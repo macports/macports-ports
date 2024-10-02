@@ -17,14 +17,14 @@ if {[string match *clang* ${configure.compiler}]} {
     legacysupport.use_mp_libcxx yes
 }
 
-# NB: Facebook does not do API stabiilty, apparently, so please don't
+# NB: Facebook does not do API stability, apparently, so please don't
 # upgrade without also upgrading its dependents, as listed by:
 # port list rdepends:folly
-github.setup        facebook folly 2023.05.15.00 v
-revision            3
-checksums           rmd160  562d4877fba3842d2f0fd2733c4e1e0ad2c56773 \
-                    sha256  fffd8a800f0840875b11d867225499d8ddff5917e7280a787a9d298e42acb1ba \
-                    size    3832144
+github.setup        facebook folly 2024.09.23.00 v
+revision            0
+checksums           rmd160  ccb164ce200b2fd10c4b3d931914696d281b1b9e \
+                    sha256  25f2affdc97728ecd42d599b2b66090cddf48c306f4fa806444d1e5c57b02cee \
+                    size    4185562
 
 categories          devel
 license             Apache-2
@@ -48,12 +48,13 @@ github.tarball_from releases
 distname            ${name}-v${version}
 extract.mkdir       yes
 
-set port_libfmt     libfmt9
+set port_libfmt     libfmt11
 cmake.module_path-append \
                     ${prefix}/lib/${port_libfmt}/cmake
 
 depends_lib-append  port:bzip2 \
                     port:double-conversion \
+                    port:fast-float \
                     port:gflags \
                     port:google-glog \
                     port:libevent \
@@ -69,39 +70,37 @@ depends_lib-append  port:bzip2 \
 
 cmake.generator     Ninja
 
-patchfiles-append   patch-older-systems.diff
+# https://github.com/facebook/folly/pull/2124
+# https://github.com/facebook/folly/pull/1907
+patchfiles-append   patch-legacy-systems.diff
 
-# This is a temporary revert of breaking commits until this can be properly fixed.
-# See: https://github.com/macports/macports-ports/commit/03289e4611ed4b387ce916214c7c6a6a105e25e0
+# https://github.com/facebook/folly/issues/2266
 platform darwin {
-    if {${os.major} < 20} {
+    if {${os.major} < 20 && ${configure.cxx_stdlib} eq "libc++"} {
         patchfiles-append \
-                    0001-Revert-Update-methods-to-dcheck-ToSend-Received-OrEm.patch \
-                    0002-Revert-Add-popNextReceivedFds-using-ReadAncillaryDat.patch \
-                    0003-Revert-Change-cloneToSendFrom-to-DFATAL-instead-of-C.patch \
-                    0004-Revert-Add-const-to-help-with-thread-safety.patch \
-                    0005-Revert-Unit-tests.patch \
-                    0006-Revert-writeChainWithFds-using-SendMsgParamsCallback.patch
+                    patch-Revert-breaking-commit-re-threadlocal.diff
     }
+}
+
+# Broken by https://github.com/facebook/folly/commit/1110819343455b5f698e8d01a951b9da1b3b9c5a
+# Not macOS-specific.
+platform powerpc {
+    patchfiles-append \
+                    patch-revert-MurmurHash-breakage.diff
 }
 
 configure.args-append   -DBUILD_SHARED_LIBS=ON \
                         -DFOLLY_USE_JEMALLOC=0
 
+compiler.thread_local_storage \
+                        yes
 compiler.cxx_standard   2017
 configure.cxxflags-append \
                         -std=c++17
 
-# error: TARGET_OS_xxx not defined, evaluates to 0
-configure.cppflags-append \
-                        -Wno-undef-prefix
-
 # error: typedef redefinition with different types ('uint8_t' (aka 'unsigned char') vs 'enum clockid_t')
-compiler.blacklist-append {clang < 1100}
-# error: 'path' is unavailable: introduced in macOS 10.15
-compiler.blacklist-append {macports-clang-[5-9].0}
-# Temporary blacklist; current gcc 12.2.0 fails with undefined symbols, while gcc 11.3.0 works fine.
-compiler.blacklist-append macports-gcc-12
+# error: no matching constructor for initialization of 'std::function<LocalRefCount ()>'
+compiler.blacklist-append {clang < 1400}
 
 platform darwin {
     # https://github.com/facebook/folly/issues/864
@@ -125,9 +124,18 @@ platform darwin {
         # https://github.com/macports/macports-ports/pull/15689#issuecomment-1212969969
         configure.ldflags-append \
                                 -L${prefix}/lib -lgflags
+        # This is just easier than keep rebasing a patch to fix a broken libatomic test which upstream has:
+        if {${configure.build_arch} in [list i386 ppc]} {
+            configure.ldflags-append \
+                                -latomic
+        }
+    } elseif {[string match *clang* ${configure.compiler}]} {
+        # error: TARGET_OS_xxx not defined, evaluates to 0
+        configure.cppflags-append \
+                                -Wno-undef-prefix
     }
     # Fix for building in Rosetta, so that x86 SSE is not invoked:
-    if {${os.major} == 10 && ${build_arch} eq "ppc"} {
+    if {${os.major} == 10 && ${configure.build_arch} eq "ppc"} {
         configure.args-append   -DCMAKE_LIBRARY_ARCHITECTURE="ppc" \
                                 -DIS_X86_64_ARCH=OFF
     }
@@ -149,4 +157,40 @@ variant native description {Build with best native support for local CPU capabil
         configure.cxxflags-append \
                                 -march=native
     }
+}
+
+# FIXME: at the moment about 90% of tests pass on PowerPC.
+# This is somewhat worse than Sonoma arm64, where 91% of tests pass.
+# https://github.com/facebook/folly/issues/2128
+variant tests description {Enable testing} {
+    depends_build-append        port:gtest
+    configure.pre_args-replace  -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+                                -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+    configure.args-append       -DBUILD_TESTS=ON
+
+    pre-test {
+        if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
+            foreach testexec    [glob ${cmake.build_dir}/*test] {
+                move            ${testexec} \
+                                ${testexec}-orig
+
+                set  wrapper    [open "${testexec}" w 0755]
+                puts ${wrapper} "#!/bin/bash"
+                puts ${wrapper} ""
+                puts ${wrapper} {if [ -n "$DYLD_LIBRARY_PATH" ]; then}
+                puts ${wrapper} "   DYLD_LIBRARY_PATH=${prefix}/lib/libgcc:\./:\${DYLD_LIBRARY_PATH}"
+                puts ${wrapper} {else}
+                puts ${wrapper} "   DYLD_LIBRARY_PATH=${prefix}/lib/libgcc:\./"
+                puts ${wrapper} {fi}
+                puts ${wrapper} {export DYLD_LIBRARY_PATH}
+                puts ${wrapper} ""
+                puts ${wrapper} {exec "${0}-orig" "$@"}
+                close $wrapper
+            }
+        }
+        # test infrastructure uses /bin/ps, which is forbidden by sandboxing
+        append portsandbox_profile " (allow process-exec (literal \"/bin/ps\") (with no-profile))"
+    }
+    test.run                    yes
 }

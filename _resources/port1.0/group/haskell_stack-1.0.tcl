@@ -42,8 +42,24 @@
 #   destroot phases. Defaults to --with-gcc ${configure.cc}
 #   --allow-different-user --system-ghc (if haskell_stack.system_ghc is set)
 
-options haskell_stack.system_ghc
-default haskell_stack.system_ghc {no}
+options \
+    haskell_stack.bin \
+    haskell_stack.bindirs \
+    haskell_stack.default_args \
+    haskell_stack.env \
+    haskell_stack.stack_root \
+    haskell_stack.system_ghc \
+    haskell_stack.use_init \
+    haskell_stack.yaml
+
+# default master_sites for non-GitHub ports
+if {![info exists github.master_sites]} {
+    default master_sites \
+        {https://hackage.haskell.org/package/${subport}-${version}}
+} 
+
+default haskell_stack.system_ghc    {no}
+default haskell_stack.bindirs       {${destroot}${prefix}/bin}
 
 proc haskell_stack.system_ghc_flags {} {
     if {[option haskell_stack.system_ghc]} {
@@ -60,18 +76,23 @@ proc haskell_stack.add_dependencies {} {
     if {[option haskell_stack.system_ghc]} {
         depends_build-append port:ghc
     }
+    depends_build-append \
+        port:cctools \
+        port:file \
+        port:grep \
+        port:gsed \
+        path:bin/openssl:openssl
 }
 port::register_callback haskell_stack.add_dependencies
 
-options haskell_stack.stack_root
 default haskell_stack.stack_root {${workpath}/.home/.stack}
 
 post-extract {
     xinstall -m 0755 -d "[option haskell_stack.stack_root]"
 }
 
-# stack builds x86_64 binaries
-supported_archs     x86_64
+# stack builds arm64 and x86_64 binaries
+supported_archs     arm64 x86_64
 
 # libHSbase shipped with GHC links against system libiconv, which provides the
 # 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
@@ -83,22 +104,18 @@ compiler.cpath
 # Builds (sometimes) fail if ccache is enabled in MacPorts
 configure.ccache    no
 
-options haskell_stack.bin haskell_stack.default_args
 default haskell_stack.bin   ${prefix}/bin/stack
 default haskell_stack.default_args \
     {--with-gcc ${configure.cc} \
          --allow-different-user \
          [haskell_stack.system_ghc_flags]}
 
-options haskell_stack.yaml
 default haskell_stack.yaml  {${worksrcpath}/stack.yaml}
 
-options haskell_stack.env
 default haskell_stack.env \
     {STACK_ROOT=[option haskell_stack.stack_root] \
          STACK_YAML=[option haskell_stack.yaml]}
 
-options haskell_stack.use_init
 default haskell_stack.use_init yes
 
 pre-configure {
@@ -113,6 +130,7 @@ pre-configure {
 default configure.cmd       {${haskell_stack.bin}}
 default configure.pre_args  {}
 default configure.args      {setup ${haskell_stack.default_args}}
+default configure.universal_args {}
 default configure.env       {${haskell_stack.env}}
 
 default build.cmd           {${haskell_stack.bin}}
@@ -134,3 +152,93 @@ default test.env            {${haskell_stack.env}}
 default livecheck.type      {regex}
 default livecheck.url       {https://hackage.haskell.org/package/${name}}
 default livecheck.regex     {"/package/[quotemeta ${name}]-\\\[^/\\\]+/[quotemeta ${name}]-(\\\[^\\\"\\\]+)[quotemeta ${extract.suffix}]"}
+
+post-destroot {
+    # strip binaries
+    foreach bindir ${haskell_stack.bindirs} {
+        foreach binfile [glob -nocomplain ${bindir}/*] {
+            if {([file isfile ${binfile}]
+                && [file type ${binfile}] eq {file}
+                && [file executable ${binfile}]
+                && [regexp -nocase -- \
+                    {application/x-.*(binary|executable)} \
+                        [lindex [exec file --mime-type ${binfile}] end]])} {
+                system -W ${bindir} \
+                        "strip ${binfile}"
+                if {${configure.build_arch} eq {arm64}} {
+                    system -W ${bindir} \
+                        "codesign -f -s - ${binfile}"
+                }
+            }
+        }
+    }
+
+    # binary sed hack to address unfixed cabal datadir issue:
+    # replace hardwired datadir in build directory with path
+    # of the same length using repeated /'s
+    # https://github.com/haskell/cabal/issues/3586
+    # find cabal data-files
+    foreach bindir ${haskell_stack.bindirs} {
+        foreach binfile [glob -nocomplain ${bindir}/*] {
+            if {!([file isfile ${binfile}]
+                  && [file type ${binfile}] eq {file}
+                  && [file executable ${binfile}]
+                  && [regexp -nocase -- \
+                          {application/x-.*(binary|executable)} \
+                          [lindex [exec file --mime-type ${binfile}] end]])} {
+                continue
+            }
+            set build_installsubdirs [list]
+            foreach sdir [exec sh -c "LC_ALL='C' ggrep -E -a -o -e '${haskell_stack.stack_root}(/\[-_.\[:alnum:]]+)+' ${binfile} 2>/dev/null || true"] {
+                lappend build_installsubdirs ${sdir}
+            }
+            if {[llength ${build_installsubdirs}] > 0} {
+                xinstall -m 0755 \
+                    ${binfile} \
+                    ${binfile}.slash_hack
+                foreach build_idir ${build_installsubdirs} {
+                    if {![string trim [exec sh -c \
+                        "if LC_ALL='C' ggrep -F -a -c -q -e [shellescape ${build_idir}] \
+                            [shellescape ${binfile}.slash_hack] 2>/dev/null; \
+                                then echo '1'; else echo '0'; fi"]]} {
+                        continue
+                    }
+                    set replacesubdir \
+                        share/${subport}
+                    set replacedir \
+                        ${prefix}/${replacesubdir}
+                    set extra_slashes \
+                        [expr {[string length ${build_idir}] - [string length ${replacedir}]}]
+                    if {${extra_slashes} >= 0} {
+                        set slash_hack \
+                            [string repeat / [expr {${extra_slashes} + 1}]]
+                        set installsubdir_slash_hack \
+                            [strsed ${replacedir} "g|/${replacesubdir}\$|${slash_hack}${replacesubdir}|"]
+                        set build_idir_esc \
+                            [strsed ${build_idir} {g|/|\\/|}]
+                        set installsubdir_slash_hack_esc \
+                            [strsed ${installsubdir_slash_hack} {g|/|\\/|}]
+                        system -W ${bindir} \
+                            "gsed -i -e\
+                                's/${build_idir_esc}/${installsubdir_slash_hack_esc}/g'\
+                                ${binfile}.slash_hack"
+                    }
+                }
+                if {([file size ${binfile}.slash_hack] \
+                    == [file size ${binfile}])
+                    && ([exec openssl dgst -ripemd160 ${binfile}.slash_hack] \
+                            ne [exec openssl dgst -ripemd160 ${binfile}])} {
+                    # gsed created a different file of the same size
+                    delete ${binfile}
+                    xinstall -m 0755 \
+                        ${binfile}.slash_hack \
+                        ${binfile}
+                    if {${configure.build_arch} eq {arm64}} {
+                        system "codesign -f -s - ${binfile}"
+                    }
+                }
+                delete ${binfile}.slash_hack
+            }
+        }
+    }
+}

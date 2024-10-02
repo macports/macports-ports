@@ -11,7 +11,7 @@ default categories              php
 # built. For unified extension ports (name begins with "php-") setting
 # php.branches is mandatory; there is no default. Example:
 #
-#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2
+#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2 8.3 8.4
 #
 # For unified ports, setting php.branches will create the subports.
 #
@@ -103,7 +103,7 @@ proc php._set_name {option action args} {
 # when the php port is updated.
 
 options php.latest_stable_branch
-default php.latest_stable_branch 8.2
+default php.latest_stable_branch 8.3
 
 
 # php.default_branch: the branch of PHP for which the port should be installed
@@ -438,7 +438,7 @@ proc php.add_port_code {} {
     post-destroot {
         # Get the list of extensions that got installed by the port.
         set installed_extension_files [lsort [glob -nocomplain -tails -directory ${destroot}${php.extension_dir} *.so]]
-        set installed_extensions {}
+        set installed_extensions [list]
         foreach installed_extension_file ${installed_extension_files} {
             lappend installed_extensions [file rootname ${installed_extension_file}]
         }
@@ -447,7 +447,7 @@ proc php.add_port_code {} {
         # load all of them.
         if {![info exists php.extensions]} {
             if {0 < [llength ${php.extensions.zend}]} {
-                set php.extensions {}
+                set php.extensions [list]
             } else {
                 set php.extensions ${installed_extensions}
             }
@@ -507,7 +507,7 @@ proc php.add_port_code {} {
 # php.suffix_from_branch: calculates the suffix from the given branch.
 
 proc php.suffix_from_branch {branch} {
-    return [strsed ${branch} {g/\\.//}]
+    return [string map {. ""} ${branch}]
 }
 
 

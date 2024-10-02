@@ -22,11 +22,7 @@
 # the upstream source code. The cargo2port generator can be used to automate
 # updates of this list for new releases.
 #
-# To get a list of these, run in worksrcdir:
-#     cargo update
-#     egrep -e '^(name|version|checksum) = ' Cargo.lock | perl -pe 's/^(?:name|version|checksum) = "(.+)"/$1/'
-#
-# https://github.com/macports/macports-contrib/tree/master/cargo2port/cargo2port.tcl
+# https://ports.macports.org/port/cargo2port/
 #
 # If Cargo.lock references pre-release versions, or in general references
 # crates not published on crates.io, but available from GitHub, also use the

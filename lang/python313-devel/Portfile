@@ -1,12 +1,11 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem 1.0
-PortGroup select 1.0
 
 name                python313-devel
 
 # Remember to keep py313-tkinter and py313-gdbm's versions sync'd with this
-version             3.13.0a1
+version             3.13.0rc2
 
 set branch          [join [lrange [split ${version} .] 0 1] .]
 categories          lang
@@ -23,15 +22,16 @@ master_sites        ${homepage}ftp/python/3.13.0/
 
 distname            Python-${version}
 use_xz              yes
-checksums           md5 1a13c086438c52a3bfd125e98e214453 \
-                    rmd160 c1930d78b71e2eac345d9c641072ffd63f6343b0 \
-                    sha256 f0281bf22cc00414361c14fc9197183e7eb2eabb729656b69442224fbb63eecb
+checksums           md5 8ace0094cf8698daf5328a2819ab0376 \
+                    rmd160 ee148832b9b791d3f4d29f68f8d1abfcd501ca12 \
+                    sha256 d60e8b7c10de4f71d2dffaf7c7be8efa54dc1e532fe931dbb84e5f625709e237
 
 patchfiles          patch-configure.diff \
                     patch-Lib-ctypes-macholib-dyld.py.diff \
                     configure-disable-libb2.patch \
                     configure-disable-libuuid.patch \
-                    configure-disable-tkinter.patch
+                    configure-disable-tkinter.patch \
+                    configure-disable-system-libffi.patch
 
 if {${os.platform} eq "darwin" && ${os.major} <= 10} {
     # work around no copyfile and/or pthread_threadid_np on older systems
@@ -39,19 +39,22 @@ if {${os.platform} eq "darwin" && ${os.major} <= 10} {
                        patch-threadid-older-systems.diff
 }
 
-depends_build       port:pkgconfig
+depends_build       path:bin/pkg-config:pkgconfig
 depends_lib         port:bzip2 \
                     port:expat \
                     port:gettext-runtime \
                     port:libedit \
                     port:libffi \
+                    port:mpdecimal \
                     port:ncurses \
                     path:lib/libssl.dylib:openssl \
                     port:sqlite3 \
                     port:xz \
                     port:zlib
-depends_run         port:python_select \
-                    port:python3_select
+
+set pythonVerNoDot  [string map {. {}} $branch]
+depends_run         port:python_select-${pythonVerNoDot} \
+                    port:python3_select-${pythonVerNoDot}
 
 compiler.c_standard 2011
 
@@ -84,14 +87,12 @@ test.target         test
 
 destroot.target     frameworkinstall maninstall
 
-set pythonNoDot python[string map {. {}} $branch]
-select.entries      [list python python-$pythonNoDot $pythonNoDot] \
-                    [list python3 python3-$pythonNoDot $pythonNoDot]
-
 platform darwin {
-    set framewpath  ${frameworks_dir}/Python.framework
-    set framewdir   ${framewpath}/Versions/${branch}
-    set confdir     config-${branch}-darwin
+    set abiflags    {}
+
+    if {${os.major} < 11} {
+        configure.args-append   --without-mimalloc
+    }
 
     post-configure {
         # poll() misbehaves on 10.8 and older
@@ -102,6 +103,10 @@ platform darwin {
     }
 
     post-destroot {
+        set framewpath  ${frameworks_dir}/Python.framework
+        set framewdir   ${framewpath}/Versions/${branch}
+        set confdir     config-${branch}${abiflags}-darwin
+
         foreach dir { Headers Resources Python Versions/Current } {
             file delete ${destroot}${framewpath}/${dir}
         }
@@ -120,15 +125,15 @@ platform darwin {
         set lfs_pattern {^([[:space:]]*'LINKFORSHARED':).*}
         set lfs_replacement "\\1 '-L${framewdir}/lib/python${branch}/${confdir} -lpython${branch} -ldl -framework CoreFoundation',"
         reinplace -E s|${lfs_pattern}|${lfs_replacement}| \
-            ${libdir}/_sysconfigdata__darwin_darwin.py
+            ${libdir}/_sysconfigdata_${abiflags}_darwin_darwin.py
 
         # remove -arch flags from the config
         reinplace -E {s|-arch [a-z0-9_]+||g} \
-            ${libdir}/_sysconfigdata__darwin_darwin.py
+            ${libdir}/_sysconfigdata_${abiflags}_darwin_darwin.py
 
         # also remove gettext overlinking
         reinplace "s|-lintl||" \
-            ${libdir}/_sysconfigdata__darwin_darwin.py
+            ${libdir}/_sysconfigdata_${abiflags}_darwin_darwin.py
 
         # recompile the modified file
         set python_for_build python.exe
@@ -136,7 +141,7 @@ platform darwin {
         if {![file exists ${worksrcpath}/${python_for_build}]} {
             set python_for_build python
         }
-        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -m compileall -d [shellescape ${framewdir}/lib/python${branch}] -o 0 -o 1 -o 2 [shellescape ${libdir}/_sysconfigdata__darwin_darwin.py]"
+        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -m compileall -d [shellescape ${framewdir}/lib/python${branch}] -o 0 -o 1 -o 2 [shellescape ${libdir}/_sysconfigdata_${abiflags}_darwin_darwin.py]"
 
         # Also make the sysconfig changes in the Makefile
         reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION)$(ABIFLAGS) $(LIBS) $(SYSLIBS)|} \
@@ -160,8 +165,8 @@ notes "
 To make this the default Python or Python 3 (i.e., the version run by\
 the 'python' or 'python3' commands), run one or both of:
 
-    sudo port select --set python $pythonNoDot
-    sudo port select --set python3 $pythonNoDot
+    sudo port select --set python python$pythonVerNoDot
+    sudo port select --set python3 python$pythonVerNoDot
 "
 
 variant universal {
@@ -229,12 +234,12 @@ variant lto description {enable Link-Time Optimization} {
 }
 
 platform darwin {
-    # Build failures on 10.9 and older
+    # Build failures on 10.10 and older
     if {${os.major} > 11} {
         if {${os.major} > 14 || !($universal_possible && [variant_isset universal])} {
             default_variants +lto
         }
-        if {${os.major} > 13} {
+        if {${os.major} > 14} {
             default_variants-append +optimizations
         }
     }

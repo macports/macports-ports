@@ -1,15 +1,19 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           wxWidgets 1.0
 PortGroup           compiler_blacklist_versions 1.0
+PortGroup           legacysupport 1.1
+PortGroup           wxWidgets 1.0
+
+# LegacySupport only used for providing wrappers here.
+legacysupport.newest_darwin_requires_legacy 0
 
 name                FileZilla
-version             3.51.0
+version             3.67.1
+revision            0
 
-categories          www aqua
-platforms           darwin
-maintainers         {@lhaeger gmx.net:lothar.haeger} openmaintainer
+categories          www net aqua
+maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
 license             GPL-2+
 
 description         Open-source FTP, FTPS, and SFTP client
@@ -18,20 +22,60 @@ long_description    FileZilla Client is a fast and reliable cross-platform \
                     FTP, FTPS and SFTP client with lots of useful features \
                     and an intuitive graphical user interface.
 
-homepage            https://filezilla-project.org/
-master_sites        https://download.filezilla-project.org/client
+homepage            https://filezilla-project.org
 
-checksums           rmd160  1f7380bd1cec6c17d9b80d3d47214506cb197d14 \
-                    sha256  82be1c4a4f51bb32a599d0b4cc3a24127ba948c0af0f957233cc6a13ea3b6c4c \
-                    size    4808717
+# Deleloper site seems to generate one-time link now, and direct download
+# from there does not work anymore, it redirects to an html page. Even
+# wget https://download.filezilla-project.org/client/FileZilla_3.67.1_src.tar.xz
+# downloads a 12 KB dummy. For now, use the source from Debian archive.
+# master_sites        https://download.filezilla-project.org/client
 
-# wxWidgets-3.0 with support for C++11 on < 10.9
-wxWidgets.use       wxWidgets-3.0-cxx11
+master_sites        https://deb.debian.org/debian/pool/main/f/filezilla/
 
-depends_build       port:pkgconfig \
-                    port:gettext
+use_xz              yes
+distname            filezilla_${version}.orig
 
-depends_lib         port:dbus \
+checksums           rmd160  06fb47a8f3cf23914c1015ad6edeff94dea1f2a2 \
+                    sha256  10468e6ef623ad9789996df61f588ca7417d39353678313611d54f2d8131a1db \
+                    size    4065540
+
+# FileZilla 3.67 dropped support for wxWidgets < 3.2.1.
+# However, wxWidgets-3.2 does not build on < 10.11,
+# and wxWidgets-3.0* does not work correctly on < 10.8.
+# So for older macOS (and non-Darwin) use wxGTK.
+if {${os.platform} eq "darwin" && ${os.major} > 15} {
+    wxWidgets.use   wxWidgets-3.2
+} elseif {${os.platform} eq "darwin" && ${os.major} > 11} {
+    wxWidgets.use   wxWidgets-3.0-cxx11
+} else {
+    wxWidgets.use   wxGTK-3.0-cxx11
+
+    depends_lib-append \
+                    port:desktop-file-utils
+
+    legacysupport.redirect_bins filezilla
+
+    # Contrary to documentation, FZ_DATADIR does nothing
+    # on macOS, since assumption of app bundle is hardcoded.
+    patchfiles-append \
+                    patch-fix-fz_datadir.diff
+}
+
+if {${wxWidgets.version} < 3.2} {
+    # Here we just restore macOS-relevant fallbacks from 3.66.4.
+    patchfiles-append \
+                    patch-relax-wxwidgets-version.diff \
+                    patch-wx3.0.diff
+}
+
+depends_build-append \
+                    port:autoconf \
+                    port:automake \
+                    port:gettext \
+                    port:libtool \
+                    path:bin/pkg-config:pkgconfig
+
+depends_lib-append  port:dbus \
                     path:lib/pkgconfig/gnutls.pc:gnutls \
                     port:libfilezilla \
                     port:libidn \
@@ -40,16 +84,41 @@ depends_lib         port:dbus \
                     port:xdg-utils \
                     port:${wxWidgets.port}
 
-distname            ${name}_${version}_src
+if {[string match *gcc* ${configure.compiler}]} {
+    # checking for whether we need to use Boost Regex due GCC bug 86164
+    # configure: error: Boost Regex 1.76 or higher not found.
+    depends_build-append \
+                    port:boost
+}
 
-use_bzip2           yes
 worksrcdir          filezilla-${version}
 
-patchfiles          patch-src-interface-buildinfo.cpp.diff
+patchfiles-append   patch-src-commonui-buildinfo.cpp.diff \
+                    patch-src-engine-version.cpp.diff \
+                    patch-src-interface-mainfrm.cpp.diff \
+                    patch-src-interface-toolbar.mm.diff \
+                    patch-powermanagement.diff \
+                    patch-dnd.diff \
+                    patch-paths-1050.diff
+
+platform darwin {
+    # Condition is wrong in the source, since this object is required
+    # for linking on macOS, whether or not app bundle is built.
+    patchfiles-append \
+                    patch-fix-mac-wxgtk.diff
+
+    if {${os.major} < 11} {
+        # O_CLOEXEC was added in Mac OS X 10.7. Only apply this patch
+        # on system versions which need it because it could create
+        # a race condition in multi-threaded applications.
+        patchfiles-append patch-cloexec.diff
+    }
+}
 
 # http://trac.filezilla-project.org/ticket/5473
 # http://sourceforge.net/p/tinyxml/patches/51/
-configure.args      --with-tinyxml=builtin \
+configure.args-append \
+                    --with-tinyxml=builtin \
                     --with-pugixml=builtin \
                     --disable-manualupdatecheck \
                     --disable-autoupdatecheck \
@@ -63,9 +132,21 @@ compiler.thread_local_storage   yes
 # https://trac.macports.org/ticket/59805
 compiler.blacklist-append {clang < 1000}
 
-destroot {
-    copy ${worksrcpath}/FileZilla.app ${destroot}${applications_dir}
+# We only override destroot for app bundle build.
+if {${os.platform} eq "darwin" && ${os.major} > 11} {
+    destroot {
+        copy ${worksrcpath}/FileZilla.app ${destroot}${applications_dir}
+    }
+} else {
+    post-activate {
+        system "${prefix}/bin/update-desktop-database ${prefix}/share/applications"
+    }
 }
+
+depends_test-append port:cppunit
+
+test.run            yes
+test.target         check
 
 livecheck.type      regex
 livecheck.url       ${master_sites}

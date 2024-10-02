@@ -35,7 +35,7 @@ proc aspelldict.setup {locale version lang {aspell-version {}}} {
     master_sites        gnu:aspell/dict/${locale}
 
     depends_build-append port:aspell
-    configure.pre_args  {}
+    configure.pre_args
     configure.args      --vars \
                         ASPELL=${prefix}/bin/aspell \
                         WORD_LIST_COMPRESS=${prefix}/bin/word-list-compress

@@ -1,0 +1,187 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           legacysupport 1.1
+PortGroup           muniversal 1.0
+PortGroup           boost 1.0
+PortGroup           compiler_blacklist_versions 1.0
+
+boost.version       1.81
+
+# The developer does not accept macOS-specific bug reports, but does
+# accept pull requests.
+
+name                mkvtoolnix-legacy
+conflicts           mkvtoolnix mkvtoolnix-devel
+set my_name         mkvtoolnix
+
+categories          multimedia
+maintainers         {i0ntempest @i0ntempest} openmaintainer
+license             GPL-2+ LGPL-2.1+
+
+description         Matroska media files manipulation tools.
+long_description    mkvtoolnix will evolve to a set of tools to create, \
+                    alter and inspect Matroska files under Linux and other \
+                    Unices, just what the OGMtools do for the OGM format.
+
+homepage            https://mkvtoolnix.download
+master_sites        ${homepage}/sources/
+use_xz              yes
+
+if {${os.platform} ne "darwin" || ${os.major} >= 14} {
+    version         81.0
+    revision        1
+    # Versions newer than this requires Qt 6 - do not update
+    checksums       rmd160  03c1ad905f5313303fc104b4e19f54353775d564 \
+                    sha256  422f2bec88d5d93547df0c3e1399272a6dc4c23050b45d34343bbdd6d55e5ad6 \
+                    size    11067288
+} else {
+    version         58.0.0
+    revision        1
+    # This is the latest version that does not require Qt with GUI disabled
+    checksums       rmd160  3c513bf1851cfa9f439e2739a8027692ad2de6ea \
+                    sha256  1af727fa203e2bd8c54a005f28b635c96a4b80aa4ee8d23b4def0b6800ca6e38 \
+                    size    7651964
+}
+
+distname            ${my_name}-${version}
+dist_subdir         ${my_name}
+
+# libc++ on 10.13 supports std::optional but the compilers that
+# shipped with 10.13's Xcode incorrectly believed that it didn't.
+# https://github.com/llvm/llvm-project/commit/7fb40e1569dd66292b647f4501b85517e9247953
+# MacPorts clang 8 and later have applied this fix.
+# However, Xcode clangs prior to 10.0.1 have other issues, so exclude those.
+compiler.blacklist-append \
+                    {clang < 1001}
+
+# v74 introduced ruby 3.2 support
+if {[vercmp ${version} 74] >= 0} {
+    set version_ruby 3.2
+} else {
+    set version_ruby 2.7
+}
+set version_ruby_mp [join [split $version_ruby "."] ""]
+
+depends_build       port:ruby${version_ruby_mp} \
+                    port:docbook-xsl-nons \
+                    path:bin/pkg-config:pkgconfig \
+                    port:libxslt \
+                    port:po4a
+
+depends_lib         port:bzip2 \
+                    port:expat \
+                    port:flac \
+                    port:gettext-runtime \
+                    port:libebml \
+                    port:libmatroska \
+                    port:libogg \
+                    port:libvorbis \
+                    port:lzo2 \
+                    port:zlib \
+                    port:pugixml \
+                    port:cmark \
+                    port:libdvdread \
+                    port:nlohmann-json
+
+if {[vercmp ${version} 59] >= 0} {
+                    PortGroup qt5 1.0
+                    depends_lib-append \
+                        port:gmp
+} else {
+                    depends_lib-append \
+                        port:libmagic \
+                        port:pcre \
+                        port:pcre2
+}
+
+depends_run         port:ruby${version_ruby_mp}
+
+depends_test        port:gtest
+
+post-patch {
+    fs-traverse f ${worksrcpath} {
+        set t [file tail ${f}]
+        set e [file extension ${f}]
+        if {${t} eq "Rakefile" || ${e} eq ".rb"} {
+            reinplace -q -E "s|^#!/usr/bin/(env )?ruby|#!${prefix}/bin/ruby${version_ruby}|g" ${f}
+        }
+    }
+}
+
+compiler.cxx_standard 2017
+configure.cxxflags-append -std=c++17
+legacysupport.newest_darwin_requires_legacy 18
+legacysupport.use_mp_libcxx yes
+
+set cxx_stdlibflags {}
+if {[string match *clang* ${configure.cxx}]} {
+    set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
+}
+
+build.cmd           rake${version_ruby}
+build.target        default
+# disable silent rules
+build.args-append   V=1
+
+# NOTE: QT-related options changed significantly with v59.x and v58.x. And QT now required regardless, even when GUI disabled
+# See: https://gitlab.com/mbunkus/mkvtoolnix/-/blob/release-59.0.0/NEWS.md#build-system-changes
+# See: https://gitlab.com/mbunkus/mkvtoolnix/-/blob/release-58.0.0/NEWS.md#build-system-changes
+configure.args      --mandir=${prefix}/share/man \
+                    --with-boost=[boost::install_area] \
+                    --with-extra-libs=${prefix}/lib \
+                    --with-extra-includes=${prefix}/include \
+                    --with-xsltproc=${prefix}/bin/xsltproc \
+                    --with-docbook-xsl-root=${prefix}/share/xsl/docbook-xsl-nons \
+                    --with-po4a=${prefix}/bin/po4a \
+                    --with-po4a-translate=${prefix}/bin/po4a-translate \
+                    --disable-qt6 \
+                    --disable-update-check
+
+configure.ldflags-append ${cxx_stdlibflags}
+
+if {[vercmp ${version} 59] >= 0} {
+        configure.args-append --disable-gui \
+                              --with-qmake=${qt_dir}/bin/qmake
+} else {
+        configure.args-append --disable-qt
+}
+
+test.run            yes
+test.cmd            rake
+test.target         tests:unit
+
+variant qtgui description {Build with the qt5 GUI} {
+    PortGroup       app 1.0
+    if {[vercmp ${version} 59] < 0} {
+        PortGroup       qt5 1.0
+        configure.args-append \
+                        --with-qmake=${qt_dir}/bin/qmake
+    }
+
+    app.name        MKVToolNix
+    app.executable  mkvtoolnix-gui
+    app.icon        ${worksrcpath}/share/icons/256x256/mkvtoolnix-gui.png
+
+    depends_build-append \
+                    port:makeicns
+    qt5.depends_component \
+                    qtmultimedia
+    if {[vercmp ${version} 59] >= 0} {
+        configure.args-replace --disable-gui --enable-gui
+    } else {
+        configure.args-replace --disable-qt --enable-qt
+    }
+}
+
+if {${os.platform} ne "darwin" || ${os.major} >= 14} {
+    default_variants +qtgui
+} elseif {[variant_isset qtgui]} {
+    known_fail      yes
+    pre-fetch {
+        ui_error "The qtgui variant requires Qt 5.9.0 or later, available on OS X 10.10 and later"
+        return -code error "incompatible OS X version"
+    }
+}
+
+livecheck.type      none

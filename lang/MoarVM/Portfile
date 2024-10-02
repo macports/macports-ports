@@ -5,42 +5,45 @@ PortSystem          1.0
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           legacysupport 1.1
 
-# strnlen, arc4random_buf
-legacysupport.newest_darwin_requires_legacy 10
+# strnlen, arc4random_buf, clock_gettime
+legacysupport.newest_darwin_requires_legacy 15
 
 name                MoarVM
-version             2023.06
-revision            1
+version             2024.07
+revision            0
 categories          lang devel
-license             Artistic-2 MIT BSD ISC public-domain
+license             Artistic-2 BSD ISC MIT public-domain
 maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
-description         A virtual machine for NQP And Rakudo
+description         A virtual machine for NQP and Rakudo
 long_description    MoarVM is a modern virtual machine built for the Rakudo \
-                    compiler implementing the Raku Programming Language, \
-                    and the NQP Compiler Toolchain.
+                    compiler implementing the Raku programming language, \
+                    and the NQP compiler toolchain.
 
 homepage            https://moarvm.org/
 master_sites        https://moarvm.org/releases/
 
-conflicts           moar
-
-checksums           rmd160  c22c09c79b656d5156e8d74f35569b0b2e211d39 \
-                    sha256  143f92510eaa3452c712e4aae9f44d84cd078f16517b40252bab7dd5e224ecdb \
-                    size    14929053
+checksums           rmd160  52ebf7f6ba44ede3904f08aaddafad7b6f975810 \
+                    sha256  625241fe1578341f6099784f0ea82a62b8a638855c3b8fa604d6ce9e5024fe29 \
+                    size    14989077
 
 depends_build-append \
-                    port:perl5 \
-                    port:pkgconfig
+                    path:bin/perl:perl5 \
+                    path:bin/pkg-config:pkgconfig
 
 # libatomic_ops:    https://trac.macports.org/ticket/53171
 depends_lib-append  port:dyncall \
                     port:libatomic_ops \
-                    port:libtommath \
-                    port:libuv
+                    port:libtommath
 
 patchfiles          patch-Configure.diff \
                     patch-dyncall.diff \
                     patch-setup.pm.diff
+
+if ![variant_isset macports_libuv] {
+patchfiles-append   patch-libuv-includes-path.diff \
+                    patch-libuv-legacy.diff \
+                    patch-moar.pc.diff
+}
 
 if {[string match *gcc* ${configure.compiler}]} {
     patchfiles-append patch-gcc.diff
@@ -62,34 +65,64 @@ legacysupport.redirect_bins moar
 
 # https://trac.macports.org/ticket/53950
 compiler.blacklist  cc gcc-* apple-gcc-* llvm-gcc-*
-
-platform darwin 10 {
-    if {${build_arch} eq "ppc"} {
-        # Clang is broken on PPC, but Rosetta tries using it
-        compiler.blacklist-append *clang*
-    }
-}
+# uv-common.h:41:11: fatal error: 'stdatomic.h' file not found
+compiler.blacklist-append \
+                    {clang < 700}
 
 configure.cmd       ${prefix}/bin/perl Configure.pl
 configure.args      --cc=${configure.cc} \
                     --has-dyncall \
                     --has-libatomic_ops \
                     --has-libtommath \
-                    --has-libuv
+                    --no-mimalloc
+
 configure.cflags-append \
                     -I${prefix}/include/libtommath
+
+# libuv/src/unix/fs.c:478:34: error: passing argument 3 of 'scandir' from incompatible pointer type
+configure.cflags-append \
+                    -Wno-error=incompatible-pointer-types
 
 # The dylib machinery uses -rpath, not available on Tiger
 platform darwin 8 {
     patchfiles-append patch-build-setup-tiger.diff
 }
 
-if {${os.platform} eq "darwin" && ${os.major} <= 10} {
-    configure.args-append \
-                    --no-mimalloc
-}
+# The build system puts CPPFLAGS and LDFLAGS before its own flags which leads to
+# build failures if MacPorts libuv is installed. The right -I and -L flags are
+# inserted later by the build system so the ones MacPorts adds are not needed.
+# https://github.com/MoarVM/MoarVM/issues/1818
+configure.cppflags-delete   -I${prefix}/include
+configure.ldflags-delete    -L${prefix}/lib
+
+# Disable silent rules
+build.args-append   NOISY=1
 
 # https://github.com/MoarVM/MoarVM/issues/414
 universal_variant   no
 # Unsupported by Configure.pl
 # configure.universal_args-delete --disable-dependency-tracking
+
+variant macports_libuv description "Use MacPorts' libuv" {
+    # Once libuv is updated, this should be changed to path-style dependency:
+    depends_lib-append  port:libuv-devel
+
+    configure.args-append \
+                    --has-libuv
+}
+
+variant mimalloc description "Build with mimalloc support" {
+    configure.args-delete \
+                    --no-mimalloc
+}
+
+# stats.c:569:31: error: variable has incomplete type 'struct mach_task_basic_info'
+# mimalloc code uses the API available on macOS 10.8+
+# not enabled at will by the maintainer, possibly to be fixed on older systems
+#if {${os.platform} eq "darwin" && ${os.major} > 11} {
+#    default_variants    +mimalloc
+#}
+
+# This can be enabled once libuv port is updated.
+# See: https://trac.macports.org/ticket/68464
+# default_variants-append macports_libuv

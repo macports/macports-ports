@@ -74,6 +74,10 @@ default muniversal.arch_flag {yes}
 options muniversal.arch_compiler
 default muniversal.arch_compiler {no}
 
+# if yes, append architecture flag to build compiler name
+options muniversal.arch_build_compiler
+default muniversal.arch_build_compiler  {${muniversal.arch_compiler}}
+
 ##########################################################################################
 # MacPorts options for different architectures
 ##########################################################################################
@@ -138,7 +142,7 @@ default muniversal.is_cross.ppc64   {[expr { ${os.arch} ne "powerpc" || !${os.cp
 # see https://wiki.osdev.org/Target_Triplet
 ##########################################################################################
 options triplet.vendor
-default triplet.vendor      {apple}
+default triplet.vendor      {[expr {${os.platform} eq "darwin" ? "apple" : "unknown"}]}
 
 options triplet.os
 default triplet.os          {${os.platform}${os.major}}
@@ -174,6 +178,29 @@ foreach arch {arm64 x86_64 i386 ppc ppc64} {
 }
 unset arch
 
+##########################################################################################
+# for cross-compiling, some configure scripts recognize
+#     CPPFLAGS_FOR_BUILD
+#     CFLAGS_FOR_BUILD
+#     CXXFLAGS_FOR_BUILD
+#     LDFLAGS_FOR_BUILD
+##########################################################################################
+options configure.cppflags_for_build
+default configure.cppflags_for_build                {${configure.cppflags}}
+
+options configure.cflags_for_build
+default configure.cflags_for_build                  {${configure.cflags}}
+
+options configure.cxxflags_for_build
+default configure.cxxflags_for_build                {${configure.cxxflags}}
+
+options configure.ldflags_for_build
+default configure.ldflags_for_build                 {${configure.ldflags}}
+
+# this is a seldom needed feature where XFLAGS_FOR_BUILD are appended to the X compiler
+options configure.append_build_flags_to_compiler
+default configure.append_build_flags_to_compiler    {no}
+
 namespace eval muniversal {}
 
 ####################################################################################################################################
@@ -199,7 +226,10 @@ proc muniversal::cpu64bit_capable {} {
         # Doesn't really matter what we return here.
         return 1
     }
-    if {[option os.major] >= 9 && ![catch {sysctl hw.cpu64bit_capable} result]} {
+    if {[option os.major] >= 11} {
+        # 10.7 and later only support 64-bit hardware
+        return 1
+    } elseif {[option os.major] >= 9 && ![catch {sysctl hw.cpu64bit_capable} result]} {
         return $result
     } elseif {(![catch {sysctl hw.optional.x86_64} is_x86_64] && ${is_x86_64})
               || (![catch {sysctl hw.optional.64bitops} is_ppc64] && ${is_ppc64})} {
@@ -213,11 +243,9 @@ proc muniversal::cpu64bit_capable {} {
 proc muniversal::get_triplets {arch} {
     global triplet.add_host triplet.add_build os.arch os.cpu64bit_capable
 
-    if { [file tail [option configure.cmd]] eq "cmake" }  { return "" }
+    if { [file tail [option configure.cmd]] in [list cmake meson printenv] }  { return [list] }
 
-    if { [file tail [option configure.cmd]] eq "meson" }  { return "" }
-
-    set ret ""
+    set ret [list]
 
     if { ${triplet.add_host} eq "all"
          || ${arch} in ${triplet.add_host}
@@ -698,22 +726,32 @@ proc parse_environment {command} {
     if { ${command} eq "configure" } {
         append_to_environment_value     ${command}  CPP_FOR_BUILD       {*}"[portconfigure::configure_get_compiler cpp]"
         append_to_environment_value     ${command}  CXXCPP_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cpp]"
-        append_to_environment_value     ${command}  CPPFLAGS_FOR_BUILD  {*}[option configure.cppflags]
+        append_to_environment_value     ${command}  CPPFLAGS_FOR_BUILD  {*}[option configure.cppflags_for_build]
 
-        if { [option muniversal.arch_compiler] } {
-            append_to_environment_value ${command}  CC_FOR_BUILD        {*}"[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
-            append_to_environment_value ${command}  CXX_FOR_BUILD       {*}"[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
+        if { [option muniversal.arch_build_compiler] } {
+            if { [option configure.append_build_flags_to_compiler] } {
+                append_to_environment_value ${command}  CC_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc] [option configure.cflags_for_build]"
+                append_to_environment_value ${command}  CXX_FOR_BUILD   {*}"[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx] [option configure.cxxflags_for_build]"
+            } else {
+                append_to_environment_value ${command}  CC_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
+                append_to_environment_value ${command}  CXX_FOR_BUILD   {*}"[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
+            }
 
-            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}[option configure.cflags]
-            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}[option configure.cxxflags]
-            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}[option configure.ldflags]
+            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}"[option configure.cflags_for_build]"
+            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}[option configure.cxxflags_for_build]
+            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}[option configure.ldflags_for_build]
         } else {
-            append_to_environment_value ${command}  CC_FOR_BUILD        {*}[portconfigure::configure_get_compiler cc]
-            append_to_environment_value ${command}  CXX_FOR_BUILD       {*}[portconfigure::configure_get_compiler cxx]
+            if { [option configure.append_build_flags_to_compiler] } {
+                append_to_environment_value ${command}  CC_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cc]  [option configure.cflags_for_build]"
+                append_to_environment_value ${command}  CXX_FOR_BUILD   {*}"[portconfigure::configure_get_compiler cxx] [option configure.cxxflags_for_build]"
+            } else {
+                append_to_environment_value ${command}  CC_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cc]"
+                append_to_environment_value ${command}  CXX_FOR_BUILD   {*}"[portconfigure::configure_get_compiler cxx]"
+            }
 
-            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}"[option configure.cflags] [portconfigure::configure_get_archflags cc]"
-            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}"[option configure.cxxflags] [portconfigure::configure_get_archflags cxx]"
-            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}"[option configure.ldflags] [portconfigure::configure_get_archflags ld]"
+            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}"[option configure.cflags_for_build] [portconfigure::configure_get_archflags cc]"
+            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}"[option configure.cxxflags_for_build] [portconfigure::configure_get_archflags cxx]"
+            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}"[option configure.ldflags_for_build] [portconfigure::configure_get_archflags ld]"
         }
     }
 
@@ -768,7 +806,7 @@ rename portpatch::patch_main portpatch::patch_main_real
 proc portpatch::patch_main {args} {
     global UI_PREFIX
 
-    set patches ""
+    set patches [list]
 
     if {[exists patchfiles]} {
         lappend patches {*}[option patchfiles]
@@ -1045,6 +1083,7 @@ proc muniversal::add_compiler_flags {} {
 
     if {[option universal_possible] && [variant_isset universal]} {
         if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
+            depends_build-delete port:diffutils-for-muniversal
             depends_build-append port:diffutils-for-muniversal
         }
     }

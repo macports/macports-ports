@@ -30,14 +30,14 @@
 # compiler.blacklist-delete clang
 #
 # This PortGroup was created following this discussion:
-# https://lists.macosforge.org/pipermail/macports-dev/2012-November/021103.html
+# https://lists.macports.org/pipermail/macports-dev/2012-November/021103.html
 
 option_proc compiler.blacklist compiler_blacklist_versions._set_compiler_blacklist
 
 proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
-    global os.platform
     if {${action} ne "set"} return
-    foreach blacklist [option ${option}] {
+    global os.platform compiler.blacklist
+    foreach blacklist ${compiler.blacklist} {
         if {[llength ${blacklist}] > 1} {
             compiler.blacklist-delete ${blacklist}
             if {${os.platform} ne "darwin"} {
@@ -46,7 +46,7 @@ proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
             set compiler [lindex ${blacklist} 0]
             set comparisons [lrange ${blacklist} 1 end]
             set compiler_version [compiler.command_line_tools_version ${compiler}]
-            if {[compiler_blacklist_versions._matches_all_versions ${compiler} ${comparisons}]} {
+            if {${compiler_version} eq "" || [compiler_blacklist_versions._matches_all_versions ${compiler_version} ${comparisons}]} {
                 if {${compiler_version} eq ""} {
                     ui_debug "compiler ${compiler} blacklisted because it's not installed or it doesn't work"
                 } else {
@@ -60,25 +60,14 @@ proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
     }
 }
 
-proc compiler_blacklist_versions._matches_all_versions {compiler comparisons} {
+proc compiler_blacklist_versions._matches_all_versions {compiler_version comparisons} {
     if {[llength ${comparisons}] % 2} {
         return -code error "invalid/incomplete comparison specification \"${comparisons}\""
     }
-    while {[llength ${comparisons}] > 0} {
-        set comparison_operator [lindex ${comparisons} 0]
-        set test_version [lindex ${comparisons} 1]
-        if {![compiler_blacklist_versions._version_matches ${compiler} ${comparison_operator} ${test_version}]} {
+    foreach {comparison_operator test_version} ${comparisons} {
+        if {![vercmp ${compiler_version} ${comparison_operator} ${test_version}]} {
             return 0
         }
-        set comparisons [lrange ${comparisons} 2 end]
     }
     return 1
-}
-
-proc compiler_blacklist_versions._version_matches {compiler comparison_operator test_version} {
-    set actual_version [compiler.command_line_tools_version ${compiler}]
-    if {${actual_version} eq ""} {
-        return 1
-    }
-    return [vercmp ${actual_version} ${comparison_operator} ${test_version}]
 }

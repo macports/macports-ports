@@ -30,6 +30,6 @@ depends_lib-append \
     path:${fuse_path}:${fuse_port}
 
 depends_build-append \
-    port:pkgconfig
+    path:bin/pkg-config:pkgconfig
 
 universal_variant no

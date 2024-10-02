@@ -232,6 +232,17 @@ pre-configure {
             return -code error "Install ${mpi.name} +$need"
         }
     }
+
+    if {[mpi_variant_isset] && ([mpi_variant_name] eq "mpich" || [mpi_variant_name] eq "mpich-devel")} {
+        # The new linker in Xcode 15 is buggy, causing build failures for many (but not all)
+        # ports that link to mpich. The -Wl,-ld_classic option below reverts to the
+        # classic linker.
+        #
+        # TODO: This is a temporary solution, the classic linker will be removed in a future release by Apple.
+        if { ( [vercmp ${xcodeversion} 15 ] >= 0 ) || ( [vercmp ${xcodecltversion} 15 ] >= 0 ) } {
+            configure.ldflags-append    -Wl,-ld_classic
+        }
+    }
 }
 
 proc mpi_variant_isset {} {
@@ -242,9 +253,9 @@ proc mpi.setup {args} {
     global cdb mpidb mpi.variants mpi.require mpi.default compilers.variants \
         name os.major os.arch
 
-    set add_list {}
+    set add_list [list]
     set remove_list ${mpi.variants}
-    set cl {}
+    set cl [list]
 
     foreach variant $args {
         # keep original commandname
@@ -330,7 +341,7 @@ proc mpi.setup {args} {
         # Clang 15 and 16 only available on 10.7 and later
         if {${os.major} < 11} {
             lappend ::mpi.disabled_compilers \
-                -clang15 -clang16
+                -clang15 -clang16 -clang17
         }
 
         if {${os.arch} eq "arm"} {

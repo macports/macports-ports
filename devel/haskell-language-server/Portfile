@@ -1,0 +1,190 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           haskell_cabal 1.0
+
+name                haskell-language-server
+version             2.9.0.0
+revision            0
+categories          devel haskell
+maintainers         nomaintainer
+license             GPL-3
+
+description         Official haskell ide support via language server (LSP).
+
+long_description    The haskell-language-server (HLS) project is an \
+                    implementation of a server (a \"language server\") \
+                    for the Language Server Protocol (LSP). A language \
+                    server talks to a client (typically an editor), \
+                    which can ask the server to perform various \
+                    operations, such as reporting errors or providing \
+                    code completions. The advantage of this system is \
+                    that clients and servers can interoperate more \
+                    easily so long as they all speak the LSP \
+                    protocol. In the case of HLS, that means that it \
+                    can be used with many different editors, since \
+                    editor support for the LSP protocol is now \
+                    widespread.
+
+homepage            https://github.com/haskell/haskell-language-server
+
+checksums           rmd160  515a329ffd47d3978291e3ad2cbb456509d1cb4b \
+                    sha256  d20902536a7a6e0136f8cc8bd9a68b75f94d1c6c9555438503000ab26db13c9c \
+                    size    492989
+
+set name_underscore [string map {- _} ${name}]
+set paths_name_underscore   src/Paths_${name_underscore}.hs
+
+# relative paths to ${prefix}
+set hls_libdir      lib/${distname}
+set hls_docdir      share/doc/${distname}/html
+
+post-extract {      
+    # Fix for cabal data-files hardcoded path in binary
+    # See:          
+    # https://github.com/commercialhaskell/stack/issues/848
+    # https://github.com/commercialhaskell/stack/issues/4857
+    # https://github.com/haskell/cabal/issues/462
+    # https://github.com/haskell/cabal/issues/3586
+    xinstall -m 0644 -W ${worksrcpath} \
+                    ${filespath}/Paths_NAME.hs ${paths_name_underscore}
+
+    reinplace "s|@PREFIX@|${prefix}|g" \
+                    ${worksrcpath}/${paths_name_underscore}
+    reinplace "s|@NAME@|${name_underscore}|g" \
+                    ${worksrcpath}/${paths_name_underscore}
+    reinplace "s|@DISTNAME@|${distname}|g" \
+                    ${worksrcpath}/${paths_name_underscore}
+    # this regexp replaces the hardcoded version expressed as a Haskell [Num]
+    reinplace -E "s|(Version\[\[:space:\]\]+)\\\[\[\[:digit:\]\]+\[\[:space:\]\]*(,\[\[:space:\]\]*\[\[:digit:\]\]+){1,4}\[\[:space:\]\]*\\\]|\\1\[[join [split ${version} .] ,]\]|" \
+                    ${worksrcpath}/${paths_name_underscore}
+}                   
+
+depends_build-append \
+                    port:file
+
+depends_lib-append  path:bin/ghc:ghc
+
+depends_run-append  port:cabal \
+                    port:hscolour
+
+variant dynamic \
+    description {Use ghc-specific dynamic libraries for installation.} {}
+
+build.target        all
+# turn off dynamic library linking
+build.post_args-prepend \
+                    --flags=-dynamic
+
+if { [variant_isset "dynamic"] } {
+    # see ${name}.cabal for build specifics
+    # install depends on ghc version libraries, not simply `path:bin/ghc:ghc`
+    depends_lib-replace \
+                    path:bin/ghc:ghc \
+                    port:ghc
+
+    build.target
+    # turn on dynamic library linking
+    build.post_args-replace \
+                    --flags=-dynamic \
+                    -fdynamic
+
+    post-destroot {
+        # fix and install all libraries
+        shared_library_chase \
+                    ${destroot}${prefix}/bin/${name} \
+                    ${prefix}/${hls_libdir} \
+                    {@rpath/libHS.+\.dylib}
+    }
+}
+
+set hls_build_binary    {}
+set hls_build_doc       {}
+
+pre-destroot {
+    set hls_build_binary \
+        [glob -nocomplain ${workpath}/dist/build/*/ghc-*/${name}-${version}/x/${name}/build/${name}/${name}]
+    set hls_build_doc \
+        [glob -nocomplain ${workpath}/dist/build/*/ghc-*/${name}-${version}/doc/html/${name}]
+}
+
+destroot {
+    xinstall -d ${destroot}${prefix}/${hls_libdir} \
+                    ${destroot}${prefix}/${hls_docdir}
+
+    xinstall -m 0755 ${hls_build_binary} \
+                    ${destroot}${prefix}/bin/${name}
+
+    # ${name}-wrapper must point to the correct binary
+    ln -s ${prefix}/bin/${name} \
+                    ${destroot}${prefix}/bin/${name}-wrapper
+
+    # documentation
+    foreach f [glob ${hls_build_doc}/*.{css,html,json,png}] {
+        xinstall -m 0644 ${f} ${destroot}${prefix}/${hls_docdir}
+    }
+
+    # delete any destroot path appearing in text files
+    fs-traverse f ${destroot}${prefix} {
+        if {[file_is_ascii ${f}]} {
+            reinplace -q "s|${destroot}||g" ${f}
+        }
+    }
+}
+
+notes "The Haskell Language Server (HLS) must be used with the same\
+      version of GHC with which it was built.
+
+For an Emacs client, use `M-x package-install lsp-haskell`.
+
+The HLS User Manual is available at:
+
+file://${prefix}/${hls_docdir}/index.html"
+
+proc file_is_ascii { fname } {
+    return [expr \
+        [file isfile ${fname}] \
+            && [expr [string match {text/*} \
+                    [lindex [exec file --mime-type ${fname}] end]] \
+              || ![expr [lsearch -nocase \
+                    [lrange [exec file ${fname}] 1 end] ascii] < 0]]]
+}
+
+# get the objdump rpath names that match ${workpath} in the binary
+proc get_workpath_list { binname } {
+    global workpath
+    return [exec bash -c "otool -l \"${binname}\" 2>/dev/null \
+        | grep -E -A 2 -e '\[\[:space:]]+cmd\[\[:space:]]+LC_RPATH' \
+        | grep -E -e '\[\[:space:]]+path\[\[:space:]]+' \
+        | grep -E -o -e '(${workpath}\[^ ]+)' || true"]
+}
+
+# install the DAG of shared libraries into ${libdir}, delete ${workpath} dirs
+proc shared_library_chase { binname libdir rpath_re } {
+    global destroot
+    set workpath_list [get_workpath_list ${binname}]
+    foreach path [lreverse ${workpath_list}] {
+        system "install_name_tool -delete_rpath \"${path}\" \"${binname}\""
+    }
+    system "install_name_tool -add_rpath \"${libdir}\" \"${binname}\""
+    foreach rpath [exec bash -c \
+        "otool -L \"${binname}\" | grep -E -o -e '${rpath_re}' || true"] {
+        set libname [strsed ${rpath} "s|^@rpath/||"]
+        set libpath ${libdir}/${libname}
+        set builtlib {}
+        foreach path ${workpath_list} {
+            if { [file exists ${path}/${libname}]
+                && [file isfile ${path}/${libname}] } {
+                set builtlib ${path}/${libname}
+                break
+            }
+        }
+        if { ${builtlib} ne {}
+            && ![file exists ${destroot}${libpath}] } {
+            xinstall -m 0644 ${builtlib} ${destroot}${libpath}
+            shared_library_chase \
+                    ${destroot}${libpath} \
+                    ${libdir} ${rpath_re}
+        }
+    }
+}

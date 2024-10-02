@@ -9,13 +9,8 @@ options perl5.default_branch perl5.branches
 default perl5.default_branch {[perl5_get_default_branch]}
 
 proc perl5_get_default_branch {} {
-    global prefix perl5.branches
-    # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.34
-    if {![catch {set val [lindex [split [exec ${prefix}/bin/perl5 -V:version] {'}] 1]}]} {
-        set ret [join [lrange [split $val .] 0 1] .]
-    } else {
-        set ret 5.34
-    }
+    global perl5.branches
+    set ret 5.34
     # if the above default is not supported by this module, use the latest it does support
     if {[info exists perl5.branches] && $ret ni ${perl5.branches}} {
         set ret [lindex ${perl5.branches} end]
@@ -55,50 +50,48 @@ default perl5.set_default_variant {true}
 default perl5.conflict_variants {true}
 # Control whether a perl variant is required and if true produce an error if a perl variant is not set.
 default perl5.require_variant {false}
-# Get variant names from branches
-proc perl5.get_variant_names {branches} {
-    set ret {}
-    foreach branch ${branches} {
-        lappend ret "perl[string map {. _} ${branch}]"
-    }
-    return $ret
-}
 # Create perl variants
 proc perl5.create_variants {branches} {
-    global name perl5.major perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants perl5.require_variant perl5.variants
-    set perl5.variants [perl5.get_variant_names ${branches}]
-    foreach branch ${branches} {
-        set index [lsearch -exact ${branches} ${branch}]
-        set variant [lindex ${perl5.variants} ${index}]
-# Add conflicts
-        set filtered {}
+    global name perl5.major perl5.default_variant perl5.variant \
+           perl5.set_default_variant perl5.conflict_variants \
+           perl5.require_variant perl5.variants
+
+    set perl5.variants [lmap branch ${branches} {string map {. _} perl$branch}]
+    if {${perl5.set_default_variant}} {
         if {${perl5.conflict_variants}} {
-            set filtered [lreplace ${perl5.variants} ${index} ${index}]
+            foreach variant ${perl5.variants} {
+                if {[variant_isset $variant] && $variant ne ${perl5.default_variant}} {
+                    set default_variant_conflicts 1
+                    break
+                }
+            }
         }
-        variant ${variant} conflicts {*}${filtered} description "Use MacPorts perl${branch}" {}
-        if {[variant_isset ${variant}]} {
-            perl5.variant ${variant}
-        }
-    }
-# Set default perl variant
-    if {${perl5.variant} eq {} && ${perl5.set_default_variant}} {
-        default_variants-append +${perl5.default_variant}
-        if {[variant_isset ${perl5.default_variant}]} {
-            perl5.variant ${perl5.default_variant}
+        # Set default perl variant (if no conflicting variant is set)
+        if {![info exists default_variant_conflicts]} {
+            default_variants-append +${perl5.default_variant}
         }
     }
-# Set perl version and deps
-    foreach branch ${branches} {
-        set index [lsearch -exact ${branches} ${branch}]
-        set variant [lindex ${perl5.variants} ${index}]
+
+    foreach branch ${branches} variant ${perl5.variants} {
+        # Add conflicts
+        set cur_conflicts {}
+        if {${perl5.conflict_variants}} {
+            set cur_conflicts [ldelete ${perl5.variants} $variant]
+        }
+        variant ${variant} conflicts {*}${cur_conflicts} description "Use MacPorts perl${branch}" {}
         if {[variant_isset ${variant}]} {
-            perl5.major ${branch}
+            perl5.variant-append ${variant}
+            # Set perl version and deps
+            # XXX this can't do anything sensible if perl5.conflict_variants=no
+            set perl5.major ${branch}
+            depends_lib-delete port:perl${branch}
             depends_lib-append port:perl${branch}
         }
     }
-# Require perl variant
+
+    # Require perl variant
     pre-fetch {
-        if {![variant_isset ${perl5.variant}] && ${perl5.require_variant}} {
+        if {${perl5.variant} eq {} && ${perl5.require_variant}} {
             ui_error "${name} requires one of these variants: ${perl5.variants}"
             return -code error "absence of required perl variant"
         }
@@ -130,8 +123,8 @@ set perl5.cpandir ""
 
 # perl5 group setup procedure
 proc perl5.setup {module vers {cpandir ""}} {
-    global perl5.branches perl5.default_branch perl5.bin perl5.lib \
-           perl5.module perl5.moduleversion perl5.cpandir \
+    global perl5.branches perl5.bin perl5.cpandir perl5.default_branch \
+           perl5.lib perl5.module perl5.moduleversion perl5.variants \
            prefix subport name
 
     # define perl5.module
@@ -178,7 +171,8 @@ proc perl5.setup {module vers {cpandir ""}} {
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
             }
         }
-    } else {
+    } elseif {![info exists perl5.variants]} {
+        depends_lib-delete port:perl${perl5.default_branch}
         depends_lib-append port:perl${perl5.default_branch}
     }
     if {![string match p5-* $name] || $subport ne $name} {

@@ -28,12 +28,14 @@ PortGroup active_variants 1.1
 options linalglib \
         cmake_linalglib \
         blas_only \
-        veclibfort
+        veclibfort \
+        set_default_variants
 
 default linalglib ""
 default cmake_linalglib ""
 default blas_only no
 default veclibfort yes
+default set_default_variants yes
 
 proc linalg.setup {args} {
     global blas_only, veclibfort
@@ -50,17 +52,20 @@ proc linalg.setup {args} {
     }
 }
 
-if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset openblas]} {
-    if {${os.platform} eq "darwin" && ${os.major} < 21} {
-        # see https://trac.macports.org/ticket/65260
-        default_variants-append +accelerate
-    } else {
-        default_variants-append +openblas
+if {$set_default_variants} {
+    if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset blis] \
+        && ![variant_isset flexiblas] && ![variant_isset openblas]} {
+        if {${os.platform} eq "darwin" && ${os.major} < 21} {
+            # see https://trac.macports.org/ticket/65260
+            default_variants-append +accelerate
+        } else {
+            default_variants-append +openblas
+        }
     }
 }
 
 # choose one of the following for serial linear algebra
-variant accelerate conflicts atlas openblas description {Build with linear algebra from built-in Accelerate framework} {
+variant accelerate conflicts atlas blis flexiblas openblas description {Build with linear algebra from built-in Accelerate framework} {
     if {$veclibfort} {
         depends_lib-append      port:vecLibFort
         linalglib               -lvecLibFort
@@ -72,7 +77,7 @@ variant accelerate conflicts atlas openblas description {Build with linear algeb
     }
 }
 
-variant atlas conflicts accelerate openblas description {Build with linear algebra from ATLAS} {
+variant atlas conflicts accelerate blis flexiblas openblas description {Build with linear algebra from ATLAS} {
     depends_lib-append      port:atlas
     if {[variant_isset threads]} {
         linalglib           -ltatlas
@@ -87,7 +92,21 @@ variant atlas conflicts accelerate openblas description {Build with linear algeb
     # configure.args-append -DBLA_VENDOR=ATLAS
 }
 
-variant openblas conflicts accelerate atlas description {Build with linear algebra from OpenBLAS} {
+variant blis conflicts accelerate atlas flexiblas openblas description {Build with linear algebra from BLIS} {
+    depends_lib-append      port:blis
+    linalglib               -lblis
+    cmake_linalglib         -DBLAS_LIBRARIES=blis \
+                            -DLAPACK_LIBRARIES=blis
+    # cmake_linalglib         -DBLA_VENDOR=FLAME
+}
+
+variant flexiblas conflicts accelerate atlas blis openblas description {Build with linear algebra from FlexiBLAS} {
+    depends_lib-append      port:flexiblas
+    linalglib               -lflexiblas
+    cmake_linalglib         -DBLA_VENDOR=FlexiBLAS
+}
+
+variant openblas conflicts accelerate atlas blis flexiblas description {Build with linear algebra from OpenBLAS} {
     # allow OpenBLAS-devel too
     depends_lib-append      path:lib/libopenblas.dylib:OpenBLAS
     if {!$blas_only} {
@@ -97,7 +116,8 @@ variant openblas conflicts accelerate atlas description {Build with linear algeb
     cmake_linalglib         -DBLA_VENDOR=OpenBLAS
 }
 
-if {![variant_isset accelerate] && ![variant_isset openblas] && ![variant_isset atlas] } {
-    ui_error "You must select either the +accelerate, +atlas, or +openblas variant for linear algebra."
+if {![variant_isset accelerate] && ![variant_isset openblas] && ![variant_isset atlas] \
+    && ![variant_isset blis] && ![variant_isset flexiblas]} {
+    ui_error "You must select either the +accelerate, +atlas, +blis, +flexiblas or +openblas variant for linear algebra."
     return -code error "No linear-algebra variant selected."
 }

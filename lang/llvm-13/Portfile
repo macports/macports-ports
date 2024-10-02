@@ -20,17 +20,15 @@ categories              lang
 license                 NCSA
 maintainers             nomaintainer
 
-platforms               {darwin < 23}
-
 set llvm_version        13
 version                 ${llvm_version}.0.1
 
 name                    llvm-${llvm_version}
 revision                2
 subport                 mlir-${llvm_version}  { revision 0 }
-subport                 clang-${llvm_version} { revision 3 }
+subport                 clang-${llvm_version} { revision 4 }
 subport                 lldb-${llvm_version}  { revision 2 }
-subport                 flang-${llvm_version} { revision 0 }
+subport                 flang-${llvm_version} { revision 1 }
 
 checksums               rmd160  ae542658ad0e97b4bf088b1cfba66fa10b9b52d8 \
                         sha256  326335a830f2e32d06d0a36393b5455d17dc73e0bd1211065227ee014f92cbf8 \
@@ -61,15 +59,14 @@ cmake.build_type        Release
 cmake.install_rpath
 
 configure.pre_args-delete \
-    -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
-    -DCMAKE_INSTALL_RPATH=${cmake.install_prefix}/lib
+    -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib"
 
 configure.pre_args-replace \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
 
 configure.pre_args-replace \
-    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;${cmake.install_prefix}\;/usr" \
     -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr"
 
 configure.args-append \
@@ -111,7 +108,7 @@ platform darwin {
 }
 
 patch.dir ${workpath}/${distname}
-patch.pre_args  -p1
+patch.pre_args-replace  -p0 -p1
 
 patchfiles-append \
     0001-MacPorts-only-clang-use-MP-omp-locations.patch \
@@ -130,9 +127,13 @@ patchfiles-append \
     0015-Fixup-libstdc-header-search-paths-for-older-versions.patch \
     0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
     0025-lldb-add-defines-needed-for-older-SDKs.patch \
+    0028-lldb-Add-cstdio-include-to-fix-a595b931f1f91897317a4.patch \
+    0029-xray-Use-L-instead-of-.L-for-Mach-O.patch \
+    0030-builtins-Move-cfi-start-s-after-the-symbol-name-NFC.patch \
     SyntheticSections.cpp-types.patch \
     patch-lldb-stdc-macros-134877.diff \
-    patch-lldb-fix-swig-lvalue-2128646.diff
+    patch-lldb-fix-swig-lvalue-2128646.diff \
+    patch-xcode-15.diff
 
 if {${os.platform} eq "darwin" && ${os.major} < 14} {
     patchfiles-append \
@@ -262,12 +263,17 @@ if { ${subport} eq "flang-${llvm_version}" } {
     # has to match mlir's archs
     supported_archs     arm64 x86_64
 
+    post-patch {
+        reinplace -E "1s|^#!.*$|#!${prefix}/bin/bash|" ${worksrcpath}/../flang/tools/f18/flang.in
+    }
+
     configure.args-append \
         -DLLVM_ENABLE_PROJECTS="clang\;flang\;compiler-rt\;mlir" \
         -DLIBCXX_ENABLE_SHARED=OFF          \
         -DLIBCXX_INSTALL_LIBRARY=OFF
 
     depends_lib-append  port:clang-${llvm_version} port:mlir-${llvm_version}
+    depends_run-append  port:bash
 
     destroot {
         # we have to run the destroot like this, because individual targets for each of the
@@ -287,7 +293,7 @@ if { ${subport} eq "flang-${llvm_version}" } {
 if { ${subport} eq "mlir-${llvm_version}" ||
      ${subport} eq "flang-${llvm_version}" } {
     # temporarily restrict to newer systems until older systems can be rigorously vetted
-    platforms {darwin >= 10} {darwin < 23}
+    platforms {darwin >= 10}
 }
 
 if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
@@ -338,6 +344,22 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
         configure.args-append    -DCLANG_ENABLE_CLANGD=OFF \
                                  -DLLVM_ENABLE_BACKTRACES=OFF
     }
+
+    post-configure {
+        # -Wl,-syslibroot referencing the macOS SDK must not appear when linking
+        # runtime libraries for non-macOS platforms, which are cross-built and
+        # used for cross-platform support. The clang/flang build will provide
+        # the proper -isysroot for the platform in these cases. Remove the macOS
+        # SDK.
+        foreach rtl {asan lsan stats tsan ubsan ubsan_minimal} {
+            foreach rtl_os {ios iossim} {
+                set link_txt_path "${workpath}/build/projects/compiler-rt/lib/${rtl}/CMakeFiles/clang_rt.${rtl}_${rtl_os}_dynamic.dir/link.txt"
+                if {[file exists "${link_txt_path}"]} {
+                    reinplace "s|-Wl,-syslibroot,${configure.sdkroot}||" "${link_txt_path}"
+                }
+            }
+        }
+    }
 }
 
 if {${subport} eq "lldb-${llvm_version}"} {
@@ -355,7 +377,7 @@ if {${subport} eq "lldb-${llvm_version}"} {
     select.file         ${filespath}/mp-${subport}
 
     # error: use of undeclared identifier 'CPU_SUBTYPE_ARM64E
-    platforms {darwin >= 18} {darwin < 23}
+    platforms {darwin >= 18}
 
     configure.args-append \
         -DLLDB_CODESIGN_IDENTITY=- \
@@ -441,6 +463,16 @@ post-destroot {
         xinstall -m 755 -W ${lldb_scripts_srcdir} \
             macos-setup-codesign.sh \
             ${lldb_scripts_destdir}
+    }
+
+    if {${subport} eq "clang-${llvm_version}"} {
+        # move libc++ libraries out of default location to prevent accidental linkage
+        set libcxx_dir ${destroot}${sub_prefix}/lib/libc++
+        xinstall -d ${libcxx_dir}
+        foreach f [glob -nocomplain ${destroot}${sub_prefix}/lib/libc++*.*] {
+            ui_debug "Moving ${f} to ${libcxx_dir}"
+            move ${f} ${libcxx_dir}
+        }
     }
 }
 

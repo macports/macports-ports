@@ -2,17 +2,18 @@
 
 PortSystem          1.0
 PortGroup           cmake 1.1
+PortGroup           compiler_blacklist_versions 1.0
 PortGroup           github 1.0
 PortGroup           legacysupport 1.1
 PortGroup           openssl 1.0
 
-# _getline
+# _getline, filesystem
 legacysupport.newest_darwin_requires_legacy 19
 
 # See discussion in: https://github.com/macports/macports-ports/pull/19686
 legacysupport.use_mp_libcxx yes
 
-github.setup        TileDB-Inc TileDB 2.17.2
+github.setup        TileDB-Inc TileDB 2.25.0
 name                tiledb
 revision            0
 categories          databases
@@ -21,9 +22,9 @@ maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
 description         The universal storage engine
 long_description    {*}${description}
 homepage            https://tiledb.com
-checksums           rmd160  4fc8fea72a1cf7acf6d7b40abfe3cc13c75f9ee5 \
-                    sha256  fff42d79e8db9829ab2d7efac2a3aa0d9fb949f7db2ac829ae61ebb8aafc74db \
-                    size    4411239
+checksums           rmd160  6e17574c88f6c64f65247a2326de44eda55cc08d \
+                    sha256  edadfc63b419c605d37304236ca6de55a46a9905015e122e597b82075135d39e \
+                    size    4222271
 github.tarball_from archive
 
 # Notice that 32-bit platforms are not supported by upstream, and there are reports elsewhere
@@ -38,15 +39,13 @@ set libfmt_ver      10
 cmake.module_path-append \
                     ${prefix}/lib/libfmt${libfmt_ver}/cmake
 
-depends_lib-append  port:blosc \
-                    port:bzip2 \
-                    port:curl \
+depends_lib-append  port:bzip2 \
+                    port:file \
                     port:libfmt${libfmt_ver} \
-                    port:libpng \
                     port:lz4 \
                     port:spdlog \
                     port:zlib \
-                    port:zstd
+                    port:zstdConfig.cmake
 
 depends_build-append \
                     port:gmake
@@ -58,35 +57,55 @@ if {${os.platform} eq "darwin" && ${os.major} < 13} {
     git.cmd                 ${prefix}/bin/git
 }
 
-if {${os.platform} eq "darwin" && ${os.major} < 11} {
+if {${os.platform} eq "darwin" && ${os.major} < 20} {
     # This trickery is intended. Normal passing of flags to CMake fails to have a desired effect.
     # Non-Apple OS on ppc will need libatomic linking too, but leave it until tested.
     patchfiles-append \
-                    patch-linking.diff \
-                    0001-Add-a-fix-for-32-bit.patch
+                    patch-linking.diff
 
     post-patch {
         reinplace "s,@PREFIX@,${prefix},g" ${worksrcpath}/cmake/Modules/FindMagic_EP.cmake
     }
 }
 
-compiler.cxx_standard   2020
+# Can be rewritten unconditionally, but no point in making a patch more complex:
+if {[string match *gcc* ${configure.compiler}] && ${configure.build_arch} in [list arm i386 ppc]} {
+    patchfiles-append \
+                    patch-libatomic-32-bit.diff
+}
+
+# Patch TileDB to find lz4 manually, because the lz4 package does not provide CMake configs.
+# Updating the lz4 port is blocked on lz4 releasing a new version, with some official
+# linkage-agnostic targets.
+patchfiles-append   lz4_fix.diff
+
+compiler.cxx_standard       2020
+# https://github.com/TileDB-Inc/TileDB/issues/4566
+compiler.blacklist-append   {clang < 1400}
+# https://github.com/TileDB-Inc/TileDB/issues/5164
+compiler.blacklist-append   macports-clang-18
 
 # config modules are defunct.
 # https://github.com/TileDB-Inc/TileDB/issues/4070
 configure.args-append \
                     -DCATCH_INCLUDE_DIR:STRING=${prefix}/include \
-                    -DTILEDB_ABSEIL=OFF \
                     -DTILEDB_ASSERIONS=OFF \
                     -DTILEDB_AZURE=OFF \
                     -DTILEDB_CPP_API=ON \
                     -DTILEDB_EXPERIMENTAL_FEATURES=OFF \
+                    -DTILEDB_GCS=OFF \
+                    -DTILEDB_HDFS=OFF \
                     -DTILEDB_SERIALIZATION=OFF \
+                    -DTILEDB_SUPERBUILD=OFF \
                     -DTILEDB_TESTS=OFF \
                     -DTILEDB_TOOLS=OFF \
                     -DTILEDB_VERBOSE=ON \
                     -DTILEDB_WEBP=OFF \
                     -DTILEDB_WERROR=OFF
+
+# Disable auto-downloading of vcpkg. All dependencies will be provided by MacPorts.
+configure.env-append \
+                    TILEDB_DISABLE_AUTO_VCPKG=1
 
 configure.cflags-append \
                     -DSPDLOG_FMT_EXTERNAL=1
@@ -106,15 +125,28 @@ if {${build_arch} eq "i386" && [string match *clang* ${configure.compiler}]} {
                     -Wno-c++11-narrowing
 }
 
-destroot.target     install-tiledb
-
+# FIXME: ppc32 tests build, but fail to pass. Possibly size of bool issue?
+# ppc64 tests are much better, though not clean. See above.
 variant tests description "Enable testing" {
+    # This is needed only if a bundled Catch2 is used:
+    # PortGroup       conflicts_build 1.0
+
     if {${configure.build_arch} in [list i386 ppc]} {
         cmake.build_type    Debug
     }
 
+    # This is a tricky part. We may need to switch between
+    # Macports-provided Catch2 and a bundled one. Related:
+    # https://github.com/TileDB-Inc/TileDB/issues/4590
+    # https://github.com/TileDB-Inc/TileDB/issues/4095
     depends_build-append \
-                    port:catch2
+                    port:catch2 \
+                    port:libpng
+    # As of 2.19.1, bundled one is broken:
+    # :info:build Undefined symbols:
+    # :info:build   "__ZN5Catch29formatReconstructedExpressionERSoRKSsNS_9StringRefES2_", referenced from:
+    # :info:build       __ZNK5Catch10BinaryExprIRKN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEES9_E29streamReconstructedExpressionERSo in test_assert.cc.o
+    # conflicts_build catch2
 
     configure.pre_args-replace \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \

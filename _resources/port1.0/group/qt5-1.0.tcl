@@ -40,8 +40,8 @@ options qt5.mac_sdk
 default qt5.mac_sdk     {[qt5pg::qmake_mac_sdk]}
 
 # use PKGCONFIG for Qt discovery in configure scripts
-depends_build-delete    port:pkgconfig
-depends_build-append    port:pkgconfig
+depends_build-delete    path:bin/pkg-config:pkgconfig port:pkgconfig
+depends_build-append    path:bin/pkg-config:pkgconfig
 
 # standard qmake spec
 # other platforms required

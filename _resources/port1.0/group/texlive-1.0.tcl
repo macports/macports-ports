@@ -357,7 +357,7 @@ proc texlive.texmfport {} {
                 puts $langluafile "\t\tloader = '$langfile',"
                 puts $langluafile "\t\tlefthyphenmin = $langlhmin,"
                 puts $langluafile "\t\trighthyphenmin = $langrhmin,"
-                set qsyns {}
+                set qsyns [list]
                 foreach syn $langsyns {
                     lappend qsyns "'$syn'"
                 }

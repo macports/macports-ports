@@ -29,19 +29,20 @@ options common_lisp.sbcl
 default common_lisp.sbcl        yes
 
 options common_lisp.ecl
-# ECL doesn't support PPC
-default common_lisp.ecl         [expr { ${os.arch} ne "powerpc" }]
+# boehmgc has random failures on macOS which makes ECL useless
+# See: https://github.com/ivmai/bdwgc/issues/103
+default common_lisp.ecl         no
 
 options common_lisp.clisp
 default common_lisp.clisp       yes
 
 options common_lisp.ccl
 # CLL doesn't support arm64 yet, and seems that stable working on 10.10+
-default common_lisp.ccl         [expr { ${os.platform} eq "darwin" && ${os.major} >= 14  && ${os.arch} ne "arm" }]
+default common_lisp.ccl         {[expr { ${os.platform} eq "darwin" && ${os.major} >= 14  && ${os.arch} ne "arm" }]}
 
 options common_lisp.abcl
-# ABCL requires java and support OpenJDK 11 before 10.14 fragile
-default common_lisp.abcl        [expr { ${os.platform} eq "darwin" && ${os.major} >= 18 }]
+# ABCL requires java and support OpenJDK 21 before 10.14 fragile
+default common_lisp.abcl        {[expr { ${os.platform} eq "darwin" && ${os.major} >= 18 }]}
 
 options common_lisp.build_run
 default common_lisp.build_run   yes
@@ -63,12 +64,6 @@ default test.run                yes
 namespace eval common_lisp      {}
 
 proc common_lisp::add_dependencies {} {
-    global common_lisp.sbcl
-    global common_lisp.ecl
-    global common_lisp.clisp
-    global common_lisp.abcl
-    global common_lisp.ccl
-
     if {[option common_lisp.sbcl]} {
         depends_build-delete    port:sbcl \
                                 port:sbcl-devel \
@@ -106,10 +101,6 @@ proc common_lisp::add_dependencies {} {
 port::register_callback common_lisp::add_dependencies
 
 proc common_lisp::respect_threads_support {} {
-    global common_lisp.sbcl
-    global common_lisp.ecl
-    global common_lisp.clisp
-
     if {[option common_lisp.threads] && [option common_lisp.sbcl]} {
         common_lisp.sbcl    no
 
@@ -191,12 +182,6 @@ test {
 }
 
 proc common_lisp::asdf_operate {op name build_system_path} {
-    global common_lisp.sbcl
-    global common_lisp.ecl
-    global common_lisp.clisp
-    global common_lisp.abcl
-    global common_lisp.ccl
-
     if {[option common_lisp.sbcl]} {
         common_lisp::sbcl_asdf_operate ${op} ${name} ${build_system_path}
     }

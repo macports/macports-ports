@@ -15,13 +15,16 @@ endgroup() {
     printtag "endgroup"
 }
 
-MACPORTS_VERSION=2.8.1
+MACPORTS_VERSION=2.10.2
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 OS_ARCH=$(uname -m)
 case "$OS_ARCH" in
     i586|i686|x86_64)
         OS_ARCH=i386
+        ;;
+    arm64)
+        OS_ARCH=arm
         ;;
 esac
 
@@ -36,8 +39,9 @@ curl_getopt_pid=$!
 echo "Fetching MacPorts..."
 /usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/${MACPORTS_FILENAME}" &
 curl_mpbase_pid=$!
-echo "Fetching PortIndex..."
-/usr/bin/curl -fsSLo ports/PortIndex "https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" &
+PORTINDEX_URL="https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex"
+echo "Fetching PortIndex from $PORTINDEX_URL ..."
+/usr/bin/curl -fsSLo ports/PortIndex "$PORTINDEX_URL" &
 curl_portindex_pid=$!
 endgroup
 
@@ -57,23 +61,35 @@ endgroup
 
 
 begingroup "Uninstalling Homebrew"
-# Move directories to /opt/off
+# Move directories to /opt/*-off
 echo "Moving directories..."
-sudo mkdir /opt/off
-/usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/off/ \;
+sudo mkdir /opt/local-off /opt/homebrew-off
+test ! -d /usr/local || /usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/local-off/ \;
+test ! -d /opt/homebrew || /usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/homebrew-off/ \;
 
 # Unlink files
 echo "Removing files..."
-/usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type f -print -delete
+test ! -d /usr/local || /usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type f -print -delete
+test ! -d /opt/homebrew || /usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type f -print -delete
 
 # Rehash to forget about the deleted files
 hash -r
 endgroup
 
+begingroup "Selecting Xcode version"
+case "$OS_MAJOR" in
+    22) sudo xcode-select --switch /Applications/Xcode_14.3.1.app/Contents/Developer
+        ;;
+    23) sudo xcode-select --switch /Applications/Xcode_16.app/Contents/Developer
+        ;;
+esac
+endgroup
 
 begingroup "Installing getopt"
 # Install getopt required by mpbb
-wait $curl_getopt_pid
+if ! wait $curl_getopt_pid; then
+    echo "Fetching getopt failed: $?"
+fi
 echo "Extracting..."
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 rm -f "getopt-v1.1.6.tar.bz2"
@@ -82,7 +98,9 @@ endgroup
 
 begingroup "Installing MacPorts"
 # Install MacPorts built by https://github.com/macports/macports-base/tree/master/.github
-wait $curl_mpbase_pid
+if ! wait $curl_mpbase_pid; then
+    echo "Fetching base failed: $?"
+fi
 echo "Extracting..."
 sudo tar -xpf "${MACPORTS_FILENAME}" -C /
 rm -f "${MACPORTS_FILENAME}"
@@ -93,7 +111,7 @@ begingroup "Configuring MacPorts"
 # Set PATH for portindex
 source /opt/local/share/macports/setupenv.bash
 # Set ports tree to $PWD/ports
-sudo sed -i "" "s|rsync://rsync.macports.org/macports/release/tarballs/ports.tar|file://${PWD}/ports|; /^file:/s/default/nosync,default/" /opt/local/etc/macports/sources.conf
+echo "file://${PWD}/ports [default,nosync]" | sudo tee /opt/local/etc/macports/sources.conf >/dev/null
 # CI is not interactive
 echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Only download from the CDN, not the mirrors
@@ -114,8 +132,10 @@ git -C ports/ fetch macports master
 git -C ports/ checkout -qf macports/master~10
 git -C ports/ checkout -qf -
 git -C ports/ checkout -qf "$(git -C ports/ merge-base macports/master HEAD)"
+if ! wait $curl_portindex_pid; then
+    echo "Fetching PortIndex failed: $?"
+fi
 ## Ignore portindex errors on common ancestor
-wait $curl_portindex_pid
 (cd ports/ && portindex)
 git -C ports/ checkout -qf -
 (cd ports/ && portindex -e)

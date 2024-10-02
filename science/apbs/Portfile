@@ -2,11 +2,9 @@
 
 PortSystem              1.0
 PortGroup               compiler_blacklist_versions 1.0
-PortGroup               cmake 1.0
-PortGroup               mpi 1.0
+PortGroup               cmake 1.1
 PortGroup               github 1.0
 
-cmake.out_of_source     yes
 name                    apbs
 
 categories              science
@@ -20,64 +18,101 @@ long_description        APBS is a software package for the numerical \
                         electrostatic interactions between molecular \
                         solutes over a wide range of length scales.
 
-github.setup            Electrostatics apbs-pdb2pqr d4e78c62e6a07f92c26924318d83a159fa6af063
-version                 1.4.1
-homepage                http://www.poissonboltzmann.org
-worksrcdir              ${worksrcdir}/apbs
-revision                6
+version                 3.4.1
+homepage                https://www.poissonboltzmann.org
+revision                0
 
-# stealth update; remove for next version
-dist_subdir             ${name}/${version}_1
-checksums               rmd160  09ffa6a90c190eb4e584934519c8cbd6229fc7b8 \
-                        sha256  3c3e6914a1a69c27d54d9d9ea7ffd1072e3bc82209971289f0a8a7964fcdf82b \
-                        size    37120958
+set FETK_version        1.9.3
 
-depends_lib             port:maloc \
-                        port:readline
+github.setup            Electrostatics    apbs    ${version} v
+github.tarball_from     releases
+extract.mkdir           no
+master_sites            https://github.com/Electrostatics/apbs/archive/refs/tags/v${version}:apbs \
+                        https://github.com/Electrostatics/FETK/archive/refs/tags/${FETK_version}:FETK
 
-# dependencies are not managed correctly within this code, so errors such as from -lapbs_geoflow might occur
-# how to solve: first 'make apbs_geoflow', then 'make all'
-use_parallel_build no
+distfiles               apbs-${version}.tar.gz:apbs FETK-${FETK_version}.tar.gz:FETK
+checksums               apbs-${version}.tar.gz \
+                        rmd160  17de250c3887ff68f89a873c5a0be19f6ab38813 \
+                        sha256  644e6246fd37c9dd4172fc7be1763337082ab8584dbcd53e738c831b62c89bb2 \
+                        size    85806314 \
+                        FETK-${FETK_version}.tar.gz \
+                        rmd160  25cf57754a0b817e76e19b8de93617e554302661 \
+                        sha256  2ce7ab04cba4403f4208c3ecf1c81a0a18aae6a77d22da0ffa5f64c2da7c6f28 \
+                        size    27757348
 
-configure.optflags      -O3 -ffast-math
-configure.args-append   -DENABLE_OPENMP:BOOL=OFF \
-                        -DENABLE_BEM=OFF \
-                        -DCMAKE_C_COMPILER_ARG1:STRING="-I${worksrcpath}/include ${configure.cflags}" \
-                        -DCMAKE_CXX_COMPILER_ARG1:STRING="-I${worksrcpath}/include ${configure.cxxflags} -stdlib=libc++"
+worksrcdir              ${workpath}/apbs-${version}
 
-# otherwise obsolete subport installation will fail on patch phase and not get to pre-configure error about replacement
-if {${subport} eq ${name}} {
-    patchfiles              patch-CMakeLists.txt.diff patch-Eigen-include-path.diff patch-contrib-tabipb-CMakeLists.txt.diff patch-pbsolvercz.cpp.diff
-    if {[mpi_variant_isset]} {
-        patchfiles-append   patch-tests-apbs_tester.py.diff
+# Test support requires python3 but the
+# building the apbs python module with swig
+# is unnecessary for apbs's use in pymol.
+platform darwin {
+    if {${os.major} < 19} {
+        depends_test port:python312
+        set python ${prefix}/bin/python3.12
+    } else {
+        set python /usr/bin/python3
     }
 }
 
+compiler.cxx_standard   2017
+
+depends_lib             port:maloc \
+                        port:superlu \
+                        port:SuiteSparse
+
+configure.optflags      -O3 -ffast-math
+configure.cppflags-append -I${worksrcpath}/include -Wno-error=implicit-int
+
+if {[string match *clang* ${configure.compiler}]} {
+    configure.cppflags-append \
+                        -Wno-error=incompatible-function-pointer-types
+} elseif {[string match *gcc* ${configure.compiler}]} {
+    configure.cppflags-append \
+                        -Wno-error=incompatible-pointer-types
+}
+
+# Follow Debian's approach of not building those
+# features like BEM, GEOFLOW or PBAM that only
+# exist in apbs's github without tagged releases yet.
+configure.args-append   -DAPBS_STATIC_BUILD=ON \
+                        -DBUILD_SHARED_LIBS=OFF \
+                        -DBUILD_TOOLS=ON \
+                        -DENABLE_OPENMP:BOOL=OFF \
+                        -DENABLE_BEM=OFF \
+                        -DENABLE_GEOFLOW=OFF \
+                        -DENABLE_PBAM=OFF \
+                        -DBUILD_MALOC=OFF \
+                        -DBUILD_SUPERLU=OFF \
+                        -DBUILD_SHARED_LIBS=ON \
+                        -DFETCHCONTENT_SOURCE_DIR_FETK=${worksrcpath}/FETK-${FETK_version} \
+                        -DSUPERLU_INCLUDES=${prefix}/include -DSUPERLU_LIBRARIES=${prefix}/lib
+
+patchfiles              cmake-maloc.patch disable_python_cmake_check.patch patch-testfiles.patch open-U-obsolete.patch python3.patch wrong-path-for-interpreter.patch
 test.run  yes
 test {
     ln ${worksrcpath}/tools/manip/inputgen.py ${worksrcpath}/tests/
     ln ${worksrcpath}/tools/manip/psize.py    ${worksrcpath}/tests/
 
-    if {[mpi_variant_isset]} {
-        reinplace "s|mpiexec|\"${mpi.exec}\", \"-n\", \"${build.jobs}\"|" ${worksrcpath}/tests/apbs_tester.py
+    platform darwin {
+        system -W ${worksrcpath}/tests "PATH=${destroot}${prefix}/bin:/usr/bin:/bin:${prefix}/bin ${python} apbs_tester.py -c test_cases.cfg || exit 0"
     }
-    
-    system -W ${worksrcpath}/tests "python apbs_tester.py"
     system -W ${worksrcpath}/tests "cat test.log"
     system -W ${worksrcpath}/tests "if grep FAILED test.log; then echo \"FAIL\"; exit 1; fi"
 }
 
-# Some cmake tests will fail with "error: unrecognized option '-arch'" from gcc 4.6 and earlier. Same with dragonegg based on it.
-# llvm-gcc-4.2 will fail to build with: error: unrecognized command line option "-std=c++0x"
-# It comes with clang for OSX 10.6 so we need to blacklist clang to prevent it being used.
-compiler.blacklist      macports-gcc-4.4 macports-gcc-4.5 macports-gcc-4.6 \
-    macports-dragonegg-3.4 gcc-4.2 llvm-gcc-4.2 apple-gcc-4.2 macports-llvm-gcc-4.2 {clang < 425} \
-    macports-clang-3.4
-# g++ will just fail to link apbs_geoflow. probably about -lstdc++ stuff. So, just use Fortran.
-compilers.choose        fc
-mpi.setup
+post-extract {
+    move ${worksrcdir}/../FETK-${FETK_version} ${worksrcdir}
+}
 
-configure.args-append   -DENABLE_MPI:BOOL=OFF
+post-patch {
+    reinplace "s|EXACT REQUIRED|REQUIRED|" ${worksrcpath}/CMakeLists.txt ${worksrcpath}/tests/CMakeLists.txt ${worksrcpath}/tools/python/CMakeLists.txt
+    platform darwin {
+        if {${os.major} < 19} {
+            reinplace "s|env python3|env ${prefix}/bin/python3.12|" ${worksrcpath}/tools/manip/psize.py
+            reinplace "s|/usr/bin/python3|${prefix}/bin/python3.12|" ${worksrcpath}/tools/python/vgrid/mergedx.py
+        }
+    }
+}
 
 post-destroot {
     set tools ${destroot}${prefix}/share/${subport}/tools
@@ -93,38 +128,4 @@ post-destroot {
     }
 }
 
-pre-configure {
-    if {[mpi_variant_isset]} {
-        configure.args-delete   -DENABLE_MPI:BOOL=OFF
-        configure.args-append   -DENABLE_MPI:BOOL=ON \
-            -DMPI_C_COMPILER=${mpi.cc} \
-            -DMPI_CXX_COMPILER=${mpi.cxx}
-    }
-}
-
-variant bem description {Build with support for Boundary Element Method} {
-    configure.args-delete  -DENABLE_BEM=OFF
-    configure.args-append  -DENABLE_BEM=ON
-
-    if {![fortran_variant_isset]} {
-        ui_error "+bem requires a Fortran variant, e.g. +gccX or +g95."
-        return -code error "+bem requires a Fortran variant."
-    }
-
-    # BEM looks for 'gfortran', hard-coded, and configure fails without it if BEM is enabled, with a syntax error
-    #CMake Error at CMakeLists.txt:217 (get_filename_component):
-    #  get_filename_component called with incorrect number of arguments
-    post-patch {
-        # -lstdc++ does not seem necessary and may cause trouble; specifying full paths avoid possible use of -ltabip from an earlier installation in ${prefix}
-        reinplace "s|-L\${LIBGFORTRAN_PATH} -lgfortran -ltabipb -lstdc\+\+|${compilers.libfortran} ${worksrcpath}/lib/libtabipb.a|" ${worksrcpath}/CMakeLists.txt
-        # provide this information to subsidiary cmake command run in tabipb directory during build phase
-        reinplace "s|CMAKE_ARGS|CMAKE_ARGS -DCMAKE_Fortran_COMPILER:STRING=${configure.fc}|" ${worksrcpath}/CMakeLists.txt
-        reinplace "s|FCFLAGS|${configure.fcflags}|g" ${worksrcpath}/contrib/tabipb/CMakeLists.txt
-    }
-}
-
-# check for real releases, not github commits
-livecheck.type          regex
-livecheck.version       ${version}
-livecheck.url           https://apbs-pdb2pqr.readthedocs.io/en/latest/downloads.html
-livecheck.regex         APBS (\[0-9.\]+)
+github.livecheck.regex  {([0-9.]+)}

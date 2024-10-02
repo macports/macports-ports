@@ -12,7 +12,6 @@ PortGroup           cmake 1.1
 PortGroup           boost 1.0
 
 categories          science comms
-platforms           darwin macosx
 
 # declare which gnuradio are you using
 options gnuradio.type
@@ -76,7 +75,7 @@ foreach py_ver ${gnuradio.python_versions} {
 }
 
 depends_build-append \
-    port:pkgconfig
+    path:bin/pkg-config:pkgconfig
 
 depends_lib-append \
     port:fftw-3-single \

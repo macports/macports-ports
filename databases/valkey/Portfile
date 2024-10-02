@@ -1,0 +1,128 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           legacysupport 1.1
+PortGroup           muniversal 1.0
+PortGroup           xcode_workaround 1.0
+PortGroup           makefile 1.0
+
+# clock_gettime
+legacysupport.newest_darwin_requires_legacy 15
+
+github.setup        valkey-io valkey 8.0.0
+github.tarball_from archive
+revision            1
+categories          databases
+license             BSD
+
+maintainers         {makr @mohd-akram} openmaintainer
+
+description         in-memory data store
+long_description    Valkey is an open source (BSD) high-performance key/value \
+                    datastore that supports a variety workloads such as \
+                    caching, message queues, and can act as a primary database.
+
+homepage            https://valkey.io
+
+checksums           rmd160  679a69e31bf83efda2de64abe00db5195fd06a05 \
+                    sha256  f87fef2ba81ae4bce891b874fba58cfde2d19370a3bcac20f0e17498b33c33c0 \
+                    size    3624237
+
+patchfiles          patch-valkey.conf.diff \
+                    patch-hiredis.diff \
+                    patch-gh-12585.diff \
+                    patch-remove-brewism.diff
+
+# Backport of upstream fix, see: https://github.com/valkey-io/valkey/issues/1051
+# https://trac.macports.org/ticket/70794
+patchfiles-append   d07c29791a4cecd8bce76b05d046981f39fe5fcd.patch
+
+post-patch {
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${worksrcpath}/valkey.conf \
+        ${worksrcpath}/deps/hiredis/Makefile
+}
+
+# see ${worksrcpath}/deps/jemalloc/Makefile
+compiler.cxx_standard   2014
+configure.cxxflags-append   -std=c++14
+
+# https://trac.macports.org/ticket/59245
+xcode_workaround.fixed_xcode_version 11.2
+
+# valkey and dep makefiles have their own optflags
+configure.optflags
+
+# avoid build conflict with lua
+configure.cppflags-replace \
+                    -I${prefix}/include \
+                    -isystem${prefix}/include
+
+if {[string match *gcc* ${configure.compiler}] \
+    && ${configure.build_arch} in [list i386 ppc]} {
+    # https://github.com/valkey-io/valkey/issues/434
+    configure.ldflags-append \
+                    -latomic
+}
+
+# valkey doesn't know about CPPFLAGS so pass it this way
+build.args-append   SERVER_CFLAGS="${configure.cppflags}"
+
+# disable silent rules
+build.args-append   V=1
+
+# use jemalloc
+build.args-append   MALLOC=jemalloc
+
+# enable TLS.
+build.args-append   BUILD_TLS=yes
+depends_lib         path:lib/libssl.dylib:openssl
+
+# prevent conflict with redis
+destroot.args-append    USE_REDIS_SYMLINKS=no
+
+set db_dir          ${prefix}/var/db/${name}
+set log_dir         ${prefix}/var/log/${name}
+set run_dir         ${prefix}/var/run/${name}
+
+destroot.keepdirs   ${destroot}${db_dir} \
+                    ${destroot}${log_dir} \
+                    ${destroot}${run_dir}
+
+installs_libs       no
+
+makefile.has_destdir    no
+
+post-destroot {
+    xinstall -d ${destroot}${prefix}/share/doc/${name}
+    foreach conffile {valkey.conf sentinel.conf} {
+        xinstall -m 0644 ${worksrcpath}/${conffile} \
+            ${destroot}${prefix}/share/doc/${name}/${conffile}
+    }
+    xinstall -o ${name} -g ${name} -d ${destroot}${db_dir}
+    xinstall -o ${name} -g ${name} -d ${destroot}${log_dir}
+    xinstall -o ${name} -g ${name} -d ${destroot}${run_dir}
+}
+
+post-activate {
+    foreach conffile {valkey.conf sentinel.conf} {
+        if {![file exists ${prefix}/etc/${conffile}]} {
+            file copy ${prefix}/share/doc/${name}/${conffile} \
+                ${prefix}/etc/${conffile}
+        }
+    }
+}
+
+variant redis_compat description {Install redis compatibility symlinks} {
+    conflicts               redis
+    destroot.args-delete    USE_REDIS_SYMLINKS=no
+}
+
+add_users           ${name} group=${name} realname=Valkey\ Database\ Server
+startupitem.create  yes
+startupitem.user    ${name}
+startupitem.group   ${name}
+startupitem.executable  ${prefix}/bin/valkey-server ${prefix}/etc/valkey.conf
+
+github.livecheck.regex  {([0-9.]+)}

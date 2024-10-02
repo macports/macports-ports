@@ -1,0 +1,190 @@
+From 2e03aea6360e4f34b107f74f7cdee00e235dc852 Mon Sep 17 00:00:00 2001
+From: Dean M Greer <38226388+Gcenx@users.noreply.github.com>
+Date: Tue, 14 Feb 2023 21:45:59 -0500
+Subject: [PATCH 1/3] Revert: "HACK: server: CX HACK 21217"
+
+---
+ server/mach.c | 29 -----------------------------
+ 1 file changed, 29 deletions(-)
+
+diff --git a/server/mach.c b/server/mach.c
+index c701573a..b3becfe7 100644
+--- a/server/mach.c
++++ b/server/mach.c
+@@ -48,7 +48,6 @@
+ #include <mach/thread_act.h>
+ #include <mach/mach_vm.h>
+ #include <servers/bootstrap.h>
+-#include <sys/sysctl.h>
+ 
+ static mach_port_t server_mach_port;
+ 
+@@ -152,26 +151,6 @@ void init_thread_context( struct thread *thread )
+ {
+ }
+ 
+-/* CX HACK 21217 */
+-static int is_apple_silicon( void )
+-{
+-    static int apple_silicon_status, did_check = 0;
+-    if (!did_check)
+-    {
+-        /* returns 0 for native process or on error, 1 for translated */
+-        int ret = 0;
+-        size_t size = sizeof(ret);
+-        if (sysctlbyname( "sysctl.proc_translated", &ret, &size, NULL, 0 ) == -1)
+-            apple_silicon_status = 0;
+-        else
+-            apple_silicon_status = ret;
+-
+-        did_check = 1;
+-    }
+-
+-    return apple_silicon_status;
+-}
+-
+ /* retrieve the thread x86 registers */
+ void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
+ {
+@@ -223,13 +202,6 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
+         }
+         context->flags |= SERVER_CTX_DEBUG_REGISTERS;
+     }
+-    else if (is_apple_silicon())
+-    {
+-        /* CX HACK 21217: Fake debug registers on Apple Silicon */
+-        fprintf( stderr, "%04x: thread_get_state failed on Apple Silicon - faking zero debug registers\n", thread->id );
+-        memset( &context->debug, 0, sizeof(context->debug) );
+-        context->flags |= SERVER_CTX_DEBUG_REGISTERS;
+-    }
+     mach_port_deallocate( mach_task_self(), port );
+ #endif
+ }
+@@ -255,7 +227,6 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
+         return;
+     }
+ 
+-
+ #ifdef __x86_64__
+     if (thread->process->machine == IMAGE_FILE_MACHINE_AMD64)
+     {
+-- 
+2.39.3 (Apple Git-146)
+
+From 8f00d194d8d1f541a73a7a1b1ba8884bd264b86c Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Wed, 8 Feb 2023 15:51:29 -0800
+Subject: [PATCH 2/3] server: On macOS, fake debug registers when running under
+ Rosetta.
+
+Based on a patch by Tim Clem <tclem@codeweavers.com>.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=54367
+
+cherry picked from commit https://github.com/wine-mirror/wine/commit/93fde56b494151f5e4bdfc560f930867bda52514
+---
+ server/mach.c | 39 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/server/mach.c b/server/mach.c
+index b3becfe7..8c24f0f9 100644
+--- a/server/mach.c
++++ b/server/mach.c
+@@ -31,6 +31,9 @@
+ #ifdef HAVE_SYS_SYSCALL_H
+ #include <sys/syscall.h>
+ #endif
++#ifdef HAVE_SYS_SYSCTL_H
++#include <sys/sysctl.h>
++#endif
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+@@ -74,6 +77,25 @@ static mach_port_t get_process_port( struct process *process )
+     return process->trace_data;
+ }
+ 
++static int is_rosetta( void )
++{
++    static int rosetta_status, did_check = 0;
++    if (!did_check)
++    {
++        /* returns 0 for native process or on error, 1 for translated */
++        int ret = 0;
++        size_t size = sizeof(ret);
++        if (sysctlbyname( "sysctl.proc_translated", &ret, &size, NULL, 0 ) == -1)
++            rosetta_status = 0;
++        else
++            rosetta_status = ret;
++
++        did_check = 1;
++    }
++
++    return rosetta_status;
++}
++
+ /* initialize the process control mechanism */
+ void init_tracing_mechanism(void)
+ {
+@@ -163,6 +185,14 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
+     /* all other regs are handled on the client side */
+     assert( flags == SERVER_CTX_DEBUG_REGISTERS );
+ 
++    if (is_rosetta())
++    {
++        /* getting debug registers of a translated process is not supported cross-process, return all zeroes */
++        memset( &context->debug, 0, sizeof(context->debug) );
++        context->flags |= SERVER_CTX_DEBUG_REGISTERS;
++        return;
++    }
++
+     if (thread->unix_pid == -1 || !process_port ||
+         mach_port_extract_right( process_port, thread->unix_tid,
+                                  MACH_MSG_TYPE_COPY_SEND, &port, &type ))
+@@ -227,6 +257,15 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
+         return;
+     }
+ 
++    if (is_rosetta())
++    {
++        /* Setting debug registers of a translated process is not supported cross-process
++         * (and even in-process, setting debug registers never has the desired effect).
++         */
++        set_error( STATUS_UNSUCCESSFUL );
++        return;
++    }
++
+ #ifdef __x86_64__
+     if (thread->process->machine == IMAGE_FILE_MACHINE_AMD64)
+     {
+--
+2.39.3 (Apple Git-146)
+
+From d8aedcdd8227afd1c632538e4dfba31141f84e14 Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Thu, 16 Feb 2023 21:58:26 -0800
+Subject: [PATCH 3/3] ntdll: Add a WARN when setting debug registers fails
+ under Rosetta.
+
+cherry picked from commit https://github.com/wine-mirror/wine/commit/39655dade3c802557754439451279c5b59b31ce8
+---
+ dlls/ntdll/unix/signal_x86_64.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index b434950e..d7862c59 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -1809,6 +1809,10 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
+     if (!self)
+     {
+         ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_AMD64 );
++#ifdef __APPLE__
++        if ((flags & CONTEXT_DEBUG_REGISTERS) && (ret == STATUS_UNSUCCESSFUL))
++            WARN_(seh)( "Setting debug registers is not supported under Rosetta\n" );
++#endif
+         if (ret || !self) return ret;
+         if (flags & CONTEXT_DEBUG_REGISTERS)
+         {
+--
+2.39.3 (Apple Git-146)

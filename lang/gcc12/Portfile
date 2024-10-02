@@ -11,7 +11,7 @@ name                gcc12
 
 homepage            https://gcc.gnu.org/
 
-platforms           {darwin >= 10}
+platforms           {darwin >= 10 < 24}
 categories          lang
 maintainers         nomaintainer
 # an exception in the license allows dependents to not be GPL
@@ -22,17 +22,17 @@ long_description    {*}${description}, including front ends for \
                     C, C++, Objective-C, Objective-C++ and Fortran.
 
 # Remember to reset all revision increments below to 0 on new versions
-version             12.3.0
-revision            3
+version             12.4.0
+revision            1
 
 set libgccname      lib${name}
 subport             ${libgccname} { revision [ expr ${revision} + 0 ] }
 
 set libcxxname      ${name}-libcxx
 
-checksums           rmd160  bcc2a72fbbee69d031e1ca31c7236c65352397d4 \
-                    sha256  949a5d4f99e786421a93b532b22ffab5578de7321369975b91aec97adfda8c3b \
-                    size    85491976
+checksums           rmd160  28610a746188e2a3c368b6578a22b6770f295267 \
+                    sha256  704f652604ccbccb14bdabf3478c9511c89788b12cb3bbffded37341916a9175 \
+                    size    83377372
 
 # Primary releases
 master_sites        https://ftpmirror.gnu.org/gcc/gcc-${version}/ \
@@ -69,8 +69,18 @@ license_noconflict  gmp mpfr ppl libmpc zlib
 
 set major           [lindex [split ${version} .-] 0]
 
+proc gcc_arch {arch} {
+    switch ${arch} {
+        arm64       {return aarch64}
+        ppc64       {return powerpc64}
+        ppc         {return powerpc}
+        default     {return ${arch}}
+    }
+}
+
 platform darwin {
-    configure.pre_args-append --build=${build_arch}-apple-darwin${os.major}
+    set gcc_triple [gcc_arch ${build_arch}]-apple-darwin${os.major}
+    configure.pre_args-append --build=${gcc_triple}
 }
 
 set gcc_configure_langs {c c++ objc obj-c++ lto fortran}
@@ -81,9 +91,20 @@ if {${subport} eq ${name} && ${build_arch} ne "i386"} {
 }
 
 proc get_clean_sysroot {} {
-    global configure.sdkroot
-    # if the sdkroot is one of the current, rapidly changing SDKS, use the generic one
-    return [regsub {MacOSX1[1-9]\.[0-9]+\.sdk} ${configure.sdkroot} {MacOSX.sdk}]
+    global configure.sdkroot configure.sdk_version
+    set new_sdk ${configure.sdkroot}
+    if { [regexp {MacOSX(.*).sdk} ${configure.sdkroot} -> sdk_v] } {
+        if { ${sdk_v} != "" } {
+            # If present strip minor version from SDK version
+            set sdk_major [lindex [split $sdk_v .] 0]
+            ui_debug "Detected versioned SDK ${sdk_v} ${sdk_major} ${configure.sdkroot}"
+            set new_sdk [regsub {MacOSX1[1-9]\.[0-9]+\.sdk} ${configure.sdkroot} MacOSX${sdk_major}.sdk]
+            if { ${new_sdk} != ${configure.sdkroot} } {
+                ui_debug " New SDK ${new_sdk}"
+            }
+        }
+    }
+    return ${new_sdk}
 }
 
 set mp_extra_rpath  ${prefix}/lib/libgcc
@@ -161,9 +182,29 @@ configure.env-append \
 
 if { ${os.platform} eq "darwin" } {
     # Patch generated from https://github.com/iains/gcc-12-branch
-    # git diff --no-prefix releases/gcc-12.2.0 gcc-12.2-darwin-r0
+    # git diff --no-prefix releases/gcc-12.4.0 gcc-12.4-darwin-r0
     patchfiles-append  patch-darwin-gcc-${version}.diff
 }
+
+# Since GCC 7.4.0, during configure, it detects features supported by target-as.
+# On the other hand, MacPorts cctools contain a proxy for 'as' that runs system
+# 'as' or one of the supported MacPorts clang's 'as' if it is installed. Here,
+# we may encounter a misconfiguration when GCC builds on a system with some
+# MacPorts clang, and 'as' is using it. However, on a clean system, it uses
+# system 'as' if no MacPorts clang is installed, which may behave differently.
+# This can make GCC broken until MacPorts clang is installed. To avoid a stealth
+# dependency on the used clang, I enforce building with system 'as'.
+# See:
+#  - https://trac.macports.org/ticket/68683
+#  - https://github.com/gcc-mirror/gcc/commit/b410cf1dc056aab195c5408871ffca932df8a78a
+patchfiles-append   patch-gcc10-disable-macports-cctools-as-changes.diff
+
+configure.env-append \
+                    DISABLE_MACPORTS_AS_CLANG_SEARCH=1 \
+                    DISABLE_XCODE_AS_CLANG_SEARCH=1
+
+build.env-append    DISABLE_MACPORTS_AS_CLANG_SEARCH=1 \
+                    DISABLE_XCODE_AS_CLANG_SEARCH=1
 
 if {${os.platform} eq "darwin" && ${os.major} >= 22} {
     if { [vercmp ${xcodeversion} >= 15.0] || [vercmp ${xcodecltversion} >= 15.0] } {
@@ -227,6 +268,7 @@ subport ${libcxxname} {
     patchfiles
     use_configure           no
     supported_archs         noarch
+    platforms               any
     # Find clang/llvm version to use from active variant
     proc getClangVersion {} {
         if { [regexp {clang(.*)} [clang_variant_name] -> clang_v] } {
@@ -353,8 +395,9 @@ if {${subport} eq ${libgccname}} {
     }
 
     # No need to build as nothing that isn't provided by libgcc13
+    platforms   any
 
-    depends_run path:share/doc/libgcc/README:libgcc
+    depends_run port:libgcc13
     depends_lib
 
     fetch.type    none
@@ -424,23 +467,22 @@ if { ${subport} ne ${libcxxname} } {
         }
     }
 
-    platform powerpc {
-        configure.universal_archs ppc ppc64
-    }
-    if { ${os.platform} eq "darwin" && ${os.major} >= 20 } {
-        platform i386 {
-            configure.universal_archs x86_64 arm64
+    if {${os.platform} eq "darwin" && ${os.major} <= 18} {
+        switch -- $build_arch {
+            i386 -
+            x86_64 {
+                configure.universal_archs i386 x86_64
+            }
+            ppc -
+            ppc64 {
+                configure.universal_archs ppc ppc64
+            }
         }
-        platform arm {
-            configure.universal_archs x86_64 arm64
+        variant universal {
+            configure.args-delete --disable-multilib
         }
     } else {
-        platform i386 {
-            configure.universal_archs i386 x86_64
-        }
-    }
-    variant universal {
-        configure.args-delete --disable-multilib
+        universal_variant   no
     }
     # the generated compiler doesn't accept -arch
     configure.env-append \

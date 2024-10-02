@@ -10,10 +10,10 @@ use_configure       no
 build {
     system -W ${worksrcpath} "${configure.cc} ${configure.cppflags} ${configure.cflags} [get_canonical_archflags cc] -fPIC -c -I. parser.c"
 
-    if {[file exists ${worksrcpath}/scanner.c]} {
-        system -W ${worksrcpath} "${configure.cc} ${configure.cppflags} ${configure.cflags} [get_canonical_archflags cc] -fPIC -c -I. scanner.c"
-    } elseif {[file exists ${worksrcpath}/scanner.cc]} {
+    if {[file exists ${worksrcpath}/scanner.cc]} {
         system -W ${worksrcpath} "${configure.cxx} ${configure.cxxflags} ${configure.cflags} [get_canonical_archflags cxx] -fPIC -c -I. scanner.cc"
+    } elseif {[file exists ${worksrcpath}/scanner.c]} {
+        system -W ${worksrcpath} "${configure.cc} ${configure.cppflags} ${configure.cflags} [get_canonical_archflags cc] -fPIC -c -I. scanner.c"
     }
 
     if {[file exists ${worksrcpath}/scanner.cc]} {

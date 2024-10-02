@@ -42,7 +42,11 @@ proc haskell_cabal.add_dependencies {} {
             port:libiconv
     }
     depends_build-append \
-        port:gsed
+        port:cctools \
+        port:file \
+        port:grep \
+        port:gsed \
+        path:bin/openssl:openssl
 }
 port::register_callback haskell_cabal.add_dependencies
 
@@ -131,11 +135,11 @@ post-patch {
                     "  dynlibdir: ${prefix}/lib" \
                     "  libexecdir: ${prefix}/libexec" \
                     "  libexecsubdir: ${subport}" \
-                    "  datadir: ${prefix}/share/${subport}" \
-                    "  docdir: ${prefix}/share/doc/${subport}" \
-                    "  htmldir: ${prefix}/share/doc/${subport}" \
+                    "  datadir: ${prefix}/${haskell_cabal.datadir}" \
+                    "  docdir: ${prefix}/${haskell_cabal.docdir}" \
+                    "  htmldir: ${prefix}/${haskell_cabal.htmldir}" \
                     "  haddockdir: \$htmldir" \
-                    "  sysconfdir: ${prefix}/etc/${subport}" \
+                    "  sysconfdir: ${prefix}/${haskell_cabal.sysconfdir}" \
                     "" \
                     "program-locations" \
                     "  gcc-location: ${configure.cc}" \
@@ -153,7 +157,20 @@ options haskell_cabal.bin \
         haskell_cabal.global_flags \
         haskell_cabal.build_dir \
         haskell_cabal.use_prebuilt \
-        haskell_cabal.datadir
+        haskell_cabal.installsubdir \
+        haskell_cabal.datadir \
+        haskell_cabal.docdir \
+        haskell_cabal.htmldir \
+        haskell_cabal.haddockdir \
+        haskell_cabal.sysconfdir \
+        haskell_cabal.installdir_args \
+        haskell_cabal.bindirs
+
+# default master_sites for non-GitHub ports
+if {![info exists github.master_sites]} {
+    default master_sites \
+        {https://hackage.haskell.org/package/${subport}-${version}}
+}
 
 default haskell_cabal.bin {[haskell_cabal.getcabalbin]}
 
@@ -168,7 +185,22 @@ default haskell_cabal.build_dir     {${workpath}/dist}
 # use to install prebuilt binaries for bootstrapping
 default haskell_cabal.use_prebuilt  {no}
 
-default haskell_cabal.datadir       {share/${subport}}
+default haskell_cabal.installsubdir {${subport}}
+default haskell_cabal.datadir       {share/${haskell_cabal.installsubdir}}
+default haskell_cabal.docdir        {share/doc/${haskell_cabal.installsubdir}}
+default haskell_cabal.htmldir       {share/doc/${haskell_cabal.installsubdir}}
+default haskell_cabal.haddockdir    {share/doc/${haskell_cabal.installsubdir}}
+default haskell_cabal.sysconfdir    {etc/${haskell_cabal.installsubdir}}
+
+default haskell_cabal.installdir_args {\
+    --datadir=${prefix}/${haskell_cabal.datadir}\
+    --docdir=${prefix}/${haskell_cabal.docdir}\
+    --htmldir=${prefix}/${haskell_cabal.htmldir}\
+    --haddockdir=${prefix}/${haskell_cabal.haddockdir}\
+    --sysconfdir=${prefix}/${haskell_cabal.sysconfdir}\
+}
+
+default haskell_cabal.bindirs       {${destroot}${prefix}/bin}
 
 post-patch {
     if {[tbool haskell_cabal.use_prebuilt]} {
@@ -211,6 +243,7 @@ default configure.cmd       {${haskell_cabal.bin}\
                                 ${haskell_cabal.global_flags}}
 default configure.pre_args  {}
 default configure.args      {configure}
+default configure.universal_args {}
 default configure.env       {${haskell_cabal.env}}
 
 default build.type          {cabal}
@@ -223,6 +256,7 @@ default build.post_args     {\
                                 [haskell_cabal.build_getjobsarg]\
                                 --builddir=${haskell_cabal.build_dir}\
                                 --prefix=${prefix}\
+                                ${haskell_cabal.installdir_args}\
                                 --enable-relocatable\
                             }
 default build.env           {${haskell_cabal.env}}
@@ -236,7 +270,9 @@ default destroot.post_args  {\
                                 [haskell_cabal.build_getjobsarg]\
                                 --builddir=${haskell_cabal.build_dir}\
                                 --installdir=${destroot}${prefix}/bin\
+                                --install-method=copy\
                                 --enable-relocatable\
+                                --overwrite-policy=always\
                             }
 default destroot.env        {${haskell_cabal.env}}
 
@@ -255,57 +291,114 @@ default livecheck.type      {regex}
 default livecheck.url       {https://hackage.haskell.org/package/${name}}
 default livecheck.regex     {"/package/[quotemeta ${name}]-\\\[^/\\\]+/[quotemeta ${name}]-(\\\[^\\\"\\\]+)[quotemeta ${extract.suffix}]"}
 
+set idir_list   {bin etc lib libexec share}
+set idir_regexp "^([join ${idir_list} |])\$"
 
-# binary sed hack to address unfixed cabal datadir issue:
-# replace hardwired datadir in build directory with path
-# of the same length using repeated /'s
-# https://github.com/haskell/cabal/issues/3586
 post-destroot {
-    # find cabal data-files
-    set build_datadirs {}
-    if {[file isdirectory ${haskell_cabal.cabal_root}/store]} {
-        fs-traverse f ${haskell_cabal.cabal_root}/store {
-            if { [file isdirectory ${f}]
-                && [file tail ${f}] eq {share}} {
-                lappend build_datadirs ${f}
+    # strip binaries
+    foreach bindir ${haskell_cabal.bindirs} {
+        foreach binfile [glob -nocomplain ${bindir}/*] {
+            if {([file isfile ${binfile}]
+                && [file type ${binfile}] eq {file}
+                && [file executable ${binfile}]
+                && [regexp -nocase -- \
+                    {application/x-.*(binary|executable)} \
+                        [lindex [exec file --mime-type ${binfile}] end]])} {
+                system -W ${bindir} \
+                        "strip ${binfile}"
+                if {${configure.build_arch} eq {arm64}} {
+                    system -W ${bindir} \
+                        "codesign -f -s - ${binfile}"
+                }
             }
         }
     }
-    if {[llength ${build_datadirs}] > 0} {
-        foreach binfile [glob -nocomplain ${destroot}${prefix}/bin/*] {
-            if {!([file isfile ${binfile}] && [file type ${binfile}] eq {file})} {
-                continue
-            }
-            xinstall -m 0755 \
-                ${binfile} \
-                ${binfile}.slash_hack
-            foreach build_datadir ${build_datadirs} {
-                set extra_slashes \
-                    [expr {[string length ${build_datadir}] - [string length ${prefix}/${haskell_cabal.datadir}]}]
-                if {${extra_slashes} >= 0} {
-                    set slash_hack \
-                        [string repeat / [expr {${extra_slashes} + 1}]]
-                    set datadir_slash_hack \
-                        [strsed ${prefix}/${haskell_cabal.datadir} "g|/${haskell_cabal.datadir}\$|${slash_hack}${haskell_cabal.datadir}|"]
-                    set build_datadir_esc \
-                        [strsed ${build_datadir} {g|/|\\/|}]
-                    set datadir_slash_hack_esc \
-                        [strsed ${datadir_slash_hack} {g|/|\\/|}]
-                    system -W ${destroot}${prefix}/bin \
-                        "gsed -i -e\
-                            's/${build_datadir_esc}/${datadir_slash_hack_esc}/g'\
-                            ${binfile}.slash_hack"
+
+    # binary sed hack to address unfixed cabal datadir issue:
+    # replace hardwired datadir in build directory with path
+    # of the same length using repeated /'s
+    # https://github.com/haskell/cabal/issues/3586
+    # find cabal data-files
+    set build_installsubdirs [list]
+    if {[file isdirectory ${haskell_cabal.cabal_root}/store]} {
+        fs-traverse f ${haskell_cabal.cabal_root}/store {
+            if { [file isdirectory ${f}]
+                && [regexp -nocase -- ${idir_regexp} \
+                        [file tail ${f}]]} {
+                set sdir [file dirname ${f}]
+                if {${sdir} ni ${build_installsubdirs}} {
+                    lappend build_installsubdirs ${sdir}
                 }
             }
-            if {[file size ${binfile}.slash_hack] == [file size ${binfile}]} {
-                delete  ${binfile}
+        }
+    }
+    if {[llength ${build_installsubdirs}] > 0} {
+        foreach bindir ${haskell_cabal.bindirs} {
+            foreach binfile [glob -nocomplain ${bindir}/*] {
+                if {!([file isfile ${binfile}]
+                      && [file type ${binfile}] eq {file}
+                      && [file executable ${binfile}]
+                      && [regexp -nocase -- \
+                          {application/x-.*(binary|executable)} \
+                          [lindex [exec file --mime-type ${binfile}] end]])} {
+                    continue
+                }
                 xinstall -m 0755 \
-                    ${binfile}.slash_hack \
-                    ${binfile}
-            }
-            delete  ${binfile}.slash_hack
-            if {${configure.build_arch} eq {arm64}} {
-                system "codesign -f -s - ${binfile}"
+                    ${binfile} \
+                    ${binfile}.slash_hack
+                foreach build_installsubdir ${build_installsubdirs} {
+                    foreach idir ${idir_list} {
+                        set build_idir ${build_installsubdir}/${idir}
+                        if {![string trim [exec sh -c \
+                            "if LC_ALL='C' ggrep -F -a -c -q -e [shellescape ${build_idir}] \
+                                [shellescape ${binfile}.slash_hack] 2>/dev/null; \
+                                then echo '1'; else echo '0'; fi"]]} {
+                            continue
+                        }
+                        switch ${idir} {
+                            bin {
+                                set replacesubdir \
+                                    ${idir}
+                            }
+                            default {
+                                set replacesubdir \
+                                    ${idir}/${haskell_cabal.installsubdir}
+                            }
+                        }
+                        set replacedir \
+                            ${prefix}/${replacesubdir}
+                        set extra_slashes \
+                            [expr {[string length ${build_idir}] - [string length ${replacedir}]}]
+                        if {${extra_slashes} >= 0} {
+                            set slash_hack \
+                                [string repeat / [expr {${extra_slashes} + 1}]]
+                            set installsubdir_slash_hack \
+                                [strsed ${replacedir} "g|/${replacesubdir}\$|${slash_hack}${replacesubdir}|"]
+                            set build_idir_esc \
+                                [strsed ${build_idir} {g|/|\\/|}]
+                            set installsubdir_slash_hack_esc \
+                                [strsed ${installsubdir_slash_hack} {g|/|\\/|}]
+                            system -W ${bindir} \
+                                "gsed -i -e\
+                                's/${build_idir_esc}/${installsubdir_slash_hack_esc}/g'\
+                                    ${binfile}.slash_hack"
+                        }
+                    }
+                }
+                if {([file size ${binfile}.slash_hack] \
+                    == [file size ${binfile}])
+                    && ([exec openssl dgst -ripemd160 ${binfile}.slash_hack] \
+                            ne [exec openssl dgst -ripemd160 ${binfile}])} {
+                    # gsed created a different file of the same size
+                    delete ${binfile}
+                    xinstall -m 0755 \
+                        ${binfile}.slash_hack \
+                        ${binfile}
+                    if {${configure.build_arch} eq {arm64}} {
+                        system "codesign -f -s - ${binfile}"
+                    }
+                }
+                delete ${binfile}.slash_hack
             }
         }
     }

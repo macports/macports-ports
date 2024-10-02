@@ -11,6 +11,6 @@
 ;; Info-directory-list contains ${prefix}/share/info. See #32148.
 (setq Info-default-directory-list (cons "__PREFIX__/share/info" Info-default-directory-list))
 
-;; Look in MacPorts ${prefix} for tree-sitter parser libraries
-(when (boundp 'treesit-extra-load-path)
-  (setq treesit-extra-load-path (cons "__PREFIX__/lib" treesit-extra-load-path)))
+;; Use the OS X Emoji font for Emoticons
+(when (fboundp 'set-fontset-font)
+  (set-fontset-font t 'emoji '("Apple Color Emoji" . "iso10646-1") nil 'prepend))

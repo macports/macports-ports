@@ -50,6 +50,7 @@
 #   ensure Fortran code accepts "calls to external procedures with mismatches between the calls and the procedure definition"
 #   the use of this option is "strongly discouraged" as the code should be made to be "standard-conforming"
 #   see https://gcc.gnu.org/onlinedocs/gfortran/Fortran-Dialect-Options.html
+# compilers.add_gcc_rpath_support: enforce adding -rpath,${prefix}/lib/libgcc
 #
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
@@ -76,12 +77,15 @@ default compilers.clear_archflags no
 options compilers.allow_arguments_mismatch
 default compilers.allow_arguments_mismatch no
 
+options compilers.add_gcc_rpath_support
+default compilers.add_gcc_rpath_support yes
+
 # Set a default gcc version
 if {${os.major} < 10 && ${os.platform} eq "darwin" } {
     # see https://trac.macports.org/ticket/57135
     set compilers.gcc_default gcc7
 } else {
-    set compilers.gcc_default gcc13
+    set compilers.gcc_default gcc14
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
@@ -89,14 +93,21 @@ set compilers.list {cc cxx cpp objc fc f77 f90}
 # build database of gcc compiler attributes
 # Should match those in compilers/gcc_compilers.tcl
 if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
-    set gcc_versions {10 11 12 13 devel}
+    set gcc_versions [list]
+    if { [vercmp ${xcodeversion} < 16.0] && [vercmp ${xcodecltversion} < 16.0] } {
+        lappend gcc_versions 10 11 12 13
+    }
+    lappend gcc_versions 14 devel
 } else {
-    set gcc_versions {}
+    set gcc_versions [list]
     if { ${os.major} < 15 } {
         lappend gcc_versions 5 6 7 8 9
     }
     if { ${os.major} >= 10 } {
-        lappend gcc_versions 10 11 12 13 devel
+        if { [vercmp ${xcodeversion} < 16.0] && [vercmp ${xcodecltversion} < 16.0] } {
+            lappend gcc_versions 10 11 12 13
+        }
+        lappend gcc_versions 14 devel
     }
 }
 # GCC version providing the primary runtime
@@ -104,7 +115,7 @@ if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
 if { ${os.major} < 10 && ${os.platform} eq "darwin" } {
     set gcc_main_version 7
 } else {
-    set gcc_main_version 13
+    set gcc_main_version 14
 }
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
@@ -160,7 +171,7 @@ foreach ver ${gcc_versions} {
 # build database of clang compiler attributes
 # Should match those in compilers/clang_compilers.tcl
 # Also do not forget to add support of new llvm into cctools
-set clang_versions {}
+set clang_versions [list]
 if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
     if {${os.major} < 16} {
         if {${os.major} < 9} {
@@ -172,19 +183,21 @@ if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
         }
     }
     if { ${os.major} >= 9 && ${os.major} < 20 } {
-        lappend clang_versions 5.0 6.0 7.0
+        lappend clang_versions 5.0 6.0 7.0 8.0
     }
-    if { ${os.major} >= 10 } {
-        if { ${os.major} < 20 } {
-            lappend clang_versions 8.0
-        }
+    if { ${os.major} >= 9 && ${os.major} < 23 } {
         lappend clang_versions 9.0 10
     }
 }
-if { ${os.major} >= 10 || ${os.platform} ne "darwin" } {
-    lappend clang_versions 11
+if { ${os.major} >= 9 || ${os.platform} ne "darwin" } {
+    if { ${os.major} <= 23 || ${os.platform} ne "darwin"} {
+        lappend clang_versions 11
+        if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
+            lappend clang_versions 12
+        }
+    }
     if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 12 13 14 15 16 17
+        lappend clang_versions 13 14 15 16 17 18 19
     }
     if { ${os.major} >= 14 } {
         lappend clang_versions devel
@@ -276,7 +289,7 @@ proc compilers.setup_variants {variants} {
     global compilers.clear_archflags
     global build_arch
 
-    set compilers.my_fortran_variants {}
+    set compilers.my_fortran_variants [list]
     foreach variant $variants {
         if {$cdb($variant,f77) ne ""} {
             lappend compilers.my_fortran_variants $variant
@@ -554,7 +567,7 @@ proc compilers.choose {args} {
     }
 
     # zero out the variable before and append args
-    set compilers.list {}
+    set compilers.list [list]
     foreach v $args {
         lappend compilers.list $v
     }
@@ -663,7 +676,7 @@ proc compilers.setup {args} {
         os.major os.arch
 
     if {!${compilers.setup_done}} {
-        set add_list {}
+        set add_list [list]
         set remove_list ${compilers.variants}
 
         # if we are only setting fortran compilers, then we are in "only
@@ -742,7 +755,7 @@ proc compilers.setup {args} {
         }
 
         # remove duplicates
-        set duplicates {}
+        set duplicates [list]
         foreach foo $remove_list {
             if {$foo in $add_list} {
                 lappend duplicates $foo
@@ -802,6 +815,9 @@ pre-configure {
     compilers.action_enforce_c ${compilers.required_c}
     compilers.action_enforce_f ${compilers.required_f}
     compilers.action_enforce_some_f ${compilers.required_some_f}
+    if {${compilers.add_gcc_rpath_support}} {
+        compilers::add_gcc_rpath_support
+    }
 }
 
 namespace eval compilers {
@@ -849,8 +865,6 @@ proc compilers::add_gcc_rpath_support {} {
         }
     }
 }
-
-port::register_callback compilers::add_gcc_rpath_support
 
 proc compilers::fortran_legacy_support_proc {option action args} {
     if {$action ne  "set"} return

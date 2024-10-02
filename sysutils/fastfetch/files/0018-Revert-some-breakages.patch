@@ -1,0 +1,517 @@
+From a7d9d6274e96ef4a269a8dd15d54390795beef67 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Thu, 12 Sep 2024 08:17:48 +0800
+Subject: [PATCH 18/21] Revert some breakages
+
+---
+ src/detection/displayserver/displayserver.c   |  35 +++--
+ src/detection/displayserver/displayserver.h   |  14 +-
+ .../displayserver/displayserver_apple.c       | 138 +++++++-----------
+ src/detection/font/font_apple.m               |   3 +-
+ src/detection/monitor/monitor.h               |   1 -
+ src/detection/monitor/monitor_apple.m         |  19 +--
+ src/modules/display/display.c                 |  63 ++------
+ src/modules/monitor/monitor.c                 |   8 +-
+ 8 files changed, 98 insertions(+), 183 deletions(-)
+
+diff --git a/src/detection/displayserver/displayserver.c b/src/detection/displayserver/displayserver.c
+index ddc97396..20a36623 100644
+--- a/src/detection/displayserver/displayserver.c
++++ b/src/detection/displayserver/displayserver.c
+@@ -1,6 +1,24 @@
+ #include "displayserver.h"
+ 
+-FFDisplayResult* ffdsAppendDisplay(
++uint32_t ffdsParseRefreshRate(int32_t refreshRate)
++{
++    if(refreshRate <= 0)
++        return 0;
++
++    int remainder = refreshRate % 5;
++    if(remainder >= 3)
++        refreshRate += (5 - remainder);
++    else
++        refreshRate -= remainder;
++
++    // All other typicall refresh rates are dividable by 5
++    if(refreshRate == 145)
++        refreshRate = 144;
++
++    return (uint32_t) refreshRate;
++}
++
++bool ffdsAppendDisplay(
+     FFDisplayServerResult* result,
+     uint32_t width,
+     uint32_t height,
+@@ -11,12 +29,10 @@ FFDisplayResult* ffdsAppendDisplay(
+     FFstrbuf* name,
+     FFDisplayType type,
+     bool primary,
+-    uint64_t id,
+-    uint32_t physicalWidth,
+-    uint32_t physicalHeight)
++    uint64_t id)
+ {
+     if(width == 0 || height == 0)
+-        return NULL;
++        return false;
+ 
+     FFDisplayResult* display = ffListAdd(&result->displays);
+     display->width = width;
+@@ -27,15 +43,10 @@ FFDisplayResult* ffdsAppendDisplay(
+     display->rotation = rotation;
+     ffStrbufInitMove(&display->name, name);
+     display->type = type;
+-    display->id = id;
+-    display->physicalWidth = physicalWidth;
+-    display->physicalHeight = physicalHeight;
+     display->primary = primary;
++    display->id = id;
+ 
+-    display->bitDepth = 0;
+-    display->hdrEnabled = false;
+-
+-    return display;
++    return true;
+ }
+ 
+ void ffConnectDisplayServerImpl(FFDisplayServerResult* ds);
+diff --git a/src/detection/displayserver/displayserver.h b/src/detection/displayserver/displayserver.h
+index 127dbc5f..ffe46466 100644
+--- a/src/detection/displayserver/displayserver.h
++++ b/src/detection/displayserver/displayserver.h
+@@ -58,12 +58,8 @@ typedef struct FFDisplayResult
+     FFstrbuf name;
+     FFDisplayType type;
+     uint32_t rotation;
+-    uint64_t id; // platform dependent
+-    uint32_t physicalWidth;
+-    uint32_t physicalHeight;
+     bool primary;
+-    uint8_t bitDepth;
+-    bool hdrEnabled;
++    uint64_t id; // platform dependent
+ } FFDisplayResult;
+ 
+ typedef struct FFDisplayServerResult
+@@ -78,7 +74,9 @@ typedef struct FFDisplayServerResult
+ 
+ const FFDisplayServerResult* ffConnectDisplayServer();
+ 
+-FFDisplayResult* ffdsAppendDisplay(
++uint32_t ffdsParseRefreshRate(int32_t refreshRate);
++
++bool ffdsAppendDisplay(
+     FFDisplayServerResult* result,
+     uint32_t width,
+     uint32_t height,
+@@ -89,6 +87,4 @@ FFDisplayResult* ffdsAppendDisplay(
+     FFstrbuf* name,
+     FFDisplayType type,
+     bool primary,
+-    uint64_t id,
+-    uint32_t physicalWidth,
+-    uint32_t physicalHeight);
++    uint64_t id);
+diff --git a/src/detection/displayserver/displayserver_apple.c b/src/detection/displayserver/displayserver_apple.c
+index ab2abe5e..4b6b6fe4 100644
+--- a/src/detection/displayserver/displayserver_apple.c
++++ b/src/detection/displayserver/displayserver_apple.c
+@@ -1,111 +1,77 @@
+ #include "displayserver.h"
+ #include "util/apple/cf_helpers.h"
+-#include "util/stringUtils.h"
++#include "common/sysctl.h"
+ 
+ #include <stdlib.h>
++#include <ctype.h>
+ #include <string.h>
+ #include <assert.h>
+-#include <CoreGraphics/CGDirectDisplay.h>
+-#include <CoreVideo/CVDisplayLink.h>
++#include <ApplicationServices/ApplicationServices.h>
++#include <AvailabilityMacros.h>
+ 
+-#ifdef MAC_OS_X_VERSION_10_15
+-extern CFDictionaryRef CoreDisplay_DisplayCreateInfoDictionary(CGDirectDisplayID display) __attribute__((weak_import));
+-extern Boolean CoreDisplay_Display_IsHDRModeEnabled(CGDirectDisplayID display) __attribute__((weak_import));
+-#else
+-#include <IOKit/graphics/IOGraphicsLib.h>
+-#endif
++typedef union
++{
++    uint8_t rawData[0xDC];
++    struct
++    {
++        uint32_t mode;
++        uint32_t flags;		// 0x4
++        uint32_t width;		// 0x8
++        uint32_t height;	// 0xC
++        uint32_t depth;		// 0x10
++        uint32_t dc2[42];
++        uint16_t dc3;
++        uint16_t freq;		// 0xBC
++        uint32_t dc4[4];
++        float density;		// 0xD0
++    } derived;
++} modes_D4;
++
++void CGSGetCurrentDisplayMode(CGDirectDisplayID display, int* modeNum);
++void CGSGetDisplayModeDescriptionOfLength(CGDirectDisplayID display, int idx, modes_D4* mode, int length);
+ 
+ static void detectDisplays(FFDisplayServerResult* ds)
+ {
+-    CGDirectDisplayID screens[128];
+-    uint32_t screenCount;
+-    if(CGGetOnlineDisplayList(sizeof(screens) / sizeof(screens[0]), screens, &screenCount) != kCGErrorSuccess)
++    CGDisplayCount screenCount;
++    CGGetOnlineDisplayList(INT_MAX, NULL, &screenCount);
++    if(screenCount == 0)
+         return;
+ 
++    CGDirectDisplayID* screens = malloc(screenCount * sizeof(CGDirectDisplayID));
++    CGGetOnlineDisplayList(INT_MAX, screens, &screenCount);
++
+     for(uint32_t i = 0; i < screenCount; i++)
+     {
+-        CGDirectDisplayID screen = screens[i];
+-        CGDisplayModeRef mode = CGDisplayCopyDisplayMode(screen);
+-        if(mode)
+-        {
+-            //https://github.com/glfw/glfw/commit/aab08712dd8142b642e2042e7b7ba563acd07a45
+-            double refreshRate = CGDisplayModeGetRefreshRate(mode);
++        int modeID;
++        CGSGetCurrentDisplayMode(screens[i], &modeID);
++        modes_D4 mode;
++        CGSGetDisplayModeDescriptionOfLength(screens[i], modeID, &mode, 0xD4);
+ 
+-            if (refreshRate == 0)
+-            {
+-                CVDisplayLinkRef link;
+-                if(CVDisplayLinkCreateWithCGDisplay(screen, &link) == kCVReturnSuccess)
+-                {
+-                    const CVTime time = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link);
+-                    if (!(time.flags & kCVTimeIsIndefinite))
+-                        refreshRate = time.timeScale / (double) time.timeValue; //59.97...
+-                    CVDisplayLinkRelease(link);
+-                }
+-            }
+-
+-            FF_STRBUF_AUTO_DESTROY name = ffStrbufCreate();
+-            CFDictionaryRef FF_CFTYPE_AUTO_RELEASE displayInfo = NULL;
+-            #ifdef MAC_OS_X_VERSION_10_15
+-            if(CoreDisplay_DisplayCreateInfoDictionary)
+-                displayInfo = CoreDisplay_DisplayCreateInfoDictionary(screen);
+-            #else
+-            {
+-                io_service_t servicePort = CGDisplayIOServicePort(screen);
+-                displayInfo = IODisplayCreateInfoDictionary(servicePort, kIODisplayOnlyPreferredName);
+-            }
+-            #endif
+-            if(displayInfo)
+-            {
+-                CFDictionaryRef productNames;
+-                if(!ffCfDictGetDict(displayInfo, CFSTR(kDisplayProductName), &productNames))
+-                    ffCfDictGetString(productNames, CFSTR("en_US"), &name);
+-            }
+-
+-            CGSize size = CGDisplayScreenSize(screen);
+-
+-            FFDisplayResult* display = ffdsAppendDisplay(ds,
+-                (uint32_t)CGDisplayModeGetPixelWidth(mode),
+-                (uint32_t)CGDisplayModeGetPixelHeight(mode),
+-                refreshRate,
+-                (uint32_t)CGDisplayModeGetWidth(mode),
+-                (uint32_t)CGDisplayModeGetHeight(mode),
+-                (uint32_t)CGDisplayRotation(screen),
+-                &name,
+-                CGDisplayIsBuiltin(screen) ? FF_DISPLAY_TYPE_BUILTIN : FF_DISPLAY_TYPE_EXTERNAL,
+-                CGDisplayIsMain(screen),
+-                (uint64_t)screen,
+-                (uint32_t) (size.width + 0.5),
+-                (uint32_t) (size.height + 0.5)
+-            );
+-            if (display)
+-            {
+-                // https://stackoverflow.com/a/33519316/9976392
+-                // Also shitty, but better than parsing `CFCopyDescription(mode)`
+-                CFDictionaryRef dict = (CFDictionaryRef) *((int64_t *)mode + 2);
+-                if (CFGetTypeID(dict) == CFDictionaryGetTypeID())
+-                {
+-                    int32_t bitDepth;
+-                    ffCfDictGetInt(dict, kCGDisplayBitsPerSample, &bitDepth);
+-                    display->bitDepth = (uint8_t) bitDepth;
+-                }
+-
+-                #ifdef MAC_OS_X_VERSION_10_15
+-                if (CoreDisplay_Display_IsHDRModeEnabled)
+-                {
+-                    display->hdrEnabled = CoreDisplay_Display_IsHDRModeEnabled(screen);
+-                }
+-                #endif
+-            }
+-            CGDisplayModeRelease(mode);
+-        }
+-        CGDisplayRelease(screen);
++        double refreshRate = ffdsParseRefreshRate(mode.derived.freq);
++        ffdsAppendDisplay(ds,
++            mode.derived.width,
++            mode.derived.height,
++            refreshRate,
++            0,
++            0,
++            0,
++            NULL,
++            FF_DISPLAY_TYPE_UNKNOWN,
++            true,
++            0
++        );
+     }
++    free(screens);
+ }
+ 
+ void ffConnectDisplayServerImpl(FFDisplayServerResult* ds)
+ {
+     {
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+         FF_CFTYPE_AUTO_RELEASE CFMachPortRef port = CGWindowServerCreateServerPort();
++#else
++        FF_CFTYPE_AUTO_RELEASE CFMachPortRef port = CGWindowServerCFMachPort();
++#endif
+         if (port)
+         {
+             ffStrbufSetStatic(&ds->wmProcessName, "WindowServer");
+diff --git a/src/detection/font/font_apple.m b/src/detection/font/font_apple.m
+index a2c9fb74..80874ced 100644
+--- a/src/detection/font/font_apple.m
++++ b/src/detection/font/font_apple.m
+@@ -2,7 +2,8 @@
+ #include "common/io/io.h"
+ #include "font.h"
+ 
+-#import <AppKit/NSFont.h>
++#include <Foundation/Foundation.h>
++#include <AppKit/NSFont.h>
+ 
+ #include <AvailabilityMacros.h>
+ 
+diff --git a/src/detection/monitor/monitor.h b/src/detection/monitor/monitor.h
+index 4066f117..a6150e5d 100644
+--- a/src/detection/monitor/monitor.h
++++ b/src/detection/monitor/monitor.h
+@@ -5,7 +5,6 @@ typedef struct FFMonitorResult
+     FFstrbuf name;
+     uint32_t width; // native / maximum resolution, in pixels
+     uint32_t height; // native / maximum resolution, in pixels
+-    double refreshRate;// maximum refresh rate in native resolution, in Hz
+     uint32_t physicalWidth; // in mm
+     uint32_t physicalHeight; // in mm
+     bool hdrCompatible;
+diff --git a/src/detection/monitor/monitor_apple.m b/src/detection/monitor/monitor_apple.m
+index c72c7f55..5c6cdb0d 100644
+--- a/src/detection/monitor/monitor_apple.m
++++ b/src/detection/monitor/monitor_apple.m
+@@ -117,22 +117,9 @@ const char* ffDetectMonitor(FFlist* results)
+         monitor->physicalHeight = (uint32_t) (size.height + 0.5);
+         monitor->hdrCompatible = CFDictionaryContainsKey(displayInfo, CFSTR("ReferencePeakHDRLuminance")) ||
+             detectHdrSupportWithNSScreen(display);
+-        monitor->serial = CGDisplaySerialNumber((CGDirectDisplayID) display->id);
+-
+-        FF_CFTYPE_AUTO_RELEASE CFArrayRef modes = CGDisplayCopyAllDisplayModes((CGDirectDisplayID) display->id, NULL);
+-        double maxRefreshRate = 0;
+-        for (uint32_t j = 0; j < CFArrayGetCount(modes); ++j)
+-        {
+-            CGDisplayModeRef mode = (CGDisplayModeRef) CFArrayGetValueAtIndex(modes, j);
+-            if (CGDisplayModeGetWidth(mode) == (uint32_t) width && CGDisplayModeGetHeight(mode) == (uint32_t) height)
+-            {
+-                double refreshRate = CGDisplayModeGetRefreshRate(mode);
+-                if (refreshRate > maxRefreshRate) maxRefreshRate = refreshRate;
+-            }
+-        }
+-        monitor->refreshRate = maxRefreshRate;
+-
+-        int64_t year, week;
++        int64_t serial, year, week;
++        if (ffCfDictGetInt64(displayInfo, CFSTR("DisplaySerialNumber"), &serial) == NULL)
++            monitor->serial = (uint32_t) (uint64_t) serial;
+         if (ffCfDictGetInt64(displayInfo, CFSTR("DisplayYearManufacture"), &year) == NULL)
+             monitor->manufactureYear = (uint16_t) year;
+         if (ffCfDictGetInt64(displayInfo, CFSTR("DisplayWeekManufacture"), &week) == NULL)
+diff --git a/src/modules/display/display.c b/src/modules/display/display.c
+index 4e3f67eb..277ad49d 100644
+--- a/src/modules/display/display.c
++++ b/src/modules/display/display.c
+@@ -4,9 +4,7 @@
+ #include "modules/display/display.h"
+ #include "util/stringUtils.h"
+ 
+-#include <math.h>
+-
+-#define FF_DISPLAY_NUM_FORMAT_ARGS 15
++#define FF_DISPLAY_NUM_FORMAT_ARGS 9
+ 
+ static int sortByNameAsc(FFDisplayResult* a, FFDisplayResult* b)
+ {
+@@ -99,47 +97,35 @@ void ffPrintDisplay(FFDisplayOptions* options)
+             }));
+         }
+ 
+-        FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreate();
+-        double inch = sqrt(result->physicalWidth * result->physicalWidth + result->physicalHeight * result->physicalHeight) / 25.4;
+-
+         if(options->moduleArgs.outputFormat.length == 0)
+         {
+             ffPrintLogoAndKey(key.chars, 0, &options->moduleArgs, FF_PRINT_TYPE_NO_CUSTOM_KEY);
+ 
+-            ffStrbufAppendF(&buffer, "%ix%i", result->width, result->height);
++            printf("%ix%i", result->width, result->height);
+ 
+             if(result->refreshRate > 0)
+             {
+                 if(options->preciseRefreshRate)
+-                    ffStrbufAppendF(&buffer, " @ %g Hz", ((int) (result->refreshRate * 1000 + 0.5)) / 1000.0);
++                    printf(" @ %gHz", ((int) (result->refreshRate * 1000 + 0.5)) / 1000.0);
+                 else
+-                    ffStrbufAppendF(&buffer, " @ %i Hz", (uint32_t) (result->refreshRate + 0.5));
++                    printf(" @ %iHz", (uint32_t) (result->refreshRate + 0.5));
+             }
+ 
+             if(
+                 result->scaledWidth > 0 && result->scaledWidth != result->width &&
+                 result->scaledHeight > 0 && result->scaledHeight != result->height)
+-                ffStrbufAppendF(&buffer, " (as %ix%i)", result->scaledWidth, result->scaledHeight);
+-
+-            if (inch > 0)
+-                ffStrbufAppendF(&buffer, " in %i″", (uint32_t) (inch + 0.5));
++                printf(" (as %ix%i)", result->scaledWidth, result->scaledHeight);
+ 
+             if(result->type != FF_DISPLAY_TYPE_UNKNOWN)
+-                ffStrbufAppendS(&buffer, result->type == FF_DISPLAY_TYPE_BUILTIN ? " [Built-in]" : " [External]");
+-
+-            if (result->hdrEnabled)
+-                ffStrbufAppendS(&buffer, " [HDR]");
++                fputs(result->type == FF_DISPLAY_TYPE_BUILTIN ? " [Built-in]" : " [External]", stdout);
+ 
+             if(moduleIndex > 0 && result->primary)
+-                ffStrbufAppendS(&buffer, " *");
++                printf(" *");
+ 
+-            ffStrbufPutTo(&buffer, stdout);
+-            ffStrbufClear(&buffer);
++            putchar('\n');
+         }
+         else
+         {
+-            double ppi = sqrt(result->width * result->width + result->height * result->height) / inch;
+-
+             char refreshRate[16];
+             if(result->refreshRate > 0)
+             {
+@@ -160,12 +146,6 @@ void ffPrintDisplay(FFDisplayOptions* options)
+                 FF_FORMAT_ARG(displayType, "type"),
+                 FF_FORMAT_ARG(result->rotation, "rotation"),
+                 FF_FORMAT_ARG(result->primary, "is-primary"),
+-                FF_FORMAT_ARG(result->physicalWidth, "physical-width"),
+-                FF_FORMAT_ARG(result->physicalHeight, "physical-height"),
+-                FF_FORMAT_ARG(inch, "inch"),
+-                FF_FORMAT_ARG(ppi, "ppi"),
+-                FF_FORMAT_ARG(result->bitDepth, "bit-depth"),
+-                FF_FORMAT_ARG(result->hdrEnabled, "hdr-enabled"),
+             }));
+         }
+     }
+@@ -316,26 +296,14 @@ void ffGenerateDisplayJsonResult(FF_MAYBE_UNUSED FFDisplayOptions* options, yyjs
+     FF_LIST_FOR_EACH(FFDisplayResult, item, dsResult->displays)
+     {
+         yyjson_mut_val* obj = yyjson_mut_arr_add_obj(doc, arr);
++        yyjson_mut_obj_add_uint(doc, obj, "width", item->width);
++        yyjson_mut_obj_add_uint(doc, obj, "height", item->height);
+         yyjson_mut_obj_add_uint(doc, obj, "id", item->id);
+         yyjson_mut_obj_add_strbuf(doc, obj, "name", &item->name);
+         yyjson_mut_obj_add_bool(doc, obj, "primary", item->primary);
+ 
+-        yyjson_mut_val* output = yyjson_mut_obj_add_obj(doc, obj, "output");
+-        yyjson_mut_obj_add_uint(doc, output, "width", item->width);
+-        yyjson_mut_obj_add_uint(doc, output, "height", item->height);
+-
+-        yyjson_mut_val* scaled = yyjson_mut_obj_add_obj(doc, obj, "scaled");
+-        yyjson_mut_obj_add_uint(doc, scaled, "width", item->scaledWidth);
+-        yyjson_mut_obj_add_uint(doc, scaled, "height", item->scaledHeight);
+-
+-        yyjson_mut_val* physical = yyjson_mut_obj_add_obj(doc, obj, "physical");
+-        yyjson_mut_obj_add_uint(doc, physical, "width", item->physicalWidth);
+-        yyjson_mut_obj_add_uint(doc, physical, "height", item->physicalHeight);
+-
+-        yyjson_mut_obj_add_real(doc, obj, "refreshRate", item->refreshRate);
+-        yyjson_mut_obj_add_uint(doc, obj, "rotation", item->rotation);
+-        yyjson_mut_obj_add_uint(doc, obj, "bitDepth", item->bitDepth);
+-        yyjson_mut_obj_add_bool(doc, obj, "hdrEnabled", item->hdrEnabled);
++        yyjson_mut_obj_add_uint(doc, obj, "scaledHeight", item->scaledHeight);
++        yyjson_mut_obj_add_uint(doc, obj, "scaledWidth", item->scaledWidth);
+ 
+         switch (item->type)
+         {
+@@ -364,12 +332,6 @@ void ffPrintDisplayHelpFormat(void)
+         "Screen type (builtin, external or unknown) - type",
+         "Screen rotation (in degrees) - rotation",
+         "True if being the primary screen - is-primary",
+-        "Screen physical width (in millimeters) - physical-width",
+-        "Screen physical height (in millimeters) - physical-height",
+-        "Physical diagonal length in inches - inch",
+-        "Pixels per inch (PPI) - ppi",
+-        "Bits per color channel - bit-depth",
+-        "True if high dynamic range (HDR) is enabled - hdr-enabled",
+     }));
+ }
+ 
+diff --git a/src/modules/monitor/monitor.c b/src/modules/monitor/monitor.c
+index a2d43cff..fd823fb5 100644
+--- a/src/modules/monitor/monitor.c
++++ b/src/modules/monitor/monitor.c
+@@ -6,7 +6,7 @@
+ 
+ #include <math.h>
+ 
+-#define FF_MONITOR_NUM_FORMAT_ARGS 11
++#define FF_MONITOR_NUM_FORMAT_ARGS 10
+ 
+ void ffPrintMonitor(FFMonitorOptions* options)
+ {
+@@ -53,8 +53,6 @@ void ffPrintMonitor(FFMonitorOptions* options)
+             ffPrintLogoAndKey(key.chars, 0, &options->moduleArgs, FF_PRINT_TYPE_NO_CUSTOM_KEY);
+ 
+             printf("%ux%u px", display->width, display->height);
+-            if (display->refreshRate > 0)
+-                printf(" @ %g Hz", ((int) (display->refreshRate * 1000 + 0.5)) / 1000.0);
+             if (inch > 0)
+                 printf(" - %ux%u mm (%.2f inches, %.2f ppi)\n", display->physicalWidth, display->physicalHeight, inch, ppi);
+             else
+@@ -82,7 +80,6 @@ void ffPrintMonitor(FFMonitorOptions* options)
+                 FF_FORMAT_ARG(display->manufactureYear, "manufacture-year"),
+                 FF_FORMAT_ARG(display->manufactureWeek, "manufacture-week"),
+                 FF_FORMAT_ARG(buf, "serial"),
+-                FF_FORMAT_ARG(display->refreshRate, "refresh-rate"),
+             }));
+         }
+ 
+@@ -157,8 +154,6 @@ void ffGenerateMonitorJsonResult(FF_MAYBE_UNUSED FFMonitorOptions* options, yyjs
+             yyjson_mut_obj_add_uint(doc, physical, "height", item->physicalHeight);
+             yyjson_mut_obj_add_uint(doc, physical, "width", item->physicalWidth);
+ 
+-            yyjson_mut_obj_add_real(doc, obj, "refreshRate", item->refreshRate);
+-
+             if (item->manufactureYear)
+             {
+                 yyjson_mut_val* manufactureDate = yyjson_mut_obj_add_obj(doc, obj, "manufactureDate");
+@@ -196,7 +191,6 @@ void ffPrintMonitorHelpFormat(void)
+         "Year of manufacturing - manufacture-year",
+         "Nth week of manufacturing in the year - manufacture-week",
+         "Serial number - serial",
+-        "Maximum refresh rate in Hz - refresh-rate",
+     }));
+ }
+ 
+-- 
+2.46.0
+

@@ -43,7 +43,6 @@ proc crossgdb.setup {target version} {
         name                ${crossgdb.target}-gdb
         version             ${crossgdb.version}
         categories          cross devel
-        platforms           darwin
         license             GPL-3+
         maintainers         nomaintainer
 

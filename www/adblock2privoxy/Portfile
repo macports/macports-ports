@@ -3,8 +3,8 @@
 PortSystem          1.0
 
 name                adblock2privoxy
-version             2.1.0
-revision            3
+version             2.3.0
+revision            0
 categories          www haskell
 maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
 license             GPL-3
@@ -32,15 +32,14 @@ long_description    {*}${description}. \
 
 homepage            https://github.com/essandess/adblock2privoxy
 
-master_sites        https://hackage.haskell.org/package/${name}-${version}
-
-checksums           rmd160  da82eb5ece0f97b9ebf3ec97f6631f45d4bb30c5 \
-                    sha256  1c5ac2cb54cc9fd336a5ece50a8acbfaee13281ffe8c3a9d8c8b8b44f5859e70 \
-                    size    42526
+checksums           rmd160  2c672d9742a76fd01f0715e2b0ac45c4a6f4a9bd \
+                    sha256  bd6a0b2f7a922a314608392ff2aad299f28337c5c97d6723b03c7abdfb4c5f29 \
+                    size    44257
 
 depends_lib-append  port:zlib
 
-depends_run-append  port:nginx \
+depends_run-append  port:bash \
+                    port:nginx \
                     port:privoxy \
                     port:wget
 
@@ -118,10 +117,21 @@ if { [variant_isset "stack"] } {
 }
 
 post-destroot {
+    xinstall -m 0644 -W ${worksrcpath} \
+        man/man1/${name}.1 \
+        ${destroot}${prefix}/share/man/man1
+
     xinstall -d \
         ${destroot}${prefix}/etc/${name} \
-        ${destroot}${prefix}/etc/${name}/privoxy \
-        ${destroot}${prefix}/etc/${name}/css
+        ${destroot}${prefix}/etc/${name}/bin \
+        ${destroot}${prefix}/etc/${name}/css \
+        ${destroot}${prefix}/etc/${name}/privoxy
+
+    xinstall -m 0755 -W ${filespath} \
+        adblock2privoxy_initialize.sh \
+        ${destroot}${prefix}/etc/${name}/bin
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${destroot}${prefix}/etc/${name}/bin/adblock2privoxy_initialize.sh
 
     xinstall -m 0644 -W ${filespath} \
         adblock2privoxy_blocklist.txt \
@@ -134,14 +144,62 @@ post-destroot {
         ${destroot}${prefix}/etc/${name}/css/default.html.macports
     reinplace "s|@PREFIX@|${prefix}|g" \
         ${destroot}${prefix}/etc/${name}/nginx.conf.macports
-
-    xinstall -m 0644 -W ${filespath} \
-        private.myserver.launchctl-setenv.plist \
-        ${destroot}${prefix}/share/${name}
 }
 
 set tls_ca_dir      ${prefix}/etc/${name}/ca.macports
 set tls_cert_dir    ${prefix}/etc/${name}/certs
+
+set optional_proxy  http://localhost:8080
+set proxy_message \
+        "Startupitem configured to use a proxy. Please set the
+environment variables http_proxy and https_proxy and
+install this port variant a sudo command that sets
+these variables, e.g.:
+
+\tsudo -E port install ${name} +proxy_settings
+\tsudo env http_proxy=${optional_proxy} port install ${name} +proxy_settings
+
+or edit the startupitem:
+
+\t${prefix}/etc/${startupitem.location}/org.macports.${name}/org.macports.${name}.plist
+
+to change the proxy settings and reload the port."
+
+variant proxy_settings \
+    description {Include proxy settings in the startupitem plist.} {
+    # Note: `sudo launchctl setenv` is no longer functional on macOS Ventura+
+    notes-append ${proxy_message}
+    post-activate {
+        if { [info exists ::env(http_proxy)] } {
+            set http_proxy $env(http_proxy)
+        } else {
+            set http_proxy ${optional_proxy}
+        }
+        if { [info exists ::env(https_proxy)] } {
+            set https_proxy $env(https_proxy)
+        } else {
+            set https_proxy ${http_proxy}
+        }
+        # org.macports.adblock2privoxy
+        reinplace \
+            "s|^<key>ProgramArguments</key>|<key>EnvironmentVariables</key>\\
+<dict>\\
+	<key>http_proxy</key>\\
+	<string>${http_proxy}</string>\\
+	<key>https_proxy</key>\\
+	<string>${https_proxy}</string>\\
+</dict>\\
+&|" \
+        ${prefix}/etc/${startupitem.location}/org.macports.${name}/org.macports.${name}.plist
+        ui_msg "${proxy_message}
+
+The startupitem is configured to use the proxy settings:
+
+\thttp_proxy=${http_proxy}
+\thttps_proxy=${https_proxy}
+"
+    }
+}
 
 variant https_inspection \
     description {HTTPS CSS Server for use with 'privoxy +https_inspection'.} {
@@ -244,7 +302,7 @@ variant https_inspection \
 
             # CA certificate
             openssl req -config openssl.cnf \\
-                -new -x509 -days 1460 -sha256 \\
+                -new -x509 -days 1460 -sha384 \\
                 -extensions v3_ca \\
                 -out ca.cert.pem -key ca.key.pem \\
                 -passin file:passphrase.txt -batch
@@ -255,12 +313,13 @@ variant https_inspection \
             # Convert to .cer DER and .p12 for other uses
             openssl x509 -outform der -in ca.cert.pem -out ca.cer
 
-            openssl pkcs12 -export -out ca.p12 \\
+            # https://github.com/essandess/macports-ports/pull/new/privoxy
+            openssl pkcs12 -legacy -export -out ca.p12 \\
                 -inkey ca.key.pem -in ca.cert.pem \\
                 -passin file:passphrase.txt \\
                 -passout file:passphrase.txt
             # verify .p12 passphrase
-            openssl pkcs12 -noout -in ca.p12 -passin file:passphrase.txt
+            openssl pkcs12 -legacy -noout -in ca.p12 -passin file:passphrase.txt
 
             # Server certificates
 
@@ -274,14 +333,14 @@ variant https_inspection \
             chmod go-rwx adblock2privoxy-nginx.key.pem.decrypted
 
             # Server certificate CSR
-            openssl req -config openssl.cnf -new -sha256 \
-                 -extensions server_cert -key adblock2privoxy-nginx.key.pem \
+            openssl req -config openssl.cnf -new -sha384 \
+                 -key adblock2privoxy-nginx.key.pem \
                  -passin file:passphrase.txt \
                  -out adblock2privoxy-nginx.csr.pem -batch
 
             # Server certificate (825 days maximum validity)
             # https://support.apple.com/en-us/HT210176
-            openssl ca -config openssl.cnf -days 825 -notext -md sha256 \
+            openssl ca -config openssl.cnf -days 825 -notext -md sha384 \
                 -extensions server_cert -in adblock2privoxy-nginx.csr.pem \
                 -out adblock2privoxy-nginx.cert.pem \
                 -passin file:passphrase.txt \
@@ -385,14 +444,14 @@ ADBLOCK2PRIVOXY_DH
         chmod go-rwx adblock2privoxy-nginx.key.pem.decrypted
 
         # Server certificate CSR
-        openssl req -config openssl.cnf -new -sha256 \\
-             -extensions server_cert -key adblock2privoxy-nginx.key.pem \\
+        openssl req -config openssl.cnf -new -sha384 \\
+             -key adblock2privoxy-nginx.key.pem \\
              -passin file:passphrase.txt \\
              -out adblock2privoxy-nginx.csr.pem -batch
 
         # Server certificate (825 days maximum validity)
         # https://support.apple.com/en-us/HT210176
-        openssl ca -config openssl.cnf -days 825 -notext -md sha256 \\
+        openssl ca -config openssl.cnf -days 825 -notext -md sha384 \\
             -extensions server_cert -in adblock2privoxy-nginx.csr.pem \\
             -out adblock2privoxy-nginx.cert.pem \\
             -passin file:passphrase.txt \\
@@ -430,14 +489,20 @@ if { ![variant_isset "https_inspection"] } {
 startupitem.create  yes
 startupitems \
     name            ${name} \
-    init            "ADBLOCK2PRIVOXY_CSS_SERVER=\"\${ADBLOCK2PRIVOXY_CSS_SERVER:-${adblock2privoxy_css_server}}\"" \
-    start [list     "( IFS=\$'\\n' ADBLOCK2PRIVOXY_BLOCKLIST=(\$(grep -v -e '^ *#' < \${prefix}/etc/${name}/adblock2privoxy_blocklist.txt \\" \
+    init [list      "if \[ -f \"\${prefix}/etc/adblock2privoxy/ADBLOCK2PRIVOXY.env\" ]; then" \
+                    "\tset -a" \
+                    "\t. <(grep -E -o -e '^\[\[:alnum:]_]+=\[^\[:space:]\;]+\$' \"${prefix}/etc/adblock2privoxy/ADBLOCK2PRIVOXY.env\" | grep -E -v '^\[\[:space:]]*(#|\$)|\\\$\\(|`')" \
+                    "\tset +a" \
+                    "fi" \
+                    "ADBLOCK2PRIVOXY_CSS_SERVER=\"\${ADBLOCK2PRIVOXY_CSS_SERVER:-${adblock2privoxy_css_server}}\"" \
+    ] \
+    start [list     "( IFS=\$'\\n' ADBLOCK2PRIVOXY_BLOCKLIST=(\$(grep -v -e '^ *#' < \"\${prefix}/etc/${name}/adblock2privoxy_blocklist.txt\" \\" \
                     "\t| while read -r t; do if \"\${prefix}/bin/wget\" --max-redirect=0 -S --spider \"\${t}\" 2>&1 | grep -q 'HTTP/1.1 200 OK'; then echo \"\${t}\"; fi done)); \\" \
                     "/bin/test -f \"\${prefix}/etc/adblock2privoxy/privoxy/ab2p.task\" \\" \
                     "&& \"\${prefix}/bin/adblock2privoxy\" -t \"\${prefix}/etc/adblock2privoxy/privoxy/ab2p.task\" \\" \
                     "|| \"\${prefix}/bin/adblock2privoxy\" -p \"\${prefix}/etc/adblock2privoxy/privoxy\" \\" \
                     "\t-w \"\${prefix}/etc/adblock2privoxy/css\" \\" \
-                    "\t-d \${ADBLOCK2PRIVOXY_CSS_SERVER} ${ab2p_use_http_flag} \\" \
+                    "\t-d \"\${ADBLOCK2PRIVOXY_CSS_SERVER}\" ${ab2p_use_http_flag} \\" \
                     "\t\"\${ADBLOCK2PRIVOXY_BLOCKLIST\[@]}\" \\" \
                     ") && \"\${prefix}/bin/port\" reload privoxy" \
     ] \
@@ -460,8 +525,12 @@ startupitems-append \
                     "fi" \
     ]
 
-post-activate {
+post-destroot {
     # org.macports.adblock2privoxy
+    reinplace -E \
+        "1s|^(#!\[\[:space:]]*)/bin/sh|\\1/usr/bin/env bash|" \
+        ${destroot}${prefix}/etc/${startupitem.location}/org.macports.${name}/${name}.wrapper
+
     reinplace \
         "s|^<key>ProgramArguments</key>|<key>StartCalendarInterval</key>\\
 	<array>\\
@@ -479,8 +548,10 @@ post-activate {
 	<key>StandardOutPath</key>\\
 	<string>${prefix}/var/log/${name}.log</string>\\
 &|" \
-        ${prefix}/etc/${startupitem.location}/org.macports.${name}/org.macports.${name}.plist
+        ${destroot}${prefix}/etc/${startupitem.location}/org.macports.${name}/org.macports.${name}.plist
+}
 
+post-activate {
     foreach f [list \
         ${prefix}/etc/${name}/adblock2privoxy_blocklist.txt \
         ${prefix}/etc/${name}/nginx.conf \
@@ -526,15 +597,16 @@ Update run:
   adblock2privoxy -t ${prefix}/etc/adblock2privoxy/privoxy/ab2p.task
 
 The CSS web server domain name or IP address is specified by the\
-environment variables (with default values):
+environment variable ADBLOCK2PRIVOXY_CSS_SERVER (with default value):
 
-  \${ADBLOCK2PRIVOXY_CSS_SERVER:-${adblock2privoxy_css_server}}
+  ADBLOCK2PRIVOXY_CSS_SERVER=${adblock2privoxy_css_server}
 
-To change site-specific launchd environment variables,\
-use the launchd plist:
+To change this or site-specific environment variables, set them in the\
+optional file
 
-  ${prefix}/share/${name}/private.myserver.launchctl-setenv.plist
+  ${prefix}/etc/adblock2privoxy/ADBLOCK2PRIVOXY.env
 
+Please note that the macOS command `launchctl setenv` is now prohibited by SIP.
 "
 
 if { [variant_isset "initialize_always"] } {

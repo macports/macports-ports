@@ -33,17 +33,17 @@ options xml.addtocatalog
 option_proc xml.addtocatalog xml._set_catalog_entry
 global xml.rootcatalog xml.catalog_list
 set xml.rootcatalog ${xml.confdir}/catalog
-set xml.catalog_list {}
+set xml.catalog_list [list]
 
 options xml.entity
 option_proc xml.entity xml._set_entity
 global xml.entity_list
-set xml.entity_list {}
+set xml.entity_list [list]
 
 options xml.rewrite
 option_proc xml.rewrite xml._set_rewrite
 global xml.rewrite_list
-set xml.rewrite_list {}
+set xml.rewrite_list [list]
 
 options sgml.catalog
 option_proc sgml.catalog sgml._set_catalog
@@ -51,7 +51,7 @@ options sgml.addtocatalog
 option_proc sgml.addtocatalog sgml._set_catalog_entry
 global sgml.rootcatalog sgml.catalog_list
 set sgml.rootcatalog ${sgml.confdir}/catalog
-set sgml.catalog_list {}
+set sgml.catalog_list [list]
 
 depends_lib-append port:xmlcatmgr
 

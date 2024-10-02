@@ -7,7 +7,7 @@ PortGroup           github 1.0
 
 github.setup        openstreetmap mod_tile 0.5
 github.tarball_from archive
-revision            7
+revision            10
 
 categories-append   gis
 platforms           darwin
@@ -33,6 +33,7 @@ checksums           rmd160  e6c2224c6500f695e4a17addc7d05086ce5bebd5 \
 boost.version       1.76
 
 depends_build       port:apache2 \
+                    port:carto \
                     port:iniparser
 
 depends_lib         port:curl \
@@ -42,7 +43,7 @@ depends_lib         port:curl \
                     path:include/turbojpeg.h:libjpeg-turbo \
                     port:libpng \
                     port:mapnik \
-                    port:proj4 \
+                    port:proj7 \
                     port:tiff \
                     port:webp \
                     port:zlib
@@ -50,7 +51,6 @@ depends_lib         port:curl \
 depends_run         port:gsed \
                     port:openstreetmap-carto \
                     port:osm2pgsql-lua \
-                    port:postgis3 \
                     port:wget
 
 set agent_name      fetch-osm-db-updates
@@ -60,6 +60,7 @@ set apxs            ${prefix}/bin/apxs
 set docdir          ${prefix}/share/doc/${name}
 set mdir            ${prefix}/lib/apache2/modules/
 set renderd_user    nobody
+set pgsqlbinpath    /bin
 
 startupitem.type    launchd
 startupitem.create  yes
@@ -89,12 +90,16 @@ test.run            yes
 
 require_active_variants mapnik postgis
 
-variant postgresql12 conflicts postgresql13 description {Use with PostgreSQL 12} {
-    depends_lib-append port:postgresql12
+variant postgresql15 conflicts postgresql16 description {Use with PostgreSQL 15} {
+    set pgsqlbinpath "/lib/postgresql15/bin";
+    depends_lib-append port:postgresql15 \
+                       port:pg15-postgis3
 }
 
-variant postgresql13 conflicts postgresql12 description {Use with PostgreSQL 13} {
-    depends_lib-append port:postgresql13
+variant postgresql16 conflicts postgresql15 description {Use with PostgreSQL 16} {
+    set pgsqlbinpath "/lib/postgresql16/bin";
+    depends_lib-append port:postgresql16 \
+                       port:pg16-postgis3
 }
 
 variant osmosis description {Perform incremental OSM updates} {
@@ -110,8 +115,9 @@ variant logrotate description {Logrotate configuration} {
 
 default_variants +osmosis +logrotate
 
-if {![variant_isset postgresql12] && ![variant_isset postgresql13]} {
-    default_variants-append +postgresql13
+if {![variant_isset postgresql15] && ![variant_isset postgresql16]} {
+    set pgsqlbinpath "/lib/postgresql16/bin";
+    default_variants-append +postgresql16
 }
 
 post-extract {
@@ -131,9 +137,9 @@ post-patch {
 post-destroot {
     system -W ${worksrcpath} "make install-mod_tile DESTDIR=${destroot} PREFIX=${prefix}"
     if {[variant_isset osmosis]} {
-        xinstall -m 0755 -d ${destroot}${prefix}/etc/LaunchAgents/${agent_uniquename}
+        xinstall -m 0755 -d ${destroot}${prefix}/etc/LaunchDaemons/${agent_uniquename}
         set minutes 20; # Run every ${minutes} minutes
-        set plist [open "${destroot}${prefix}/etc/LaunchAgents/${agent_uniquename}/${agent_uniquename}.plist" w 0644]
+        set plist [open "${destroot}${prefix}/etc/LaunchDaemons/${agent_uniquename}/${agent_uniquename}.plist" w 0644]
         puts ${plist} {<?xml version="1.0" encoding="UTF-8"?>}
         puts ${plist} {<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN"}
         puts ${plist} {"http://www.apple.com/DTDs/PropertyList-1.0.dtd">}
@@ -165,10 +171,10 @@ post-destroot {
 
         # install the plist
         if {[getuid] == 0  && ${startupitem.install}} {
-            xinstall -m 0755 -d ${destroot}/Library/LaunchAgents
-            ln -sf ${prefix}/etc/LaunchAgents/${agent_uniquename}/${agent_uniquename}.plist ${destroot}/Library/LaunchAgents
+            xinstall -m 0755 -d ${destroot}/Library/LaunchDaemons
+            ln -sf ${prefix}/etc/LaunchDaemons/${agent_uniquename}/${agent_uniquename}.plist ${destroot}/Library/LaunchDaemons
         } else {
-            ln -sf ${prefix}/etc/LaunchAgents/${agent_uniquename}/${agent_uniquename}.plist ${destroot}${prefix}/etc/LaunchAgents
+            ln -sf ${prefix}/etc/LaunchDaemons/${agent_uniquename}/${agent_uniquename}.plist ${destroot}${prefix}/etc/LaunchDaemons
         }
     }
 
@@ -185,6 +191,15 @@ post-destroot {
     xinstall -o root -m 0644 ${worksrcpath}/renderd.conf.dist \
         ${destroot}${prefix}/etc/renderd/renderd.conf.dist
     xinstall -m 0755 -d ${destroot}${prefix}/etc/${name}
+    exec -ignorestderr sudo -u ${macportsuser} carto -qf ${workpath}/.tmp/mapnik.xml.dist ${prefix}/share/openstreetmap-carto/project.mml >& /dev/null
+    xinstall -o root -m 0644 ${workpath}/.tmp/mapnik.xml.dist \
+        ${destroot}${prefix}/etc/renderd/mapnik.xml.dist
+    if {[file exists ${prefix}/share/openstreetmap-carto/symbols]} {
+        ln -s ${prefix}/share/openstreetmap-carto/symbols ${destroot}${prefix}/etc/renderd/symbols
+    }
+    if {[file exists ${prefix}/share/openstreetmap-carto/patterns]} {
+        ln -s ${prefix}/share/openstreetmap-carto/patterns ${destroot}${prefix}/etc/renderd/patterns
+    }
     xinstall -o root -m 0644 ${worksrcpath}/osm-tiles-update.conf.dist \
         ${destroot}${prefix}/etc/${name}/osm-tiles-update.conf.dist
     xinstall -m 0755 -d \
@@ -196,6 +211,8 @@ post-destroot {
         ${destroot}${prefix}/share/${name}
     xinstall -o ${renderd_user} -m 0755 -d ${destroot}${prefix}/var/run/${name}
     xinstall -o ${renderd_user} -m 0755 -d ${destroot}${prefix}/var/lib/${name}
+    xinstall -o ${renderd_user} -m 0755 -d ${destroot}${prefix}/var/run/renderd
+    xinstall -o ${renderd_user} -m 0755 -d ${destroot}${prefix}/var/log/renderd
 
     if {[variant_isset logrotate]} {
         xinstall -m 0755 -d ${destroot}${prefix}/etc/logrotate.d
@@ -205,12 +222,20 @@ post-destroot {
         ${destroot}${prefix}/share/${name}/osm_setup_db.sh \
         ${destroot}${prefix}/share/${name}/openstreetmap-tiles-update-expire
 
+    reinplace "s|/lib/postgresql/bin|${pgsqlbinpath}|g" \
+        ${destroot}${prefix}/share/${name}/osm_setup_db.sh
+
     destroot.keepdirs \
         ${destroot}${prefix}/var/run/${name} \
-        ${destroot}${prefix}/var/lib/${name}
+        ${destroot}${prefix}/var/lib/${name} \
+        ${destroot}${prefix}/var/run/renderd \
+        ${destroot}${prefix}/var/log/renderd
 }
 
 post-activate {
+    if {![file exists ${prefix}/etc/renderd/mapnik.xml]} {
+        file copy ${prefix}/etc/renderd/mapnik.xml.dist ${prefix}/etc/renderd/mapnik.xml
+    }
     if {![file exists ${prefix}/etc/renderd/renderd.conf]} {
         file copy ${prefix}/etc/renderd/renderd.conf.dist ${prefix}/etc/renderd/renderd.conf
     }
@@ -228,7 +253,7 @@ post-activate {
 
 pre-deactivate {
     if {[variant_isset osmosis]} {
-        system "launchctl unload /Library/LaunchAgents/${agent_uniquename}.plist"
+        system "launchctl unload /Library/LaunchDaemons/${agent_uniquename}.plist"
     }
 }
 
@@ -247,6 +272,6 @@ And then relaunch Apache:
 if {[variant_isset osmosis]} {
     notes-append "To load ${agent_name}:
 
-    sudo launchctl load -w /Library/LaunchAgents/${agent_uniquename}.plist
+    sudo launchctl load -w /Library/LaunchDaemons/${agent_uniquename}.plist
 "
 }

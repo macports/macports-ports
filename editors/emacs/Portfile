@@ -24,6 +24,8 @@ platforms       darwin freebsd
 homepage        https://www.gnu.org/software/emacs/emacs.html
 master_sites    gnu
 
+set rpaths [list]
+
 if {$subport eq $name} {
     conflicts   emacs-devel
 }
@@ -56,6 +58,12 @@ configure.args  --disable-silent-rules \
                 --with-webp \
                 --infodir ${prefix}/share/info/${name}
 
+pre-configure {
+    if {[llength $rpaths] > 0} {
+        configure.ldflags-append "-Wl,-rpath " [join $rpaths " -Wl,-rpath "]
+    }
+}
+
 depends_build-append   port:pkgconfig \
                        port:texinfo
 depends_lib-append     port:gmp \
@@ -66,17 +74,14 @@ depends_lib-append     port:gmp \
                        port:sqlite3 \
                        port:webp
 
+compiler.blacklist-append  *gcc-4.0 *gcc-4.2
+
 post-destroot {
     xinstall -d ${destroot}${prefix}/share/emacs/${version}/leim
     delete ${destroot}${prefix}/bin/ctags
     delete ${destroot}${prefix}/share/man/man1/ctags.1.gz
 
     if {$subport eq $name || $subport eq "emacs-devel"} {
-        file copy ${filespath}/site-start.el \
-            ${destroot}${prefix}/share/emacs/site-lisp/
-        reinplace "s|__PREFIX__|${prefix}|g" \
-            ${destroot}${prefix}/share/emacs/site-lisp/site-start.el
-
         # avoid conflicts with xemacs
         move ${destroot}${prefix}/bin/etags ${destroot}${prefix}/bin/etags-emacs
         move ${destroot}${prefix}/share/man/man1/etags.1.gz ${destroot}${prefix}/share/man/man1/etags-emacs.1.gz
@@ -102,33 +107,45 @@ platform darwin {
 }
 
 if {$subport eq $name || $subport eq "emacs-app"} {
-    version         29.1
-    revision        2
+    version         29.4
+    revision        1
+    checksums       rmd160  b32b86be6f600ba745ad023efd7238088dfa5952 \
+                    sha256  1adb1b9a2c6cdb316609b3e86b0ba1ceb523f8de540cfdda2aec95b6a5343abf \
+                    size    78519074
 
-    checksums       rmd160  c306a0554d77ee472600ed28af4751211dc1ec70 \
-                    sha256  5b80e0475b0e619d2ad395ef5bc481b7cb9f13894ed23c301210572040e4b5b1 \
-                    size    78324084
+    patchfiles-append \
+                    patch-allow-powerpc.diff
 }
 
 if {$subport eq "emacs-devel" || $subport eq "emacs-app-devel"} {
     PortGroup       github 1.0
 
-    github.setup    emacs-mirror emacs d0b1e3647fb4e6d889f9f999388c53daf0e67f0d
+    # do not forget to check that configure hasn't introduce some suprises via
+    # git diff [old]..[new] -- '**/configure.ac'
+    github.setup    emacs-mirror emacs f70a6ea0ea86ef461e40d20664a75a92d02679ea
     epoch           5
-    version         20230920
-    revision        1
+    version         20240804
+    revision        0
 
     master_sites    ${github.master_sites}
 
-    checksums       rmd160  15935e22a9152c47de39a12785d09240535fb791 \
-                    sha256  b0bf6f036d12e125afff643b7af985afc757310fcd9f98c265acba48a535856c \
-                    size    49341552
+    checksums       rmd160  12a45be4572b1ab5bb4cd7983673742f984ca52b \
+                    sha256  de8ab5f6bd3f9a269626f3d5110da1a10db71bfade08b8e043643ee9d66e4986 \
+                    size    50643953
+
+    patchfiles-append \
+                    patch-allow-powerpc-devel.diff
 
     pre-configure {
         system -W ${worksrcpath} "sh ./autogen.sh"
     }
 
     livecheck.type none
+
+    if {[variant_isset nativecomp]} {
+        notes "emacs devel subports don't always keep compatibility for native\
+ compiled files. Better to cleanup your ~/.emacs.d/.local/cache/eln"
+    }
 } else {
     livecheck.type  regex
     livecheck.url   https://ftp.gnu.org/gnu/emacs/?C=M&O=D
@@ -269,18 +286,23 @@ if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
 }
 
 variant nativecomp description {Builds emacs with native compilation support} {
-    set gcc_v                      12
+    set gcc_v                      14
     depends_lib-append             port:gcc${gcc_v}
     configure.args-append          --with-native-compilation=aot
     compiler.cpath-prepend         ${prefix}/include/gcc${gcc_v}
     compiler.library_path-prepend  ${prefix}/lib/gcc${gcc_v}
-    configure.ldflags-append       "-Wl,-rpath ${prefix}/lib/gcc${gcc_v}"
+    lappend rpaths                 ${prefix}/lib/gcc${gcc_v}
 }
 
 variant treesitter description {Builds emacs with tree-sitter support} {
     configure.args-delete   --without-tree-sitter
     configure.args-append   --with-tree-sitter
-    depends_lib-append  port:tree-sitter
+    depends_lib-append      port:tree-sitter
+
+    if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
+        lappend rpaths ${prefix}/lib
+    }
+
     depends_run-append \
         port:tree-sitter-typescript \
         port:tree-sitter-javascript \
@@ -306,8 +328,23 @@ variant treesitter description {Builds emacs with tree-sitter support} {
         depends_run-append \
             port:tree-sitter-html \
             port:tree-sitter-heex \
-            port:tree-sitter-elixir
+            port:tree-sitter-elixir \
+            port:tree-sitter-lua \
+            port:tree-sitter-php
     }
+
+    notes-append "
+To install tree-sitter grammar libraries not required by built-in *-ts-modes,\
+please use M-x treesit-install-language-grammar. For details, please refer to\
+etc/NEWS or the Emacs Lisp reference manual.
+"
 }
 
-default_variants-append +nativecomp +treesitter
+default_variants-append     +treesitter
+
+# JIT not supported in gcc for i386, so configure will fail.
+# On ppc it is supported, but the build with +nativecomp segfaults.
+# https://trac.macports.org/ticket/69677
+if {${configure.build_arch} ni [list i386 ppc]} {
+    default_variants-append +nativecomp
+}

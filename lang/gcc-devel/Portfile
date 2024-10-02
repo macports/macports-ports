@@ -27,13 +27,13 @@ set libgccname      lib${name}
 
 set libcxxname      ${name}-libcxx
 
-version         14-20231001
+version         15-20240630
 revision        0
 subport         ${libgccname} { revision [ expr ${revision} + 0 ] }
 
-checksums       rmd160  d0310cc59e3eab891a7a68abfa780a331a82c207 \
-                sha256  28d20639edc7abfb142f2416a537ee8b7e5ffa48419f972ecfc9aa359659b606 \
-                size    85968476
+checksums       rmd160  5a5baf2efa5750eb6952fe48c3cd061b58039b37 \
+                sha256  e5d214bafbce9fc30ac916603765f3bf4bd79faee4ad0d2693772b066638568f \
+                size    88427396
 
 # Primary releases
 master_sites    https://ftpmirror.gnu.org/gcc/gcc-${version}/ \
@@ -79,8 +79,16 @@ license_noconflict  gmp mpfr ppl libmpc zlib
 # For devel builds
 set major           devel
 
+proc gcc_arch {arch} {
+    switch ${arch} {
+        arm64       {return aarch64}
+        default     {return ${arch}}
+    }
+}
+
 platform darwin {
-    configure.pre_args-append --build=${build_arch}-apple-darwin${os.major}
+    set gcc_triple [gcc_arch ${build_arch}]-apple-darwin${os.major}
+    configure.pre_args-append --build=${gcc_triple}
 }
 
 set gcc_configure_langs {c c++ objc obj-c++ lto fortran}
@@ -102,7 +110,6 @@ configure.dir       ${workpath}/build
 configure.cmd       ${worksrcpath}/configure
 configure.args      --enable-languages=[join ${gcc_configure_langs} ","] \
                     --libdir=${prefix}/lib/${name} \
-                    --includedir=${prefix}/include/${name} \
                     --infodir=${prefix}/share/info \
                     --mandir=${prefix}/share/man \
                     --datarootdir=${prefix}/share/gcc-${major} \
@@ -141,10 +148,10 @@ if { ${subport} ne ${libcxxname} && ${os.platform} eq "darwin" } {
     # gcc has build issues on macOS 11.3 with the use of Xcode 12.5 clang via cctools for ld
     # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=100340
     # https://trac.macports.org/ticket/62775
-    # Extend skipping comparison to Darwin 14 and older.
+    # Update for gcc13 - Similar issues on macOS 10.6, 10.13 ...
     if { ([vercmp ${xcodeversion} >= 12.5] && [vercmp ${xcodeversion} < 13]) || \
          ([vercmp ${xcodecltversion} >= 12.5] && [vercmp ${xcodecltversion} < 13]) || \
-         ${os.major} < 15 } \
+             ${os.major} < 11 || ${os.major} == 17 } \
     {
         # Skip bootstrap comparison entirely
         configure.args-replace --with-build-config=bootstrap-debug --without-build-config
@@ -157,6 +164,33 @@ if { ${subport} ne ${libcxxname} && ${os.platform} eq "darwin" } {
         }
     }
 }
+
+if { ${os.platform} eq "darwin" } {
+    # GCC fixinc work-around for sys/ucred.h on OSX10.14.4 no longer seems to work ???
+    if { ${os.major} == 18 } {
+        patchfiles-append  patch-OSX10.14-ucred-atomic-define.diff
+    }
+}
+
+# Since GCC 7.4.0, during configure, it detects features supported by target-as.
+# On the other hand, MacPorts cctools contain a proxy for 'as' that runs system
+# 'as' or one of the supported MacPorts clang's 'as' if it is installed. Here,
+# we may encounter a misconfiguration when GCC builds on a system with some
+# MacPorts clang, and 'as' is using it. However, on a clean system, it uses
+# system 'as' if no MacPorts clang is installed, which may behave differently.
+# This can make GCC broken until MacPorts clang is installed. To avoid a stealth
+# dependency on the used clang, I enforce building with system 'as'.
+# See:
+#  - https://trac.macports.org/ticket/68683
+#  - https://github.com/gcc-mirror/gcc/commit/b410cf1dc056aab195c5408871ffca932df8a78a
+patchfiles-append   patch-gcc10-disable-macports-cctools-as-changes.diff
+
+configure.env-append \
+                    DISABLE_MACPORTS_AS_CLANG_SEARCH=1 \
+                    DISABLE_XCODE_AS_CLANG_SEARCH=1
+
+build.env-append    DISABLE_MACPORTS_AS_CLANG_SEARCH=1 \
+                    DISABLE_XCODE_AS_CLANG_SEARCH=1
 
 configure.env-append \
                     AR_FOR_TARGET=${prefix}/bin/ar \
@@ -214,7 +248,7 @@ subport ${libcxxname} {
         if { ${os.platform} eq "darwin" && ${os.major} < 11 } {
             default_variants-append +clang11
         } else {
-            default_variants-append +clang14
+            default_variants-append +clang16
         }
     }
     revision                [ expr ${revision} + 0 ]
@@ -231,6 +265,7 @@ subport ${libcxxname} {
     extract.rename          no
     use_configure           no
     supported_archs         noarch
+    platforms               any
     # Find clang/llvm version to use from active variant
     proc getClangVersion {} {
         if { [regexp {clang(.*)} [clang_variant_name] -> clang_v] } {
@@ -284,6 +319,20 @@ compiler.blacklist-append {clang < 800} gcc-4.0 *gcc-4.2 {llvm-gcc-4.2 < 2336.1}
 # c++/v1/functional:1408:2: error: no member named 'fancy_abort' in namespace 'std::__1'; did you mean simply 'fancy_abort'?
 compiler.blacklist-append {clang < 1001}
 
+platform darwin {
+    # gcc can't be built by Xcode Clang 14.0.x
+    # https://trac.macports.org/ticket/67416
+    # https://github.com/iains/gcc-12-branch/issues/6
+    if { ([vercmp ${xcodeversion} >= 14.0] && [vercmp ${xcodeversion} < 14.1]) || \
+        ([vercmp ${xcodecltversion} >= 14.0] && [vercmp ${xcodecltversion} < 14.1]) } {
+        pre-fetch {
+            ui_error "${name} cannot be built with Xcode/CLT 14.0.x"
+            ui_error "Either upgrade both Xcode and the Command Line Tools to 14.1 or later, or downgrade to 13.4."
+            return -code error "incompatible Xcode/CLT version"
+        }
+    }
+}
+
 # "-stdlib" would be passed on to the bootstrap compiler if present
 configure.cxx_stdlib
 
@@ -295,14 +344,13 @@ destroot.target     install install-info-host
 # gcc cannot build if libunwind-headers is active
 conflicts_build-append libunwind-headers
 
-# List of dylibs to be installed
-# Note that we really don't want to include libgcc_ext.10.[45].dylib here, but install_name_tool
-# doesn't know how to change the id of stubs, and it's easier than recreating them for each
-# gcc port.
-set dylibs {libgcc_ext.10.4.dylib libgcc_ext.10.5.dylib libgcc_s.1.dylib libgcc_s.1.1.dylib \
-                libgcc_s.2.dylib libgfortran.5.dylib libquadmath.0.dylib libstdc++.6.dylib \
-                libobjc-gnu.4.dylib libgomp.1.dylib libitm.1.dylib libssp.0.dylib libasan.6.dylib \
-                libubsan.1.dylib libatomic.1.dylib libgcc_ehs.1.1.dylib}
+# Find dylibs at a given location
+proc dylib_list {location} {
+    # Note *.*.dylib is to only match versioned dylibs, not the versionless sym links
+    set dylibs [glob -directory ${location} -tails *.*.dylib]
+    ui_debug "Found at ${location} dylibs : ${dylibs}"
+    return ${dylibs}
+}
 
 # Moving libgccjit.0.dylib to libgcc failed for some reason
 # https://github.com/macports/macports-ports/commit/ce950c5729c9178cd6c61f9f4096888a026bb87f#commitcomment-78932371
@@ -337,23 +385,9 @@ if {${subport} eq ${libgccname}} {
         --libdir=${prefix}/lib/${name} \
         --libdir=${prefix}/lib/libgcc
 
-    # see https://trac.macports.org/ticket/54766
-    configure.args-replace \
-        --includedir=${prefix}/include/${name} \
-        --includedir=${prefix}/include/gcc
-
     configure.args-replace \
         --with-gxx-include-dir=${prefix}/include/${name}/c++/ \
         --with-gxx-include-dir=${prefix}/include/gcc/c++/
-
-    # TODO: Possibly disable bootstrap with appropriate configure flags.
-    #       the problem is that libstdc++'s configure script tests for tls support
-    #       using the running compiler (not gcc for which libstdc++ is being built).
-    #       Thus when we build with clang, we get a mismatch
-    # http://trac.macports.org/ticket/36116
-    #compiler.blacklist-append {clang < 425}
-    #configure.args-append --disable-bootstrap
-    #build.target        all
 
     post-destroot {
 
@@ -361,6 +395,7 @@ if {${subport} eq ${libgccname}} {
         file mkdir ${destroot}${prefix}/lib/libgcc.merged
 
         # loop over libs to install
+        set dylibs [dylib_list ${destroot}${prefix}/lib/libgcc]
         foreach dylib ${dylibs} {
 
             # Different OS versions (e.g. Leopard) or architectures (e.g. PPC) don't produce all the dylibs
@@ -370,7 +405,7 @@ if {${subport} eq ${libgccname}} {
                 continue
             }
 
-            # Move dylib to it to temp area
+            # Move dylib to temp area
             move ${destroot}${prefix}/lib/libgcc/${dylib} ${destroot}${prefix}/lib/libgcc.merged
 
             # If needed create versionless sym link to dylib
@@ -433,6 +468,7 @@ if {${subport} eq ${name}} {
         }
 
         # loop over libs to install
+        set dylibs [dylib_list ${destroot}${prefix}/lib/${name}]
         foreach dylib ${dylibs} {
             # Different OS versions (e.g. Leopard) or architectures (e.g. PPC) don't produce all the dylibs
             # https://trac.macports.org/ticket/40098
@@ -449,6 +485,16 @@ if {${subport} eq ${name}} {
                     }
                 }
             }
+        }
+
+        # Ensure all headers are in versioned dir
+        # Required after we stopped using the option the --includedir option
+        # See https://github.com/iains/gcc-13-branch/issues/20 for more details.
+        foreach h [glob -nocomplain ${destroot}${prefix}/include/*.h] {
+            set f [file tail ${h}]
+            set newh ${destroot}${prefix}/include/${name}/${f}
+            ui_debug "Moving ${h} to ${newh}"
+            file rename ${h} ${newh}
         }
 
     }

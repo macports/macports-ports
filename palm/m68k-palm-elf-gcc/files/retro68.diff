@@ -1,0 +1,2547 @@
+diff --git a/gcc-9.1.0/gcc/c-family/c-common.c b/gcc-9.1.0/gcc/c-family/c-common.c
+index 99ca1ad37..cfb07f12c 100644
+--- a/gcc-9.1.0/gcc/c-family/c-common.c
++++ b/gcc-9.1.0/gcc/c-family/c-common.c
+@@ -753,6 +753,11 @@ fix_string_type (tree value)
+       charsz = 1;
+       e_type = char_type_node;
+     }
++  else if (TREE_TYPE (value) == uchar_array_type_node)
++    {
++      charsz = 1;
++      e_type = unsigned_char_type_node;
++    }
+   else if (flag_char8_t && TREE_TYPE (value) == char8_array_type_node)
+     {
+       charsz = TYPE_PRECISION (char8_type_node) / BITS_PER_UNIT;
+@@ -4254,6 +4259,12 @@ c_common_nodes_and_builtins (void)
+   char_array_type_node
+     = build_array_type (char_type_node, array_domain_type);
+ 
++  /* Make a type for arrays of unsigned characters.
++     Needed for "\ppascal string" support.  */
++  uchar_array_type_node
++    = build_array_type (unsigned_char_type_node, array_domain_type);
++
++
+   string_type_node = build_pointer_type (char_type_node);
+   const_string_type_node
+     = build_pointer_type (build_qualified_type
+diff --git a/gcc-9.1.0/gcc/c-family/c-common.h b/gcc-9.1.0/gcc/c-family/c-common.h
+index 1cf2cae63..e695b49e4 100644
+--- a/gcc-9.1.0/gcc/c-family/c-common.h
++++ b/gcc-9.1.0/gcc/c-family/c-common.h
+@@ -334,6 +334,7 @@ enum c_tree_index
+     CTI_UINTPTR_TYPE,
+ 
+     CTI_CHAR_ARRAY_TYPE,
++    CTI_UCHAR_ARRAY_TYPE,
+     CTI_CHAR8_ARRAY_TYPE,
+     CTI_CHAR16_ARRAY_TYPE,
+     CTI_CHAR32_ARRAY_TYPE,
+@@ -483,6 +484,7 @@ extern const unsigned int num_c_common_reswords;
+ #define truthvalue_false_node		c_global_trees[CTI_TRUTHVALUE_FALSE]
+ 
+ #define char_array_type_node		c_global_trees[CTI_CHAR_ARRAY_TYPE]
++#define uchar_array_type_node		c_global_trees[CTI_UCHAR_ARRAY_TYPE]
+ #define char8_array_type_node		c_global_trees[CTI_CHAR8_ARRAY_TYPE]
+ #define char16_array_type_node		c_global_trees[CTI_CHAR16_ARRAY_TYPE]
+ #define char32_array_type_node		c_global_trees[CTI_CHAR32_ARRAY_TYPE]
+diff --git a/gcc-9.1.0/gcc/c-family/c-lex.c b/gcc-9.1.0/gcc/c-family/c-lex.c
+index 0a368a33a..03dca31e7 100644
+--- a/gcc-9.1.0/gcc/c-family/c-lex.c
++++ b/gcc-9.1.0/gcc/c-family/c-lex.c
+@@ -1166,6 +1166,8 @@ lex_string (const cpp_token *tok, tree *valp, bool objc_string, bool translate)
+      zero '@' before each string.  */
+   bool objc_at_sign_was_seen = false;
+ 
++  bool pascal_string = false;
++
+  retry:
+   tok = cpp_get_token (parse_in);
+   switch (tok->type)
+@@ -1233,10 +1235,22 @@ lex_string (const cpp_token *tok, tree *valp, bool objc_string, bool translate)
+     warning (OPT_Wtraditional,
+ 	     "traditional C rejects string constant concatenation");
+ 
++  if (!strncmp((const char*)strs[0].text, "\"\\p", 3))
++    {
++       pascal_string = true;
++       /* replace \p by a valid escape sequence */
++       ((unsigned char*)strs[0].text)[2] = 'n';
++    }
++
+   if ((translate
+        ? cpp_interpret_string : cpp_interpret_string_notranslate)
+       (parse_in, strs, concats + 1, &istr, type))
+     {
++      if (pascal_string)
++        {
++          /* put the real string length in */
++          ((unsigned char*)istr.text)[0] = (unsigned char) (istr.len - 2);
++        }
+       value = build_string (istr.len, (const char *) istr.text);
+       free (CONST_CAST (unsigned char *, istr.text));
+       if (concats)
+@@ -1281,7 +1295,10 @@ lex_string (const cpp_token *tok, tree *valp, bool objc_string, bool translate)
+     {
+     default:
+     case CPP_STRING:
+-      TREE_TYPE (value) = char_array_type_node;
++      if (pascal_string)
++        TREE_TYPE (value) = uchar_array_type_node;
++      else
++        TREE_TYPE (value) = char_array_type_node;
+       break;
+     case CPP_UTF8STRING:
+       if (flag_char8_t)
+diff --git a/gcc-9.1.0/gcc/c/c-decl.c b/gcc-9.1.0/gcc/c/c-decl.c
+index c8e7cd01d..004a59423 100644
+--- a/gcc-9.1.0/gcc/c/c-decl.c
++++ b/gcc-9.1.0/gcc/c/c-decl.c
+@@ -4892,7 +4892,8 @@ start_decl (struct c_declarator *declarator, struct c_declspecs *declspecs,
+ 	break;
+ 
+       case FUNCTION_DECL:
+-	error ("function %qD is initialized like a variable", decl);
++	//error ("function %qD is initialized like a variable", decl);
++        // Retro68: a function defined by inline opcodes does not count as initialized.
+ 	initialized = false;
+ 	break;
+ 
+diff --git a/gcc-9.1.0/gcc/c/c-parser.c b/gcc-9.1.0/gcc/c/c-parser.c
+index 741d172ff..d054299c9 100644
+--- a/gcc-9.1.0/gcc/c/c-parser.c
++++ b/gcc-9.1.0/gcc/c/c-parser.c
+@@ -1499,6 +1499,7 @@ static void c_parser_objc_at_dynamic_declaration (c_parser *);
+ static bool c_parser_objc_diagnose_bad_element_prefix
+   (c_parser *, struct c_declspecs *);
+ 
++static tree c_parser_inline_opcodes(c_parser *);
+ static void c_parser_parse_rtl_body (c_parser *parser, char *start_with_pass);
+ 
+ /* Parse a translation unit (C90 6.7, C99 6.9, C11 6.9).
+@@ -2114,23 +2115,31 @@ c_parser_declaration_or_fndef (c_parser *parser, bool fndef_ok,
+ 		  /* The declaration of the variable is in effect while
+ 		     its initializer is parsed.  */
+ 		  d = start_decl (declarator, specs, true,
+-				  chainon (postfix_attrs, all_prefix_attrs));
++			          chainon (postfix_attrs, all_prefix_attrs));
+ 		  if (!d)
+ 		    d = error_mark_node;
+ 		  if (omp_declare_simd_clauses.exists ())
+ 		    c_finish_omp_declare_simd (parser, d, NULL_TREE,
+ 					       omp_declare_simd_clauses);
+-		  init_loc = c_parser_peek_token (parser)->location;
+-		  rich_location richloc (line_table, init_loc);
+-		  start_init (d, asm_name, global_bindings_p (), &richloc);
+-		  /* A parameter is initialized, which is invalid.  Don't
+-		     attempt to instrument the initializer.  */
+-		  int flag_sanitize_save = flag_sanitize;
+-		  if (TREE_CODE (d) == PARM_DECL)
+-		    flag_sanitize = 0;
+-		  init = c_parser_initializer (parser);
+-		  flag_sanitize = flag_sanitize_save;
+-		  finish_init ();
++		  if(TREE_CODE(d) == FUNCTION_DECL)
++                    {
++                      tree rawinline_attr = c_parser_inline_opcodes(parser);
++                      decl_attributes (&d, rawinline_attr, 0);
++                    }
++                  else
++                    {
++                      init_loc = c_parser_peek_token (parser)->location;
++		      rich_location richloc (line_table, init_loc);
++		      start_init (d, asm_name, global_bindings_p (), &richloc);
++		      /* A parameter is initialized, which is invalid.  Don't
++		         attempt to instrument the initializer.  */
++		      int flag_sanitize_save = flag_sanitize;
++		      if (TREE_CODE (d) == PARM_DECL)
++		        flag_sanitize = 0;
++		      init = c_parser_initializer (parser);
++		      flag_sanitize = flag_sanitize_save;
++		      finish_init ();
++                    }
+ 		}
+ 	      if (oacc_routine_data)
+ 		c_finish_oacc_routine (oacc_routine_data, d, false);
+@@ -19855,6 +19864,33 @@ c_parse_file (void)
+   the_parser = NULL;
+ }
+ 
++static tree c_parser_inline_opcodes(c_parser * parser)
++{
++  tree attr_args;
++  vec<tree, va_gc> *expr_list;
++  bool braced = false;
++    
++  braced = c_parser_next_token_is(parser, CPP_OPEN_BRACE);
++  if(braced)
++    c_parser_consume_token(parser);
++  
++  expr_list = c_parser_expr_list (parser, false, true,
++                                  NULL, NULL, NULL, NULL);
++  attr_args = build_tree_list_vec (expr_list);
++  release_tree_vector (expr_list);
++  
++  if(braced)
++    {
++      if(c_parser_next_token_is(parser, CPP_CLOSE_BRACE))
++        c_parser_consume_token(parser);
++      else
++        c_parser_error (parser, "expected %<}%>");
++    }
++  
++  return build_tree_list (
++		canonicalize_attr_name(get_identifier("__raw_inline__")), attr_args);
++}
++
+ /* Parse the body of a function declaration marked with "__RTL".
+ 
+    The RTL parser works on the level of characters read from a
+diff --git a/gcc-9.1.0/gcc/calls.c b/gcc-9.1.0/gcc/calls.c
+index 6b22e7a23..3d5af427d 100644
+--- a/gcc-9.1.0/gcc/calls.c
++++ b/gcc-9.1.0/gcc/calls.c
+@@ -288,17 +288,29 @@ prepare_call_address (tree fndecl_or_type, rtx funexp, rtx static_chain_value,
+     }
+   else
+     {
+-      /* funexp could be a SYMBOL_REF represents a function pointer which is
+-	 of ptr_mode.  In this case, it should be converted into address mode
+-	 to be a valid address for memory rtx pattern.  See PR 64971.  */
+-      if (GET_MODE (funexp) != Pmode)
+-	funexp = convert_memory_address (Pmode, funexp);
++      int is_magic = 0;
+ 
+-      if (!(flags & ECF_SIBCALL))
+-	{
+-	  if (!NO_FUNCTION_CSE && optimize && ! flag_no_function_cse)
+-	    funexp = force_reg (Pmode, funexp);
+-	}
++      if (fndecl_or_type)
++        {
++          tree fntype = TREE_TYPE(fndecl_or_type);
++          if(fntype && lookup_attribute ("raw_inline", TYPE_ATTRIBUTES (fntype)))
++            is_magic = 1;
++        }
++    
++      if (!is_magic)
++        {
++          /* funexp could be a SYMBOL_REF represents a function pointer which is
++	     of ptr_mode.  In this case, it should be converted into address mode
++	     to be a valid address for memory rtx pattern.  See PR 64971.  */
++          if (GET_MODE (funexp) != Pmode)
++	    funexp = convert_memory_address (Pmode, funexp);
++
++          if (!(flags & ECF_SIBCALL))
++	    {
++	      if (!NO_FUNCTION_CSE && optimize && ! flag_no_function_cse)
++	        funexp = force_reg (Pmode, funexp);
++	    }
++        }
+     }
+ 
+   if (static_chain_value != 0
+@@ -1883,7 +1895,8 @@ initialize_argument_information (int num_actuals ATTRIBUTE_UNUSED,
+ 				 rtx *old_stack_level,
+ 				 poly_int64_pod *old_pending_adj,
+ 				 int *must_preallocate, int *ecf_flags,
+-				 bool *may_tailcall, bool call_from_thunk_p)
++				 bool *may_tailcall, bool call_from_thunk_p,
++				 bool reverse_args)
+ {
+   CUMULATIVE_ARGS *args_so_far_pnt = get_cumulative_args (args_so_far);
+   location_t loc = EXPR_LOCATION (exp);
+@@ -1891,7 +1904,7 @@ initialize_argument_information (int num_actuals ATTRIBUTE_UNUSED,
+   /* Count arg position in order args appear.  */
+   int argpos;
+ 
+-  int i;
++  int i, inc;
+ 
+   args_size->constant = 0;
+   args_size->var = 0;
+@@ -1901,7 +1914,17 @@ initialize_argument_information (int num_actuals ATTRIBUTE_UNUSED,
+   /* In this loop, we consider args in the order they are written.
+      We fill up ARGS from the back.  */
+ 
+-  i = num_actuals - 1;
++  if (!reverse_args)
++    {
++      i = num_actuals - 1, inc = -1;
++      /* In this case, must reverse order of args
++	 so that we compute and push the last arg first.  */
++    }
++  else
++    {
++      i = 0, inc = 1;
++    }
++
+   {
+     int j = i;
+     call_expr_arg_iterator iter;
+@@ -1911,7 +1934,7 @@ initialize_argument_information (int num_actuals ATTRIBUTE_UNUSED,
+     if (struct_value_addr_value)
+       {
+ 	args[j].tree_value = struct_value_addr_value;
+-	j--;
++	j += inc;
+       }
+     argpos = 0;
+     FOR_EACH_CALL_EXPR_ARG (arg, iter, exp)
+@@ -1925,12 +1948,12 @@ initialize_argument_information (int num_actuals ATTRIBUTE_UNUSED,
+ 	  {
+ 	    tree subtype = TREE_TYPE (argtype);
+ 	    args[j].tree_value = build1 (REALPART_EXPR, subtype, arg);
+-	    j--;
++	    j += inc;
+ 	    args[j].tree_value = build1 (IMAGPART_EXPR, subtype, arg);
+ 	  }
+ 	else
+ 	  args[j].tree_value = arg;
+-	j--;
++	j += inc;
+ 	argpos++;
+       }
+ 
+@@ -1958,7 +1981,7 @@ initialize_argument_information (int num_actuals ATTRIBUTE_UNUSED,
+   tree alloc_args[] = { NULL_TREE, NULL_TREE };
+ 
+   /* I counts args in order (to be) pushed; ARGPOS counts in order written.  */
+-  for (argpos = 0; argpos < num_actuals; i--, argpos++)
++  for (argpos = 0; argpos < num_actuals; i += inc, argpos++)
+     {
+       tree type = TREE_TYPE (args[i].tree_value);
+       int unsignedp;
+@@ -3355,6 +3378,10 @@ expand_call (tree exp, rtx target, int ignore)
+   unsigned HOST_WIDE_INT preferred_unit_stack_boundary;
+   /* The static chain value to use for this call.  */
+   rtx static_chain_value;
++
++  /* True if this is a call to a pascal-declared function. */
++  bool is_pascal = false;
++
+   /* See if this is "nothrow" function call.  */
+   if (TREE_NOTHROW (exp))
+     flags |= ECF_NOTHROW;
+@@ -3379,6 +3406,10 @@ expand_call (tree exp, rtx target, int ignore)
+ 
+   struct_value = targetm.calls.struct_value_rtx (fntype, 0);
+ 
++#ifdef IS_PASCAL_FUNC
++  is_pascal = IS_PASCAL_FUNC(fntype, fndecl);
++#endif
++
+   /* Warn if this value is an aggregate type,
+      regardless of which calling convention we are using for it.  */
+   if (AGGREGATE_TYPE_P (rettype))
+@@ -3595,7 +3626,8 @@ expand_call (tree exp, rtx target, int ignore)
+ 				   args_so_far, reg_parm_stack_space,
+ 				   &old_stack_level, &old_pending_adj,
+ 				   &must_preallocate, &flags,
+-				   &try_tail_call, CALL_FROM_THUNK_P (exp));
++				   &try_tail_call, CALL_FROM_THUNK_P (exp),
++				   is_pascal);
+ 
+   if (args_size.var)
+     must_preallocate = 1;
+@@ -3633,6 +3665,9 @@ expand_call (tree exp, rtx target, int ignore)
+   if (must_tail_call)
+     try_tail_call = 1;
+ 
++  if (is_pascal)
++    try_tail_call = 0;
++
+   /*  Rest of purposes for tail call optimizations to fail.  */
+   if (try_tail_call)
+     try_tail_call = can_implement_as_sibling_call_p (exp,
+@@ -4055,6 +4090,16 @@ expand_call (tree exp, rtx target, int ignore)
+ 					      &low_to_save, &high_to_save);
+ #endif
+ 
++      if (is_pascal)
++	{
++	  auto pascal_return_mode = TYPE_MODE (TREE_TYPE (funtype));
++	  poly_uint16 modesize = GET_MODE_SIZE (pascal_return_mode);
++#ifdef PUSH_ROUNDING
++	  modesize = PUSH_ROUNDING (modesize);
++#endif
++	  push_block (gen_int_mode (modesize, Pmode), 0, 0);
++	}
++
+       /* Now store (and compute if necessary) all non-register parms.
+ 	 These come before register parms, since they can require block-moves,
+ 	 which could clobber the registers used for register parms.
+@@ -4138,7 +4183,8 @@ expand_call (tree exp, rtx target, int ignore)
+       /* Figure out the register where the value, if any, will come back.  */
+       valreg = 0;
+       if (TYPE_MODE (rettype) != VOIDmode
+-	  && ! structure_value_addr)
++	  && ! structure_value_addr
++	  && ! is_pascal)
+ 	{
+ 	  if (pcc_struct_value)
+ 	    valreg = hard_function_value (build_pointer_type (rettype),
+@@ -4237,6 +4283,27 @@ expand_call (tree exp, rtx target, int ignore)
+ 		   next_arg_reg, valreg, old_inhibit_defer_pop, call_fusage,
+ 		   flags, args_so_far);
+ 
++      if (is_pascal)
++      {
++	if (TYPE_MODE (rettype) != VOIDmode
++	    && ! structure_value_addr)
++	  {
++	    valreg = gen_reg_rtx(TYPE_MODE(rettype));
++
++	    poly_uint16 modesize = GET_MODE_SIZE (GET_MODE (valreg));
++#ifdef PUSH_ROUNDING
++	    modesize = PUSH_ROUNDING (modesize);
++#endif
++	    emit_move_insn(valreg,
++			   gen_rtx_MEM( GET_MODE (valreg),
++					stack_pointer_rtx
++			   ));
++
++	    adjust_stack(gen_int_mode (modesize, Pmode));
++	  }
++	}
++
++
+       if (flag_ipa_ra)
+ 	{
+ 	  rtx_call_insn *last;
+diff --git a/gcc-9.1.0/gcc/combine-stack-adj.c b/gcc-9.1.0/gcc/combine-stack-adj.c
+index 3638a1b10..5422f8449 100644
+--- a/gcc-9.1.0/gcc/combine-stack-adj.c
++++ b/gcc-9.1.0/gcc/combine-stack-adj.c
+@@ -727,7 +727,10 @@ public:
+     {
+       return rest_of_handle_stack_adjustments ();
+     }
+-
++  virtual opt_pass *clone ()
++    {
++      return new pass_stack_adjustments(m_ctxt);
++    }
+ }; // class pass_stack_adjustments
+ 
+ bool
+diff --git a/gcc-9.1.0/gcc/combine.c b/gcc-9.1.0/gcc/combine.c
+index 4de759a8e..1e38a67b9 100644
+--- a/gcc-9.1.0/gcc/combine.c
++++ b/gcc-9.1.0/gcc/combine.c
+@@ -14345,10 +14345,10 @@ distribute_notes (rtx notes, rtx_insn *from_insn, rtx_insn *i3, rtx_insn *i2,
+ 	      old_size = fixup_args_size_notes (PREV_INSN (i3), i3, args_size);
+ 	      /* emit_call_1 adds for !ACCUMULATE_OUTGOING_ARGS
+ 		 REG_ARGS_SIZE note to all noreturn calls, allow that here.  */
+-	      gcc_assert (maybe_ne (old_size, args_size)
++	     /* gcc_assert (maybe_ne (old_size, args_size)
+ 			  || (CALL_P (i3)
+ 			      && !ACCUMULATE_OUTGOING_ARGS
+-			      && find_reg_note (i3, REG_NORETURN, NULL_RTX)));
++			      && find_reg_note (i3, REG_NORETURN, NULL_RTX))); ### */
+ 	    }
+ 	  break;
+ 
+diff --git a/gcc-9.1.0/gcc/config.gcc b/gcc-9.1.0/gcc/config.gcc
+index 09fb9ecd2..19fc2b6fc 100644
+--- a/gcc-9.1.0/gcc/config.gcc
++++ b/gcc-9.1.0/gcc/config.gcc
+@@ -456,6 +456,8 @@ m32r*-*-*)
+ m68k-*-*)
+ 	extra_headers=math-68881.h
+ 	extra_options="${extra_options} m68k/m68k-tables.opt"
++	c_target_objs="m68k-mac-pragmas.o"
++	cxx_target_objs="m68k-mac-pragmas.o"
+ 	;;
+ microblaze*-*-*)
+         cpu_type=microblaze
+@@ -2093,6 +2095,23 @@ m68k-*-elf* | fido-*-elf*)
+ 		;;
+ 	esac
+ 	;;
++m68k-*-macos*)
++	default_m68k_cpu=68020
++	default_cf_cpu=5206
++	tm_file="${tm_file} m68k/m68k-none.h m68k/m68kelf.h dbxelf.h elfos.h newlib-stdint.h m68k/m68kemb.h m68k/m68k-macos.h"
++	tm_defines="${tm_defines} MOTOROLA=1"
++	tmake_file="m68k/t-floatlib m68k/t-m68kbare m68k/t-m68kelf m68k/t-macos"
++	tmake_file="$tmake_file m68k/t-mlibs"
++	;;
++
++fido-*-elf*)
++	default_m68k_cpu=68020
++	default_cf_cpu=5206
++	tm_file="${tm_file} m68k/m68k-none.h m68k/m68kelf.h dbxelf.h elfos.h newlib-stdint.h m68k/m68kemb.h m68k/m68020-elf.h"
++	tm_defines="${tm_defines} MOTOROLA=1"
++	tmake_file="m68k/t-floatlib m68k/t-m68kbare m68k/t-m68kelf"
++	tmake_file="$tmake_file m68k/t-mlibs"
++	;;
+ m68k*-*-netbsdelf*)
+ 	default_m68k_cpu=68020
+ 	default_cf_cpu=5475
+@@ -2765,6 +2784,15 @@ powerpcle-*-eabi*)
+ 	extra_options="${extra_options} rs6000/sysv4.opt"
+ 	use_gcc_stdint=wrap
+ 	;;
++powerpc-apple-macos*)
++	tm_file="${tm_file} rs6000/xcoff.h rs6000/macos.h"
++	tmake_file="rs6000/t-macos"
++	extra_options="${extra_options} rs6000/aix64.opt"
++	use_collect2=yes
++	thread_file='aix'
++	use_gcc_stdint=provide
++	extra_headers=
++	;;
+ rs6000-ibm-aix6.* | powerpc-ibm-aix6.*)
+ 	tm_file="${tm_file} rs6000/aix.h rs6000/aix61.h rs6000/xcoff.h rs6000/aix-stdint.h"
+ 	tmake_file="rs6000/t-aix52 t-slibgcc"
+diff --git a/gcc-9.1.0/gcc/config/m68k/m68k-mac-pragmas.c b/gcc-9.1.0/gcc/config/m68k/m68k-mac-pragmas.c
+new file mode 100644
+index 000000000..5a543ba15
+--- /dev/null
++++ b/gcc-9.1.0/gcc/config/m68k/m68k-mac-pragmas.c
+@@ -0,0 +1,118 @@
++#include <string>
++#include <map>
++#include <vector>
++
++#include "config.h"
++#include "system.h"
++#include "coretypes.h"
++#include "tm.h"
++#include "hash-set.h"
++#include "vec.h"
++#include "double-int.h"
++#include "input.h"
++#include "alias.h"
++#include "symtab.h"
++#include "inchash.h"
++#include "tree.h"
++
++#include "c-family/c-pragma.h"
++#include "c-family/c-common.h"
++#include "diagnostic-core.h"
++#include "cpplib.h"
++
++std::map<std::string, int> pragma_parameter_register_names;
++extern std::map< std::string, std::vector<int> > pragma_parameter_directives;
++
++
++static int lookup_reg(std::string s)
++{
++  std::map<std::string, int>::const_iterator p = pragma_parameter_register_names.find(s);
++  if(p == pragma_parameter_register_names.end())
++    return -1;
++  return p->second;
++}
++
++static void
++m68k_pragma_parameter (cpp_reader * reader ATTRIBUTE_UNUSED)
++{
++  /* on off */
++  tree token;
++  enum cpp_ttype type;
++
++  std::string name;
++  std::vector<int> argregs;
++
++  type = pragma_lex (&token);
++  argregs.push_back(0);
++  if (type == CPP_NAME)
++    {
++      name = IDENTIFIER_POINTER(token);
++      type = pragma_lex (&token);
++      if (type == CPP_NAME)
++        {
++          argregs.back() = lookup_reg(name);
++          if(argregs.back() < 0)
++            {
++              error ("invalid register name %s", name.c_str());
++              return;
++            }
++          name = IDENTIFIER_POINTER(token);
++          type = pragma_lex (&token);
++        }
++      if (type == CPP_EOF)
++        {
++          pragma_parameter_directives[name] = argregs;
++          return;
++        }
++
++      if (type == CPP_OPEN_PAREN)
++        {
++          type = pragma_lex (&token);
++          while(argregs.size() == 1 ? type == CPP_NAME : type == CPP_COMMA)
++            {
++              if(argregs.size() != 1)
++                type = pragma_lex (&token);
++              if(type != CPP_NAME)
++                break;
++              
++              argregs.push_back(lookup_reg(IDENTIFIER_POINTER(token)));
++              if(argregs.back() < 0)
++                {
++                  error ("invalid register name %s", IDENTIFIER_POINTER(token));
++                  return;
++                }
++
++              type = pragma_lex (&token);
++            }
++
++          if (type == CPP_CLOSE_PAREN)
++            {
++              type = pragma_lex (&token);
++              if (type != CPP_EOF)
++                {
++                  error ("junk at end of #pragma parameter");
++                }
++              else
++                {
++                  pragma_parameter_directives[name] = argregs;
++                }
++              return;
++            }
++        }
++    }
++  error ("malformed #pragma parameter ");
++}
++
++
++void
++m68k_register_pragmas()
++{
++  for(int i = 0; i < 8; i++)
++    {
++      std::string n(1, '0' + i);
++      pragma_parameter_register_names["__D" + n] = i;
++      pragma_parameter_register_names["__A" + n] = i + 8;
++    }
++  c_register_pragma (NULL, "parameter", m68k_pragma_parameter);
++
++}
+diff --git a/gcc-9.1.0/gcc/config/m68k/m68k-macos.h b/gcc-9.1.0/gcc/config/m68k/m68k-macos.h
+new file mode 100644
+index 000000000..d43ef14d4
+--- /dev/null
++++ b/gcc-9.1.0/gcc/config/m68k/m68k-macos.h
+@@ -0,0 +1,18 @@
++
++#define LIBGCC_SPEC "--start-group -lretrocrt -lgcc -lInterface --end-group "
++#define LINK_SPEC "-elf2mac -q -undefined=_consolewrite"
++
++#undef  LIB_SPEC
++#define LIB_SPEC "--start-group -lc -lretrocrt -lInterface --end-group"
++
++#define LINK_GCC_C_SEQUENCE_SPEC "--start-group -lgcc -lc -lretrocrt -lInterface --end-group"
++
++
++#undef STARTFILE_SPEC
++#define STARTFILE_SPEC ""
++#undef ENDFILE_SPEC
++#define ENDFILE_SPEC ""
++
++#undef CPP_SPEC
++#define CPP_SPEC "-Wno-trigraphs"
++
+diff --git a/gcc-9.1.0/gcc/config/m68k/m68k-passes.def b/gcc-9.1.0/gcc/config/m68k/m68k-passes.def
+new file mode 100644
+index 000000000..9a0f91d23
+--- /dev/null
++++ b/gcc-9.1.0/gcc/config/m68k/m68k-passes.def
+@@ -0,0 +1,22 @@
++
++/*
++   Macros that can be used in this file:
++   INSERT_PASS_AFTER (PASS, INSTANCE, TGT_PASS)
++   INSERT_PASS_BEFORE (PASS, INSTANCE, TGT_PASS)
++   REPLACE_PASS (PASS, INSTANCE, TGT_PASS)
++ */
++
++	// insert a stack adjustments (csa) pass early in compilation,
++	// before register allocation.
++	// This allows removing some extraneous moves in connection with pascal functions:
++	// pascal short bar(); pascal void foo(short);
++	// foo(bar());
++	// 
++	// subq #2, sp
++	// jsr bar
++	// move (sp), d0	; <-- otherwise we end up with these two useless instructions
++	// move d0, (sp)	; <-- which are not removed if the register is already allocated
++	//			; <-- when csa figures out that no actual push or pop is needed
++	// jsr foo
++
++INSERT_PASS_AFTER (pass_combine, 1, pass_stack_adjustments);
+diff --git a/gcc-9.1.0/gcc/config/m68k/m68k-protos.h b/gcc-9.1.0/gcc/config/m68k/m68k-protos.h
+index abd920e70..10e1ac82e 100644
+--- a/gcc-9.1.0/gcc/config/m68k/m68k-protos.h
++++ b/gcc-9.1.0/gcc/config/m68k/m68k-protos.h
+@@ -63,7 +63,7 @@ extern rtx m68k_legitimize_tls_address (rtx);
+ extern bool m68k_tls_reference_p (rtx, bool);
+ extern int valid_dbcc_comparison_p_2 (rtx, machine_mode);
+ extern rtx m68k_libcall_value (machine_mode);
+-extern rtx m68k_function_value (const_tree, const_tree);
++extern rtx m68k_function_value (const_tree, const_tree, bool);
+ extern int emit_move_sequence (rtx *, machine_mode, rtx);
+ extern bool m68k_movem_pattern_p (rtx, rtx, HOST_WIDE_INT, bool);
+ extern const char *m68k_output_movem (rtx *, rtx, HOST_WIDE_INT, bool);
+@@ -98,4 +98,6 @@ extern void init_68881_table (void);
+ extern rtx m68k_legitimize_call_address (rtx);
+ extern rtx m68k_legitimize_sibcall_address (rtx);
+ extern int m68k_hard_regno_rename_ok(unsigned int, unsigned int);
++
++extern void m68k_write_macsbug_name(FILE *, const char *, tree decl);
+ extern poly_int64 m68k_push_rounding (poly_int64);
+diff --git a/gcc-9.1.0/gcc/config/m68k/m68k.c b/gcc-9.1.0/gcc/config/m68k/m68k.c
+index 7a0d6f7c6..d66ea01a9 100644
+--- a/gcc-9.1.0/gcc/config/m68k/m68k.c
++++ b/gcc-9.1.0/gcc/config/m68k/m68k.c
+@@ -17,6 +17,9 @@ You should have received a copy of the GNU General Public License
+ along with GCC; see the file COPYING3.  If not see
+ <http://www.gnu.org/licenses/>.  */
+ 
++#include <string>
++#include <map>
++#include <vector>
+ #define IN_TARGET_CODE 1
+ 
+ #include "config.h"
+@@ -40,6 +43,7 @@ along with GCC; see the file COPYING3.  If not see
+ #include "output.h"
+ #include "insn-attr.h"
+ #include "recog.h"
++#include "hashtab.h"
+ #include "diagnostic-core.h"
+ #include "flags.h"
+ #include "expmed.h"
+@@ -65,11 +69,16 @@ along with GCC; see the file COPYING3.  If not see
+ #include "optabs.h"
+ #include "builtins.h"
+ #include "rtl-iter.h"
++#include "stringpool.h"
+ #include "toplev.h"
+ 
+ /* This file should be included last.  */
+ #include "target-def.h"
+ 
++
++std::map< std::string, std::vector<int> > pragma_parameter_directives;
++
++
+ enum reg_class regno_reg_class[] =
+ {
+   DATA_REGS, DATA_REGS, DATA_REGS, DATA_REGS,
+@@ -190,6 +199,9 @@ static bool m68k_output_addr_const_extra (FILE *, rtx);
+ static void m68k_init_sync_libfuncs (void) ATTRIBUTE_UNUSED;
+ static enum flt_eval_method
+ m68k_excess_precision (enum excess_precision_type);
++
++static tree m68k_mangle_decl_assembler_name (tree decl, tree id);
++static pad_direction m68k_function_arg_padding (machine_mode mode, const_tree type);
+ static unsigned int m68k_hard_regno_nregs (unsigned int, machine_mode);
+ static bool m68k_hard_regno_mode_ok (unsigned int, machine_mode);
+ static bool m68k_modes_tieable_p (machine_mode, machine_mode);
+@@ -277,8 +289,8 @@ static machine_mode m68k_promote_function_mode (const_tree, machine_mode,
+ #undef TARGET_ATTRIBUTE_TABLE
+ #define TARGET_ATTRIBUTE_TABLE m68k_attribute_table
+ 
+-#undef TARGET_PROMOTE_PROTOTYPES
+-#define TARGET_PROMOTE_PROTOTYPES hook_bool_const_tree_true
++//#undef TARGET_PROMOTE_PROTOTYPES
++//#define TARGET_PROMOTE_PROTOTYPES hook_bool_const_tree_true
+ 
+ #undef TARGET_STRUCT_VALUE_RTX
+ #define TARGET_STRUCT_VALUE_RTX m68k_struct_value_rtx
+@@ -353,6 +365,15 @@ static machine_mode m68k_promote_function_mode (const_tree, machine_mode,
+ #undef TARGET_PROMOTE_FUNCTION_MODE
+ #define TARGET_PROMOTE_FUNCTION_MODE m68k_promote_function_mode
+ 
++#undef TARGET_FUNCTION_VALUE
++#define TARGET_FUNCTION_VALUE m68k_function_value
++
++#undef TARGET_MANGLE_DECL_ASSEMBLER_NAME
++#define TARGET_MANGLE_DECL_ASSEMBLER_NAME m68k_mangle_decl_assembler_name
++
++#undef TARGET_FUNCTION_ARG_PADDING
++#define TARGET_FUNCTION_ARG_PADDING m68k_function_arg_padding
++
+ #undef  TARGET_HAVE_SPECULATION_SAFE_VALUE
+ #define TARGET_HAVE_SPECULATION_SAFE_VALUE speculation_safe_value_not_needed
+ 
+@@ -366,6 +387,12 @@ static const struct attribute_spec m68k_attribute_table[] =
+     m68k_handle_fndecl_attribute, NULL },
+   { "interrupt_thread", 0, 0, true,  false, false, false,
+     m68k_handle_fndecl_attribute, NULL },
++  { "pascal", 0, 0, false, true, true, true,
++    m68k_handle_fndecl_attribute, NULL },
++  { "regparam", 1, 1, false, true, true, true,
++    m68k_handle_fndecl_attribute, NULL },
++  { "raw_inline", 1, 32, false, true, true, false,
++    m68k_handle_fndecl_attribute, NULL },
+   { NULL, 0, 0, false, false, false, false, NULL, NULL }
+ };
+ 
+@@ -631,6 +658,8 @@ m68k_option_override (void)
+ 	 clear how intentional that is.  */
+       flag_no_function_cse = 1;
+     }
++  else if(TARGET_PCREL)
++    m68k_symbolic_call_var = M68K_SYMBOLIC_CALL_BSRW_C;
+ 
+   switch (m68k_symbolic_call_var)
+     {
+@@ -646,6 +675,10 @@ m68k_option_override (void)
+       m68k_symbolic_call = "bsr%.l %p0";
+       break;
+ 
++    case M68K_SYMBOLIC_CALL_BSRW_C:
++      m68k_symbolic_call = "bsr%.w %c0";
++      break;
++
+     case M68K_SYMBOLIC_CALL_NONE:
+       gcc_assert (m68k_symbolic_call == NULL);
+       break;
+@@ -759,7 +792,7 @@ m68k_get_function_kind (tree func)
+   tree a;
+ 
+   gcc_assert (TREE_CODE (func) == FUNCTION_DECL);
+-  
++
+   a = lookup_attribute ("interrupt", DECL_ATTRIBUTES (func));
+   if (a != NULL_TREE)
+     return m68k_fk_interrupt_handler;
+@@ -783,6 +816,9 @@ m68k_handle_fndecl_attribute (tree *node, tree name,
+ 			      int flags ATTRIBUTE_UNUSED,
+ 			      bool *no_add_attrs)
+ {
++  if (TREE_CODE (*node) != FUNCTION_TYPE && TREE_CODE (*node) != TYPE_DECL)
++  {
++
+   if (TREE_CODE (*node) != FUNCTION_DECL)
+     {
+       warning (OPT_Wattributes, "%qE attribute only applies to functions",
+@@ -804,6 +840,9 @@ m68k_handle_fndecl_attribute (tree *node, tree name,
+     }
+ 
+   return NULL_TREE;
++  }
++  else
++  return NULL_TREE;
+ }
+ 
+ static void
+@@ -902,7 +941,7 @@ m68k_initial_elimination_offset (int from, int to)
+ static bool
+ m68k_save_reg (unsigned int regno, bool interrupt_handler)
+ {
+-  if (flag_pic && regno == PIC_REG)
++  if (!TARGET_SEP_DATA && flag_pic && regno == PIC_REG)
+     {
+       if (crtl->saves_all_registers)
+ 	return true;
+@@ -1357,14 +1396,14 @@ m68k_expand_epilogue (bool sibcall_p)
+     emit_jump_insn (ret_rtx);
+ }
+ 
+-/* Return true if X is a valid comparison operator for the dbcc 
+-   instruction.  
++/* Return true if X is a valid comparison operator for the dbcc
++   instruction.
+ 
+    Note it rejects floating point comparison operators.
+    (In the future we could use Fdbcc).
+ 
+    It also rejects some comparisons when CC_NO_OVERFLOW is set.  */
+-   
++
+ int
+ valid_dbcc_comparison_p_2 (rtx x, machine_mode mode ATTRIBUTE_UNUSED)
+ {
+@@ -1421,12 +1460,15 @@ static bool
+ m68k_ok_for_sibcall_p (tree decl, tree exp)
+ {
+   enum m68k_function_kind kind;
+-  
++
+   /* We cannot use sibcalls for nested functions because we use the
+      static chain register for indirect calls.  */
+   if (CALL_EXPR_STATIC_CHAIN (exp))
+     return false;
+ 
++  if (decl && lookup_attribute ("raw_inline", TYPE_ATTRIBUTES( TREE_TYPE(decl) )))
++    return false;
++
+   if (!VOID_TYPE_P (TREE_TYPE (DECL_RESULT (cfun->decl))))
+     {
+       /* Check that the return value locations are the same.  For
+@@ -1435,9 +1477,9 @@ m68k_ok_for_sibcall_p (tree decl, tree exp)
+       rtx cfun_value;
+       rtx call_value;
+ 
+-      cfun_value = FUNCTION_VALUE (TREE_TYPE (DECL_RESULT (cfun->decl)),
+-				   cfun->decl);
+-      call_value = FUNCTION_VALUE (TREE_TYPE (exp), decl);
++      cfun_value = m68k_function_value (TREE_TYPE (DECL_RESULT (cfun->decl)),
++				   cfun->decl, false);
++      call_value = m68k_function_value (TREE_TYPE (exp), decl, false);
+ 
+       /* Check that the values are equal or that the result the callee
+ 	 function returns is superset of what the current function returns.  */
+@@ -1457,19 +1499,115 @@ m68k_ok_for_sibcall_p (tree decl, tree exp)
+      the same.  */
+   if (decl && m68k_get_function_kind (decl) == kind)
+     return true;
+-  
++
+   return false;
+ }
+ 
+-/* On the m68k all args are always pushed.  */
++/* On the m68k all args are always pushed - NOT.  */
++
++void m68k_init_cumulative_args (CUMULATIVE_ARGS *cum,
++    const_tree fntype,
++    rtx libname ATTRIBUTE_UNUSED,
++    const_tree fndecl,
++    int n_named_args)
++{
++  cum->bytes = 0;
++  cum->index = 0;
++  cum->regparam = false;
++
++  if(!fntype)
++    return;
++
++  tree regparam = lookup_attribute ("regparam", TYPE_ATTRIBUTES( fntype ));
++  cum->regparam = regparam != NULL;
++  if(regparam)
++    {
++      regparam = TREE_VALUE(TREE_VALUE(regparam));
++      if(TREE_CODE(regparam) == STRING_CST)
++        {
++          const char *paramstr = TREE_STRING_POINTER(regparam);
++
++          const char *p = paramstr;
++
++          bool ok = true;
++          int idx = 0;
++          cum->arg_regs[0] = 0;
++          if(*p == '(')
++          {
++            idx = 1;
++            p++;
++          }
++          while(*p)
++            {
++              while(*p && (*p == '_' || *p == '%' || *p == ',' || *p == '(' || *p == ')' || *p == ' ' || *p == '\t'))
++                p++;
++
++              if(!*p)
++                break;
++
++              if(*p != 'a' && *p != 'd' && *p != 'A' && *p != 'D')
++                { ok = false; break; }
++              if(p[1] < '0' || p[1] > '7')
++                { ok = false; break; }
++              cum->arg_regs[idx++] = p[1] - '0'
++                + (*p == 'a' || *p == 'A' ? 8 : 0);
++
++              p += 2;
++
++            }
++          // TODO: error checking
++          cum->total_count = idx - 1;
++          if(cum->total_count < 0)
++            cum->total_count = 0;
++        }
++    }
++
++  if(!regparam && fndecl)
++    {
++      std::map< std::string, std::vector<int> >::iterator p
++        = pragma_parameter_directives.find(IDENTIFIER_POINTER(DECL_NAME(fndecl)));
++      if(p != pragma_parameter_directives.end())
++        {
++          cum->regparam = true;
++          cum->total_count = p->second.size()-1;
++          for(unsigned i = 0; i < p->second.size(); i++)
++            cum->arg_regs[i] = p->second[i];
++        }
++    }
++
++
++}
++
++int
++m68k_is_pascal_func(tree fntype, tree fndecl)
++{
++  if(!fntype)
++    return false;
++  if(lookup_attribute ("pascal", TYPE_ATTRIBUTES (fntype)))
++    {
++      CUMULATIVE_ARGS cum;
++      m68k_init_cumulative_args(&cum, fntype, NULL, fndecl, -1);
++      return !cum.regparam;
++    }
++  else
++    return false;
++}
+ 
+ static rtx
+-m68k_function_arg (cumulative_args_t cum ATTRIBUTE_UNUSED,
++m68k_function_arg (cumulative_args_t cum_v,
+ 		   machine_mode mode ATTRIBUTE_UNUSED,
+ 		   const_tree type ATTRIBUTE_UNUSED,
+ 		   bool named ATTRIBUTE_UNUSED)
+ {
+-  return NULL_RTX;
++  CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
++  if(!cum->regparam)
++    return NULL_RTX;
++
++  if(cum->index < cum->total_count)
++    return gen_rtx_REG (mode, cum->arg_regs[cum->index+1]);
++  else
++    return NULL_RTX;
++      //return gen_rtx_REG (mode, 0); // ###
+ }
+ 
+ static void
+@@ -1478,11 +1616,13 @@ m68k_function_arg_advance (cumulative_args_t cum_v, machine_mode mode,
+ {
+   CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
+ 
+-  *cum += (mode != BLKmode
+-	   ? (GET_MODE_SIZE (mode) + 3) & ~3
+-	   : (int_size_in_bytes (type) + 3) & ~3);
++  cum->bytes += (mode != BLKmode
++	   ? (GET_MODE_SIZE (mode) + 1) & ~1
++	   : (int_size_in_bytes (type) + 1) & ~1);
++  cum->index ++;
+ }
+ 
++
+ /* Convert X to a legitimate function call memory reference and return the
+    result.  */
+ 
+@@ -1587,8 +1727,8 @@ m68k_legitimize_address (rtx x, rtx oldx, machine_mode mode)
+   return x;
+ }
+ 
+- 
+-/* Output a dbCC; jCC sequence.  Note we do not handle the 
++
++/* Output a dbCC; jCC sequence.  Note we do not handle the
+    floating point version of this sequence (Fdbcc).  We also
+    do not handle alternative conditions when CC_NO_OVERFLOW is
+    set.  It is assumed that valid_dbcc_comparison_p and flags_in_68881 will
+@@ -2427,19 +2567,19 @@ m68k_wrap_symbol_into_got_ref (rtx x, enum m68k_reloc reloc, rtx temp_reg)
+ /* Legitimize PIC addresses.  If the address is already
+    position-independent, we return ORIG.  Newly generated
+    position-independent addresses go to REG.  If we need more
+-   than one register, we lose.  
++   than one register, we lose.
+ 
+    An address is legitimized by making an indirect reference
+    through the Global Offset Table with the name of the symbol
+-   used as an offset.  
++   used as an offset.
+ 
+-   The assembler and linker are responsible for placing the 
++   The assembler and linker are responsible for placing the
+    address of the symbol in the GOT.  The function prologue
+    is responsible for initializing a5 to the starting address
+    of the GOT.
+ 
+    The assembler is also responsible for translating a symbol name
+-   into a constant displacement from the start of the GOT.  
++   into a constant displacement from the start of the GOT.
+ 
+    A quick example may make things a little clearer:
+ 
+@@ -2459,9 +2599,9 @@ m68k_wrap_symbol_into_got_ref (rtx x, enum m68k_reloc reloc, rtx temp_reg)
+ 
+ 	movel   a5@(_foo:w), a0
+ 	movel   #12345, a0@
+-   
+ 
+-   That (in a nutshell) is how *all* symbol and label references are 
++
++   That (in a nutshell) is how *all* symbol and label references are
+    handled.  */
+ 
+ rtx
+@@ -2490,7 +2630,7 @@ legitimize_pic_address (rtx orig, machine_mode mode ATTRIBUTE_UNUSED,
+ 
+       /* legitimize both operands of the PLUS */
+       gcc_assert (GET_CODE (XEXP (orig, 0)) == PLUS);
+-      
++
+       base = legitimize_pic_address (XEXP (XEXP (orig, 0), 0), Pmode, reg);
+       orig = legitimize_pic_address (XEXP (XEXP (orig, 0), 1), Pmode,
+ 				     base == reg ? 0 : reg);
+@@ -2552,13 +2692,13 @@ m68k_call_tls_get_addr (rtx x, rtx eqv, enum m68k_reloc reloc)
+      is the simpliest way of generating a call.  The difference between
+      __tls_get_addr() and libcall is that the result is returned in D0
+      instead of A0.  To workaround this, we use m68k_libcall_value_in_a0_p
+-     which temporarily switches returning the result to A0.  */ 
++     which temporarily switches returning the result to A0.  */
+ 
+   m68k_libcall_value_in_a0_p = true;
+   a0 = emit_library_call_value (m68k_get_tls_get_addr (), NULL_RTX, LCT_PURE,
+ 				Pmode, x, Pmode);
+   m68k_libcall_value_in_a0_p = false;
+-  
++
+   insns = get_insns ();
+   end_sequence ();
+ 
+@@ -2586,7 +2726,7 @@ m68k_get_m68k_read_tp (void)
+ /* Emit instruction sequence that calls __m68k_read_tp.
+    A pseudo register with result of __m68k_read_tp call is returned.  */
+ 
+-static rtx 
++static rtx
+ m68k_call_m68k_read_tp (void)
+ {
+   rtx a0;
+@@ -2600,7 +2740,7 @@ m68k_call_m68k_read_tp (void)
+      is the simpliest way of generating a call.  The difference between
+      __m68k_read_tp() and libcall is that the result is returned in D0
+      instead of A0.  To workaround this, we use m68k_libcall_value_in_a0_p
+-     which temporarily switches returning the result to A0.  */ 
++     which temporarily switches returning the result to A0.  */
+ 
+   /* Emit the call sequence.  */
+   m68k_libcall_value_in_a0_p = true;
+@@ -2639,7 +2779,7 @@ m68k_legitimize_tls_address (rtx orig)
+ 	rtx eqv;
+ 	rtx a0;
+ 	rtx x;
+- 
++
+ 	/* Attach a unique REG_EQUIV, to allow the RTL optimizers to
+ 	   share the LDM result with other LD model accesses.  */
+ 	eqv = gen_rtx_UNSPEC (Pmode, gen_rtvec (1, const0_rtx),
+@@ -3109,7 +3249,7 @@ output_move_qimode (rtx *operands)
+ {
+   /* 68k family always modifies the stack pointer by at least 2, even for
+      byte pushes.  The 5200 (ColdFire) does not do this.  */
+-  
++
+   /* This case is generated by pushqi1 pattern now.  */
+   gcc_assert (!(GET_CODE (operands[0]) == MEM
+ 		&& GET_CODE (XEXP (operands[0], 0)) == PRE_DEC
+@@ -4158,13 +4298,13 @@ notice_update_cc (rtx exp, rtx insn)
+   if (GET_CODE (exp) == SET)
+     {
+       if (GET_CODE (SET_SRC (exp)) == CALL)
+-	CC_STATUS_INIT; 
++	CC_STATUS_INIT;
+       else if (ADDRESS_REG_P (SET_DEST (exp)))
+ 	{
+ 	  if (cc_status.value1 && modified_in_p (cc_status.value1, insn))
+ 	    cc_status.value1 = 0;
+ 	  if (cc_status.value2 && modified_in_p (cc_status.value2, insn))
+-	    cc_status.value2 = 0; 
++	    cc_status.value2 = 0;
+ 	}
+       /* fmoves to memory or data registers do not set the condition
+ 	 codes.  Normal moves _do_ set the condition codes, but not in
+@@ -4178,7 +4318,7 @@ notice_update_cc (rtx exp, rtx insn)
+ 	       && (FP_REG_P (SET_SRC (exp))
+ 		   || GET_CODE (SET_SRC (exp)) == FIX
+ 		   || FLOAT_MODE_P (GET_MODE (SET_DEST (exp)))))
+-	CC_STATUS_INIT; 
++	CC_STATUS_INIT;
+       /* A pair of move insns doesn't produce a useful overall cc.  */
+       else if (!FP_REG_P (SET_DEST (exp))
+ 	       && !FP_REG_P (SET_SRC (exp))
+@@ -4186,7 +4326,7 @@ notice_update_cc (rtx exp, rtx insn)
+ 	       && (GET_CODE (SET_SRC (exp)) == REG
+ 		   || GET_CODE (SET_SRC (exp)) == MEM
+ 		   || GET_CODE (SET_SRC (exp)) == CONST_DOUBLE))
+-	CC_STATUS_INIT; 
++	CC_STATUS_INIT;
+       else if (SET_DEST (exp) != pc_rtx)
+ 	{
+ 	  cc_status.flags = 0;
+@@ -4235,7 +4375,7 @@ notice_update_cc (rtx exp, rtx insn)
+ 	   ends with a move insn moving r2 in r2's mode.
+ 	   Thus, the cc's are set for r2.
+ 	   This can set N bit spuriously.  */
+-	cc_status.flags |= CC_NOT_NEGATIVE; 
++	cc_status.flags |= CC_NOT_NEGATIVE;
+ 
+       default:
+ 	break;
+@@ -4300,7 +4440,7 @@ output_move_const_single (rtx *operands)
+    to get the desired constant.  */
+ 
+ /* This code has been fixed for cross-compilation.  */
+-  
++
+ static int inited_68881_table = 0;
+ 
+ static const char *const strings_68881[7] = {
+@@ -4368,7 +4508,7 @@ standard_68881_constant_p (rtx x)
+       if (real_identical (r, &values_68881[i]))
+         return (codes_68881[i]);
+     }
+-  
++
+   if (GET_MODE (x) == SFmode)
+     return 0;
+ 
+@@ -4657,7 +4797,7 @@ m68k_delegitimize_address (rtx orig_x)
+   unspec = XEXP (addr.offset, 0);
+   if (GET_CODE (unspec) == PLUS && CONST_INT_P (XEXP (unspec, 1)))
+     unspec = XEXP (unspec, 0);
+-  if (GET_CODE (unspec) != UNSPEC 
++  if (GET_CODE (unspec) != UNSPEC
+       || (XINT (unspec, 1) != UNSPEC_RELOC16
+ 	  && XINT (unspec, 1) != UNSPEC_RELOC32))
+     return orig_x;
+@@ -4678,7 +4818,7 @@ m68k_delegitimize_address (rtx orig_x)
+     x = replace_equiv_address_nv (orig_x, x);
+   return x;
+ }
+-  
++
+ 
+ /* A C compound statement to output to stdio stream STREAM the
+    assembler syntax for an instruction operand that is a memory
+@@ -4692,7 +4832,7 @@ m68k_delegitimize_address (rtx orig_x)
+    It is possible for PIC to generate a (plus (label_ref...) (reg...))
+    and we handle that just like we would a (plus (symbol_ref...) (reg...)).
+ 
+-   This routine is responsible for distinguishing between -fpic and -fPIC 
++   This routine is responsible for distinguishing between -fpic and -fPIC
+    style relocations in an address.  When generating -fpic code the
+    offset is output in word mode (e.g. movel a5@(_foo:w), a0).  When generating
+    -fPIC code the offset is output in long mode (e.g. movel a5@(_foo:l), a0) */
+@@ -5049,6 +5189,42 @@ output_xorsi3 (rtx *operands)
+ const char *
+ output_call (rtx x)
+ {
++  if(GET_CODE (x) == SYMBOL_REF)
++    {
++      tree decl = SYMBOL_REF_DECL(x);
++      if(decl)
++        {
++          tree attr = lookup_attribute ("raw_inline", TYPE_ATTRIBUTES( TREE_TYPE(decl) ));
++          if(attr)
++            {
++              tree arg = TREE_VALUE(attr);
++
++              static char buf[512];
++              char *p = buf, *e = buf + sizeof(buf);
++              bool first = true;
++              p += snprintf(p, e-p, ".short ");
++
++              while(arg)
++                {
++                  tree word_tree = TREE_VALUE(arg);
++		  gcc_assert(TREE_CODE(word_tree) == INTEGER_CST);
++                  if (TREE_CODE(word_tree) == INTEGER_CST)
++                    {
++                      int word = TREE_INT_CST_LOW(word_tree);
++                      if(!first)
++                        p += snprintf(p, e-p, ", ");
++                      first = false;
++                      p += snprintf(p, e-p, "0x%04x", word);
++                    }
++                  arg = TREE_CHAIN(arg);
++                }
++
++                if(p < e)
++                  return buf;
++            }
++        }
++    }
++
+   if (symbolic_operand (x, VOIDmode))
+     return m68k_symbolic_call;
+   else
+@@ -5309,7 +5485,7 @@ m68k_preferred_reload_class (rtx x, enum reg_class rclass)
+    If there is need for a hard-float ABI it is probably worth doing it
+    properly and also passing function arguments in FP registers.  */
+ rtx
+-m68k_libcall_value (machine_mode mode)
++m68k_libcall_value (enum machine_mode mode)
+ {
+   switch (mode) {
+   case E_SFmode:
+@@ -5329,11 +5505,27 @@ m68k_libcall_value (machine_mode mode)
+    NOTE: Due to differences in ABIs, don't call this function directly,
+    use FUNCTION_VALUE instead.  */
+ rtx
+-m68k_function_value (const_tree valtype, const_tree func ATTRIBUTE_UNUSED)
++m68k_function_value (const_tree valtype, const_tree func_decl_or_type, bool outgoing)
+ {
+   machine_mode mode;
+ 
+   mode = TYPE_MODE (valtype);
++
++  const_tree decl = NULL, type = NULL;
++  if(func_decl_or_type)
++    {
++      CUMULATIVE_ARGS cum;
++      decl = func_decl_or_type;
++      type = func_decl_or_type;
++      if(TREE_CODE(type) == FUNCTION_DECL)
++        type = TREE_TYPE(type);
++      else
++        decl = NULL;
++      m68k_init_cumulative_args(&cum, type, NULL, decl, -1);
++      if(cum.regparam)
++        return gen_rtx_REG (mode, cum.arg_regs[0]);
++    }
++
+   switch (mode) {
+   case E_SFmode:
+   case E_DFmode:
+@@ -5345,8 +5537,11 @@ m68k_function_value (const_tree valtype, const_tree func ATTRIBUTE_UNUSED)
+     break;
+   }
+ 
++#if 1 /* POINTERS_IN_D0 */
++  return gen_rtx_REG (mode, D0_REG);
++#else
+   /* If the function returns a pointer, push that into %a0.  */
+-  if (func && POINTER_TYPE_P (TREE_TYPE (TREE_TYPE (func))))
++  if (type && POINTER_TYPE_P (TREE_TYPE (type)) && !outgoing)
+     /* For compatibility with the large body of existing code which
+        does not always properly declare external functions returning
+        pointer types, the m68k/SVR4 convention is to copy the value
+@@ -5367,6 +5562,7 @@ m68k_function_value (const_tree valtype, const_tree func ATTRIBUTE_UNUSED)
+     return gen_rtx_REG (mode, A0_REG);
+   else
+     return gen_rtx_REG (mode, D0_REG);
++#endif
+ }
+ 
+ /* Worker function for TARGET_RETURN_IN_MEMORY.  */
+@@ -6102,7 +6298,7 @@ m68k_sched_variable_issue (FILE *sched_dump ATTRIBUTE_UNUSED,
+ 
+ 	case CPU_CFV3:
+ 	  insn_size = sched_get_attr_size_int (insn);
+-	  
++
+ 	  /* ColdFire V3 and V4 cores have instruction buffers that can
+ 	     accumulate up to 8 instructions regardless of instructions'
+ 	     sizes.  So we should take care not to "prefetch" 24 one-word
+@@ -6539,6 +6735,8 @@ m68k_trampoline_init (rtx m_tramp, tree fndecl, rtx chain_value)
+ static poly_int64
+ m68k_return_pops_args (tree fundecl, tree funtype, poly_int64 size)
+ {
++  if (lookup_attribute ("pascal", TYPE_ATTRIBUTES (funtype)))
++    return size;
+   return ((TARGET_RTD
+ 	   && (!fundecl
+ 	       || TREE_CODE (fundecl) != IDENTIFIER_NODE)
+@@ -6615,6 +6813,66 @@ m68k_excess_precision (enum excess_precision_type type)
+   return FLT_EVAL_METHOD_UNPREDICTABLE;
+ }
+ 
++extern int retro68_hack_asm_rts_counter;
++
++void
++m68k_write_macsbug_name(FILE *file, const char *name, tree decl)
++{
++  int len = strlen(name);
++  if(len > 255)
++    len = 255;
++
++  const char *section_name = DECL_SECTION_NAME (decl);
++  if(flag_function_sections && section_name)
++      fprintf(file, "\t.pushsection %s.macsbug,\"ax\",@progbits\n", section_name);
++  fprintf(file, "# macsbug symbol\n");
++  if(!retro68_hack_asm_rts_counter)
++    fprintf(file, "\trts\n");
++  if(len < 32)
++    fprintf(file, "\t.byte %d\n", len | 0x80);
++  else
++    fprintf(file, "\t.byte 0x80\n\t.byte %d\n", len);
++
++  ASM_OUTPUT_ASCII(file, name, len);
++  fprintf(file, "\t.align 2,0\n\t.short 0\n");
++  if(flag_function_sections && section_name)
++        fprintf(file, "\t.popsection\n", section_name);
++}
++
++static tree
++m68k_mangle_decl_assembler_name (tree decl, tree id)
++{
++  tree new_id = NULL_TREE;
++
++  if (TREE_CODE (decl) == FUNCTION_DECL)
++    {
++      tree attrs = TYPE_ATTRIBUTES ( TREE_TYPE(decl) );
++      if (attrs != NULL_TREE)
++        {
++          if (lookup_attribute ("pascal", attrs))
++            {
++              const char *old_str = IDENTIFIER_POINTER (id != NULL_TREE ? id : DECL_NAME (decl));
++              char *new_str, *p;
++              int len = strlen(old_str);
++              new_str = XALLOCAVEC (char, 1 + len);
++              for(int i = 0; i < len; i++)
++                new_str[i] = TOUPPER(old_str[i]);
++              new_str[len] = 0;
++
++              return get_identifier (new_str);
++            }
++        }
++    }
++
++  return id;
++}
++
++static pad_direction
++m68k_function_arg_padding (machine_mode mode, const_tree type)
++{
++  return PAD_UPWARD;
++}
++
+ /* Implement PUSH_ROUNDING.  On the 680x0, sp@- in a byte insn really pushes
+    a word.  On the ColdFire, sp@- in a byte insn pushes just a byte.  */
+ 
+diff --git a/gcc-9.1.0/gcc/config/m68k/m68k.h b/gcc-9.1.0/gcc/config/m68k/m68k.h
+index fc65e524b..57eddd759 100644
+--- a/gcc-9.1.0/gcc/config/m68k/m68k.h
++++ b/gcc-9.1.0/gcc/config/m68k/m68k.h
+@@ -54,6 +54,7 @@ along with GCC; see the file COPYING3.  If not see
+ 
+ #define SUBTARGET_EXTRA_SPECS
+ 
++
+ /* Note that some other tm.h files include this one and then override
+    many of the definitions that relate to assembler syntax.  */
+ 
+@@ -193,9 +194,16 @@ along with GCC; see the file COPYING3.  If not see
+ 									\
+       builtin_assert ("cpu=m68k");					\
+       builtin_assert ("machine=m68k");					\
++      \
++      builtin_define("pascal=__attribute__((__pascal__))");	\
+     }									\
+   while (0)
+ 
++
++extern void m68k_register_pragmas(void);
++  /* Target Pragmas.  */
++#define REGISTER_TARGET_PRAGMAS() m68k_register_pragmas ()
++
+ /* Classify the groups of pseudo-ops used to assemble QI, HI and SI
+    quantities.  */
+ #define INT_OP_STANDARD	0	/* .byte, .short, .long */
+@@ -287,7 +295,7 @@ along with GCC; see the file COPYING3.  If not see
+ 
+ #define UNITS_PER_WORD 4
+ 
+-#define PARM_BOUNDARY (TARGET_SHORT ? 16 : 32)
++#define PARM_BOUNDARY 16 /* (TARGET_SHORT ? 16 : 32) */
+ #define STACK_BOUNDARY 16
+ #define FUNCTION_BOUNDARY 16
+ #define EMPTY_FIELD_BOUNDARY 16
+@@ -340,7 +348,7 @@ along with GCC; see the file COPYING3.  If not see
+   0, 0, 0, 0, 0, 0, 0, 0,      \
+                                \
+   /* Address registers.  */    \
+-  0, 0, 0, 0, 0, 0, 0, 1,      \
++  0, 0, 0, 0, 0, 1, 0, 1,      \
+                                \
+   /* Floating point registers  \
+      (if available).  */       \
+@@ -357,10 +365,10 @@ along with GCC; see the file COPYING3.  If not see
+    Aside from that, you can include as many other registers as you like.  */
+ #define CALL_USED_REGISTERS     \
+  {/* Data registers.  */        \
+-  1, 1, 0, 0, 0, 0, 0, 0,       \
++  1, 1, 1, 0, 0, 0, 0, 0,       \
+                                 \
+   /* Address registers.  */     \
+-  1, 1, 0, 0, 0, 0, 0, 1,       \
++  1, 1, 0, 0, 0, 1, 0, 1,       \
+                                 \
+   /* Floating point registers   \
+      (if available).  */        \
+@@ -473,8 +481,7 @@ extern enum reg_class regno_reg_class[];
+ #define FIRST_PARM_OFFSET(FNDECL) 8
+ 
+ /* On the m68k the return value defaults to D0.  */
+-#define FUNCTION_VALUE(VALTYPE, FUNC)  \
+-  gen_rtx_REG (TYPE_MODE (VALTYPE), D0_REG)
++//  gen_rtx_REG (TYPE_MODE (VALTYPE), D0_REG)
+ 
+ /* On the m68k the return value defaults to D0.  */
+ #define LIBCALL_VALUE(MODE)  gen_rtx_REG (MODE, D0_REG)
+@@ -490,13 +497,21 @@ extern enum reg_class regno_reg_class[];
+ /* On the m68k, all arguments are usually pushed on the stack.  */
+ #define FUNCTION_ARG_REGNO_P(N) 0
+ 
+-/* On the m68k, this is a single integer, which is a number of bytes
+-   of arguments scanned so far.  */
+-#define CUMULATIVE_ARGS int
++
++typedef struct {
++	int bytes; /* number of bytes  of arguments scanned so far.  */
++	int total_count;
++	int index;
++	int regparam;
++    int arg_regs[32];
++    
++} CUMULATIVE_ARGS;
++
++extern void m68k_init_cumulative_args (CUMULATIVE_ARGS *cum, const_tree fntype, rtx libname, const_tree fundecl, int n_named_args);
+ 
+ /* On the m68k, the offset starts at 0.  */
+ #define INIT_CUMULATIVE_ARGS(CUM, FNTYPE, LIBNAME, INDIRECT, N_NAMED_ARGS) \
+- ((CUM) = 0)
++  m68k_init_cumulative_args(&(CUM), (FNTYPE), (LIBNAME), (INDIRECT), (N_NAMED_ARGS));
+ 
+ #define FUNCTION_PROFILER(FILE, LABELNO)  \
+   asm_fprintf (FILE, "\tlea %LLP%d,%Ra0\n\tjsr mcount\n", (LABELNO))
+@@ -926,7 +941,8 @@ extern const char *m68k_symbolic_call;
+ extern const char *m68k_symbolic_jump;
+ 
+ enum M68K_SYMBOLIC_CALL { M68K_SYMBOLIC_CALL_NONE, M68K_SYMBOLIC_CALL_JSR,
+-			  M68K_SYMBOLIC_CALL_BSR_C, M68K_SYMBOLIC_CALL_BSR_P };
++			  M68K_SYMBOLIC_CALL_BSR_C, M68K_SYMBOLIC_CALL_BSR_P,
++			  M68K_SYMBOLIC_CALL_BSRW_C };
+ 
+ extern enum M68K_SYMBOLIC_CALL m68k_symbolic_call_var;
+ 
+@@ -945,3 +961,15 @@ extern int m68k_sched_address_bypass_p (rtx_insn *, rtx_insn *);
+ extern int m68k_sched_indexed_address_bypass_p (rtx_insn *, rtx_insn *);
+ 
+ #define CPU_UNITS_QUERY 1
++
++#define ASM_DECLARE_FUNCTION_SIZE(FILE, FNAME, DECL)		\
++  do								\
++    {								\
++      if (!flag_inhibit_size_directive)				\
++	ASM_OUTPUT_MEASURED_SIZE (FILE, FNAME);			\
++      m68k_write_macsbug_name(FILE, FNAME, DECL);			\
++    }								\
++  while (0)
++
++extern int m68k_is_pascal_func(tree, tree);
++#define IS_PASCAL_FUNC(fntype, fndecl) m68k_is_pascal_func(fntype, fndecl)
+diff --git a/gcc-9.1.0/gcc/config/m68k/m68k.md b/gcc-9.1.0/gcc/config/m68k/m68k.md
+index 31e8767e7..0720c56a4 100644
+--- a/gcc-9.1.0/gcc/config/m68k/m68k.md
++++ b/gcc-9.1.0/gcc/config/m68k/m68k.md
+@@ -1119,12 +1119,26 @@
+    move%.b %1,%0"
+   [(set_attr "type" "clr,clr,move,move")])
+ 
+-(define_expand "pushqi1"
+-  [(set (reg:SI SP_REG) (plus:SI (reg:SI SP_REG) (const_int -2)))
+-   (set (mem:QI (plus:SI (reg:SI SP_REG) (const_int 1)))
+-	(match_operand:QI 0 "general_operand" ""))]
++; (define_expand "pushqi1"
++;  [(set (reg:SI SP_REG) (plus:SI (reg:SI SP_REG) (const_int -2)))
++;   (set (mem:QI (reg:SI SP_REG) )
++;	(match_operand:QI 0 "general_operand" ""))]
++;  "!TARGET_COLDFIRE"
++;  "")
++
++; (define_insn "*pushqi1"
++;  [(set (reg:SI SP_REG) (plus:SI (reg:SI SP_REG) (const_int -2)))
++;   (set (mem:QI (reg:SI SP_REG) )
++;	(match_operand:QI 0 "general_operand" ""))]
++;  "!TARGET_COLDFIRE"
++;  { return "move%.b %0,%-"; })
++
++(define_insn "*pushqi1"
++  [
++   (set (mem:QI (pre_modify:SI (reg:SI SP_REG) (plus:SI (reg:SI SP_REG) (const_int -2))))
++	(match_operand:QI 0 "general_operand" "dmn"))]
+   "!TARGET_COLDFIRE"
+-  "")
++  { return "move%.b %0,%-"; })
+ 
+ (define_expand "reload_insf"
+   [(set (match_operand:SF 0 "nonimmediate_operand" "=f")
+@@ -6932,6 +6946,41 @@
+   operands[1] = m68k_legitimize_call_address (operands[1]);
+ })
+ 
++(define_expand "call_pop"
++  [(parallel [(call (match_operand:QI 0 "memory_operand" "")
++		    (match_operand:SI 1 "general_operand" ""))
++	      (set (reg:SI SP_REG)
++		   (plus:SI (reg:SI SP_REG)
++			    (match_operand:SI 3 "" "")))])]
++  ""
++{
++  operands[0] = m68k_legitimize_call_address (operands[0]);
++})
++(define_expand "call_value_pop"
++  [(parallel [(set (match_operand 0 "" "")
++                   (call (match_operand:QI 1 "memory_operand" "")
++		         (match_operand:SI 2 "general_operand" "")))
++	      (set (reg:SI SP_REG)
++		   (plus:SI (reg:SI SP_REG)
++			    (match_operand:SI 4 "" "")))])]
++  ""
++{
++  operands[1] = m68k_legitimize_call_address (operands[1]);
++})
++
++(define_insn "*call_pop"
++  [(call (mem:QI (match_operand:SI 0 "call_operand" "a,W"))
++	 (match_operand:SI 1 "general_operand" "g,g"))
++         (set (reg:SI SP_REG)
++		   (plus:SI (reg:SI SP_REG)
++			    (match_operand:SI 2 "" "")))]
++  ;; Operand 1 not really used on the m68000.
++  "!SIBLING_CALL_P (insn)"
++{
++  return output_call (operands[0]);
++}
++  [(set_attr "type" "jsr")])
++
+ (define_insn "*non_symbolic_call_value"
+   [(set (match_operand 0 "" "=rf,rf")
+ 	(call (mem:QI (match_operand:SI 1 "non_symbolic_call_operand" "a,W"))
+@@ -6950,7 +6999,7 @@
+   "!SIBLING_CALL_P (insn) && m68k_symbolic_call_var == M68K_SYMBOLIC_CALL_JSR"
+ {
+   operands[0] = operands[1];
+-  return m68k_symbolic_call;
++  return output_call (operands[0]);
+ }
+   [(set_attr "type" "jsr")
+    (set_attr "opx" "1")])
+@@ -6962,14 +7011,66 @@
+   ;; Operand 2 not really used on the m68000.
+   "!SIBLING_CALL_P (insn)
+    && (m68k_symbolic_call_var == M68K_SYMBOLIC_CALL_BSR_C
+-       || m68k_symbolic_call_var == M68K_SYMBOLIC_CALL_BSR_P)"
++       || m68k_symbolic_call_var == M68K_SYMBOLIC_CALL_BSR_P
++       || m68k_symbolic_call_var == M68K_SYMBOLIC_CALL_BSRW_C)"
++{
++  operands[0] = operands[1];
++  return output_call (operands[0]);
++}
++  [(set_attr "type" "bsr")
++   (set_attr "opx" "1")])
++
++
++(define_insn "*non_symbolic_call_value_pop"
++  [(set (match_operand 0 "" "=rf,rf")
++	(call (mem:QI (match_operand:SI 1 "non_symbolic_call_operand" "a,W"))
++	      (match_operand:SI 2 "general_operand" "g,g")))
++   (set (reg:SI SP_REG)
++		   (plus:SI (reg:SI SP_REG)
++			    (match_operand:SI 3 "" "")))]
++  ;; Operand 2 not really used on the m68000.
++  "!SIBLING_CALL_P (insn)"
++  "jsr %a1"
++  [(set_attr "type" "jsr")
++   (set_attr "opx" "1")])
++
++(define_insn "*symbolic_call_value_pop_jsr"
++  [(set (match_operand 0 "" "=rf,rf")
++	(call (mem:QI (match_operand:SI 1 "symbolic_operand" "a,W"))
++	      (match_operand:SI 2 "general_operand" "g,g")))
++   (set (reg:SI SP_REG)
++		   (plus:SI (reg:SI SP_REG)
++			    (match_operand:SI 3 "" "")))]
++  ;; Operand 2 not really used on the m68000.
++  "!SIBLING_CALL_P (insn) && m68k_symbolic_call_var == M68K_SYMBOLIC_CALL_JSR"
++{
++  operands[0] = operands[1];
++  return output_call (operands[0]);
++}
++  [(set_attr "type" "jsr")
++   (set_attr "opx" "1")])
++
++(define_insn "*symbolic_call_value_pop_bsr"
++  [(set (match_operand 0 "" "=rf,rf")
++	(call (mem:QI (match_operand:SI 1 "symbolic_operand" "a,W"))
++	      (match_operand:SI 2 "general_operand" "g,g")))
++   (set (reg:SI SP_REG)
++		   (plus:SI (reg:SI SP_REG)
++			    (match_operand:SI 3 "" "")))]
++  ;; Operand 2 not really used on the m68000.
++  "!SIBLING_CALL_P (insn)
++   && (m68k_symbolic_call_var == M68K_SYMBOLIC_CALL_BSR_C
++       || m68k_symbolic_call_var == M68K_SYMBOLIC_CALL_BSR_P
++       || m68k_symbolic_call_var == M68K_SYMBOLIC_CALL_BSRW_C)"
+ {
+   operands[0] = operands[1];
+-  return m68k_symbolic_call;
++  return output_call (operands[0]);
+ }
+   [(set_attr "type" "bsr")
+    (set_attr "opx" "1")])
+ 
++
++
+ ;; Call subroutine returning any type.
+ 
+ (define_expand "untyped_call"
+@@ -7046,6 +7147,7 @@
+   [(return)]
+   ""
+ {
++  extern int retro68_hack_asm_rts_counter;
+   switch (m68k_get_function_kind (current_function_decl))
+     {
+     case m68k_fk_interrupt_handler:
+@@ -7055,11 +7157,17 @@
+       return "sleep";
+ 
+     default:
++      retro68_hack_asm_rts_counter = 2;
+       if (crtl->args.pops_args)
+ 	{
+ 	  operands[0] = GEN_INT (crtl->args.pops_args);
+-	  return "rtd %0";
+-	}
++          if (TARGET_68020)
++            return "rtd %0";
++          else
++            return "move.l (%%a7)+, %%a0\n"
++                 "\tlea %a0(%%a7), %%a7\n"
++                 "\tjmp (%%a0)";
++  	}
+       else
+ 	return "rts";
+     }
+diff --git a/gcc-9.1.0/gcc/config/m68k/m68kemb.h b/gcc-9.1.0/gcc/config/m68k/m68kemb.h
+index 893cc756d..64362c179 100644
+--- a/gcc-9.1.0/gcc/config/m68k/m68kemb.h
++++ b/gcc-9.1.0/gcc/config/m68k/m68kemb.h
+@@ -17,8 +17,6 @@
+    and unions in registers, which is slightly more efficient.  */
+ #define DEFAULT_PCC_STRUCT_RETURN 0
+ 
+-#undef FUNCTION_VALUE
+-#define FUNCTION_VALUE(VALTYPE,FUNC) LIBCALL_VALUE (TYPE_MODE (VALTYPE))
+ 
+ #undef LIBCALL_VALUE
+ #define LIBCALL_VALUE(MODE)					\
+diff --git a/gcc-9.1.0/gcc/config/m68k/t-m68k b/gcc-9.1.0/gcc/config/m68k/t-m68k
+index cbff34d65..cff52fb59 100644
+--- a/gcc-9.1.0/gcc/config/m68k/t-m68k
++++ b/gcc-9.1.0/gcc/config/m68k/t-m68k
+@@ -2,3 +2,7 @@
+ 
+ M68K_MLIB_CPU += && (CPU !~ "^mcf")
+ M68K_ARCH := m68k
++
++M68K_MLIB_CPU += && (CPU !~ "^m68060") && (CPU !~ "^cpu32") && (CPU !~ "^fidoa")
++
++PASSES_EXTRA += $(srcdir)/config/m68k/m68k-passes.def
+diff --git a/gcc-9.1.0/gcc/config/m68k/t-macos b/gcc-9.1.0/gcc/config/m68k/t-macos
+new file mode 100644
+index 000000000..1ef1c285f
+--- /dev/null
++++ b/gcc-9.1.0/gcc/config/m68k/t-macos
+@@ -0,0 +1,5 @@
++m68k-mac-pragmas.o: $(srcdir)/config/m68k/m68k-mac-pragmas.c
++	  $(COMPILE) $<
++	  $(POSTCOMPILE)
++
++M68K_MLIB_CPU += && (CPU !~ "^m68060") && (CPU !~ "^cpu32") && (CPU !~ "^fidoa")
+diff --git a/gcc-9.1.0/gcc/config/rs6000/macos.h b/gcc-9.1.0/gcc/config/rs6000/macos.h
+new file mode 100644
+index 000000000..1176fe0c6
+--- /dev/null
++++ b/gcc-9.1.0/gcc/config/rs6000/macos.h
+@@ -0,0 +1,292 @@
++/* Definitions of target machine for GNU compiler,
++   for IBM RS/6000 POWER running AIX.
++   Copyright (C) 2000-2015 Free Software Foundation, Inc.
++
++   This file is part of GCC.
++
++   GCC is free software; you can redistribute it and/or modify it
++   under the terms of the GNU General Public License as published
++   by the Free Software Foundation; either version 3, or (at your
++   option) any later version.
++
++   GCC is distributed in the hope that it will be useful, but WITHOUT
++   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++   or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
++   License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with GCC; see the file COPYING3.  If not see
++   <http://www.gnu.org/licenses/>.  */
++
++/* Yes!  We are AIX!  */
++#define DEFAULT_ABI ABI_AIX
++#undef  TARGET_AIX
++#define TARGET_AIX 1
++
++/* Linux64.h wants to redefine TARGET_AIX based on -m64, but it can't be used
++   in the #if conditional in options-default.h, so provide another macro.  */
++#undef  TARGET_AIX_OS
++#define TARGET_AIX_OS 1
++
++/* AIX always has a TOC.  */
++#define TARGET_NO_TOC 0
++#define TARGET_TOC 1
++#define FIXED_R2 1
++
++/* AIX allows r13 to be used in 32-bit mode.  */
++#define FIXED_R13 0
++
++/* 32-bit and 64-bit AIX stack boundary is 128.  */
++#undef  STACK_BOUNDARY
++#define STACK_BOUNDARY 128
++
++#undef  TARGET_IEEEQUAD
++#define TARGET_IEEEQUAD 0
++
++
++#if HAVE_AS_REF
++/* Issue assembly directives that create a reference to the given DWARF table
++   identifier label from the current function section.  This is defined to
++   ensure we drag frame frame tables associated with needed function bodies in
++   a link with garbage collection activated.  */
++#define ASM_OUTPUT_DWARF_TABLE_REF rs6000_aix_asm_output_dwarf_table_ref
++#endif
++
++/* This is the only version of nm that collect2 can work with.  */
++//#define REAL_NM_FILE_NAME "/usr/ucb/nm"
++
++#define USER_LABEL_PREFIX  ""
++
++/* Don't turn -B into -L if the argument specifies a relative file name.  */
++#define RELATIVE_PREFIX_NOT_LINKDIR
++
++/* Because of the above, we must have gcc search itself to find libgcc.a.  */
++#define LINK_LIBGCC_SPECIAL_1
++
++#undef ASM_DEFAULT_SPEC
++#define ASM_DEFAULT_SPEC ""
++
++
++/* Static linking with shared libstdc++ requires libsupc++ as well.  */
++#define LIBSTDCXX_STATIC "supc++"
++
++/* Compute field alignment.
++   This implements the 'power' alignment rule by pegging the alignment of
++   items (beyond the first aggregate field) to 32 bits.  The pegging is
++   suppressed for vector and long double items (both 128 in size).
++   There is a dummy use of the FIELD argument to avoid an unused variable
++   warning (see PR59496).  */
++#define ADJUST_FIELD_ALIGN(FIELD, TYPE, COMPUTED)		\
++  ((void) (FIELD),						\
++    (TARGET_ALIGN_NATURAL					\
++     ? (COMPUTED)						\
++     : (COMPUTED) == 128					\
++	? 128							\
++	: MIN ((COMPUTED), 32)))
++
++/* AIX increases natural record alignment to doubleword if the first
++   field is an FP double while the FP fields remain word aligned.  */
++#define ROUND_TYPE_ALIGN(STRUCT, COMPUTED, SPECIFIED)			\
++  ((TREE_CODE (STRUCT) == RECORD_TYPE					\
++    || TREE_CODE (STRUCT) == UNION_TYPE					\
++    || TREE_CODE (STRUCT) == QUAL_UNION_TYPE)				\
++   && TARGET_ALIGN_NATURAL == 0						\
++   ? rs6000_special_round_type_align (STRUCT, COMPUTED, SPECIFIED)	\
++   : MAX ((COMPUTED), (SPECIFIED)))
++
++/* The AIX ABI isn't explicit on whether aggregates smaller than a
++   word/doubleword should be padded upward or downward.  One could
++   reasonably assume that they follow the normal rules for structure
++   layout treating the parameter area as any other block of memory,
++   then map the reg param area to registers, i.e., pad upward, which
++   is the way IBM Compilers for AIX behave.
++   Setting both of the following defines results in this behavior.  */
++#define AGGREGATE_PADDING_FIXED 1
++#define AGGREGATES_PAD_UPWARD_ALWAYS 1
++
++/* Specify padding for the last element of a block move between
++   registers and memory.  FIRST is nonzero if this is the only
++   element.  */
++#define BLOCK_REG_PADDING(MODE, TYPE, FIRST) \
++  (!(FIRST) ? PAD_UPWARD : targetm.calls.function_arg_padding (MODE, TYPE))
++
++
++/* Indicate that jump tables go in the text section.  */
++
++#define JUMP_TABLES_IN_TEXT_SECTION 1
++
++
++#define PROFILE_HOOK(LABEL)   output_profile_hook (LABEL)
++
++/* No version of AIX fully supports AltiVec or 64-bit instructions in
++   32-bit mode.  */
++#define OS_MISSING_POWERPC64 1
++#define OS_MISSING_ALTIVEC 1
++
++/* WINT_TYPE */
++#define WINT_TYPE "int"
++
++/* Static stack checking is supported by means of probes.  */
++#define STACK_CHECK_STATIC_BUILTIN 1
++
++/* Use standard DWARF numbering for DWARF debugging information.  */
++#define RS6000_USE_DWARF_NUMBERING
++
++
++
++/* MacOS does support Altivec.  */
++#/*undef  TARGET_ALTIVEC
++#define TARGET_ALTIVEC 1
++#undef  TARGET_ALTIVEC_ABI
++#define TARGET_ALTIVEC_ABI 1
++#undef  TARGET_ALTIVEC_VRSAVE
++#define TARGET_ALTIVEC_VRSAVE 1*/
++
++#undef TARGET_OS_CPP_BUILTINS
++/* __POWERPC__ must be defined for some header files */
++#define TARGET_OS_CPP_BUILTINS()          \
++  do                                      \
++    {                                     \
++      builtin_define ("__ppc__");               \
++      builtin_define ("__PPC__");               \
++      builtin_define ("__POWERPC__");           \
++      builtin_define ("__NATURAL_ALIGNMENT__"); \
++      builtin_assert ("system=macos");     \
++      builtin_assert ("cpu=powerpc");     \
++      builtin_assert ("machine=powerpc"); \
++            builtin_assert ("cpu=m68k");          \
++      builtin_assert ("machine=m68k");          \
++      builtin_define("pascal=__attribute__((__pascal__))");	\
++      builtin_define("__IEEE_BIG_ENDIAN"); \
++    }                                     \
++  while (0)
++
++/* --no-check-sections  :   sections overlap on purpose!
++   -undefined=_consolewrite : hack to allow easy configuration of console output             
++*/
++
++#define LINK_SPEC "%{!r:-btextro} -bhalt:4 -bnodelcsect \
++--no-check-sections -undefined=_consolewrite \
++%{shared:-bM:SRE}"
++
++#define LIB_SPEC "-lc"
++#define LIBGCC_SPEC "-lgcc %{carbon: -lretrocrt-carbon} %{!carbon: -lretrocrt} -lgcc %{carbon: -lCarbonLib} %{!carbon: -lInterfaceLib}"
++
++#define LINK_GCC_C_SEQUENCE_SPEC "--start-group -lgcc -lc %{carbon: -lretrocrt-carbon} %{!carbon: -lretrocrt} %{carbon: -lCarbonLib} %{!carbon: -lInterfaceLib} --end-group"
++
++#undef STARTFILE_SPEC
++#define STARTFILE_SPEC ""
++
++#undef CPP_SPEC
++#define CPP_SPEC "-Wno-trigraphs"
++
++#undef TARGET_DEFAULT
++#define TARGET_DEFAULT 0
++// (MASK_POWERPC | MASK_MULTIPLE | MASK_NEW_MNEMONICS)
++
++#undef PROCESSOR_DEFAULT
++#define PROCESSOR_DEFAULT PROCESSOR_PPC601
++
++#undef OS_MISSING_ALTIVEC
++#define OS_MISSING_ALTIVEC 0
++
++#undef VECTOR_SAVE_INLINE
++#define VECTOR_SAVE_INLINE(FIRST_REG) 1
++
++
++#define TARGET_USES_AIX64_OPT
++
++#undef TARGET_POINTERS_TO_NESTED_FUNCTIONS
++#define TARGET_POINTERS_TO_NESTED_FUNCTIONS 0
++
++/* Type used for ptrdiff_t, as a string used in a declaration.  */
++#undef PTRDIFF_TYPE
++#define PTRDIFF_TYPE "long int"
++
++/* The AIX linker will discard static constructors in object files before
++   collect has a chance to see them, so collect2 contains functionality
++   to scan the object files directly, enabled by:
++	#define COLLECT_EXPORT_LIST
++   
++   However, this seems to find all constructors and exception frame tables,
++   and thus leads to huge executables.
++   As we don't need to be compatible with the AIX linker, binutils had been
++   made to not discard these symbols any more *if* the corresponding object
++   file is loaded.
++*/
++
++/* Select a format to encode pointers in exception handling data.  CODE
++   is 0 for data, 1 for code labels, 2 for function pointers.  GLOBAL is
++   true if the symbol may be affected by dynamic relocations.  */
++#undef	ASM_PREFERRED_EH_DATA_FORMAT
++#define	ASM_PREFERRED_EH_DATA_FORMAT(CODE, GLOBAL) \
++  (DW_EH_PE_absptr)
++#undef EH_TABLES_CAN_BE_READ_ONLY
++#define EH_TABLES_CAN_BE_READ_ONLY 0
++
++#if 0
++/* On AIX, initialisers specified with -binitfini are called in breadth-first
++   order.
++   e.g. if a.out depends on lib1.so, the init function for a.out is called before
++   the init function for lib1.so.
++
++   To ensure global C++ constructors in linked libraries are run before global
++   C++ constructors from the current module, there is additional symbol scanning
++   logic in collect2.
++
++   The global initialiser/finaliser functions are named __GLOBAL_AIXI_{libname}
++   and __GLOBAL_AIXD_{libname} and are exported from each shared library.
++
++   collect2 will detect these symbols when they exist in shared libraries that
++   the current program is being linked against.  All such initiliser functions
++   will be called prior to the constructors of the current program, and
++   finaliser functions called after destructors.
++
++   Reference counting generated by collect2 will ensure that constructors are
++   only invoked once in the case of multiple dependencies on a library.
++
++   -binitfini is still used in parallel to this solution.
++   This handles the case where a library is loaded through dlopen(), and also
++   handles the option -blazy.
++*/
++#define COLLECT_SHARED_INIT_FUNC(STREAM, FUNC) \
++	  fprintf ((STREAM), "void %s() {\n\t%s();\n}\n", aix_shared_initname, (FUNC))
++#define COLLECT_SHARED_FINI_FUNC(STREAM, FUNC) \
++	  fprintf ((STREAM), "void %s() {\n\t%s();\n}\n", aix_shared_fininame, (FUNC))
++
++#endif
++
++
++
++#define SIG_ATOMIC_TYPE "int"
++
++#define INT8_TYPE "signed char"
++#define INT16_TYPE "short int"
++#define INT32_TYPE "long int"
++#define INT64_TYPE "long long int"
++#define UINT8_TYPE "unsigned char"
++#define UINT16_TYPE "short unsigned int"
++#define UINT32_TYPE "long unsigned int"
++#define UINT64_TYPE "long long unsigned int"
++
++#define INT_LEAST8_TYPE "signed char"
++#define INT_LEAST16_TYPE "short int"
++#define INT_LEAST32_TYPE "long int"
++#define INT_LEAST64_TYPE "long long int"
++#define UINT_LEAST8_TYPE "unsigned char"
++#define UINT_LEAST16_TYPE "short unsigned int"
++#define UINT_LEAST32_TYPE "long unsigned int"
++#define UINT_LEAST64_TYPE "long long unsigned int"
++
++#define INT_FAST8_TYPE "signed char"
++#define INT_FAST16_TYPE "short int"
++#define INT_FAST32_TYPE "long int"
++#define INT_FAST64_TYPE "long long int"
++#define UINT_FAST8_TYPE "unsigned char"
++#define UINT_FAST16_TYPE "short unsigned int"
++#define UINT_FAST32_TYPE "long unsigned int"
++#define UINT_FAST64_TYPE "long long unsigned int"
++
++#define INTPTR_TYPE "long int"
++#define UINTPTR_TYPE "long unsigned int"
++
+diff --git a/gcc-9.1.0/gcc/config/rs6000/rs6000.c b/gcc-9.1.0/gcc/config/rs6000/rs6000.c
+index f0de18d4d..6ce4f3cf9 100644
+--- a/gcc-9.1.0/gcc/config/rs6000/rs6000.c
++++ b/gcc-9.1.0/gcc/config/rs6000/rs6000.c
+@@ -1530,6 +1530,9 @@ static const struct attribute_spec rs6000_attribute_table[] =
+     rs6000_handle_struct_attribute, NULL },
+   { "gcc_struct", 0, 0, false, false, false, false,
+     rs6000_handle_struct_attribute, NULL },
++  { "pascal", 0, 0, false, true, true, false/*don't be strict about function pointers*/,
++    NULL, NULL },
++
+ #ifdef SUBTARGET_ATTRIBUTE_TABLE
+   SUBTARGET_ATTRIBUTE_TABLE,
+ #endif
+@@ -34341,8 +34344,8 @@ rs6000_xcoff_declare_object_name (FILE *file, const char *name, tree decl)
+   struct declare_alias_data data = {file, false};
+   RS6000_OUTPUT_BASENAME (file, name);
+   fputs (":\n", file);
+-  symtab_node::get_create (decl)->call_for_symbol_and_aliases (rs6000_declare_alias,
+-							       &data, true);
++  if(symtab_node::get (decl))
++    symtab_node::get (decl)->call_for_symbol_and_aliases (rs6000_declare_alias, &data, true);
+ }
+ 
+ /* Overide the default 'SYMBOL-.' syntax with AIX compatible 'SYMBOL-$'. */
+diff --git a/gcc-9.1.0/gcc/config/rs6000/rs6000.opt b/gcc-9.1.0/gcc/config/rs6000/rs6000.opt
+index f4b5c91e1..cc352d6cd 100644
+--- a/gcc-9.1.0/gcc/config/rs6000/rs6000.opt
++++ b/gcc-9.1.0/gcc/config/rs6000/rs6000.opt
+@@ -565,6 +565,9 @@ Use the given offset for addressing the stack-protector guard.
+ TargetVariable
+ long rs6000_stack_protector_guard_offset = 0
+ 
++carbon
++Target RejectNegative
++
+ ;; -mno-speculate-indirect-jumps adds deliberate misprediction to indirect
+ ;; branches via the CTR.
+ mspeculate-indirect-jumps
+diff --git a/gcc-9.1.0/gcc/config/rs6000/t-macos b/gcc-9.1.0/gcc/config/rs6000/t-macos
+new file mode 100644
+index 000000000..534dd94a4
+--- /dev/null
++++ b/gcc-9.1.0/gcc/config/rs6000/t-macos
+@@ -0,0 +1,35 @@
++# Copyright (C) 1998-2015 Free Software Foundation, Inc.
++#
++# This file is part of GCC.
++#
++# GCC is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 3, or (at your option)
++# any later version.
++#
++# GCC is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with GCC; see the file COPYING3.  If not see
++# <http://www.gnu.org/licenses/>.
++
++# Build the libraries for pthread and all of the 
++# different processor models
++
++#MULTILIB_OPTIONS	=
++# mcpu=powerpc
++
++#MULTILIB_DIRNAMES	= 
++#powerpc
++
++#MULTILIB_MATCHES	= 
++#			  mcpu?powerpc=mcpu?powerpc \
++#			  mcpu?powerpc=mcpu?601 \
++#			  mcpu?powerpc=mcpu?602 \
++#			  mcpu?powerpc=mcpu?603 \
++#			  mcpu?powerpc=mcpu?603e \
++#			  mcpu?powerpc=mcpu?604 \
++#			  mcpu?powerpc=mcpu?604e
+diff --git a/gcc-9.1.0/gcc/cp/decl.c b/gcc-9.1.0/gcc/cp/decl.c
+index 01c89cd57..0042a2f7e 100644
+--- a/gcc-9.1.0/gcc/cp/decl.c
++++ b/gcc-9.1.0/gcc/cp/decl.c
+@@ -8975,6 +8975,12 @@ grokfndecl (tree ctype,
+ 		  (IDENTIFIER_POINTER (declarator))))))
+     SET_DECL_LANGUAGE (decl, lang_c);
+ 
++  if (attrlist && lookup_attribute ("pascal", *attrlist))
++    {
++	    // paradoxical, but true: Mac pascal function names aren't mangled.
++      SET_DECL_LANGUAGE (decl, lang_c);
++    }
++
+   /* Should probably propagate const out from type to decl I bet (mrs).  */
+   if (staticp)
+     {
+diff --git a/gcc-9.1.0/gcc/cp/parser.c b/gcc-9.1.0/gcc/cp/parser.c
+index 3d908916a..7396614ef 100644
+--- a/gcc-9.1.0/gcc/cp/parser.c
++++ b/gcc-9.1.0/gcc/cp/parser.c
+@@ -2650,6 +2650,8 @@ static bool cp_parser_init_statement_p
+   (cp_parser *);
+ static bool cp_parser_skip_to_closing_square_bracket
+   (cp_parser *);
++static tree cp_parser_inline_opcodes
++  (cp_parser *);
+ 
+ /* Concept-related syntactic transformations */
+ 
+@@ -4094,6 +4096,7 @@ cp_parser_string_literal (cp_parser *parser, bool translate, bool wide_ok,
+   tree string_tree;
+   tree suffix_id = NULL_TREE;
+   bool curr_tok_is_userdef_p = false;
++  bool pascal_string = false;
+ 
+   tok = cp_lexer_peek_token (parser->lexer);
+   if (!cp_parser_is_string_literal (tok))
+@@ -4223,9 +4226,21 @@ cp_parser_string_literal (cp_parser *parser, bool translate, bool wide_ok,
+       type = CPP_STRING;
+     }
+ 
++  if (!strncmp((const char*)strs[0].text, "\"\\p", 3))
++    {
++       pascal_string = true;
++       /* replace \p by a valid escape sequence */
++       ((unsigned char*)strs[0].text)[2] = 'n';
++    }
++
+   if ((translate ? cpp_interpret_string : cpp_interpret_string_notranslate)
+       (parse_in, strs, count, &istr, type))
+     {
++      if (pascal_string)
++        {
++          /* put the real string length in */
++          ((unsigned char*)istr.text)[0] = (unsigned char) (istr.len - 2);
++        }
+       value = build_string (istr.len, (const char *)istr.text);
+       free (CONST_CAST (unsigned char *, istr.text));
+       if (count > 1)
+@@ -4239,7 +4254,10 @@ cp_parser_string_literal (cp_parser *parser, bool translate, bool wide_ok,
+ 	{
+ 	default:
+ 	case CPP_STRING:
+-	  TREE_TYPE (value) = char_array_type_node;
++          if (pascal_string)
++            TREE_TYPE (value) = uchar_array_type_node;
++          else
++            TREE_TYPE (value) = char_array_type_node;
+ 	  break;
+ 	case CPP_UTF8STRING:
+ 	  if (flag_char8_t)
+@@ -20443,20 +20461,42 @@ cp_parser_init_declarator (cp_parser* parser,
+     {
+       if (function_declarator_p (declarator))
+ 	{
+-	   if (initialization_kind == CPP_EQ)
+-	     initializer = cp_parser_pure_specifier (parser);
+-	   else
+-	     {
+-	       /* If the declaration was erroneous, we don't really
++	  if (initialization_kind == CPP_EQ)
++            {
++              if(member_p)
++                initializer = cp_parser_pure_specifier (parser);
++              else
++                {
++                  cp_token *token;
++                  cp_lexer_consume_token (parser->lexer);
++                  token = cp_lexer_peek_token (parser->lexer);
++                  if (token->keyword == RID_DEFAULT
++                      || token->keyword == RID_DELETE)
++                    {
++                      cp_lexer_consume_token (parser->lexer);
++                      maybe_warn_cpp0x (CPP0X_DEFAULTED_DELETED);
++                      initializer = token->u.value;
++                    }
++                  else
++                    {
++                      is_initialized = false;
++                      tree rawinline_attr = cp_parser_inline_opcodes (parser);
++                      decl_attributes (&decl, rawinline_attr, 0);                   
++                    }
++                }
++            }
++	  else
++	    {
++	      /* If the declaration was erroneous, we don't really
+ 		  know what the user intended, so just silently
+ 		  consume the initializer.  */
+-	       if (decl != error_mark_node)
++	      if (decl != error_mark_node)
+ 		 error_at (tmp_init_loc, "initializer provided for function");
+-	       cp_parser_skip_to_closing_parenthesis (parser,
++	      cp_parser_skip_to_closing_parenthesis (parser,
+ 						      /*recovering=*/true,
+ 						      /*or_comma=*/false,
+ 						      /*consume_paren=*/true);
+-	     }
++	    }
+ 	}
+       else
+ 	{
+@@ -41446,6 +41486,49 @@ finish_fully_implicit_template (cp_parser *parser, tree member_decl_opt)
+   return member_decl_opt;
+ }
+ 
++
++static tree cp_parser_inline_opcodes(cp_parser * parser)
++{
++  tree attr_args;
++  bool braced = false;
++    
++  braced = cp_lexer_next_token_is(parser->lexer, CPP_OPEN_BRACE);
++  if(braced)
++    cp_lexer_consume_token(parser->lexer);
++  
++  vec<tree, va_gc> *expr_list = make_tree_vector ();
++
++  if(!braced || !cp_lexer_next_token_is(parser->lexer, CPP_CLOSE_BRACE))
++  {
++    for(;;)
++    {
++      tree val = cp_parser_constant_expression (parser,
++                                                /*allow_non_constant_p=*/false,
++                                                NULL);
++      val = cp_fully_fold(val);						
++      vec_safe_push (expr_list, val);
++
++      if(cp_lexer_next_token_is(parser->lexer, CPP_COMMA))
++        cp_lexer_consume_token(parser->lexer);
++      else
++        break;
++    }
++  }
++
++  attr_args = build_tree_list_vec (expr_list);
++  release_tree_vector (expr_list);
++
++  if(braced)
++    {
++      if(cp_lexer_next_token_is(parser->lexer, CPP_CLOSE_BRACE))
++        cp_lexer_consume_token(parser->lexer);
++      else
++        cp_parser_error (parser, "expected %<}%>");
++    }
++  
++  return build_tree_list (canonicalize_attr_name(get_identifier("__raw_inline__")), attr_args);
++}
++
+ /* Like finish_fully_implicit_template, but to be used in error
+    recovery, rearranging scopes so that we restore the state we had
+    before synthesize_implicit_template_parm inserted the implement
+diff --git a/gcc-9.1.0/gcc/expr.c b/gcc-9.1.0/gcc/expr.c
+index fa15b7ece..e2ddab37b 100644
+--- a/gcc-9.1.0/gcc/expr.c
++++ b/gcc-9.1.0/gcc/expr.c
+@@ -4088,12 +4088,14 @@ find_args_size_adjust (rtx_insn *insn)
+       addr = XEXP (mem, 0);
+       switch (GET_CODE (addr))
+ 	{
++#ifdef PUSH_ROUNDING
+ 	case PRE_INC:
+ 	case POST_INC:
+-	  return GET_MODE_SIZE (GET_MODE (mem));
++	  return PUSH_ROUNDING( GET_MODE_SIZE (GET_MODE (mem)) );
+ 	case PRE_DEC:
+ 	case POST_DEC:
+-	  return -GET_MODE_SIZE (GET_MODE (mem));
++	  return -PUSH_ROUNDING( GET_MODE_SIZE (GET_MODE (mem)) );
++#endif
+ 	case PRE_MODIFY:
+ 	case POST_MODIFY:
+ 	  addr = XEXP (addr, 1);
+@@ -4128,6 +4130,19 @@ fixup_args_size_notes (rtx_insn *prev, rtx_insn *last,
+       gcc_assert (!note || known_eq (args_size, get_args_size (note)));
+ 
+       poly_int64 this_delta = find_args_size_adjust (insn);
++     
++      /* **** HALF-UNDERSTOOD HACK:
++
++        The original code here leaves out REG_ARGS_SIZE annotations for
++        instructions that don't adjust the stack under some circumstances.
++
++        In some situations, involving both m68k mac pascal functions 
++        and exception handling, this leads to a failure in dwarf2cfi.c:combine_traces.
++
++        Disabling the if (this_delta == 0) fixes this, but causes the subsequent gcc_assert 
++        to trip sometimes. Disabling both hasn't caused any observable problems... YET.
++
++
+       if (known_eq (this_delta, 0))
+ 	{
+ 	  if (!CALL_P (insn)
+@@ -4137,6 +4152,8 @@ fixup_args_size_notes (rtx_insn *prev, rtx_insn *last,
+ 	}
+ 
+       gcc_assert (!saw_unknown);
++
++      */
+       if (known_eq (this_delta, HOST_WIDE_INT_MIN))
+ 	saw_unknown = true;
+ 
+diff --git a/gcc-9.1.0/gcc/final.c b/gcc-9.1.0/gcc/final.c
+index fefc4874b..c0c26e937 100644
+--- a/gcc-9.1.0/gcc/final.c
++++ b/gcc-9.1.0/gcc/final.c
+@@ -3824,6 +3824,8 @@ do_assembler_dialects (const char *p, int *dialect)
+       and print a constant expression for minus the value
+       of the operand, with no other punctuation.  */
+ 
++int retro68_hack_asm_rts_counter = 0;
++
+ void
+ output_asm_insn (const char *templ, rtx *operands)
+ {
+@@ -3841,6 +3843,13 @@ output_asm_insn (const char *templ, rtx *operands)
+   if (*templ == 0)
+     return;
+ 
++  /* Hack: in Retro68, we want to know whether the last
++           instruction we output was an rts, so we know
++           whether we have to output an extra one as part
++           of the MacsBug name. */
++  if(retro68_hack_asm_rts_counter)
++    retro68_hack_asm_rts_counter--;
++
+   memset (opoutput, 0, sizeof opoutput);
+   p = templ;
+   putc ('\t', asm_out_file);
+diff --git a/gcc-9.1.0/gcc/function.c b/gcc-9.1.0/gcc/function.c
+index c6e862b33..ccfc4e352 100644
+--- a/gcc-9.1.0/gcc/function.c
++++ b/gcc-9.1.0/gcc/function.c
+@@ -2393,6 +2393,20 @@ assign_parms_augmented_arg_list (struct assign_parm_data_all *all)
+       all->function_result_decl = decl;
+     }
+ 
++#ifdef IS_PASCAL_FUNC
++  if (IS_PASCAL_FUNC(fntype, fndecl))
++    {
++        // reverse argument order
++      unsigned n = fnargs.length(), n2 = fnargs.length() / 2;
++      for(unsigned i = 0; i < n2; i++)
++      {
++        tree tmp = fnargs[i];
++        fnargs[i] = fnargs[n - 1 - i];
++        fnargs[n - 1 - i] = tmp;
++      }
++    }
++#endif
++
+   /* If the target wants to split complex arguments into scalars, do so.  */
+   if (targetm.calls.split_complex_arg)
+     split_complex_args (&fnargs);
+@@ -5344,6 +5358,20 @@ expand_function_end (void)
+       tree decl_result = DECL_RESULT (current_function_decl);
+       rtx decl_rtl = DECL_RTL (decl_result);
+ 
++#ifdef IS_PASCAL_FUNC
++      if (IS_PASCAL_FUNC(TREE_TYPE(current_function_decl), current_function_decl))
++	{
++	  enum machine_mode mode = GET_MODE(decl_rtl);;
++
++	  rtx return_slot = gen_int_mode(crtl->args.pops_args + 8, Pmode);
++	  return_slot = gen_rtx_PLUS(Pmode, arg_pointer_rtx, return_slot);
++	  return_slot = gen_rtx_MEM(mode, return_slot);
++	  MEM_VOLATILE_P(return_slot) = true;
++	  emit_move_insn (return_slot, decl_rtl);
++	  crtl->return_rtx = return_slot;
++	}
++      else
++#endif
+       if (REG_P (decl_rtl)
+ 	  ? REGNO (decl_rtl) >= FIRST_PSEUDO_REGISTER
+ 	  : DECL_REGISTER (decl_result))
+diff --git a/gcc-9.1.0/gcc/reload1.c b/gcc-9.1.0/gcc/reload1.c
+index bb112d817..cf674fab3 100644
+--- a/gcc-9.1.0/gcc/reload1.c
++++ b/gcc-9.1.0/gcc/reload1.c
+@@ -3035,6 +3035,8 @@ elimination_effects (rtx x, machine_mode mem_mode)
+ 		else
+ 		  ep->can_eliminate = 0;
+ 	      }
++            if (code == POST_DEC || code == POST_INC)
++              ep->can_eliminate = 0;
+ 	  }
+ 
+       /* These two aren't unary operators.  */
+diff --git a/gcc-9.1.0/gcc/rtlanal.c b/gcc-9.1.0/gcc/rtlanal.c
+index 268a38799..92cdc7475 100644
+--- a/gcc-9.1.0/gcc/rtlanal.c
++++ b/gcc-9.1.0/gcc/rtlanal.c
+@@ -1596,7 +1596,24 @@ set_noop_p (const_rtx set)
+     return 1;
+ 
+   if (MEM_P (dst) && MEM_P (src))
+-    return rtx_equal_p (dst, src) && !side_effects_p (dst);
++  {
++    if (rtx_equal_p (dst, src) && !side_effects_p (dst))
++	  return 1;
++
++    src = XEXP(src, 0); 
++	dst = XEXP(dst, 0);
++
++	if( GET_CODE(src) == POST_INC && GET_CODE(dst) == PRE_DEC )
++	{
++	  src = XEXP(src, 0);
++	  dst = XEXP(dst, 0);
++      if (rtx_equal_p (dst, src) && !side_effects_p (dst))
++	    return 1;
++
++	}
++
++    return 0;
++  }
+ 
+   if (GET_CODE (dst) == ZERO_EXTRACT)
+     return rtx_equal_p (XEXP (dst, 0), src)
+diff --git a/gcc-9.1.0/gcc/system.h b/gcc-9.1.0/gcc/system.h
+index d04f8fd33..69d195d85 100644
+--- a/gcc-9.1.0/gcc/system.h
++++ b/gcc-9.1.0/gcc/system.h
+@@ -145,7 +145,7 @@ extern int fgetc_unlocked (FILE *);
+ extern char *fgets_unlocked (char *, int, FILE *);
+ #  endif
+ # endif
+-# ifdef HAVE_FPUTS_UNLOCKED
++# if defined (HAVE_FPUTS_UNLOCKED) && !defined (__CYGWIN__)
+ #  undef fputs
+ #  define fputs(String, Stream) fputs_unlocked (String, Stream)
+ #  if defined (HAVE_DECL_FPUTS_UNLOCKED) && !HAVE_DECL_FPUTS_UNLOCKED
+diff --git a/gcc-9.1.0/libcc1/cc1plugin-config.h.in b/gcc-9.1.0/libcc1/cc1plugin-config.h.in
+index ac06357ba..e1f32b36a 100644
+--- a/gcc-9.1.0/libcc1/cc1plugin-config.h.in
++++ b/gcc-9.1.0/libcc1/cc1plugin-config.h.in
+@@ -34,8 +34,7 @@
+ /* Define to 1 if you have the <unistd.h> header file. */
+ #undef HAVE_UNISTD_H
+ 
+-/* Define to the sub-directory in which libtool stores uninstalled libraries.
+-   */
++/* Define to the sub-directory where libtool stores uninstalled libraries. */
+ #undef LT_OBJDIR
+ 
+ /* Define to the address where bug reports for this package should be sent. */
+diff --git a/gcc-9.1.0/libcpp/charset.c b/gcc-9.1.0/libcpp/charset.c
+index 8a0e5cbb2..67eddcc7f 100644
+--- a/gcc-9.1.0/libcpp/charset.c
++++ b/gcc-9.1.0/libcpp/charset.c
+@@ -1828,7 +1828,7 @@ narrow_str_to_charconst (cpp_reader *pfile, cpp_string str,
+       cpp_error (pfile, CPP_DL_WARNING,
+ 		 "character constant too long for its type");
+     }
+-  else if (i > 1 && CPP_OPTION (pfile, warn_multichar))
++  else if (i > 1 && i != 4 && CPP_OPTION (pfile, warn_multichar))
+     cpp_warning (pfile, CPP_W_MULTICHAR, "multi-character character constant");
+ 
+   /* Multichar constants are of type int and therefore signed.  */
+diff --git a/gcc-9.1.0/libgcc/config.host b/gcc-9.1.0/libgcc/config.host
+index 91abc84da..820da40f5 100644
+--- a/gcc-9.1.0/libgcc/config.host
++++ b/gcc-9.1.0/libgcc/config.host
+@@ -870,6 +870,10 @@ m32rle-*-linux*)
+ m68k-*-elf* | fido-*-elf)
+ 	tmake_file="$tmake_file m68k/t-floatlib"
+ 	;;
++m68k-*-macos)
++	extra_parts="crtbegin.o crtend.o"
++	tmake_file="$tmake_file m68k/t-floatlib"
++	;;
+ m68k*-*-netbsdelf*)
+ 	;;
+ m68k*-*-openbsd*)
+@@ -1204,6 +1208,9 @@ rs6000-ibm-aix[56789].* | powerpc-ibm-aix[56789].*)
+ 	tmake_file="t-fdpbit rs6000/t-ppc64-fp rs6000/t-slibgcc-aix rs6000/t-ibm-ldouble rs6000/t-aix-cxa"
+ 	extra_parts="crtcxa.o crtcxa_s.o crtdbase.o"
+ 	;;
++powerpc-*-macos)
++	tmake_file="t-fdpbit rs6000/t-ibm-ldouble"
++	;;
+ rl78-*-elf)
+ 	tmake_file="$tm_file t-fdpbit rl78/t-rl78"
+ 	;;
+diff --git a/gcc-9.1.0/libgcc/config/rs6000/cxa_finalize.c b/gcc-9.1.0/libgcc/config/rs6000/cxa_finalize.c
+index fe6621b79..b15d47dbe 100644
+--- a/gcc-9.1.0/libgcc/config/rs6000/cxa_finalize.c
++++ b/gcc-9.1.0/libgcc/config/rs6000/cxa_finalize.c
+@@ -29,7 +29,7 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+ #include "exit.h"
+ 
+ 
+-static boolean_t
++static int
+ catomic_compare_and_exchange_bool_acq (long *mem, long newval, long oldval)
+ {
+   return ! __atomic_compare_exchange (mem, &oldval, &newval, 0,

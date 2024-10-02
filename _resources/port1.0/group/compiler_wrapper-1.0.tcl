@@ -58,7 +58,7 @@ proc compwrap::comp_flags {tag} {
     }
     if { ![option compwrap.append_arch_flags] ||
          [catch {get_canonical_archflags ${tag}} flags] } {
-        set flags [join ""]
+        set flags ""
     }
     global configure.${ftag}flags
     if { [info exists configure.${ftag}flags] } {

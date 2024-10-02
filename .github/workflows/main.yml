@@ -22,20 +22,23 @@ jobs:
       group: ${{ github.ref }}/${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [macos-11, macos-12, macos-13]
+        os: [macos-12, macos-13, macos-14]
 
     steps:
       - name: Checkout ports
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 64
           path: ports
+          show-progress: false
       - name: Checkout mpbb
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: macports/mpbb
           path: mpbb
+          show-progress: false
       - name: Bootstrap MacPorts
         run: . ports/.github/workflows/bootstrap.sh
       - name: Determine list of changed ports
@@ -112,7 +115,7 @@ jobs:
               else
                 echo "##### ⚠️ ${subport}" >> $GITHUB_STEP_SUMMARY
               fi
-              printf '```\n%s```\n' "$messages" >> $GITHUB_STEP_SUMMARY
+              printf '```\n%s\n```\n' "$messages" >> $GITHUB_STEP_SUMMARY
 
               # See https://github.com/actions/toolkit/issues/193#issuecomment-605394935
               encoded_messages="port lint ${subport}:%0A"
@@ -204,6 +207,49 @@ jobs:
 
             echo "✅ Successfully built" >> $GITHUB_STEP_SUMMARY
             echo "::endgroup::"
+
+            echo "::group::Testing ${subport}"
+
+            test_fail=0
+            set +e
+            sudo mpbb \
+              --work-dir "$workdir" \
+              test-port \
+              --builtin-only \
+              "$subport"
+            test_exit=$?
+            set -e
+
+            if [ "$test_exit" -ne 0 ]; then
+              echo "::endgroup::"
+              echo "::error::Tests failed for ${subport}"
+
+              echo "❌ Tests failed, see the log for more details" >> $GITHUB_STEP_SUMMARY
+
+              # Not setting fail=1 as a 100% passing test suite is not considered
+              # essential to merge a PR.
+              test_fail=1
+            fi
+
+            test_msgs=$(port log --phase test --level warn "$subport")
+
+            if [ -n "$test_msgs" ]; then
+              echo "$test_msgs"
+              echo "⚠️ Test warnings" >> $GITHUB_STEP_SUMMARY
+
+              printf '```\n%s\n```\n' "$test_msgs" >> $GITHUB_STEP_SUMMARY
+
+              path=$(port file "$subport")
+              # See https://github.com/actions/toolkit/issues/193#issuecomment-605394935
+              encoded_messages="port test ${subport}:%0A"
+              encoded_messages+="$(echo "${test_msgs}" | sed -E 's/$/%0A/g' | tr -d '\n')"
+              echo "::warning file=${path#${PWD}/ports/},line=1,col=1::${encoded_messages}"
+            elif [ $test_fail -eq 0 ]; then
+                 echo "✅ Successfully tested" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "::endgroup::"
+
           done
 
           exit "$fail"
@@ -222,7 +268,7 @@ jobs:
             -exec chmod -R go+rX {} \;
       - name: Archive build logs
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: logs-${{ matrix.os }}.zip
+          name: logs-${{ matrix.os }}
           path: /tmp/mpbb/*/logs

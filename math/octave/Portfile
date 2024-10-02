@@ -4,16 +4,17 @@ PortSystem          1.0
 PortGroup           compilers  1.0
 PortGroup           muniversal 1.0
 PortGroup           compiler_blacklist_versions 1.0
+PortGroup           legacysupport 1.1
 PortGroup           linear_algebra 1.0
 
 name                octave
-version             8.3.0
-set package_version 8.x.x
+version             9.2.0
+set package_version 9.x.x
 revision            1
 
 categories          math science
 license             GPL-3+
-maintainers         {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
+maintainers         {mcalhoun @MarcusCalhoun-Lopez} {mps @Schamschula} openmaintainer
 description         a high-level language for numerical computations
 long_description    \
     GNU Octave is a high-level language, primarily intended for numerical \
@@ -24,13 +25,13 @@ homepage            https://www.gnu.org/software/octave
 
 master_sites        gnu:octave
 
-checksums           rmd160  dd95c7d1f95dfe94c3cb1fb52f74a0f766d7c295 \
-                    sha256  2b48111cb67b312817e5d1f3e171f5bad1512bb067e1674b9c4b29281895b97a \
-                    size    37535048
+checksums           rmd160  df77e36534a6c279c6b51c312cf6baa3249bfe59 \
+                    sha256  0636554b05996997e431caad4422c00386d2d7c68900472700fecf5ffeb7c991 \
+                    size    37805062
 
 # see https://lists.gnu.org/archive/html/octave-maintainers/2016-05/msg00286.html
 compiler.cxx_standard \
-                    2011
+                    2017
 
 # if there is an error bulding octave package, avoid
 #    error: structure has no member 'dir'
@@ -38,7 +39,8 @@ patchfiles-append patch-better_error.diff
 
 # bsdtar and tar have different outputs
 # starting in Mac OS X Snow Leopard (10.6), tar is an alias of bsdtar
-if { ${os.platform} eq "darwin" && ${os.major} >= 10 } {
+# this patch breaks packages builds on 10.6 ppc, so exclude it there
+if { ${os.platform} eq "darwin" && ${os.major} >= 10 && ${os.arch} ne "powerpc" } {
     patchfiles-append patch-bsdtar.diff
 }
 
@@ -73,18 +75,43 @@ post-patch {
         ${worksrcpath}/Makefile.in
 }
 
-post-patch {
-    if { ${os.arch} eq "i386" } {
-        if { ${os.platform} eq "darwin" && ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
-            set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
-        } else {
-            set short_host_name i686-apple-${os.platform}${os.major}.x.x
+# https://trac.macports.org/ticket/69575
+legacysupport.redirect_bins mkoctfile-${version} octave-${version} octave-cli-${version} octave-config-${version}
+
+if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
+    # Patch the script which runs at destroot:
+    patchfiles-append patch-run-octave-libstdcpp.diff
+
+    post-patch {
+        reinplace "s|%PREFIX%|${prefix}|" ${worksrcpath}/run-octave.in
+    }
+
+    # Patch scripts installed by LegacySupport so that they call correct binaries.
+    post-activate {
+        foreach obin {mkoctfile octave octave-cli octave-config} {
+            reinplace "s|\"\${0}-orig\"|$obin-${version}-orig|" \
+                ${prefix}/bin/${obin}-${version}
         }
-    } else {
-        if { ${os.platform} eq "darwin" && ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
-            set short_host_name powerpc64-apple-${os.platform}${os.major}.x.x
-        } else {
+    }
+}
+
+post-patch {
+    platform darwin {
+        # Keep ppc before i386, so that Rosetta builds for ppc.
+        # Also, use build_arch and not sysctl:
+        # https://trac.macports.org/ticket/69573
+        if { ${configure.build_arch} eq "arm64" } {
+            set short_host_name aarch64-apple-${os.platform}${os.major}.x.x
+        } elseif { ${configure.build_arch} eq "ppc" } {
             set short_host_name powerpc-apple-${os.platform}${os.major}.x.x
+        } elseif { ${configure.build_arch} eq "ppc64" } {
+            set short_host_name powerpc64-apple-${os.platform}${os.major}.x.x
+        } elseif { ${os.arch} eq "i386" } {
+            if { ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
+                set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
+            } else {
+                set short_host_name i686-apple-${os.platform}${os.major}.x.x
+            }
         }
     }
     reinplace \
@@ -136,7 +163,7 @@ compiler.blacklist-append {clang <= 802}
 # see see https://trac.macports.org/ticket/53044
 compiler.blacklist-append {*gcc-4.6}
 
-configure.checks.implicit_function_declaration.whitelist-append strchr
+configure.checks.implicit_function_declaration.whitelist-append strchr unreachable
 
 # see https://wiki.octave.org/Building for a list of dependencies
 
@@ -283,8 +310,8 @@ configure.args-append       \
     --enable-link-all-dependencies
 
 # in configure.ac, listed as one of "[p]rograms used when running Octave"
-depends_lib-append port:python311
-configure.python ${prefix}/bin/python3.11
+depends_lib-append port:python312
+configure.python ${prefix}/bin/python3.12
 
 # in configure.ac, listed as one of "[p]rograms used when running Octave"
 depends_lib-append port:ghostscript
@@ -334,9 +361,11 @@ depends_lib-append  port:hdf5
 #    fatal error: 'mpi.h' file not found
 # see https://github.com/macports/macports-ports/pull/1865
 #    for a discussion
-foreach mpi {mpich mpich_devel openmpi openmpi_devel} {
-    require_active_variants hdf5 "" ${mpi}
-}
+# UPD. 2024.03. No longer an issue, apparently:
+# https://trac.macports.org/ticket/69574
+# foreach mpi {mpich mpich_devel openmpi openmpi_devel} {
+#     require_active_variants hdf5 "" ${mpi}
+# }
 
 #--disable-fftw-threads
 #--without-fftw3
@@ -363,12 +392,16 @@ configure.args-append --without-openssl
 # see https://trac.macports.org/ticket/56989
 configure.args-append \
     --without-sundials_nvecserial \
-    --without-sundials_ida
+    --without-sundials_ida \
+    --without-sundials_sunlinsolklu \
+    --without-sundials_core
 variant sundials description {enable sundials support for solving ODEs} {
-    set sundials_ver     5
+    set sundials_ver     6
     set sundials_base    ${prefix}/libexec/sundials${sundials_ver}
     set sundials_include ${sundials_base}/include
     set sundials_lib     ${sundials_base}/lib
+
+    configure.env-append "CXXFLAGS=-std=gnu++17"
 
     depends_lib-append \
         port:sundials${sundials_ver}
@@ -376,14 +409,17 @@ variant sundials description {enable sundials support for solving ODEs} {
         ${sundials_include}
     compiler.library_path-append \
         ${sundials_lib}
-    configure.args-delete \
-        --without-sundials_nvecserial \
-        --without-sundials_ida
+     configure.args-delete \
+         --without-sundials_nvecserial \
+         --without-sundials_ida \
+         --without-sundials_sunlinsolklu
     configure.args-append \
-        --with-sundials_ida-includedir=${sundials_include}/ida \
+        --with-sundials_ida-includedir=${sundials_include} \
         --with-sundials_ida-libdir=${sundials_lib} \
-        --with-sundials_nvecserial-includedir=${sundials_include}/nvector \
-        --with-sundials_nvecserial-libdir=${sundials_lib}
+        --with-sundials_nvecserial-includedir=${sundials_include} \
+        --with-sundials_nvecserial-libdir=${sundials_lib} \
+        --with-sundials_sunlinsolklu-includedir=${sundials_include} \
+        --with-sundials_sunlinsolklu-libdir=${sundials_lib}
 }
 default_variants-append +sundials
 
@@ -648,7 +684,7 @@ post-destroot {
     }
 
     # do not force upgrade of every dependency every time the version changes
-    foreach lib {liboctave.10.dylib liboctinterp.11.dylib} {
+    foreach lib {liboctave.dylib liboctinterp.dylib} {
         xinstall -d -m 0755 ${destroot}${prefix}/lib/octave/${package_version}
         ln -s ../${version}/${lib} ${destroot}${prefix}/lib/octave/${package_version}/${lib}
         system "install_name_tool -id ${prefix}/lib/octave/${package_version}/${lib} ${destroot}${prefix}/lib/octave/${version}/${lib}"
@@ -656,13 +692,12 @@ post-destroot {
 
     if { [variant_isset qt5] } {
         # do not force upgrade of every dependency every time the version changes
-        foreach lib {liboctgui.9.dylib} {
+        foreach lib {liboctgui.dylib} {
             xinstall -d -m 0755 ${destroot}${prefix}/lib/octave/${package_version}
             ln -s ../${version}/${lib} ${destroot}${prefix}/lib/octave/${package_version}/${lib}
             system "install_name_tool -id ${prefix}/lib/octave/${package_version}/${lib} ${destroot}${prefix}/lib/octave/${version}/${lib}"
         }
     }
-
 }
 
 # generate default octave_packages file so that it is removed if Octave is uninstalled

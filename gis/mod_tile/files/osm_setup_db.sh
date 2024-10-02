@@ -71,6 +71,7 @@ set +e
 #set -x
 
 PREFIX="${PREFIX:-/usr/local}"
+PGSQLBINPATH="${PREFIX}/lib/postgresql/bin"
 
 if [ -r $PREFIX/etc/mod_tile/osm-tiles-update.conf ]; then
     source $PREFIX/etc/mod_tile/osm-tiles-update.conf
@@ -101,9 +102,9 @@ fi
 
 initializeDatabase()
 {
-    sudo -u "$PG_SUPER_USER" "$PREFIX/bin/createuser" "$GIS_DB_USER" -DRS >/dev/null 2>&1
-    sudo -u "$PG_SUPER_USER" "$PREFIX/bin/createdb" "$GIS_DB" --owner="$GIS_DB_USER" --encoding=UTF8 >/dev/null 2>&1
-    cat <<EOF | sudo -u "$PG_SUPER_USER" psql "$GIS_DB" >/dev/null 2>&1
+    sudo -u "$PG_SUPER_USER" "$PGSQLBINPATH/createuser" "$GIS_DB_USER" -DRS >/dev/null 2>&1
+    sudo -u "$PG_SUPER_USER" "$PGSQLBINPATH/createdb" "$GIS_DB" --owner="$GIS_DB_USER" --encoding=UTF8 >/dev/null 2>&1
+    cat <<EOF | sudo -u "$PG_SUPER_USER" "$PGSQLBINPATH/psql" "$GIS_DB" >/dev/null 2>&1
 CREATE EXTENSION postgis;
 CREATE EXTENSION hstore;
 ALTER TABLE geometry_columns OWNER TO $GIS_DB_USER;
@@ -187,7 +188,7 @@ createDatabase()
 	    exit 1
 	fi
 	>&2 echo "Creating indexes... (This can also take a very long time)"
-	sudo -u "$GIS_USER" psql -d "$GIS_DB" -U "$GIS_DB_USER" \
+	sudo -u "$GIS_USER" "$PGSQLBINPATH/psql" -d "$GIS_DB" -U "$GIS_DB_USER" \
 	     -f "$PREFIX/share/openstreetmap-carto/indexes.sql" >/dev/null
 	if [ $? -ne 0 ]; then
 	    >&2 echo "Error creating indexes in PostgreSQL"
@@ -243,6 +244,7 @@ initializeIncrementalUpdates()
     fi
 }
 
+cd /tmp
 if [ -z "$SKIP_IMPORT" ]; then
     initializeDatabase
     readPbf

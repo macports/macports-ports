@@ -1,0 +1,143 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           conflicts_build 1.0
+PortGroup           github 1.0
+PortGroup           openssl 1.0
+
+if {${configure.cxx_stdlib} eq "libc++"} {
+    PortGroup       legacysupport 1.1
+
+    legacysupport.newest_darwin_requires_legacy 19
+    legacysupport.use_mp_libcxx yes
+}
+
+github.setup        uowuo abaddon 0.2.1 v
+revision            2
+categories          net www
+license             GPL-3
+maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
+description         Alternative Discord client with voice support
+long_description    {*}${description} made with C++ and GTK3. \
+                    The app runs on all systems from PowerPC to aarch64.
+
+github.tarball_from archive
+
+set miniaudio_hash  88436b25ef4ca8434d6268f19b748d917ee7f39d
+
+master_sites-append https://github.com/mackron/miniaudio/archive/${miniaudio_hash}/:miniaudio
+distfiles-append    miniaudio-${miniaudio_hash}.tar.gz:miniaudio
+
+checksums           ${distname}${extract.suffix} \
+                    rmd160  ee93f18a4dabc0bd29ecd577238bf9a871e694a3 \
+                    sha256  407d14bc7659c65eca1c5266fb96a60b1e169b31c122159ae7f54e69a86e0b45 \
+                    size    14187672 \
+                    miniaudio-${miniaudio_hash}.tar.gz \
+                    rmd160  a20c48d4c789ab509634ea003681307f2d2c1057 \
+                    sha256  2578de252bbc158bed771fa4ecba2d05899de1148937b587ab0fb429479f7c4d \
+                    size    1473883
+
+extract.only        ${distname}${extract.suffix}
+
+post-extract {
+    set tar [findBinary tar ${portutil::autoconf::tar_command}]
+    system -W ${workpath} "${tar} -zxf ${distpath}/miniaudio-${miniaudio_hash}.tar.gz"
+    delete ${worksrcpath}/subprojects/miniaudio
+    move ${workpath}/miniaudio-${miniaudio_hash} ${worksrcpath}/subprojects/miniaudio
+}
+
+# https://github.com/uowuo/abaddon/pull/291
+patchfiles-append   0001-Do-not-use-precomp-headers-target-with-GCC-on-Apple.patch
+patchfiles-append   0002-platform.cpp-add-missing-unistd.h.patch
+patchfiles-append   0003-CMakeLists-also-link-to-AudioUnit-on-Apple.patch
+# https://github.com/uowuo/abaddon/pull/292
+patchfiles-append   0004-platform.cpp-add-a-missing-spdlog-include.patch
+
+post-patch {
+    reinplace "s|@PREFIX@|${prefix}|" \
+                    ${worksrcpath}/src/platform.cpp \
+                    ${worksrcpath}/CMakeLists.txt
+}
+
+# Linking to libunwind leads to random crashes,
+# at least on Sonoma. And older macOS do not need it anyway.
+conflicts_build     libunwind
+
+set abaddon_root    ${prefix}/share/${name}
+
+# Default libfmt version, customize when adding subports
+set libfmt_ver      10
+cmake.module_path-append \
+                    ${prefix}/lib/libfmt${libfmt_ver}/cmake
+
+depends_build-append \
+                    port:pkgconfig
+depends_lib-append  port:curl \
+                    port:libfmt${libfmt_ver} \
+                    port:fontconfig \
+                    path:lib/pkgconfig/gtk+-3.0.pc:gtk3 \
+                    port:gtkmm3 \
+                    port:ixwebsocket \
+                    port:libhandy \
+                    port:libopus \
+                    port:libsodium \
+                    port:nlohmann-json \
+                    port:rnnoise \
+                    port:spdlog \
+                    port:sqlite3 \
+                    port:zlib
+
+compiler.cxx_standard   2017
+
+configure.args-append \
+                    -DENABLE_NOTIFICATION_SOUNDS=ON \
+                    -DENABLE_QRCODE_LOGIN=OFF \
+                    -DENABLE_RNNOISE=ON \
+                    -DENABLE_VOICE=ON \
+                    -DUSE_KEYCHAIN=OFF \
+                    -DUSE_LIBHANDY=ON
+
+# Install target is broken: https://github.com/uowuo/abaddon/issues/290
+# We need to do it manually.
+destroot {
+    xinstall -d ${destroot}${abaddon_root}
+    copy ${cmake.build_dir}/${name} ${destroot}${abaddon_root}
+
+    foreach res {css res} {
+        copy ${worksrcpath}/res/${res} ${destroot}${abaddon_root}
+    }
+
+    # https://github.com/uowuo/abaddon/issues/293
+    set abexec      ${prefix}/bin/${name}
+
+    if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
+        set  wrapper    [open "${destroot}${abexec}" w 0755]
+        puts ${wrapper} "#!/bin/bash"
+        puts ${wrapper} ""
+        puts ${wrapper} {if [ -n "$DYLD_LIBRARY_PATH" ]; then}
+        puts ${wrapper} "   DYLD_LIBRARY_PATH=${prefix}/lib/libgcc:\${DYLD_LIBRARY_PATH}"
+        puts ${wrapper} {else}
+        puts ${wrapper} "   DYLD_LIBRARY_PATH=${prefix}/lib/libgcc"
+        puts ${wrapper} {fi}
+        puts ${wrapper} {export DYLD_LIBRARY_PATH}
+        puts ${wrapper} ""
+        puts ${wrapper} "cd $abaddon_root"
+        puts ${wrapper} "exec \./$name \"\$@\""
+        close $wrapper
+    } else {
+        set  wrapper    [open "${destroot}${abexec}" w 0755]
+        puts ${wrapper} "#!/bin/bash"
+        puts ${wrapper} ""
+        puts ${wrapper} "cd $abaddon_root"
+        puts ${wrapper} "exec \./$name \"\$@\""
+        close $wrapper
+    }
+}
+
+notes "
+You will need your Discord token in order to log in.
+Upstream refers to the following thread:
+https://github.com/Tyrrrz/DiscordChatExporter/issues/76
+Make sure to keep your token safe.
+"

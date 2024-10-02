@@ -6,6 +6,7 @@ PortGroup compiler_blacklist_versions 1.0
 PortGroup active_variants             1.1
 PortGroup cmake                       1.1
 PortGroup legacysupport               1.1
+PortGroup conflicts_build             1.0
 
 # Do not propagate c/c++ standards as set by base
 cmake.set_c_standard                  no
@@ -17,24 +18,24 @@ legacysupport.use_static              yes
 legacysupport.disable_function_wrap   yes
 
 categories              lang
-platforms               {darwin >= 11}
+platforms               {darwin > 10}
 license                 NCSA
 maintainers             nomaintainer
 
 set llvm_version        17
 set clang_exe_version   ${llvm_version}
-version                 ${llvm_version}.0.3
+version                 ${llvm_version}.0.6
 
 name                    llvm-${llvm_version}
-revision                0
+revision                1
 subport                 mlir-${llvm_version}  { revision [ expr ${revision} + 0 ] }
-subport                 clang-${llvm_version} { revision [ expr ${revision} + 0 ] }
+subport                 clang-${llvm_version} { revision [ expr ${revision} + 2 ] }
 subport                 lldb-${llvm_version}  { revision [ expr ${revision} + 0 ] }
 subport                 flang-${llvm_version} { revision [ expr ${revision} + 0 ] }
 
-checksums               rmd160  3860793c59a46b4b7ff4d408907e5ab6e53b0960 \
-                        sha256  be5a1e44d64f306bb44fce7d36e3b3993694e8e6122b2348608906283c176db8 \
-                        size    127843636
+checksums               rmd160  10f44d5a8e3d0d5fc1a1961a8adaac945733ec07 \
+                        sha256  58a8818c60e6627064f312dbf46c02d9949956558340938b71cf731ad8bc0813 \
+                        size    127838860
 
 master_sites            https://github.com/llvm/llvm-project/releases/download/llvmorg-${version}
 distname                llvm-project-${version}.src
@@ -45,6 +46,9 @@ set suffix              mp-${llvm_version}
 set sub_prefix          ${prefix}/libexec/llvm-${llvm_version}
 worksrcdir              ${worksrcdir}/llvm
 
+# https://github.com/macports/macports-ports/commit/a83a493bc21cbe7e14b1f5884379649ec8f31bae#commitcomment-132530885
+conflicts_build-append  libunwind libunwind-headers
+
 # hand-tweaked, approximately c++ standard 2017
 compiler.blacklist      *gcc* {clang < 1001} macports-clang-3.*
 # work/build/include/c++/v1/optional:224:5: error: destructor cannot be marked constexpr
@@ -52,8 +56,7 @@ compiler.blacklist      *gcc* {clang < 1001} macports-clang-3.*
 compiler.blacklist-append {clang < 1204} {macports-clang-[5-9].0} {macports-clang-1[0-3]}
 compiler.fallback       clang macports-clang-14 macports-clang-15
 
-# We can't use Ninja with our custom destrooting plan for llvm
-#cmake.generator         Ninja
+cmake.generator         Ninja
 cmake.install_prefix    ${sub_prefix}
 cmake.build_type        Release
 
@@ -61,15 +64,14 @@ cmake.build_type        Release
 cmake.install_rpath
 
 configure.pre_args-delete \
-    -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
-    -DCMAKE_INSTALL_RPATH=${cmake.install_prefix}/lib
+    -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib"
 
 configure.pre_args-replace \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
 
 configure.pre_args-replace \
-    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;${cmake.install_prefix}\;/usr" \
     -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr"
 
 configure.args-append \
@@ -122,7 +124,7 @@ platform darwin {
 }
 
 patch.dir ${workpath}/${distname}
-patch.pre_args  -p1
+patch.pre_args-replace  -p0 -p1
 
 patchfiles-append \
     0001-MacPorts-only-clang-use-MP-omp-locations.patch \
@@ -141,6 +143,7 @@ patchfiles-append \
     0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
     0025-lldb-add-defines-needed-for-older-SDKs.patch \
     0026-llvm-set-memrchr-unavailable.patch \
+    0043-builtins-Move-cfi-start-s-after-the-symbol-name-NFC.patch \
     0999-i386-fix.diff \
     add-missed-i386-host.diff
 
@@ -199,6 +202,11 @@ if {${os.platform} eq "darwin" && ${os.major} < 12} {
             ${patch.dir}/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
     }
 }
+
+# alter the default availability header to indicate no verbose_abort is in libcxx
+# the altered section is used only when macports-libcxx is being invoked
+# see: https://trac.macports.org/ticket/68640
+patchfiles-append      0120-clang-no-verbose-abort-in-library.diff
 
 # https://trac.macports.org/ticket/67686
 # revert commit that breaks rpath linkages in clang runtime
@@ -271,12 +279,6 @@ if {${subport} eq "mlir-${llvm_version}"} {
 
     configure.args-append \
                         -DLLVM_ENABLE_PROJECTS="mlir"
-
-    destroot {
-        # we have to run the destroot like this, because individual targets for each of the
-        # components we want to install are not available; we want "everything but llvm"
-        system "cd ${destroot.dir}/tools/mlir && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-    }
 }
 
 if { ${subport} eq "clang-${llvm_version}" } {
@@ -296,16 +298,6 @@ if { ${subport} eq "clang-${llvm_version}" } {
         -DLLVM_ENABLE_RUNTIMES="libcxx\;libcxxabi" \
         -DLIBCXX_ENABLE_SHARED=ON    \
         -DLIBCXX_INSTALL_LIBRARY=ON
-
-    destroot {
-        # we have to run the destroot like this, because individual targets for each of the
-        # components we want to install are not available; we want "everything but llvm"
-        system "cd ${destroot.dir}/tools/clang                      && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-        system "cd ${destroot.dir}/tools/lld                        && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-        system "cd ${destroot.dir}/projects/compiler-rt             && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-        system "cd ${destroot.dir}/runtimes/runtimes-bins/libcxx    && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-        system "cd ${destroot.dir}/runtimes/runtimes-bins/libcxxabi && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-    }
 }
 
 if { ${subport} eq "flang-${llvm_version}" } {
@@ -323,12 +315,6 @@ if { ${subport} eq "flang-${llvm_version}" } {
         -DLIBCXX_INSTALL_LIBRARY=OFF
 
     depends_lib-append  port:clang-${llvm_version} port:mlir-${llvm_version}
-
-    destroot {
-        # we have to run the destroot like this, because individual targets for each of the
-        # components we want to install are not available; we want "everything but llvm"
-        system "cd ${destroot.dir}/tools/flang && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-    }
 }
 
 if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
@@ -438,10 +424,17 @@ variant tests description {Enable building of test code} {
 
 post-destroot {
 
-    if {${subport} eq "clang-${llvm_version}"} {
+    if {[file exists ${destroot}${sub_prefix}/bin/clang]} {
         # remove the clang symlink and replace it with the actual binary
         delete      ${destroot}${sub_prefix}/bin/clang
         file rename ${destroot}${sub_prefix}/bin/clang-${clang_exe_version} ${destroot}${sub_prefix}/bin/clang
+    }
+
+    # If only 'flang-new' created, link to 'flang'
+    if {[file exists ${destroot}${sub_prefix}/bin/flang-new]} {
+        if {![file exists ${destroot}${sub_prefix}/bin/flang]} {
+            ln -s ${sub_prefix}/bin/flang-new ${destroot}${sub_prefix}/bin/flang
+        }
     }
 
     # generate a versioned wrapper script for each file in the bin directory
@@ -464,11 +457,13 @@ post-destroot {
         ln -s LLVMPolly.so ${destroot}${sub_prefix}/lib/LLVMPolly.dylib
     }
 
-    if {${subport} eq "clang-${llvm_version}"} {
+    if {[file exists ${destroot}${sub_prefix}/lib/cmake/clang/ClangTargets-release.cmake]} {
         # fix the cmake scripts to point to the versioned files
         reinplace "s|/bin/clang-${clang_exe_version}|/bin/clang|g" \
                   "${destroot}${sub_prefix}/lib/cmake/clang/ClangTargets-release.cmake"
+    }
 
+    if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
         # http://trac.macports.org/ticket/33207
         ln -s ${prefix}/libexec/ld64/ld ${destroot}${sub_prefix}/bin/ld
     }
@@ -482,6 +477,34 @@ post-destroot {
         xinstall -m 755 -W ${lldb_scripts_srcdir} \
             macos-setup-codesign.sh \
             ${lldb_scripts_destdir}
+    }
+
+    if {${subport} ne "llvm-${llvm_version}"} {
+        # Need to deactivate current version before traversing destroot to remove
+        # 'already installed' files
+        if {![catch {set installed [lindex [registry_active ${subport}] 0]}]} {
+            registry_deactivate_composite ${subport} "" [list ports_nodepcheck 1]
+        }
+        # Then search for files in destroot provided by other local (sub)ports deps and remove
+        fs-traverse destroot_f ${destroot} {
+            if {![file isdirectory $destroot_f]} {
+                set f [string replace $destroot_f 0 [string length $destroot]-1]
+                if {[file exists ${f}]} {
+                    ui_debug "${f} already exists -> Removed from destroot"
+                    file delete ${destroot_f}
+                }
+            }
+        }
+    }
+
+    if {${subport} eq "clang-${llvm_version}"} {
+        # move libc++ libraries out of default location to prevent accidental linkage
+        set libcxx_dir ${destroot}${sub_prefix}/lib/libc++
+        xinstall -d ${libcxx_dir}
+        foreach f [glob -nocomplain ${destroot}${sub_prefix}/lib/libc++*.*] {
+            ui_debug "Moving ${f} to ${libcxx_dir}"
+            move ${f} ${libcxx_dir}
+        }
     }
 }
 
@@ -560,6 +583,4 @@ if {${subport} eq "clang-${llvm_version}"} {
     }
 }
 
-livecheck.type      regex
-livecheck.url       https://github.com/llvm/llvm-project/tags
-livecheck.regex     llvmorg-(${llvm_version}.\[\\d.\]+).tar.gz
+livecheck.type      none

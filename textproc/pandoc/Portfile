@@ -3,9 +3,8 @@
 PortSystem          1.0
 PortGroup           github 1.0
 
-github.setup        jgm pandoc 3.1.8
-github.tarball_from releases
-revision            0
+github.setup        jgm pandoc 3.4
+revision            1
 categories          textproc haskell
 license             GPL-3
 maintainers         {judaew @judaew} openmaintainer
@@ -26,41 +25,144 @@ long_description    Pandoc is a Haskell library for converting from \
 
 homepage            https://pandoc.org
 
-use_zip             yes
 installs_libs       no
 
-# See https://trac.macports.org/ticket/48971
-notes-append       "For PDF support, please install the texlive-latex and texlive-fonts-recommended packages."
+checksums           rmd160  03d9812d75711b4cacc37568667a8b0af71d284f \
+                    sha256  be82c28cea23b9f4bf98d4f2bb9e311414d5950f88bb7cce52f3304c5417f798 \
+                    size    7783256
 
-switch ${build_arch} {
-    x86_64 {
-        distfiles           pandoc-${version}-x86_64-macOS${extract.suffix}
-        checksums           rmd160  4c5f8c6e12bfd9ceabb5f93caaa563c773d3f4ed \
-                            sha256  72754635cf349596e90b6b4c227e363ef46a316a2e86c9d424bf523573259004 \
-                            size    20995983
-        set worksrcpath ${workpath}/pandoc-${version}-x86_64
-    }
-    arm64 {
-        distfiles           pandoc-${version}-arm64-macOS${extract.suffix}
-        checksums           rmd160  f2994b7030cb067ec161c8647a9a9bbae16d761a \
-                            sha256  064d5418d2d7ef56dbb8c9a69f8ff6313c1ac079d7dfafc49529c6d15842bcbe \
-                            size    40210181
-        set worksrcpath ${workpath}/pandoc-${version}-arm64
-    }
-    default {
-        known_fail  yes
-        pre-fetch {
-            ui_error "${subport} @ ${version} only supported for architectures ${supported_archs}"
-            return -code error "Unsupported architecture: ${build_arch}"
-        }
-    }
+depends_lib-append  port:zlib
+
+depends_run-append  port:groff
+
+# https://github.com/jgm/pandoc/blob/main/tools/latex-package-dependencies.lua
+# comm -23 <(pandoc lua ${worksrcpath}/tools/latex-package-dependencies.lua | xargs -I{} find ${prefix}/share/texmf-texlive -name {} | sort -u | xargs -I{} find {} -depth 1 -type f | xargs port provides | awk '{print $NF}' | sort -u) <(port echo rdepof:texlive-xetex rdepends:texlive-fonts-recommended | grep texlive | sort -u)
+variant texlive \
+    description {Use TeXLive; see "port notes" for more information.} {
+    depends_run-append \
+                    port:latexmk \
+                    port:texlive-fonts-recommended \
+                    port:texlive-xetex
 }
 
-use_configure       no
+variant full_latex_dependencies \
+    requires texlive \
+    description {Install all LaTeX dependencies.} {
+    depends_run-append \
+                    port:texlive-bin-extra \
+                    port:texlive-context \
+                    port:texlive-latex-extra \
+                    port:texlive-luatex
+}
 
-build {}
+notes-append       "${name} uses LaTeX to create PDFs.
 
-destroot {
-    xinstall -m 0755 {*}[glob ${worksrcpath}/bin/*] ${destroot}${prefix}/bin
-    xinstall -m 0755 {*}[glob ${worksrcpath}/share/man/man1/*] ${destroot}${prefix}/share/man/man1
+The (minimized) variant +texlive uses MacPorts TeXLive.
+
+For full LaTeX PDF support, please use the variant +full_latex_dependencies."
+
+set minimum_major_version_for_source 20
+
+if {(${os.platform} eq {darwin}
+        && ${os.major} >= ${minimum_major_version_for_source})
+        || ${os.platform} ne {darwin}} {
+    compiler.blacklist-append \
+                   {clang < 900}
+
+    # https://trac.macports.org/ticket/48971
+    variant stack \
+        description {Use stack to build.} {}
+    if { [variant_isset "stack"] } {
+        PortGroup   haskell_stack 1.0
+
+    } else {
+        PortGroup   haskell_cabal 1.0
+
+        # https://github.com/jgm/pandoc/blob/main/macos/make_macos_release.sh
+        set cabalopts   {-fembed_data_files -fserver -flua}
+        build.target    all
+        build.post_args-prepend \
+                    {*}${cabalopts}
+
+        destroot.target exe:${subport}
+        destroot.post_args-prepend \
+                    {*}${cabalopts}
+
+        post-destroot {
+            # https://github.com/jgm/pandoc/blob/main/macos/Makefile
+            ln -s   ${prefix}/bin/${subport} \
+                    ${destroot}${prefix}/bin/${subport}-lua
+            ln -s   ${prefix}/bin/${subport} \
+                    ${destroot}${prefix}/bin/${subport}-server
+            xinstall -d ${destroot}${prefix}/share/doc
+            copy    ${worksrcpath}/doc \
+                    ${destroot}${prefix}/share/doc/${subport}
+            system -W ${worksrcpath} \
+                     "${destroot}${prefix}/bin/${subport} -s COPYING.md -Vpagetitle=License -o \"${destroot}${prefix}/share/doc/${subport}/license.html\""
+            xinstall -m 0644 -W ${worksrcpath} \
+                    AUTHORS.md \
+                    BUGS \
+                    CONTRIBUTING.md \
+                    MANUAL.txt \
+                    README.md \
+                    ${destroot}${prefix}/share/doc/${subport}
+            xinstall -m 0644 \
+                    ${worksrcpath}/pandoc-cli/man/pandoc.1 \
+                    ${worksrcpath}/pandoc-cli/man/pandoc-lua.1 \
+                    ${worksrcpath}/pandoc-cli/man/pandoc-server.1 \
+                    ${destroot}${prefix}/share/man/man1
+        }
+    }
+
+    test.run        yes
+    test.pre_args   run
+    test.args       test-${subport}
+    test.post_args-prepend \
+                    {*}${cabalopts}
+    test.post_args-append \
+                    {-- '-p markdown'}
+} else {
+    # binary support for older macOS versions
+    github.tarball_from releases
+    use_zip         yes
+    distfiles       pandoc-${version}-${build_arch}-macOS${extract.suffix}
+    set worksrcpath ${workpath}/pandoc-${version}-${build_arch}
+
+    # set build_arch/os.arch/os.major to get binary arm64/x86_64 checksums
+    # sudo port -d checksum pandoc os.arch=arm os.major=18 build_arch=arm64
+    # sudo port -d checksum pandoc os.arch=i386 os.major=18 build_arch=x86_64
+    # run `sudo port clean --all pandoc` afterwards
+    switch ${build_arch} {
+        arm64 {
+            checksums       rmd160  7788802a963a696e37ca7f6b128579d9466d1557 \
+                            sha256  2bc48ef152d5404cc7d5b98ee01f11af8bd91e503a6e888d2537bd261a578d02 \
+                            size    35849240
+        }
+        x86_64 {
+            checksums       rmd160  05ac3649d76cbb17577e1f6c29aabeb291634c4d \
+                            sha256  fb342213ce16af4a81565f1f106a808574f993900ac914a5737649ba8cedb2b3 \
+                            size    21926889
+        }
+        default {
+            known_fail  yes
+            pre-fetch {
+                ui_error "${subport} @ ${version} only supported for architectures ${supported_archs}"
+                return -code error "Unsupported architecture: ${build_arch}"
+            }
+        }
+    }
+
+    use_configure   no
+
+    build {}
+
+    destroot {
+        xinstall -m 0755 ${worksrcpath}/bin/${subport} ${destroot}${prefix}/bin
+        # https://github.com/jgm/pandoc/blob/main/macos/Makefile
+        ln -s   ${prefix}/bin/${subport} \
+                    ${destroot}${prefix}/bin/${subport}-lua
+        ln -s   ${prefix}/bin/${subport} \
+                    ${destroot}${prefix}/bin/${subport}-server
+        xinstall -m 0755 {*}[glob ${worksrcpath}/share/man/man1/*] ${destroot}${prefix}/share/man/man1
+    }
 }

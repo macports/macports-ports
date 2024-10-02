@@ -1,17 +1,20 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           github 1.0
-PortGroup           cmake 1.1
 PortGroup           active_variants 1.1
+PortGroup           cmake 1.1
+PortGroup           github 1.0
+PortGroup           legacysupport 1.1
 
-github.setup        Beep6581 RawTherapee 5.9
+# Used to provide wrappers, see below.
+legacysupport.newest_darwin_requires_legacy 0
+
+github.setup        Beep6581 RawTherapee 5.10
 github.tarball_from releases
 name                rawtherapee
 revision            1
 
 categories          graphics
-supported_archs     x86_64 arm64
 license             GPL-3
 maintainers         @jasonliu-- openmaintainer
 
@@ -25,25 +28,26 @@ long_description    ${github.project} is a powerful, cross-platform \
 
 use_xz              yes
 distname            ${name}-${github.version}
-checksums           rmd160  fab8e47b9d4836c349b4d054382b7b54316e33b6 \
-                    sha256  8eaf28c428185c165ef5a28f69595dc77a1c98826065a1f51a28c86c7b0d4823 \
-                    size    16219076
+checksums           rmd160  2147b3eab4f114d95fc7fb5dbe8d1abcb12f98cd \
+                    sha256  a799b53cd54dba4a211479e342ffc9c5db1c44d3d6c3a27d5cc13adf0debd2da \
+                    size    16943724
 
 compiler.cxx_standard   2011
 compiler.openmp_version 3.1
 
 depends_build-append    port:pkgconfig
-depends_lib-append      path:lib/pkgconfig/glib-2.0.pc:glib2 \
-                        port:glibmm-2.4 \
-                        path:lib/pkgconfig/gtk+-3.0.pc:gtk3 \
-                        port:gtkmm3 \
-                        port:gtk-osx-application-gtk3 \
-                        port:adwaita-icon-theme \
+
+depends_lib-append      port:adwaita-icon-theme \
                         path:lib/pkgconfig/cairo.pc:cairo \
                         path:lib/pkgconfig/cairomm-1.0.pc:cairomm-1.0 \
+                        port:exiv2 \
                         port:fftw-3 \
                         port:fftw-3-single \
                         path:lib/pkgconfig/gdk-pixbuf-2.0.pc:gdk-pixbuf2 \
+                        path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                        port:glibmm-2.4 \
+                        path:lib/pkgconfig/gtk+-3.0.pc:gtk3 \
+                        port:gtkmm3 \
                         port:lcms2 \
                         port:lensfun \
                         port:libiptcdata \
@@ -54,32 +58,27 @@ depends_lib-append      path:lib/pkgconfig/glib-2.0.pc:glib2 \
                         port:tiff \
                         port:zlib
 
-require_active_variants gtk3    quartz
-require_active_variants gtkmm3  quartz
-require_active_variants fftw-3          openmp
-require_active_variants fftw-3-single   openmp
-
 patchfiles-append       no-modified-project_source_dir.diff \
                         patch-config_h_in.diff
 
-post-patch {
-    copy ${filespath}/FindGtkMacIntegration.cmake \
-         ${worksrcpath}/cmake/modules/
-    reinplace {s/MacIntegration/GtkMacIntegration/} \
-        ${worksrcpath}/rtgui/CMakeLists.txt
+# https://github.com/Beep6581/RawTherapee/commit/6b9f45c69c1ddfc3607d3d9c1206dcf1def30295
+# https://trac.macports.org/ticket/69982
+patchfiles-append       0001-Fix-linking-with-jpeg-turbo.patch \
+                        0002-removes-redundant-jpeg-error-message.patch
+
+pre-configure {
+    if {![variant_isset quartz] && ![variant_isset x11]} {
+        error "Either +x11 or +quartz is required"
+    }
 }
 
-set app_contents ${applications_dir}/${github.project}.app/Contents
+configure.args-append   -DBUILD_SHARED=ON \
+                        -DOPTION_OMP=OFF
 
-configure.args-append   -DBUNDLE_BASE_INSTALL_DIR=$app_contents/MacOS \
-                        -DDATADIR=$app_contents/Resources \
-                        -DLIBDIR=$app_contents/Frameworks \
-                        -DBUILD_SHARED_LIBS=ON
-
-if {${build_arch} eq "x86_64"} {
+if {${configure.build_arch} eq "x86_64"} {
     configure.args-append   -DPROC_TARGET_NUMBER=1 \
                             -DPROC_LABEL="generic processor"
-} elseif {${build_arch} eq "arm64"} {
+} elseif {${configure.build_arch} in [list arm64 ppc ppc64]} {
     configure.args-append   -DPROC_TARGET_NUMBER=2
 }
 
@@ -91,6 +90,105 @@ if {[variant_isset debug]} {
 
     # Clear optflags for non-debug build; controlled by project
     configure.optflags
+}
+
+variant openmp description "Enable OpenMP" {
+    # It does not work on aarch64 at the moment:
+    # app builds, but segfaults on launch.
+    # Unknown status on PowerPC.
+
+    require_active_variants fftw-3          openmp
+    require_active_variants fftw-3-single   openmp
+
+    configure.args-replace \
+                        -DOPTION_OMP=OFF -DOPTION_OMP=ON
+}
+
+# No point in this on 32-bit at the moment.
+variant quartz conflicts x11 {
+    supported_archs     x86_64 arm64
+
+    depends_lib-append  port:gtk-osx-application-gtk3
+
+    post-patch {
+        copy ${filespath}/FindGtkMacIntegration.cmake \
+            ${worksrcpath}/cmake/modules/
+        reinplace {s/MacIntegration/GtkMacIntegration/} \
+            ${worksrcpath}/rtgui/CMakeLists.txt
+    }
+
+    set app_contents ${applications_dir}/${github.project}.app/Contents
+
+    configure.args-append \
+                        -DBUNDLE_BASE_INSTALL_DIR=$app_contents/MacOS \
+                        -DDATADIR=$app_contents/Resources \
+                        -DLIBDIR=$app_contents/Frameworks
+
+    require_active_variants gtk3    quartz
+    require_active_variants gtkmm3  quartz
+}
+
+variant x11 conflicts quartz {
+    legacysupport.redirect_bins rawtherapee rawtherapee-cli
+
+    configure.args-append \
+                        -DDATADIR=${prefix}/share/${name} \
+                        -DMACOS_NATIVE=OFF
+
+    require_active_variants gtk3    x11
+    require_active_variants gtkmm3  x11
+
+    patchfiles-append   0001-Do-not-force-Cocoa-build.patch \
+                        0002-Allow-non-Cocoa-code-in-sources.patch \
+                        0003-patch-options.cc.diff
+
+    post-patch {
+        reinplace "s|@PREFIX@|${prefix}|" ${worksrcpath}/rtgui/options.cc
+    }
+
+    # Having wasted many hours on this silly issue, I think it makes
+    # sense to display a warning which may save someone's time and sanity.
+    notes "
+    On the first run the app expects a user to confirm the launch\
+    in a modal window. Some versions of X server may display that window\
+    beneath the main one. Interface controls will not respond until\
+    the modal window is closed. If you find yourself in such a situation,\
+    move the main X window aside.
+    "
+}
+
+# See: https://github.com/Beep6581/RawTherapee/issues/7052
+if {${configure.build_arch} in [list i386 ppc]} {
+    patchfiles-append   0004-Revert-breaking-commit-as-a-temporary-fix.patch
+}
+
+if {${configure.build_arch} in [list ppc ppc64]} {
+    # https://github.com/Beep6581/RawTherapee/pull/7051
+    patchfiles-append   0005-Fix-PowerPC-processor-target.patch
+
+    # It is off by default, but just in case.
+    # We do not want LTO on PowerPC builds.
+    configure.args-append \
+                        -DWITH_LTO=OFF
+
+#    default_variants-append \
+#                        +x11
+#} elseif {![variant_isset x11]} {
+#    default_variants-append \
+#                        +quartz
+}
+
+# +quartz requires non-default variants of its dependencies,
+# so it will be broken on buildbots.
+default_variants-append +x11
+
+if {${configure.build_arch} ni [list i386 ppc ppc64] \
+    && ![variant_isset quartz]} {
+    notes-append "
+    Consider installing ${name} with macOS native interface:\
+    sudo port upgrade ${name} -x11 +quartz.\
+    It may offer a better user experience.
+    "
 }
 
 post-destroot {
@@ -107,70 +205,76 @@ post-destroot {
     # used to generate a fully portable installer for distribution.
 
     # XDG = X Desktop Group, now known as freedesktop.org
-    set xdg_share_root ${destroot}${prefix}/share
 
-    set rt_data_home $xdg_share_root/${name}
-    ln -s $app_contents/Resources $rt_data_home
+    # Technically, we can build app bundle with gtk+x11,
+    # but that would complicate making wrappers for libstdc++ systems,
+    # while perhaps all users of modern macOS will use +quartz anyway.
+    if {[variant_isset quartz]} {
+        set xdg_share_root ${destroot}${prefix}/share
 
-    set xdg_desktop_entries $xdg_share_root/applications
-    xinstall -d $xdg_desktop_entries
-    ln -s $app_contents/Resources/applications/${name}.desktop \
-          $xdg_desktop_entries/
+        set rt_data_home $xdg_share_root/${name}
+        ln -s $app_contents/Resources $rt_data_home
 
-    set xdg_desktop_icons $xdg_share_root/icons/hicolor
-    xinstall -d $xdg_desktop_icons
-    set icon_resolutions [list \
-        16x16 24x24 32x32 48x48 64x64 128x128 256x256 scalable \
-    ]
-    foreach ico_res $icon_resolutions {
-        xinstall -d $xdg_desktop_icons/$ico_res/apps
-        ln -s $app_contents/Resources/icons/hicolor/$ico_res/apps/${name}.png \
-              $xdg_desktop_icons/$ico_res/apps/
+        set xdg_desktop_entries $xdg_share_root/applications
+        xinstall -d $xdg_desktop_entries
+        ln -s $app_contents/Resources/applications/${name}.desktop \
+            $xdg_desktop_entries/
+
+        set xdg_desktop_icons $xdg_share_root/icons/hicolor
+        xinstall -d $xdg_desktop_icons
+        set icon_resolutions [list \
+            16x16 24x24 32x32 48x48 64x64 128x128 256x256 scalable \
+        ]
+        foreach ico_res $icon_resolutions {
+            xinstall -d $xdg_desktop_icons/$ico_res/apps
+            ln -s $app_contents/Resources/icons/hicolor/$ico_res/apps/${name}.png \
+                $xdg_desktop_icons/$ico_res/apps/
+        }
+
+        set xdg_metainfo $xdg_share_root/metainfo
+        xinstall -d $xdg_metainfo
+        ln -s $app_contents/Resources/metainfo/com.${name}.${github.project}.appdata.xml \
+            $xdg_metainfo/
+
+        set relative_manpath man/man1
+        ln -s $app_contents/Resources/$relative_manpath/${name}.1 \
+            $xdg_share_root/$relative_manpath/
+
+        set osx_tools ${worksrcpath}/tools/osx
+
+        copy $osx_tools/PkgInfo ${destroot}$app_contents/
+
+        # We overwrite the Info.plist file generated by the CMake build
+        # with the one provided in the RawTherapee source code, because the
+        # one provided by the devs is more complete than the one generated
+        # during the course of the build.
+        xinstall -m 644 $osx_tools/Info.plist.in \
+            ${destroot}$app_contents/Info.plist
+        set regexes [list \
+            "s/@minimum_arm64_version@/11.0/" \
+            "s/@minimum_x86_64_version@/10.6/" \
+            "s/@version@/${version}/" \
+            "s/@shortVersion@/${version}/" \
+            "/XDG_CONFIG_HOME/,/XDG_DATA_DIRS/s|\(<string>\).*\(</string>\)|\\1${prefix}/share/${name}\\2|" \
+            "/XDG_DATA_HOME/,/GSETTINGS_SCHEMA_DIR/s|\(<string>\).*\(</string>\)|\\1${prefix}/share/${name}\\2|" \
+            "s|/Applications/${github.project}.app/Contents/Resources|${prefix}|" \
+            "/GDK_PIXBUF_MODULEDIR/,/LIBDIR/s|\(<string>\).*\(</string>\)|\\1${prefix}/lib/gdk-pixbuf-2.0/2.10.0/loaders\\2|" \
+            "/DATADIR/,/GDK_RENDERING/s|${prefix}|$app_contents/Resources|" \
+        ]
+        foreach re $regexes {
+            reinplace -E $re ${destroot}$app_contents/Info.plist
+        }
+
+        # Copy the .icns files into the app bundle
+        set icns_files [list ${name} profile]
+        foreach icns_file $icns_files {
+            copy $osx_tools/${icns_file}.icns \
+                ${destroot}$app_contents/Resources/
+        }
+
+        ln -s $app_contents/MacOS/${name}     ${destroot}${prefix}/bin/
+        ln -s $app_contents/MacOS/${name}-cli ${destroot}${prefix}/bin/
     }
-
-    set xdg_metainfo $xdg_share_root/metainfo
-    xinstall -d $xdg_metainfo
-    ln -s $app_contents/Resources/metainfo/com.${name}.${github.project}.appdata.xml \
-          $xdg_metainfo/
-
-    set relative_manpath man/man1
-    ln -s $app_contents/Resources/$relative_manpath/${name}.1 \
-          $xdg_share_root/$relative_manpath/
-
-    set osx_tools ${worksrcpath}/tools/osx
-
-    copy $osx_tools/PkgInfo ${destroot}$app_contents/
-
-    # We overwrite the Info.plist file generated by the CMake build
-    # with the one provided in the RawTherapee source code, because the
-    # one provided by the devs is more complete than the one generated
-    # during the course of the build.
-    xinstall -m 644 $osx_tools/Info.plist.in \
-        ${destroot}$app_contents/Info.plist
-    set regexes [list \
-        "s/@minimum_arm64_version@/11.0/" \
-        "s/@minimum_x86_64_version@/10.6/" \
-        "s/@version@/${version}/" \
-        "s/@shortVersion@/${version}/" \
-        "/XDG_CONFIG_HOME/,/XDG_DATA_DIRS/s|\(<string>\).*\(</string>\)|\\1${prefix}/share/${name}\\2|" \
-        "/XDG_DATA_HOME/,/GSETTINGS_SCHEMA_DIR/s|\(<string>\).*\(</string>\)|\\1${prefix}/share/${name}\\2|" \
-        "s|/Applications/${github.project}.app/Contents/Resources|${prefix}|" \
-        "/GDK_PIXBUF_MODULEDIR/,/LIBDIR/s|\(<string>\).*\(</string>\)|\\1${prefix}/lib/gdk-pixbuf-2.0/2.10.0/loaders\\2|" \
-        "/DATADIR/,/GDK_RENDERING/s|${prefix}|$app_contents/Resources|" \
-    ]
-    foreach re $regexes {
-        reinplace -E $re ${destroot}$app_contents/Info.plist
-    }
-
-    # Copy the .icns files into the app bundle
-    set icns_files [list ${name} profile]
-    foreach icns_file $icns_files {
-        copy $osx_tools/${icns_file}.icns \
-             ${destroot}$app_contents/Resources/
-    }
-
-    ln -s $app_contents/MacOS/${name}     ${destroot}${prefix}/bin/
-    ln -s $app_contents/MacOS/${name}-cli ${destroot}${prefix}/bin/
 }
 
 proc update_desktop_env {} {

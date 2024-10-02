@@ -6,11 +6,21 @@
 # Usage:
 #
 #   PortGroup               octave 1.0
+#   octave.repo             bitbucket, github, gitlab, or sourceforge
+#   octave.author           bitbucket, GitHub, gitlab author.
+#                           Value is ignored on sourceforge (use octave)
 #   octave.module           module
 #
-# where module is the name of the module (e.g. communications)
+#   tag_prefix and tag_suffix are optional arguments
+#   see the bitbucket, github, gitlab PortGroups for details.
+#
+#   where module is the name of the module w/o the octave- prefix
+#   (e.g. communications)
 
-options octave.module octave.config_h
+# see octave Portfile
+set package_version 9.x.x
+
+options octave.author octave.module octave.config_h
 
 # do not use this option unless absolutely necessary
 # see comments below
@@ -18,43 +28,91 @@ options octave.module octave.config_h
 default octave.config_h {no}
 
 # some header files from Octave require C++-11
-compiler.cxx_standard  2011
+compiler.cxx_standard       2011
 # error: field has incomplete type 'const octave::cdef_class'
 PortGroup compiler_blacklist_versions 1.0
 compiler.blacklist-append {clang < 700}
 
 # see https://trac.macports.org/ticket/51643
-PortGroup muniversal 1.0
+PortGroup                   muniversal 1.0
 default universal_archs_supported {i386 x86_64}
 
-proc octave.setup {module version} {
-    global octave.module
-    octave.module               ${module}
-    version                     ${version}
+proc octave.setup {repo author {module ""} {version ""} {tag_prefix ""} {tag_suffix ""}} {
+    global octave.author octave.module
+
+    if {$module eq ""} {
+        # backward compatible behavior with two arguments: module version
+        octave.module       ${repo}
+        version             ${author}
+
+        default homepage    https://gnu-octave.github.io/packages/${repo}/
+        default master_sites \
+                            [list sourceforge:project/octave/Octave%20Forge%20Packages/Individual%20Package%20Releases \
+                            sourceforge:octave]
+    } else {
+        # default behavior
+        octave.author       ${author}
+        octave.module       ${module}
+        version             ${version}
+    }
+
+    # handle repos
+    switch -- ${repo} {
+        "bitbucket" {
+            PortGroup       bitbucket 1.0
+
+            bitbucket.setup ${author} ${module} ${version} ${tag_prefix}
+            bitbucket.tarball_from \
+                            downloads
+        }
+
+        "github" {
+            PortGroup       github 1.0
+
+            github.setup    ${author} ${module} ${version} ${tag_prefix} ${tag_suffix}
+            github.tarball_from \
+                            archive
+        }
+
+        "gitlab" {
+            PortGroup       gitlab 1.0
+
+            gitlab.setup    ${author} ${module} ${version} ${tag_prefix} ${tag_suffix}
+        }
+
+        "sourceforge" {
+             default homepage \
+                            https://gnu-octave.github.io/packages/${octave.module}/
+             default master_sites \
+                            [list sourceforge:project/octave/Octave%20Forge%20Packages/Individual%20Package%20Releases \
+                            sourceforge:octave]
+        }
+    }
 }
 
 option_proc octave.module octave.set_module
 proc octave.set_module {opt action args} {
-    global octave.module
+    global octave.author octave.module
     if {$action eq "set"} {
         name     octave-${octave.module}
-        homepage https://octave.sourceforge.io/${octave.module}/
     }
 }
 
-default categories   "octave math science"
-default master_sites [list sourceforge:project/octave/Octave%20Forge%20Packages/Individual%20Package%20Releases \
-                        sourceforge:octave]
-default distname     {${octave.module}-${version}}
-default worksrcdir   {${octave.module}}
+default categories  "octave math science"
+
+default distname    {${octave.module}-${version}}
+default worksrcdir  {${octave.module}}
+
 # do not build in parallel; many can't, and these are small builds
 # anyway, so no major need for this.
 default use_parallel_build {no}
-default livecheck.type     {regex}
-default livecheck.url      {https://octave.sourceforge.io/${octave.module}/}
-default livecheck.regex    {"package=${octave.module}-(\\\\d+(.\\\\d+)*)"}
 
-depends_lib-append   path:bin/octave:octave
+default livecheck.type     {regex}
+default livecheck.url      {https://gnu-octave.github.io/packages/${octave.module}/}
+default livecheck.regex    {"${octave.module}-(\\\\d+(.\\\\d+)*)"}
+
+depends_lib-append  path:bin/octave:octave
+
 # do not force all Portfiles to switch from depends_lib to depends_lib-append
 proc octave.add_dependencies {} {
     depends_lib-delete path:bin/octave:octave
@@ -63,7 +121,7 @@ proc octave.add_dependencies {} {
 port::register_callback octave.add_dependencies
 
 # configure_make.m calls "make --jobs n ..."
-# use environmental variable to set the number of jobs to 1
+# use environment variable to set the number of jobs to 1
 # parallel build is a problem for octave-optiminterp
 configure.env-append OMP_NUM_THREADS=1
 # do not force all Portfiles to switch from configure.env to configure.env-append
@@ -81,6 +139,9 @@ proc octave.add_env {} {
     configure.env-delete DL_LD=${configure.cxx}
     configure.env-append DL_LD=${configure.cxx}
 }
+# this is needed for octave 9.x.x
+configure.env-append    LDFLAGS=-L${prefix}/lib/octave/${package_version}
+
 port::register_callback octave.add_env
 
 post-extract {
@@ -165,17 +226,22 @@ pre-destroot {
 
     destroot.pre_args -q -f -H --eval
 
-    if { ${os.arch} eq "i386" } {
-        if { ${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 1 } {
-            set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
-        } else {
-            set short_host_name i686-apple-${os.platform}${os.major}.x.x
-        }
-    } else {
-        if { ${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 1 } {
-            set short_host_name powerpc64-apple-${os.platform}${os.major}.x.x
-        } else {
+    platform darwin {
+        # Keep ppc before i386, so that Rosetta builds for ppc.
+        # Also, use build_arch and not sysctl:
+        # https://trac.macports.org/ticket/69573
+        if { ${configure.build_arch} eq "arm64" } {
+            set short_host_name aarch64-apple-${os.platform}${os.major}.x.x
+        } elseif { ${configure.build_arch} eq "ppc" } {
             set short_host_name powerpc-apple-${os.platform}${os.major}.x.x
+        } elseif { ${configure.build_arch} eq "ppc64" } {
+            set short_host_name powerpc64-apple-${os.platform}${os.major}.x.x
+        } elseif { ${os.arch} eq "i386" } {
+            if { ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
+                set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
+            } else {
+                set short_host_name i686-apple-${os.platform}${os.major}.x.x
+            }
         }
     }
 

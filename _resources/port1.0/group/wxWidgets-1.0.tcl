@@ -72,8 +72,8 @@
 # * add the appropriate configure flags
 #   (depending on the project configuration/requirements)
 #
-# For adding appropirate configure flags you can you use any of the
-# following variables:
+# For adding appropriate configure flags you can use any of the following
+# variables:
 #
 # * wxWidgets.prefix
 # * wxWidgets.wxdir
@@ -115,7 +115,7 @@
 #
 #       -DwxWidgets_wxrc_EXECUTABLE=${wxWidgets.wxrc}
 #
-# Sometimes enviromental variables are required, like:
+# Sometimes environment variables are required, like:
 #
 #   configure.env[-append] \
 #       WX_CONFIG=${wxWidgets.wxconfig}
@@ -170,6 +170,7 @@ PortGroup   compiler_blacklist_versions 1.0
 ## - wxGTK-2.8
 ## - wxWidgets-3.0
 ## - wxGTK-3.0
+## - wxGTK-3.0-cxx11
 ## - wxPython-3.0
 ## - wxWidgets-3.0-cxx11
 ## - wxWidgets-3.2
@@ -257,6 +258,16 @@ proc wxWidgets._set {option action args} {
         }
         # this doesn't work
         # PortGroup cxx11 1.1
+    } elseif {${args} eq "wxGTK-3.0-cxx11"} {
+        global cxx_stdlib
+        wxWidgets.name          "wxGTK"
+        if {${cxx_stdlib} eq "libstdc++"} {
+            wxWidgets.version   "3.0-cxx11"
+            wxWidgets.port      "wxgtk-3.0-cxx11"
+        } else {
+            wxWidgets.version   "3.0"
+            wxWidgets.port      "wxgtk-3.0"
+        }
     # preliminary support for wxWidgets 3.1/3.2
     } elseif {${args} eq "wxWidgets-3.2"} {
         wxWidgets.name      "wxWidgets"
