@@ -276,7 +276,7 @@ if {${name} eq ${subport}} {
 
 subport curl-ca-bundle {
     # Also increase the revision of privoxy-pki-bundle whenever curl-ca-bundle contents change.
-    revision                    0
+    revision                    1
     categories                  net
     license                     {MPL-2 LGPL-2.1+}
     supported_archs             noarch
@@ -352,9 +352,109 @@ subport curl-ca-bundle {
         set ca_bundle_dir ${prefix}/share/curl
         set openssl_dir ${prefix}/etc/openssl
         xinstall -d ${destroot}${ca_bundle_dir} ${destroot}${openssl_dir}
-        xinstall -m 644 ${worksrcpath}/lib/ca-bundle.crt ${destroot}${ca_bundle_dir}/curl-ca-bundle.crt
+        foreach dst [list mozilla-ca-bundle.crt curl-ca-bundle.crt] {
+            xinstall -m 644 ${worksrcpath}/lib/ca-bundle.crt ${destroot}${ca_bundle_dir}/${dst}
+        }
         ln -s ${ca_bundle_dir}/curl-ca-bundle.crt ${destroot}${openssl_dir}/cert.pem
     }
+
+    post-activate {
+        ui_info "Regenerating CA certificate bundle from keychain, this may take a while..."
+
+        set keychains {
+            /Library/Keychains/System.keychain
+            /System/Library/Keychains/SystemRootCertificates.keychain
+        }
+
+        ui_debug "Fetch certificates from keychains"
+        set certs_list [exec /usr/bin/security find-certificate -a -p {*}$keychains]
+        set certs [regexp -inline -all -- {-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----} $certs_list]
+
+        ui_debug "Filter valid certificates: not expired, SSL root"
+        set checkend_cmd "/usr/bin/openssl x509 -inform pem -checkend 0 -noout"
+        set purpose_cmd "/usr/bin/openssl x509 -inform pem -purpose -noout"
+        set valid_certs {}
+        foreach cert $certs {
+            set status [catch {exec {*}$checkend_cmd << $cert} result]
+            if {$status != 0} {continue}
+            set status [catch {exec {*}$purpose_cmd << $cert} result]
+            if {$status != 0} {continue}
+            if {![string match "*SSL server CA : Yes*" $result]} {continue}
+            lappend valid_certs $cert
+        }
+
+        ui_debug "Filter certificates trusted in keychain"
+        file tempfile tmpfile_path /tmp/macports-${name}.txt
+        set verify_cmd "/usr/bin/security verify-cert -l -L -c $tmpfile_path -p ssl"
+        if {${os.major} >= 17} {append verify_cmd " -R offline"}  ;# high sierra
+        set trusted_certs {}
+        foreach cert $valid_certs {
+            set fobj [open $tmpfile_path w]
+            puts $fobj $cert
+            close $fobj
+            set status [catch {exec {*}$verify_cmd} result]
+            if {$status != 0} {continue}
+            lappend trusted_certs $cert
+        }
+        file delete $tmpfile_path
+
+        ui_debug "Get SHA256 fingerprints for all trusted certs"
+        set fingerprint_cmd "/usr/bin/openssl x509 -inform pem -fingerprint -sha256 -noout"
+        set fingerprints {}
+        foreach cert $trusted_certs {
+            set fingerprint [exec {*}$fingerprint_cmd << $cert]
+            lappend fingerprints $fingerprint
+        }
+
+        ui_debug "Found [llength $trusted_certs] CA certs from Keychain"
+        set print_cmd "/usr/bin/openssl x509 -inform pem -serial -issuer -startdate -enddate -subject -noout"
+        set i 0
+        foreach cert $trusted_certs {
+            incr i
+            set result [exec {*}$print_cmd << $cert]
+            ui_debug "No.${i}:\n${result}\n"
+        }
+
+        ui_debug "Process Mozilla certs downloaded from the package"
+        set pem_file [open "${prefix}/share/curl/mozilla-ca-bundle.crt" r]
+        set pem_certs_list [read $pem_file]
+        close $pem_file
+        set pem_certs [regexp -inline -all -- {-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----} $pem_certs_list]
+        ui_debug "Mozilla CA cert count: [llength $pem_certs]"
+
+        ui_debug "Append new certificates from downloaded"
+        set fingerprint_cmd "/usr/bin/openssl x509 -inform pem -fingerprint -sha256 -noout"
+        foreach cert $pem_certs {
+            set fingerprint [exec {*}$fingerprint_cmd << $cert]
+            if {[lsearch -exact $fingerprints $fingerprint] != -1} {
+                continue
+            }
+            lappend fingerprints $fingerprint
+            lappend trusted_certs $cert
+        }
+        ui_debug "Merged CA cert count: [llength $trusted_certs]"
+
+        set cert_file ${prefix}/share/curl/curl-ca-bundle.crt
+        ui_debug "Write the final trusted certificates"
+        file mkdir [file dirname $cert_file]
+        set cert_fobj [open $cert_file w]
+        puts $cert_fobj [join $trusted_certs "\n"]
+        close $cert_fobj
+    }
+
+    notes "
+    curl-ca-bundle downloads CA certificates from Mozilla, merge them with
+    CA certs from Keychain, and save the result into
+
+      ${prefix}/share/curl/curl-ca-bundle.crt
+
+    Only certs installed as system CA in 'System Keychains -> System' will
+    be dumped into the bundle file.
+    To update the bundle after a new CA is installed into the Keychain,
+    reactivate the pkg manually
+
+      sudo port deactivate curl-ca-bundle && sudo port activate curl-ca-bundle
+    "
 
     livecheck.type              regexm
     livecheck.url               https://hg.mozilla.org/mozilla-central/log/default/${certdata_path}
