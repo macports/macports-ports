@@ -166,7 +166,6 @@ set portfetch::mirror_sites::sites(cpan) {
     https://osl.ugr.es/CPAN/modules/by-module/
     http://sunsite.icm.edu.pl/pub/CPAN/modules/by-module/
     http://tux.rainside.sk/CPAN/modules/by-module/
-    http://www.cpan.org.ua/modules/by-module/
     http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
     http://www.planet-elektronik.de/CPAN/modules/by-module/
 }
