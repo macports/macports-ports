@@ -1,0 +1,234 @@
+From 16f1e9feb4b45e26ec39249cc684730c76f474e9 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Thu, 8 Aug 2024 06:38:12 +0800
+Subject: [PATCH] Fix atomics for modern gcc
+
+diff --git src/thread_disk.cc src/thread_disk.cc
+index ff5b3073..3d6db76e 100644
+--- src/thread_disk.cc
++++ src/thread_disk.cc
+@@ -67,7 +67,7 @@ thread_disk::call_events() {
+     if ((m_flags & flag_did_shutdown))
+       throw internal_error("Already trigged shutdown.");
+ 
+-    __sync_or_and_fetch(&m_flags, flag_did_shutdown);
++    __atomic_or_fetch(&m_flags, flag_did_shutdown, __ATOMIC_SEQ_CST);
+     throw shutdown_exception();
+   }
+ 
+diff --git src/torrent/utils/signal_bitfield.cc src/torrent/utils/signal_bitfield.cc
+index dfc3d1fe..196a3b97 100644
+--- src/torrent/utils/signal_bitfield.cc
++++ src/torrent/utils/signal_bitfield.cc
+@@ -18,7 +18,7 @@ signal_bitfield::add_signal(slot_type slot) {
+     throw internal_error("signal_bitfield::add_signal(...): Cannot add empty slot.");
+ 
+   unsigned int index = m_size;
+-  __sync_add_and_fetch(&m_size, 1);
++  __atomic_add_fetch(&m_size, 1, __ATOMIC_SEQ_CST);
+ 
+   m_slots[index] = slot;
+   return index;
+
+diff --git src/torrent/utils/signal_bitfield.h src/torrent/utils/signal_bitfield.h
+index ffa336d2..ce7aa2f5 100644
+--- src/torrent/utils/signal_bitfield.h
++++ src/torrent/utils/signal_bitfield.h
+@@ -55,7 +55,7 @@ public:
+   bool          has_signal(unsigned int index) const { return m_bitfield & (1 << index); }
+ 
+   // Do the interrupt from the thread?
+-  void          signal(unsigned int index) { __sync_or_and_fetch(&m_bitfield, 1 << index); }
++  void          signal(unsigned int index) { __atomic_or_fetch(&m_bitfield, 1 << index, __ATOMIC_SEQ_CST); }
+   void          work();
+ 
+   unsigned int  add_signal(slot_type slot);
+diff --git src/torrent/utils/thread_base.cc src/torrent/utils/thread_base.cc
+index ec0619f3..26a4ddeb 100644
+--- src/torrent/utils/thread_base.cc
++++ src/torrent/utils/thread_base.cc
+@@ -56,7 +56,7 @@ thread_base::start_thread() {
+ 
+ void
+ thread_base::stop_thread() {
+-  __sync_fetch_and_or(&m_flags, flag_do_shutdown);
++  __atomic_fetch_or(&m_flags, flag_do_shutdown, __ATOMIC_SEQ_CST);
+   interrupt();
+ }
+ 
+@@ -117,7 +117,7 @@ thread_base::event_loop(thread_base* thread) {
+       thread->call_events();
+       thread->signal_bitfield()->work();
+ 
+-      __sync_fetch_and_or(&thread->m_flags, flag_polling);
++      __atomic_fetch_or(&thread->m_flags, flag_polling, __ATOMIC_SEQ_CST);
+ 
+       // Call again after setting flag_polling to ensure we process
+       // any events set while it was working.
+@@ -152,7 +152,7 @@ thread_base::event_loop(thread_base* thread) {
+       instrumentation_update(INSTRUMENTATION_POLLING_EVENTS, event_count);
+       instrumentation_update(instrumentation_enum(INSTRUMENTATION_POLLING_EVENTS + thread->m_instrumentation_index), event_count);
+ 
+-      __sync_fetch_and_and(&thread->m_flags, ~(flag_polling | flag_no_timeout));
++      __atomic_fetch_and(&thread->m_flags, ~(flag_polling | flag_no_timeout), __ATOMIC_SEQ_CST);
+     }
+ 
+ // #ifdef USE_INTERRUPT_SOCKET
+diff --git src/torrent/utils/thread_base.h src/torrent/utils/thread_base.h
+index bead9659..07a4e8bd 100644
+--- src/torrent/utils/thread_base.h
++++ src/torrent/utils/thread_base.h
+@@ -144,9 +144,9 @@ thread_base::send_event_signal(unsigned int index, bool do_interrupt) {
+ 
+ inline void
+ thread_base::acquire_global_lock() {
+-  __sync_add_and_fetch(&thread_base::m_global.waiting, 1);
++  __atomic_add_fetch(&thread_base::m_global.waiting, 1, __ATOMIC_SEQ_CST);
+   pthread_mutex_lock(&thread_base::m_global.lock);
+-  __sync_sub_and_fetch(&thread_base::m_global.waiting, 1);
++  __atomic_sub_fetch(&thread_base::m_global.waiting, 1, __ATOMIC_SEQ_CST);
+ }
+ 
+ inline bool
+
+diff --git src/utils/instrumentation.cc src/utils/instrumentation.cc
+index 178d6a19..f1568cdf 100644
+--- src/utils/instrumentation.cc
++++ src/utils/instrumentation.cc
+@@ -45,7 +45,7 @@ std::array<int64_t, INSTRUMENTATION_MAX_SIZE> instrumentation_values lt_cachelin
+ inline int64_t
+ instrumentation_fetch_and_clear(instrumentation_enum type) {
+ #ifdef LT_INSTRUMENTATION
+-  return __sync_fetch_and_and(&instrumentation_values[type], int64_t());
++  return __atomic_fetch_and(&instrumentation_values[type], int64_t(), __ATOMIC_SEQ_CST);
+ #else
+   return instrumentation_values[type] = 0;
+ #endif
+diff --git src/utils/instrumentation.h src/utils/instrumentation.h
+index 11e77f6d..71f0043a 100644
+--- src/utils/instrumentation.h
++++ src/utils/instrumentation.h
+@@ -125,7 +125,7 @@ instrumentation_initialize() {
+ inline void
+ instrumentation_update(instrumentation_enum type, int64_t change) {
+ #ifdef LT_INSTRUMENTATION
+-  __sync_add_and_fetch(&instrumentation_values[type], change);
++  __atomic_add_fetch(&instrumentation_values[type], change, __ATOMIC_SEQ_CST);
+ #endif
+ }
+ 
+diff --git test/helpers/test_thread.cc test/helpers/test_thread.cc
+index 4b3d4c95..52374ab5 100755
+--- test/helpers/test_thread.cc
++++ test/helpers/test_thread.cc
+@@ -38,15 +38,15 @@ test_thread::init_thread() {
+ 
+   if ((m_test_flags & test_flag_acquire_global)) {
+     acquire_global_lock();
+-    __sync_and_and_fetch(&m_test_flags, ~test_flag_acquire_global);
+-    __sync_or_and_fetch(&m_test_flags, test_flag_has_global);
++    __atomic_and_fetch(&m_test_flags, ~test_flag_acquire_global, __ATOMIC_SEQ_CST);
++    __atomic_or_fetch(&m_test_flags, test_flag_has_global, __ATOMIC_SEQ_CST);
+   }
+ 
+   if ((m_flags & flag_do_shutdown)) {
+     if ((m_flags & flag_did_shutdown))
+       throw torrent::internal_error("Already trigged shutdown.");
+ 
+-    __sync_or_and_fetch(&m_flags, flag_did_shutdown);
++    __atomic_or_fetch(&m_flags, flag_did_shutdown, __ATOMIC_SEQ_CST);
+     throw torrent::shutdown_exception();
+   }
+ 
+@@ -55,7 +55,7 @@ test_thread::call_events() {
+ 
+   if ((m_test_flags & test_flag_do_work)) {
+     usleep(10 * 1000); // TODO: Don't just sleep, as that give up core.
+-    __sync_and_and_fetch(&m_test_flags, ~test_flag_do_work);
++    __atomic_and_fetch(&m_test_flags, ~test_flag_do_work, __ATOMIC_SEQ_CST);
+   }
+ 
+   if ((m_test_flags & test_flag_post_poke)) {
+diff --git test/helpers/test_thread.h test/helpers/test_thread.h
+index 52037036..12c649fb 100755
+--- test/helpers/test_thread.h
++++ test/helpers/test_thread.h
+@@ -31,10 +31,10 @@ public:
+ 
+   void    init_thread();
+ 
+-  void    set_pre_stop() { __sync_or_and_fetch(&m_test_flags, test_flag_pre_stop); }
+-  void    set_acquire_global() { __sync_or_and_fetch(&m_test_flags, test_flag_acquire_global); }
++  void    set_pre_stop() { __atomic_or_fetch(&m_test_flags, test_flag_pre_stop, __ATOMIC_SEQ_CST); }
++  void    set_acquire_global() { __atomic_or_fetch(&m_test_flags, test_flag_acquire_global, __ATOMIC_SEQ_CST); }
+ 
+-  void    set_test_flag(int flags) { __sync_or_and_fetch(&m_test_flags, flags); }
++  void    set_test_flag(int flags) { __atomic_or_fetch(&m_test_flags, flags, __ATOMIC_SEQ_CST); }
+ 
+ private:
+   void    call_events();
+diff --git test/torrent/task_manager_test.cc test/torrent/task_manager_test.cc
+index 73b1dfd9..e0e52e38 100644
+--- test/torrent/task_manager_test.cc
++++ test/torrent/task_manager_test.cc
+@@ -22,33 +22,33 @@ TaskManagerTest::tearDown() {
+ 
+ void*
+ TMT_Func(TMT_Data* data) {
+-  __sync_add_and_fetch(&data->counter, 1);
++  __atomic_add_fetch(&data->counter, 1, __ATOMIC_SEQ_CST);
+ 
+   return NULL;
+ }
+ 
+ void*
+ TMT_lock_func(TMT_Data* data) {
+-  __sync_add_and_fetch(&data->counter, 1);
++  __atomic_add_fetch(&data->counter, 1, __ATOMIC_SEQ_CST);
+ 
+   data->manager->m_manager.acquire_global_lock();
+   usleep(10000);
+   data->manager->m_manager.release_global_lock();
+ 
+-  __sync_add_and_fetch(&data->counter, 1);
++  __atomic_add_fetch(&data->counter, 1, __ATOMIC_SEQ_CST);
+ 
+   return NULL;
+ }
+ 
+ void*
+ TMT_waive_lock_func(TMT_Data* data) {
+-  __sync_add_and_fetch(&data->counter, 1);
++  __atomic_add_fetch(&data->counter, 1, __ATOMIC_SEQ_CST);
+ 
+   data->manager->m_manager.acquire_global_lock();
+   usleep(20000);
+   data->manager->m_manager.waive_global_lock();
+ 
+-  __sync_add_and_fetch(&data->counter, 1);
++  __atomic_add_fetch(&data->counter, 1, __ATOMIC_SEQ_CST);
+ 
+   return NULL;
+ }
+diff --git test/torrent/utils/test_signal_bitfield.cc test/torrent/utils/test_signal_bitfield.cc
+index 4ecd18c0..99a8d7d7 100644
+--- test/torrent/utils/test_signal_bitfield.cc
++++ test/torrent/utils/test_signal_bitfield.cc
+@@ -13,7 +13,7 @@ CPPUNIT_TEST_SUITE_NAMED_REGISTRATION(test_signal_bitfield, "torrent/utils");
+ 
+ static void
+ mark_index(uint32_t* bitfield, unsigned int index) {
+-  __sync_fetch_and_or(bitfield, 1 << index);
++  __atomic_fetch_or(bitfield, 1 << index, __ATOMIC_SEQ_CST);
+ }
+ 
+ static bool
+@@ -126,7 +126,7 @@ test_signal_bitfield::test_threaded() {
+     // thread->interrupt();
+ 
+     CPPUNIT_ASSERT(wait_for_true(std::bind(&check_index, &marked_bitfield, i % 20)));
+-    __sync_fetch_and_and(&marked_bitfield, ~uint32_t());
++    __atomic_fetch_and(&marked_bitfield, ~uint32_t(), __ATOMIC_SEQ_CST);
+   }
+ 
+   thread->stop_thread();
