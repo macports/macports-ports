@@ -10,7 +10,9 @@
 
 #ifdef __clang__
 // these prototypes are incorrectly omitted from <math.h> on Snow Leopard despite being available
+#ifdef __cplusplus
 extern "C" {
+#endif
     extern long long int llrintl(long double);
     extern long long int llrint(double);
     extern long long int llrintf(float);
@@ -18,7 +20,9 @@ extern "C" {
     extern long long int llroundl(long double);
     extern long long int llround(double);
     extern long long int llroundf(float);
+#ifdef __cplusplus
 }
+#endif
 #endif
 
 #endif
