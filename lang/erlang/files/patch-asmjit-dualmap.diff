@@ -1,0 +1,457 @@
+diff --color=auto -ru erts/emulator/asmjit/core/globals.cpp asmjit.patched/core/globals.cpp
+--- erts/emulator/asmjit/core/globals.cpp	2024-10-17 10:41:53
++++ asmjit.patched/core/globals.cpp	2024-10-19 09:24:53
+@@ -87,6 +87,7 @@
+     "ExpressionOverflow\0"
+     "FailedToOpenAnonymousMemory\0"
+     "FailedToOpenFile\0"
++    "ProtectionFailure\0"
+     "<Unknown>\0";
+ 
+   static const uint16_t sErrorIndex[] = {
+@@ -94,7 +95,7 @@
+     247, 264, 283, 298, 314, 333, 352, 370, 392, 410, 429, 444, 460, 474, 488,
+     508, 533, 551, 573, 595, 612, 629, 645, 661, 677, 694, 709, 724, 744, 764,
+     784, 817, 837, 852, 869, 888, 909, 929, 943, 964, 978, 996, 1012, 1028, 1047,
+-    1073, 1088, 1104, 1119, 1134, 1164, 1188, 1207, 1235, 1252
++    1073, 1088, 1104, 1119, 1134, 1164, 1188, 1207, 1235, 1252, 1270
+   };
+   // @EnumStringEnd@
+ 
+diff --color=auto -ru erts/emulator/asmjit/core/globals.h asmjit.patched/core/globals.h
+--- erts/emulator/asmjit/core/globals.h	2024-10-17 10:41:53
++++ asmjit.patched/core/globals.h	2024-10-19 09:24:53
+@@ -330,6 +330,10 @@
+   //! \note This is a generic error that is used by internal filesystem API.
+   kErrorFailedToOpenFile,
+ 
++  //! Protection failure can be returned from a virtual memory allocator or when trying to change memory access
++  //! permissions.
++  kErrorProtectionFailure,
++
+   // @EnumValuesEnd@
+ 
+   //! Count of AsmJit error codes.
+diff --color=auto -ru erts/emulator/asmjit/core/virtmem.cpp asmjit.patched/core/virtmem.cpp
+--- erts/emulator/asmjit/core/virtmem.cpp	2024-10-17 10:41:53
++++ asmjit.patched/core/virtmem.cpp	2024-10-19 09:24:53
+@@ -76,8 +76,6 @@
+     #define MAP_ANONYMOUS MAP_ANON
+   #endif
+ 
+-  #define ASMJIT_ANONYMOUS_MEMORY_USE_FD
+-
+   // Android NDK doesn't provide `shm_open()` and `shm_unlink()`.
+   #if !defined(__BIONIC__) && !defined(ASMJIT_NO_SHM_OPEN)
+     #define ASMJIT_HAS_SHM_OPEN
+@@ -89,18 +87,60 @@
+     #define ASMJIT_VM_SHM_DETECT 1
+   #endif
+ 
+-  #if defined(__APPLE__) && TARGET_OS_OSX && ASMJIT_ARCH_ARM >= 64
+-    #define ASMJIT_HAS_PTHREAD_JIT_WRITE_PROTECT_NP
++  #if defined(__APPLE__) && TARGET_OS_OSX
++    #if ASMJIT_ARCH_X86 != 0
++      #define ASMJIT_ANONYMOUS_MEMORY_USE_MACH_VM_REMAP
++    #endif
++    #if ASMJIT_ARCH_ARM >= 64
++      #define ASMJIT_HAS_PTHREAD_JIT_WRITE_PROTECT_NP
++    #endif
+   #endif
+ 
++  #if defined(__APPLE__) && ASMJIT_ARCH_X86 == 0
++    #define ASMJIT_NO_DUAL_MAPPING
++  #endif
++
+   #if defined(__NetBSD__) && defined(MAP_REMAPDUP) && defined(PROT_MPROTECT)
+-    #undef ASMJIT_ANONYMOUS_MEMORY_USE_FD
+     #define ASMJIT_ANONYMOUS_MEMORY_USE_REMAPDUP
+   #endif
++
++  #if !defined(ASMJIT_ANONYMOUS_MEMORY_USE_REMAPDUP) && \
++      !defined(ASMJIT_ANONYMOUS_MEMORY_USE_MACH_VM_REMAP) && \
++      !defined(ASMJIT_NO_DUAL_MAPPING)
++    #define ASMJIT_ANONYMOUS_MEMORY_USE_FD
++  #endif
+ #endif
+ 
+ #include <atomic>
+ 
++#if defined(ASMJIT_ANONYMOUS_MEMORY_USE_MACH_VM_REMAP)
++#include <mach/mach.h>
++#include <mach/mach_time.h>
++
++extern "C" {
++
++#ifdef mig_external
++mig_external
++#else
++extern
++#endif
++kern_return_t mach_vm_remap(
++  vm_map_t target_task,
++  mach_vm_address_t *target_address,
++  mach_vm_size_t size,
++  mach_vm_offset_t mask,
++  int flags,
++  vm_map_t src_task,
++  mach_vm_address_t src_address,
++  boolean_t copy,
++  vm_prot_t *cur_protection,
++  vm_prot_t *max_protection,
++  vm_inherit_t inheritance
++);
++
++} // {extern "C"}
++#endif
++
+ ASMJIT_BEGIN_SUB_NAMESPACE(VirtMem)
+ 
+ // Virtual Memory Utilities
+@@ -141,6 +181,11 @@
+   return ::GetLargePageMinimum();
+ }
+ 
++static bool hasDualMappingSupport() noexcept {
++  // TODO: This assumption works on X86 platforms, this may not work on AArch64.
++  return true;
++}
++
+ // Returns windows-specific protectFlags from \ref MemoryFlags.
+ static DWORD protectFlagsFromMemoryFlags(MemoryFlags memoryFlags) noexcept {
+   DWORD protectFlags;
+@@ -165,7 +210,12 @@
+ }
+ 
+ static HardenedRuntimeFlags getHardenedRuntimeFlags() noexcept {
+-  return HardenedRuntimeFlags::kNone;
++  HardenedRuntimeFlags flags = HardenedRuntimeFlags::kNone;
++
++  if (hasDualMappingSupport())
++    flags |= HardenedRuntimeFlags::kDualMapping;
++
++  return flags;
+ }
+ 
+ Error alloc(void** p, size_t size, MemoryFlags memoryFlags) noexcept {
+@@ -703,8 +753,8 @@
+ 
+ // Detects whether MAP_JIT is available.
+ static inline bool hasMapJitSupport() noexcept {
+-#if defined(__APPLE__) && TARGET_OS_OSX && ASMJIT_ARCH_ARM >= 64
+-  // OSX on AArch64 always uses hardened runtime + MAP_JIT:
++#if defined(__APPLE__) && TARGET_OS_OSX && ASMJIT_ARCH_X86 == 0
++  // Apple platforms always use hardened runtime + MAP_JIT on non-x86 hardware:
+   //   - https://developer.apple.com/documentation/apple_silicon/porting_just-in-time_compilers_to_apple_silicon
+   return true;
+ #elif defined(__APPLE__) && TARGET_OS_OSX
+@@ -746,6 +796,14 @@
+ #endif
+ }
+ 
++static inline bool hasDualMappingSupport() noexcept {
++#if defined(ASMJIT_NO_DUAL_MAPPING)
++  return false;
++#else
++  return true;
++#endif
++}
++
+ static HardenedRuntimeFlags getHardenedRuntimeFlags() noexcept {
+   HardenedRuntimeFlags flags = HardenedRuntimeFlags::kNone;
+ 
+@@ -755,6 +813,9 @@
+   if (hasMapJitSupport())
+     flags |= HardenedRuntimeFlags::kMapJit;
+ 
++  if (hasDualMappingSupport())
++    flags |= HardenedRuntimeFlags::kDualMapping;
++
+   return flags;
+ }
+ 
+@@ -828,6 +889,7 @@
+ // Virtual Memory [Posix] - Dual Mapping
+ // =====================================
+ 
++#if !defined(ASMJIT_NO_DUAL_MAPPING)
+ static Error unmapDualMapping(DualMapping* dm, size_t size) noexcept {
+   Error err1 = unmapMemory(dm->rx, size);
+   Error err2 = kErrorOk;
+@@ -843,6 +905,7 @@
+   dm->rw = nullptr;
+   return kErrorOk;
+ }
++#endif // !ASMJIT_NO_DUAL_MAPPING
+ 
+ #if defined(ASMJIT_ANONYMOUS_MEMORY_USE_REMAPDUP)
+ static Error allocDualMappingUsingRemapdup(DualMapping* dmOut, size_t size, MemoryFlags memoryFlags) noexcept {
+@@ -875,16 +938,105 @@
+ }
+ #endif
+ 
+-Error allocDualMapping(DualMapping* dm, size_t size, MemoryFlags memoryFlags) noexcept {
+-  dm->rx = nullptr;
+-  dm->rw = nullptr;
++#if defined(ASMJIT_ANONYMOUS_MEMORY_USE_MACH_VM_REMAP)
++static Error asmjitErrorFromKernResult(kern_return_t result) noexcept {
++  switch (result) {
++    case KERN_PROTECTION_FAILURE:
++      return DebugUtils::errored(kErrorProtectionFailure);
++    case KERN_NO_SPACE:
++      return DebugUtils::errored(kErrorOutOfMemory);
++    case KERN_INVALID_ARGUMENT:
++      return DebugUtils::errored(kErrorInvalidArgument);
++    default:
++      return DebugUtils::errored(kErrorInvalidState);
++  }
++}
+ 
+-  if (off_t(size) <= 0)
+-    return DebugUtils::errored(size == 0 ? kErrorInvalidArgument : kErrorTooLarge);
++static Error allocDualMappingUsingMachVmRemap(DualMapping* dmOut, size_t size, MemoryFlags memoryFlags) noexcept {
++  DualMapping dm {};
+ 
+-#if defined(ASMJIT_ANONYMOUS_MEMORY_USE_REMAPDUP)
+-  return allocDualMappingUsingRemapdup(dm, size, memoryFlags);
+-#elif defined(ASMJIT_ANONYMOUS_MEMORY_USE_FD)
++  MemoryFlags mmapFlags = MemoryFlags::kAccessReadWrite | (memoryFlags & MemoryFlags::kMapShared);
++  ASMJIT_PROPAGATE(mapMemory(&dm.rx, size, mmapFlags));
++
++  vm_prot_t curProt;
++  vm_prot_t maxProt;
++
++  int rwProtectFlags = VM_PROT_READ | VM_PROT_WRITE;
++  int rxProtectFlags = VM_PROT_READ;
++
++  if (Support::test(memoryFlags, MemoryFlags::kAccessExecute))
++    rxProtectFlags |= VM_PROT_EXECUTE;
++
++  kern_return_t result {};
++  do {
++    vm_map_t task = mach_task_self();
++    mach_vm_address_t remappedAddr {};
++
++#if defined(VM_FLAGS_RANDOM_ADDR)
++    int remapFlags = VM_FLAGS_ANYWHERE | VM_FLAGS_RANDOM_ADDR;
++#else
++    int remapFlags = VM_FLAGS_ANYWHERE;
++#endif
++
++    // Try to remap the existing memory into a different address.
++    result = mach_vm_remap(
++      task,                       // target_task
++      &remappedAddr,              // target_address
++      size,                       // size
++      0,                          // mask
++      remapFlags,                 // flags
++      task,                       // src_task
++      (mach_vm_address_t)dm.rx,   // src_address
++      false,                      // copy
++      &curProt,                   // cur_protection
++      &maxProt,                   // max_protection
++      VM_INHERIT_DEFAULT);        // inheritance
++
++    if (result != KERN_SUCCESS)
++      break;
++
++    dm.rw = (void*)remappedAddr;
++
++    // Now, try to change permissions of both map regions into RW and RX. The vm_protect()
++    // API is used twice as we also want to set maximum permissions, so nobody would be
++    // allowed to change the RX region back to RW or RWX (if RWX is allowed).
++    uint32_t i;
++    for (i = 0; i < 2; i++) {
++      bool setMaximum = (i == 0);
++
++      result = vm_protect(
++        task,                       // target_task
++        (vm_address_t)dm.rx,        // address
++        size,                       // size
++        setMaximum,                 // set_maximum
++        rxProtectFlags);            // new_protection
++
++      if (result != KERN_SUCCESS)
++        break;
++
++      result = vm_protect(task,     // target_task
++        (vm_address_t)dm.rw,        // address
++        size,                       // size
++        setMaximum,                 // set_maximum
++        rwProtectFlags);            // new_protection
++
++      if (result != KERN_SUCCESS)
++        break;
++    }
++  } while (0);
++
++  if (result != KERN_SUCCESS) {
++    unmapDualMapping(&dm, size);
++    return DebugUtils::errored(asmjitErrorFromKernResult(result));
++  }
++
++  *dmOut = dm;
++  return kErrorOk;
++}
++#endif // ASMJIT_ANONYMOUS_MEMORY_USE_MACH_VM_REMAP
++
++#if defined(ASMJIT_ANONYMOUS_MEMORY_USE_FD)
++static Error allocDualMappingUsingFile(DualMapping* dm, size_t size, MemoryFlags memoryFlags) noexcept {
+   bool preferTmpOverDevShm = Support::test(memoryFlags, MemoryFlags::kMappingPreferTmp);
+   if (!preferTmpOverDevShm) {
+     AnonymousMemoryStrategy strategy;
+@@ -910,13 +1062,39 @@
+   dm->rx = ptr[0];
+   dm->rw = ptr[1];
+   return kErrorOk;
++}
++#endif // ASMJIT_ANONYMOUS_MEMORY_USE_FD
++
++Error allocDualMapping(DualMapping* dm, size_t size, MemoryFlags memoryFlags) noexcept {
++  dm->rx = nullptr;
++  dm->rw = nullptr;
++
++#if defined(ASMJIT_NO_DUAL_MAPPING)
++  DebugUtils::unused(size, memoryFlags);
++  return DebugUtils::errored(kErrorFeatureNotEnabled);
+ #else
+-  #error "[asmjit] VirtMem::allocDualMapping() doesn't have implementation for the target OS and compiler"
++  if (off_t(size) <= 0)
++    return DebugUtils::errored(size == 0 ? kErrorInvalidArgument : kErrorTooLarge);
++
++#if defined(ASMJIT_ANONYMOUS_MEMORY_USE_REMAPDUP)
++  return allocDualMappingUsingRemapdup(dm, size, memoryFlags);
++#elif defined(ASMJIT_ANONYMOUS_MEMORY_USE_MACH_VM_REMAP)
++  return allocDualMappingUsingMachVmRemap(dm, size, memoryFlags);
++#elif defined(ASMJIT_ANONYMOUS_MEMORY_USE_FD)
++  return allocDualMappingUsingFile(dm, size, memoryFlags);
++#else
++  #error "[asmjit] VirtMem::allocDualMapping() doesn't have implementation for the target OS or architecture"
+ #endif
++#endif // ASMJIT_NO_DUAL_MAPPING
+ }
+ 
+ Error releaseDualMapping(DualMapping* dm, size_t size) noexcept {
++#if defined(ASMJIT_NO_DUAL_MAPPING)
++  DebugUtils::unused(dm, size);
++  return DebugUtils::errored(kErrorFeatureNotEnabled);
++#else
+   return unmapDualMapping(dm, size);
++#endif // ASMJIT_NO_DUAL_MAPPING
+ }
+ #endif
+ 
+@@ -1017,8 +1195,9 @@
+ 
+   INFO("VirtMem::hardenedRuntimeInfo():");
+   INFO("  flags:");
+-  INFO("    kEnabled: %s", Support::test(hardenedFlags, VirtMem::HardenedRuntimeFlags::kEnabled) ? "true" : "false");
+-  INFO("    kMapJit: %s", Support::test(hardenedFlags, VirtMem::HardenedRuntimeFlags::kMapJit) ? "true" : "false");
++  INFO("    kEnabled: %s"    , Support::test(hardenedFlags, VirtMem::HardenedRuntimeFlags::kEnabled    ) ? "true" : "false");
++  INFO("    kMapJit: %s"     , Support::test(hardenedFlags, VirtMem::HardenedRuntimeFlags::kMapJit     ) ? "true" : "false");
++  INFO("    kDualMapping: %s", Support::test(hardenedFlags, VirtMem::HardenedRuntimeFlags::kDualMapping) ? "true" : "false");
+ }
+ 
+ ASMJIT_END_NAMESPACE
+diff --color=auto -ru erts/emulator/asmjit/core/virtmem.h asmjit.patched/core/virtmem.h
+--- erts/emulator/asmjit/core/virtmem.h	2024-10-17 10:41:53
++++ asmjit.patched/core/virtmem.h	2024-10-19 09:24:53
+@@ -10,6 +10,7 @@
+ #ifndef ASMJIT_NO_JIT
+ 
+ #include "../core/globals.h"
++#include "../core/support.h"
+ 
+ ASMJIT_BEGIN_NAMESPACE
+ 
+@@ -215,15 +216,31 @@
+   //! architecture.
+   kEnabled = 0x00000001u,
+ 
+-  //! Read+Write+Execute can only be allocated with MAP_JIT flag (Apple specific, only available on OSX).
+-  kMapJit = 0x00000002u
++  //! Read+Write+Execute can only be allocated with MAP_JIT flag (Apple specific, only available on Apple platforms).
++  kMapJit = 0x00000002u,
++
++  //! Read+Write+Execute can be allocated with dual mapping approach (one region with RW and the other with RX).
++  kDualMapping = 0x00000004u
+ };
+ ASMJIT_DEFINE_ENUM_FLAGS(HardenedRuntimeFlags)
+ 
+ //! Hardened runtime information.
+ struct HardenedRuntimeInfo {
++  //! \name Members
++  //! \{
++
+   //! Hardened runtime flags.
+   HardenedRuntimeFlags flags;
++
++  //! \}
++
++  //! \name Accessors
++  //! \{
++
++  //! Tests whether the hardened runtime `flag` is set.
++  ASMJIT_INLINE_NODEBUG bool hasFlag(HardenedRuntimeFlags flag) const noexcept { return Support::test(flags, flag); }
++
++  //! \}
+ };
+ 
+ //! Returns runtime features provided by the OS.
+diff --color=auto -ru erts/emulator/asmjit/x86/x86emitter.h asmjit.patched/x86/x86emitter.h
+--- erts/emulator/asmjit/x86/x86emitter.h	2024-10-17 10:41:53
++++ asmjit.patched/x86/x86emitter.h	2024-10-19 09:24:53
+@@ -2827,7 +2827,7 @@
+   ASMJIT_INST_3x(vpand, Vpand, Vec, Vec, Mem)                          // AVX+
+   ASMJIT_INST_3x(vpandd, Vpandd, Vec, Vec, Vec)                        //      AVX512_F{kz|b32}
+   ASMJIT_INST_3x(vpandd, Vpandd, Vec, Vec, Mem)                        //      AVX512_F{kz|b32}
+-  ASMJIT_INST_3x(vpandn, Vpandn, Vec, Vec, Vec)                        // AV+
++  ASMJIT_INST_3x(vpandn, Vpandn, Vec, Vec, Vec)                        // AVX+
+   ASMJIT_INST_3x(vpandn, Vpandn, Vec, Vec, Mem)                        // AVX+
+   ASMJIT_INST_3x(vpandnd, Vpandnd, Vec, Vec, Vec)                      //      AVX512_F{kz|b32}
+   ASMJIT_INST_3x(vpandnd, Vpandnd, Vec, Vec, Mem)                      //      AVX512_F{kz|b32}
+@@ -3186,7 +3186,7 @@
+   ASMJIT_INST_2x(vpopcntq, Vpopcntq, Vec, Mem)                         //      AVX512_VPOPCNTDQ{kz|b64}
+   ASMJIT_INST_2x(vpopcntw, Vpopcntw, Vec, Vec)                         //      AVX512_BITALG{kz|b32}
+   ASMJIT_INST_2x(vpopcntw, Vpopcntw, Vec, Mem)                         //      AVX512_BITALG{kz|b32}
+-  ASMJIT_INST_3x(vpor, Vpor, Vec, Vec, Vec)                            // AV+
++  ASMJIT_INST_3x(vpor, Vpor, Vec, Vec, Vec)                            // AVX+
+   ASMJIT_INST_3x(vpor, Vpor, Vec, Vec, Mem)                            // AVX+
+   ASMJIT_INST_3x(vpord, Vpord, Vec, Vec, Vec)                          //      AVX512_F{kz|b32}
+   ASMJIT_INST_3x(vpord, Vpord, Vec, Vec, Mem)                          //      AVX512_F{kz|b32}
+--- erts/configure	2024-10-19 20:50:46
++++ erts/configure	2024-10-19 20:51:39
+@@ -25482,32 +25482,7 @@
+ 
+    case "$ARCH" in
+         amd64)
+-           case "$OPSYS" in
+-              darwin)
+-                # macOS Sonoma introduced some very annoying popups when
+-                # dual-mapping memory through the documented APIs, and we did
+-                # not wish to start using undocumented functionality in a patch
+-                # release, so we have disabled the JIT by default on this
+-                # platform.
+-                #
+-                # The previous version, macOS Ventura, does not have the
+-                # annoying popups, so it is still possible to explicitly
+-                # enable the JIT.
+-                #
+-                # The ARM JIT is unaffected because it uses per-thread
+-                # permissions instead of dual-mapped memory.
+-                if test ${enable_jit} = yes; then
+-                  JIT_ARCH=x86
+-                else
+-                  enable_jit=no
+-                  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: JIT disabled due to annoying popus on x86 Macs with Sononma" >&5
+-printf "%s\n" "$as_me: WARNING: JIT disabled due to annoying popus on x86 Macs with Sononma" >&2;}
+-                fi
+-                ;;
+-              *)
+-                JIT_ARCH=x86
+-                ;;
+-           esac
++           JIT_ARCH=x86
+            ;;
+         arm64)
+            case "$OPSYS" in
