@@ -508,12 +508,10 @@ set portfetch::mirror_sites::sites(netbsd) {
 # https://download-mirror.savannah.gnu.org/releases/00_MIRRORS.txt
 set portfetch::mirror_sites::sites(nongnu) {
     https://bigsearcher.com/mirrors/nongnu/
-    https://de.freedif.org/savannah/
     http://download-mirror.savannah.gnu.org/releases/
     http://ftp.acc.umu.se/mirror/gnu.org/savannah/
     http://ftp.cc.uoc.gr/mirrors/nongnu.org/
-    http://ftp.igh.cnrs.fr/pub/nongnu/
-    http://mirror.cedia.org.ec/nongnu/
+    https://mirror.cedia.org.ec/nongnu/
     http://mirror.csclub.uwaterloo.ca/nongnu/
     http://mirror.downloadvn.com/nongnu/
     http://mirror.easyname.at/nongnu/
@@ -522,12 +520,8 @@ set portfetch::mirror_sites::sites(nongnu) {
     http://mirror.marwan.ma/savannah/
     http://mirror.netcologne.de/savannah/
     http://mirror.ossplanet.net/nongnu/
-    http://mirror.rackdc.com/savannah/
-    http://mirror.yongbok.net/nongnu/
     https://mirrors.sarata.com/non-gnu/
-    http://mirrors.up.pt/pub/nongnu/
     http://nongnu.askapache.com/
-    http://nongnu.freemirror.org/nongnu/
     https://nongnu.uib.no/
     http://quantum-mirror.hu/mirrors/pub/gnusavannah/
     http://savannah-nongnu-org.ip-connect.vn.ua/
