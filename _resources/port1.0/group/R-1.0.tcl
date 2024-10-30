@@ -132,6 +132,11 @@ if {${os.platform} eq "darwin" && ${os.major} < 10} {
     }
 }
 
+# R bakes in the compiler, so if it is built with ccache,
+# then it will require ccache to build R packages.
+# Disable it to avoid an unnecessary dependency.
+configure.ccache            no
+
 port::register_callback R.add_dependencies
 
 proc R.add_dependencies {} {
