@@ -16,11 +16,8 @@ legacysupport.use_static yes
 legacysupport.newest_darwin_requires_legacy 13
 
 categories              lang
-platforms               darwin
 license                 NCSA
 maintainers             {jeremyhu @jeremyhu}
-
-platforms               {darwin < 23}
 
 set llvm_version        12
 version                 12.0.1
@@ -35,7 +32,7 @@ use_xz                  yes
 
 name                    llvm-${llvm_version}
 revision                3
-subport                 clang-${llvm_version} {revision 3}
+subport                 clang-${llvm_version} {revision 4}
 subport                 lldb-${llvm_version}  {revision 3}
 dist_subdir             llvm
 set suffix              mp-${llvm_version}
@@ -55,15 +52,14 @@ cmake.build_type        Release
 cmake.install_rpath
 
 configure.pre_args-delete \
-    -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
-    -DCMAKE_INSTALL_RPATH=${cmake.install_prefix}/lib
+    -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib"
 
 configure.pre_args-replace \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
 
 configure.pre_args-replace \
-    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;${cmake.install_prefix}\;/usr" \
     -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr"
 
 configure.args-append \
@@ -123,8 +119,12 @@ patchfiles-append \
     0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
     0025-lldb-add-defines-needed-for-older-SDKs.patch \
     0026-compiler-rt-parallel-D106305.patch \
+    0028-lldb-Add-cstdio-include-to-fix-a595b931f1f91897317a4.patch \
+    0029-xray-allow-xray_trampoline_x86_64.S-to-build-with-Xc.patch \
+    0030-compiler-rt-Move-.cfi_start-after-the-symbol-label-d.patch \
     patch-lldb-stdc-macros-134877.diff \
-    patch-lldb-fix-swig-lvalue-2128646.diff
+    patch-lldb-fix-swig-lvalue-2128646.diff \
+    patch-xcode-15.diff
 
 if {${os.platform} eq "darwin" && ${os.major} < 14} {
     patchfiles-append \
@@ -263,7 +263,7 @@ if {${subport} eq "lldb-${llvm_version}"} {
     select.group        lldb
     select.file         ${filespath}/mp-${subport}
 
-    platforms {darwin >= 16} {darwin < 23}
+    platforms {darwin >= 16}
 
     configure.args-append \
         -DLLDB_CODESIGN_IDENTITY=- \
@@ -359,6 +359,16 @@ post-destroot {
             macos-setup-codesign.sh \
             ${lldb_scripts_destdir}
     }
+
+    if {${subport} eq "clang-${llvm_version}"} {
+        # move libc++ libraries out of default location to prevent accidental linkage
+        set libcxx_dir ${destroot}${sub_prefix}/lib/libc++
+        xinstall -d ${libcxx_dir}
+        foreach f [glob -nocomplain ${destroot}${sub_prefix}/lib/libc++*.*] {
+            ui_debug "Moving ${f} to ${libcxx_dir}"
+            move ${f} ${libcxx_dir}
+        }
+    }
 }
 
 if {${subport} eq "clang-${llvm_version}"} {
@@ -443,6 +453,22 @@ if {${subport} eq "clang-${llvm_version}"} {
     }
     if { ${cxx_stdlib} eq "libstdc++" } {
         default_variants-append +libstdcxx
+    }
+
+    post-configure {
+        # -Wl,-syslibroot referencing the macOS SDK must not appear when linking
+        # runtime libraries for non-macOS platforms, which are cross-built and
+        # used for cross-platform support. The clang build will provide the
+        # proper -isysroot for the platform in these cases. Remove the macOS
+        # SDK.
+        foreach rtl {asan lsan stats tsan ubsan ubsan_minimal} {
+            foreach rtl_os {ios iossim} {
+                set link_txt_path "${workpath}/build/projects/compiler-rt/lib/${rtl}/CMakeFiles/clang_rt.${rtl}_${rtl_os}_dynamic.dir/link.txt"
+                if {[file exists "${link_txt_path}"]} {
+                    reinplace "s|-Wl,-syslibroot,${configure.sdkroot}||" "${link_txt_path}"
+                }
+            }
+        }
     }
 }
 

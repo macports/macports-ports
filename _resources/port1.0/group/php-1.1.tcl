@@ -11,7 +11,7 @@ default categories              php
 # built. For unified extension ports (name begins with "php-") setting
 # php.branches is mandatory; there is no default. Example:
 #
-#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2 8.3
+#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2 8.3 8.4
 #
 # For unified ports, setting php.branches will create the subports.
 #

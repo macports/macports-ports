@@ -422,12 +422,9 @@ proc python_add_dependencies {} {
                     }
                     nose {
                         depends_test-delete    port:py${python.version}-nose
-                        depends_test-delete    port:py${python.version}-pynose
-                        if {${python.version} >= 312} {
+                        if {${python.version} < 312} {
                             depends_test-append \
-                                                port:py${python.version}-pynose
-                        } else {
-                            depends_test-append    port:py${python.version}-nose
+                                                port:py${python.version}-nose
                         }
                     }
                     default {}

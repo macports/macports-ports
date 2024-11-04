@@ -27,9 +27,9 @@ version                 ${llvm_version}.0.6
 name                    llvm-${llvm_version}
 revision                0
 subport                 mlir-${llvm_version}  { revision 0 }
-subport                 clang-${llvm_version} { revision 2 }
+subport                 clang-${llvm_version} { revision 3 }
 subport                 lldb-${llvm_version}  { revision 1 }
-subport                 flang-${llvm_version} { revision 0 }
+subport                 flang-${llvm_version} { revision 1 }
 
 checksums               rmd160  2b8b71bbb9fa5718c85f78924a0aa7e700cbd2ee \
                         sha256  8b3cfd7bc695bd6cea0f37f53f0981f34f87496e79e2529874fd03a2f9dd3a8a \
@@ -60,15 +60,14 @@ cmake.build_type        Release
 cmake.install_rpath
 
 configure.pre_args-delete \
-    -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
-    -DCMAKE_INSTALL_RPATH=${cmake.install_prefix}/lib
+    -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib"
 
 configure.pre_args-replace \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
 
 configure.pre_args-replace \
-    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;${cmake.install_prefix}\;/usr" \
     -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr"
 
 configure.args-append \
@@ -134,6 +133,9 @@ patchfiles-append \
     0015-Fixup-libstdc-header-search-paths-for-older-versions.patch \
     0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
     0025-lldb-add-defines-needed-for-older-SDKs.patch \
+    0032-lldb-Add-cstdio-include-to-fix-a595b931f1f91897317a4.patch \
+    0033-xray-Use-L-instead-of-.L-for-Mach-O.patch \
+    0034-builtins-Move-cfi-start-s-after-the-symbol-name-NFC.patch \
     MachOWriter.cpp-types.patch \
     SyntheticSections.cpp-types.patch \
     patch-lldb-stdc-macros-134877.diff \
@@ -267,12 +269,17 @@ if { ${subport} eq "flang-${llvm_version}" } {
     # has to match mlir's archs
     supported_archs     arm64 x86_64
 
+    post-patch {
+        reinplace -E "1s|^#!.*$|#!${prefix}/bin/bash|" ${worksrcpath}/../flang/tools/f18/flang
+    }
+
     configure.args-append \
         -DLLVM_ENABLE_PROJECTS="clang\;flang\;compiler-rt\;mlir" \
         -DLIBCXX_ENABLE_SHARED=OFF          \
         -DLIBCXX_INSTALL_LIBRARY=OFF
 
     depends_lib-append  port:clang-${llvm_version} port:mlir-${llvm_version}
+    depends_run-append  port:bash
 
     destroot {
         # we have to run the destroot like this, because individual targets for each of the
@@ -342,6 +349,23 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
         # avoid need for thread_local_storage
         configure.args-append    -DCLANG_ENABLE_CLANGD=OFF \
                                  -DLLVM_ENABLE_BACKTRACES=OFF
+    }
+
+    post-configure {
+        # -Wl,-syslibroot referencing the macOS SDK must not appear when linking
+        # runtime libraries for non-macOS platforms, which are cross-built and
+        # used for cross-platform support. The clang and flang builds will
+        # provide the proper -isysroot for the platform in these cases. Remove
+        # the macOS SDK.
+        foreach rtl_dir {asan lsan stats tsan/rtl ubsan ubsan_minimal} {
+            set rtl [lindex [split ${rtl_dir} /] 0]
+            foreach rtl_os {ios iossim} {
+                set link_txt_path "${workpath}/build/projects/compiler-rt/lib/${rtl_dir}/CMakeFiles/clang_rt.${rtl}_${rtl_os}_dynamic.dir/link.txt"
+                if {[file exists "${link_txt_path}"]} {
+                    reinplace "s|-Wl,-syslibroot,${configure.sdkroot}||" "${link_txt_path}"
+                }
+            }
+        }
     }
 }
 
@@ -447,6 +471,16 @@ post-destroot {
             macos-setup-codesign.sh \
             ${lldb_scripts_destdir}
     }
+
+    if {${subport} eq "clang-${llvm_version}"} {
+        # move libc++ libraries out of default location to prevent accidental linkage
+        set libcxx_dir ${destroot}${sub_prefix}/lib/libc++
+        xinstall -d ${libcxx_dir}
+        foreach f [glob -nocomplain ${destroot}${sub_prefix}/lib/libc++*.*] {
+            ui_debug "Moving ${f} to ${libcxx_dir}"
+            move ${f} ${libcxx_dir}
+        }
+    }
 }
 
 if {${subport} eq "clang-${llvm_version}"} {
@@ -531,23 +565,6 @@ if {${subport} eq "clang-${llvm_version}"} {
     }
     if { ${cxx_stdlib} eq "libstdc++" } {
         default_variants-append +libstdcxx
-    }
-
-    post-configure {
-	# -Wl,-syslibroot referencing the macOS SDK must not appear when linking
-	# runtime libraries for non-macOS platforms, which are cross-built and
-	# used for cross-platform support. The clang build will provide the
-	# proper -isysroot for the platform in these cases. Remove the macOS
-	# SDK.
-        foreach rtl_dir {asan lsan stats tsan/rtl ubsan ubsan_minimal} {
-            set rtl [lindex [split ${rtl_dir} /] 0]
-            foreach rtl_os {ios iossim} {
-                set link_txt_path "${workpath}/build/projects/compiler-rt/lib/${rtl_dir}/CMakeFiles/clang_rt.${rtl}_${rtl_os}_dynamic.dir/link.txt"
-                if {[file exists "${link_txt_path}"]} {
-                    reinplace "s|-Wl,-syslibroot,${configure.sdkroot}||" "${link_txt_path}"
-                }
-            }
-        }
     }
 }
 

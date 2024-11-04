@@ -103,18 +103,39 @@ compiler.blacklist-append   {clang}
 # is then in the hands of the R maintainers and will not change
 # from the current defaults when these get bumped centrally.
 # NOTE : Keep this setting in sync with the one in the R port.
-compiler.blacklist-append   {macports-clang-1[7-9]}
+if { ${os.major} > 23 } {
+    # https://trac.macports.org/ticket/70799
+    compiler.blacklist-append   {macports-clang-19} {macports-clang-2[0-9]}
+} else {
+    compiler.blacklist-append   {macports-clang-1[7-9]} {macports-clang-2[0-9]}
+}
 # Similarly, for gcc select the gcc13 variant of the compilers PG.
 # This setting should also be kept in sync with that in the R Port.
 # Updates should be coordinated with the R maintainers.
-# NOTE: upon the update to gcc14, please add a blacklist of newer gccs,
+if { ${os.major} > 23 } {
+    # https://trac.macports.org/ticket/70799
+    compiler.blacklist-append   {macports-gcc-1[5-9]}
+} else {
+    compiler.blacklist-append   {macports-gcc-1[4-9]}
+}
+# NOTE: upon the update to gcc14, please update the blacklist accordingly,
 # like it is done for clangs. We would prefer using the same version of gcc and gfortran.
 if {${os.platform} eq "darwin" && ${os.major} < 10} {
     # Until old platforms are switched to the new libgcc.
     default_variants-append +gcc7
 } else {
-    default_variants-append +gcc13
+    if { ${os.major} > 23 } {
+        # https://trac.macports.org/ticket/70799
+        default_variants-append +gcc14
+    } else {
+        default_variants-append +gcc13
+    }
 }
+
+# R bakes in the compiler, so if it is built with ccache,
+# then it will require ccache to build R packages.
+# Disable it to avoid an unnecessary dependency.
+configure.ccache            no
 
 port::register_callback R.add_dependencies
 

@@ -7,12 +7,12 @@ PortGroup                   muniversal 1.1
 
 # Keep the wine-stable, wine-devel and wine-crossover portfiles as similar as possible.
 
-github.setup                wine-mirror wine 9.11 wine-
+github.setup                wine-mirror wine 9.20 wine-
 github.tarball_from         archive
 name                        wine-devel
 conflicts                   wine-stable wine-staging wine-crossover
 set my_name                 wine
-revision                    1
+revision                    0
 platforms                   {darwin >= 19}
 set branch                  [lindex [split ${version} .] 0].x
 license                     LGPL-2.1+
@@ -37,9 +37,9 @@ long_description \
 
 checksums \
     ${distname}${extract.suffix} \
-    rmd160  9f45723d664c16a89a7d35450ceb7df252e29d8f \
-    sha256  b2b199fb2f95f6c9d61f2e9bbd038c1cc803f5a6d4b63c69b2707a0021140370 \
-    size    49452646
+    rmd160  a4524cd0f2c05b360be9c0ef17d2cb86c10921ec \
+    sha256  ae5d1ef7fe71903bc1ff65e5b02e44b401225399eed8d6a0efa8a792bf79ad70 \
+    size    51667148
 
 depends_build \
     port:bison \
@@ -58,7 +58,7 @@ depends_lib \
 
 depends_run \
     port:mingw-w64-wine-gecko-2.47.4 \
-    port:mingw-w64-wine-mono-9.1.0
+    port:mingw-w64-wine-mono-9.3.0
 
 patch.pre_args-replace -p0 -p1
 
@@ -68,11 +68,6 @@ patchfiles-append \
 # Some required hacks to make wine work better on macOS & Rosetta2
 patchfiles-append \
     macos_hacks.diff
-
-# ntdll: Fix macOS build errors with Xcode 16.
-# https://gitlab.winehq.org/wine/wine/-/merge_requests/5871
-patchfiles-append \
-    5871.diff
 
 # wine requires the program specified in INSTALL to create intermediate
 # directories; /usr/bin/install doesn't.
@@ -91,6 +86,7 @@ configure.args \
     --with-coreaudio \
     --with-cups \
     --without-dbus \
+    --without-ffmpeg \
     --without-fontconfig \
     --with-freetype \
     --with-gettext \
@@ -103,7 +99,6 @@ configure.args \
     --without-krb5 \
     --with-mingw \
     --without-netapi \
-    --without-odbc \
     --with-opencl \
     --with-opengl \
     --without-oss \
@@ -130,6 +125,14 @@ configure.ldflags-append    -Wl,-rpath,${compiler.library_path}
 # FSF GCC cannot compile code using Apple's "blocks" language extensions
 compiler.blacklist-append   {*gcc*} {clang < 800} {macports-clang-3.*}
 
+# Setting an older deployment target avoids build error with MacOSX15.sdk
+# https://gitlab.winehq.org/wine/wine/-/merge_requests/5935#note_74758
+macosx_deployment_target    10.15
+
+if {${subport} eq "wine-devel"} {
+    patchfiles-append       1001-devel-msync.diff
+}
+
 subport wine-staging {
     conflicts               wine-stable wine-devel wine-crossover
     set staging_version     ${version}
@@ -141,20 +144,18 @@ subport wine-staging {
 
     checksums-append \
         ${wine_staging_distfile} \
-        rmd160  fa43f49144181ef03ef18e6791c2daa69b2c5033 \
-        sha256  5edfa88452afd9a52dd9c978ec9ca6a713ad3d645d08d8baa318d35583e7a975 \
-        size    9460666
+        rmd160  fa1258bc308dcae98314a4104ef9f2f05dca47f7 \
+        sha256  e88fe8e23f7160489538636a2d795772415004d48cdcc85d29dd9e59b2fe575d \
+        size    9518651
 
     depends_patch-append    port:autoconf
 
     # Applying staging after other patchfiles to avoid problems
-    # "winemac.drv-no-flicker-patch" gets inherited from wine-devel
-    # "1001-msync" needs to applied after staging
     post-patch {
         system -W ${worksrcpath} \
-            "${workpath}/wine-staging-${staging_version}/staging/patchinstall.py --all -W winemac.drv-no-flicker-patch"
+            "${workpath}/wine-staging-${staging_version}/staging/patchinstall.py --all -W ntdll-Syscall_Emulation -W winemac.drv-no-flicker-patch"
         system -W ${worksrcpath} \
-            "patch -p1 < ${filespath}/1001-msync.diff"
+            "patch -p1 < ${filespath}/1001-staging-msync.diff"
     }
 }
 
@@ -169,6 +170,23 @@ variant gphoto description "Build ${subport} with support for digital cameras" {
     configure.args-replace  --without-gphoto --with-gphoto
 }
 
+variant ffmpeg description "Build ${subport} with FFmpeg-based implementation for the MF byte stream handlers" {
+    # Use the same version of ffmpeg as gstreamer1-gst-libav
+    set ffmpeg_ver          6
+    depends_lib-append      port:ffmpeg${ffmpeg_ver}
+    configure.args-replace  --without-ffmpeg --with-ffmpeg
+    configure.pkg_config_path   ${prefix}/libexec/ffmpeg${ffmpeg_ver}/lib/pkgconfig
+
+    notes-append "
+        \n
+        The new implementation can be enabled by setting the DWORD value:
+        \n
+        DisableGstByteStreamHandler = 1
+        \n
+        in the HKCU\Software\Wine\MediaFoundation registry key.
+    "
+}
+
 variant gstreamer description "Build ${subport} with GStreamer, for multimedia support" {
     depends_lib-append      port:gstreamer1 port:gstreamer1-gst-plugins-base port:gstreamer1-gst-plugins-good \
         port:gstreamer1-gst-plugins-bad port:gstreamer1-gst-plugins-ugly port:gstreamer1-gst-libav
@@ -180,7 +198,7 @@ variant kerberos description "Build ${subport} with Kerberos, for network authen
     configure.args-replace  --without-krb5 --with-krb5
 }
 
-default_variants            +gstreamer
+default_variants            +ffmpeg +gstreamer
 
 triplet.add_build           cross
 triplet.add_host            none
@@ -192,8 +210,11 @@ muniversal.arch_flag        no
 muniversal.arch_compiler    yes
 configure.ldflags-delete    -L${compiler.library_path}
 configure.optflags          -g -O2
-# gcc14.1 now sets -Werror-incompatible-pointer-types
-configure.env-append        "CROSSCFLAGS=${configure.optflags} -Wno-error=incompatible-pointer-types"
+configure.env-append        "CROSSCFLAGS=${configure.optflags}"
+
+# Needed due to commit
+# https://gitlab.winehq.org/wine/wine/-/commit/b21813fa135995449b7a4ba19b561d6faf087ee8
+configure.cflags-append     -Wno-error=incompatible-function-pointer-types
 
 # Were only installing wine not the development files
 destroot.target             install-lib

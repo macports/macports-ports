@@ -21,6 +21,15 @@ if {${os.major} < 14} {
 	git.cmd                 ${prefix}/bin/git
 }
 
+# https://github.com/fortran-lang/fpm/issues/1059
+# Drop this upon the next release of FPM:
+compiler.blacklist-append \
+                    macports-gcc-14
+if {${os.platform} ne "darwin" || ${os.major} > 9} {
+    default_variants-append \
+                    +gcc13
+}
+
 # Clang of 10.7 fails with multiple packages: error: invalid instruction mnemonic 'cvtsi2sdl'
 compiler.blacklist-append \
                     *gcc-4.* {clang < 500}

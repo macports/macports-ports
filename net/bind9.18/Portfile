@@ -1,0 +1,150 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
+
+PortSystem      1.0
+PortGroup       legacysupport 1.0
+PortGroup       compiler_blacklist_versions 1.0
+
+name            bind9.18
+version         9.18.31
+categories      net
+maintainers     {jmr @jmroot}
+platforms       darwin freebsd sunos
+conflicts       bind9
+
+description     Domain Name System server
+# see https://gitlab.isc.org/isc-projects/bind9/-/blob/main/LICENSE
+license         {MPL-2 GPL-2+ LGPL-2.1+ AGPL-3+}
+
+long_description \
+                The BIND DNS Server is used on the vast majority of name \
+                serving machines on the Internet, providing a robust \
+                and stable architecture on top of which an \
+                organization's naming architecture can be built. The \
+                resolver library included in the BIND distribution \
+                provides the standard APIs for translation between domain names \
+                and Internet addresses and is intended to be linked with applications \
+                requiring name service. This is the older 9.18 release series, \
+                intended to be used on systems where 9.20 doesn't work.
+
+homepage        https://www.isc.org/
+
+distname        bind-${version}
+dist_subdir     bind9
+master_sites    isc:bind/${version}
+
+checksums       rmd160 695f597327b0276c7abd621220a2470981d0856b \
+                sha256 51b258969275c5206ef745a5aac03dbe98f1c8031fefed378d53597e7987b1b3
+
+use_xz          yes
+
+depends_build   path:bin/pkg-config:pkgconfig
+
+depends_lib     path:lib/libssl.dylib:openssl  \
+                path:lib/pkgconfig/libuv.pc:libuv \
+                port:libxml2 \
+                port:nghttp2 \
+                path:lib/pkgconfig/jemalloc.pc:jemalloc \
+                port:json-c \
+                port:libidn2 \
+                port:lmdb
+
+universal_variant \
+                no
+
+# Needs working __atomic_* builtins
+# Apple clang 15.0.0 from Xcode before 15.2 has a codgen bug that causes a crash in libisc
+compiler.blacklist \
+                *gcc-4.0 *gcc-4.2 \
+                {clang < 500} \
+                {clang >= 1500.0.40.1 < 1500.1.0.2.5 }
+
+patchfiles      atomics.patch \
+                lib_dns_Makefile.in.patch \
+                patch-fix-rwlock.diff
+
+# tests require `sudo bin/tests/system/ifconfig.sh up`
+test.run        yes
+test.target     test
+
+startupitem.create      yes
+startupitem.netchange   yes
+startupitem.executable  ${prefix}/sbin/named -u named -f
+
+add_users       named group=named
+
+configure.env   STD_CDEFINES=-DDIG_SIGCHASE=1 \
+                CC_FOR_BUILD=${configure.cc}
+if {${os.platform} eq "darwin" && ${os.major} <= ${legacysupport.newest_darwin_requires_legacy}} {
+    configure.env-append    CPPFLAGS_FOR_BUILD=-I${prefix}/include/LegacySupport \
+                            CFLAGS_FOR_BUILD=${configure.cc_archflags} \
+                            "LDFLAGS_FOR_BUILD=-L${prefix}/lib -lMacportsLegacySupport"
+}
+
+configure.args  --disable-silent-rules \
+                --mandir=${prefix}/share/man \
+                --with-openssl=${prefix} \
+                --with-libidn2=${prefix} \
+                --enable-doh
+
+platform darwin 8 {
+    configure.args-append --with-dlopen=no \
+                          --with-gssapi=no
+}
+
+platform darwin 9 {
+    configure.args-append --with-dlopen=no
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 10} {
+    # Until this is fixed: https://trac.macports.org/ticket/65945
+    depends_lib-delete \
+                path:lib/pkgconfig/jemalloc.pc:jemalloc
+    configure.args-append --with-jemalloc=no
+}
+
+post-destroot    {
+    # Ensure needed directories
+    xinstall -o named -g named -m 755 -d \
+        ${destroot}${prefix}/var/named \
+        ${destroot}${prefix}/var/run/named
+
+    # Install the conf file as a sample
+    xinstall -o root -m 644 ${filespath}/named.conf \
+        ${destroot}${prefix}/etc/named.conf.dist
+    reinplace "s|%%PREFIX%%|${prefix}|g" \
+        ${destroot}${prefix}/etc/named.conf.dist
+
+    # Install the db files as samples
+    foreach f "db.127.0.0 db.cache db.localhost" {
+        xinstall -o named -g named -m 644 ${filespath}/${f} \
+            ${destroot}${prefix}/var/named/${f}.dist
+    }
+
+    destroot.keepdirs ${destroot}${prefix}/var/run/named
+}
+
+notes "******************************************************
+* To setup named to run, you need to copy named.conf.dist
+* to named.conf:
+* sudo cp ${prefix}/etc/named.conf.dist ${prefix}/etc/named.conf
+* and edit as needed. If you use the default zone files for
+* 127.0.0, localhost, and the cache, you also need to copy
+* those files:
+* sudo cp ${prefix}/var/named/db.127.0.0.dist ${prefix}/var/named/db.127.0.0
+* sudo cp ${prefix}/var/named/db.cache.dist ${prefix}/var/named/db.cache
+* sudo cp ${prefix}/var/named/db.localhost.dist ${prefix}/var/named/db.localhost
+* 
+* You may want to generate a key (for rndc):
+* $ sudo rndc-confgen -a
+*
+* Remember to secure your configuration:
+* http://www.cymru.com/Documents/secure-bind-template.html
+*
+* The bind9 port now sets up named to run as non-root, you may
+* need to adjust your named.conf to put the pidfile and any
+* logging into a directory where this new user can write files.
+******************************************************"
+
+livecheck.type   regex
+livecheck.url    ${homepage}downloads/
+livecheck.regex  {BIND(9\.18\.\d+(?:-P\d+)?)\.tar\.[gx]z</a>}

@@ -35,7 +35,8 @@ namespace eval  qt6             {}
 # please keep in order with the most recent Qt and OS versions with the lowest indices
 #
 set qt6::available_versions {
-    qt6     {6.4   {21 20 19 18}}
+    qt6     {6.8   {23 22 21 20}}
+    qt64    {6.4   {23 22 21 20 19 18}}
 }
 
 ####################################################################################################################################
@@ -87,8 +88,13 @@ proc qt6::base {} {
 
 proc qt6::version {} {
     array set qt_info [list {*}${qt6::available_versions}]
-    return [lindex $qt_info([option qt6.base]) 0]
+    if {[info exists qt_info([option qt6.base])]} {
+        return [lindex $qt_info([option qt6.base]) 0]
+    } else {
+        return {}
+    }
 }
+
 proc qt6::read_only_option {opt action args} {
     if {${action} eq "set"} {
         return -code error "${opt} is read-only"
@@ -306,6 +312,24 @@ array set qt6::components {
         6.4
         7.0
         libexec/qt6/lib/QtQuick3DPhysics.framework/QtQuick3DPhysics
+        ""
+    }
+    qtlocation {
+        6.5
+        7.0
+        libexec/qt6/lib/QtLocation.framework/QtLocation
+        ""
+    }
+    qtquickeffectmaker {
+        6.5
+        7.0
+        /opt/local/libexec/qt6/qml/QtQuickEffectMaker/defaultnodes/basic/brightness_contrast.qen
+        ""
+    }
+    qtgraphs {
+        6.6
+        7.0
+        libexec/qt6/lib/QtGraphs.framework/QtGraphs
         ""
     }
     sqlite-plugin {
