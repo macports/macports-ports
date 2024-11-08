@@ -166,7 +166,6 @@ set portfetch::mirror_sites::sites(cpan) {
     https://osl.ugr.es/CPAN/modules/by-module/
     http://sunsite.icm.edu.pl/pub/CPAN/modules/by-module/
     http://tux.rainside.sk/CPAN/modules/by-module/
-    http://www.cpan.org.ua/modules/by-module/
     http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
     http://www.planet-elektronik.de/CPAN/modules/by-module/
 }
@@ -509,12 +508,10 @@ set portfetch::mirror_sites::sites(netbsd) {
 # https://download-mirror.savannah.gnu.org/releases/00_MIRRORS.txt
 set portfetch::mirror_sites::sites(nongnu) {
     https://bigsearcher.com/mirrors/nongnu/
-    https://de.freedif.org/savannah/
     http://download-mirror.savannah.gnu.org/releases/
     http://ftp.acc.umu.se/mirror/gnu.org/savannah/
     http://ftp.cc.uoc.gr/mirrors/nongnu.org/
-    http://ftp.igh.cnrs.fr/pub/nongnu/
-    http://mirror.cedia.org.ec/nongnu/
+    https://mirror.cedia.org.ec/nongnu/
     http://mirror.csclub.uwaterloo.ca/nongnu/
     http://mirror.downloadvn.com/nongnu/
     http://mirror.easyname.at/nongnu/
@@ -523,12 +520,8 @@ set portfetch::mirror_sites::sites(nongnu) {
     http://mirror.marwan.ma/savannah/
     http://mirror.netcologne.de/savannah/
     http://mirror.ossplanet.net/nongnu/
-    http://mirror.rackdc.com/savannah/
-    http://mirror.yongbok.net/nongnu/
     https://mirrors.sarata.com/non-gnu/
-    http://mirrors.up.pt/pub/nongnu/
     http://nongnu.askapache.com/
-    http://nongnu.freemirror.org/nongnu/
     https://nongnu.uib.no/
     http://quantum-mirror.hu/mirrors/pub/gnusavannah/
     http://savannah-nongnu-org.ip-connect.vn.ua/
@@ -666,32 +659,34 @@ set portfetch::mirror_sites::sites(savannah) \
 
 # https://sourceforge.net/p/forge/documentation/Mirrors/
 set portfetch::mirror_sites::sites(sourceforge) {
-    http://astuteinternet.dl.sourceforge.net/
+    http://altushost-swe.dl.sourceforge.net/
     http://cfhcable.dl.sourceforge.net/
-    http://deac-ams.dl.sourceforge.net/
+    http://cyfuture.dl.sourceforge.net/
+    http://cytranet-dal.dl.sourceforge.net/
     http://deac-fra.dl.sourceforge.net/
     http://deac-riga.dl.sourceforge.net/
     http://excellmedia.dl.sourceforge.net/
     http://freefr.dl.sourceforge.net/
     http://gigenet.dl.sourceforge.net/
-    http://iweb.dl.sourceforge.net/
+    http://ixpeering.dl.sourceforge.net/
     http://jaist.dl.sourceforge.net/
-    http://jztkft.dl.sourceforge.net/
     http://kumisystems.dl.sourceforge.net/
     http://liquidtelecom.dl.sourceforge.net/
-    http://managedway.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
     http://netactuate.dl.sourceforge.net/
     http://netcologne.dl.sourceforge.net/
-    http://netix.dl.sourceforge.net/
-    http://newcontinuum.dl.sourceforge.net/
+    http://onboardcloud.dl.sourceforge.net/
     http://phoenixnap.dl.sourceforge.net/
     http://pilotfiber.dl.sourceforge.net/
+    http://psychz.dl.sourceforge.net/
     http://razaoinfo.dl.sourceforge.net/
+    http://sinalbr.dl.sourceforge.net/
+    http://sitsa.dl.sourceforge.net/
     http://tenet.dl.sourceforge.net/
-    http://svwh.dl.sourceforge.net/
-    http://ufpr.dl.sourceforge.net/
     http://versaweb.dl.sourceforge.net/
+    http://webwerks.dl.sourceforge.net/
+    http://yer.dl.sourceforge.net/
+    http://zenlayer.dl.sourceforge.net/
 }
 
 set portfetch::mirror_sites::sites(sourceforge_jp) {

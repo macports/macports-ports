@@ -15,7 +15,7 @@ endgroup() {
     printtag "endgroup"
 }
 
-MACPORTS_VERSION=2.10.2
+MACPORTS_VERSION=2.10.3
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 OS_ARCH=$(uname -m)

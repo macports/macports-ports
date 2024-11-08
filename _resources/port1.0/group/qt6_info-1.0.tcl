@@ -35,7 +35,7 @@ namespace eval  qt6             {}
 # please keep in order with the most recent Qt and OS versions with the lowest indices
 #
 set qt6::available_versions {
-    qt6     {6.7   {23 22 21 20}}
+    qt6     {6.8   {23 22 21 20}}
     qt64    {6.4   {23 22 21 20 19 18}}
 }
 

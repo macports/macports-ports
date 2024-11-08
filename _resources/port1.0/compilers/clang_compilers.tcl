@@ -12,8 +12,8 @@ if {${os.platform} eq "darwin" && [option configure.build_arch] in [list ppc ppc
     return
 }
 
-# Clang 17+ only available on Darwin11 and newer
-if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
+# Clang 17+ only available on newer Darwin versions
+if {${os.major} >= 12 || ${os.platform} ne "darwin"} {
     # For now limit exposure of clang-18+ to macOS13+ due to issues like
     # https://github.com/macports/macports-ports/pull/21051
     # https://trac.macports.org/ticket/68640
