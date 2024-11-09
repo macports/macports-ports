@@ -1,23 +1,13 @@
 diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
-index 2d08481cd35..9972781a183 100644
+index df3447a9014..4d70b83ee14 100644
 --- a/dlls/kernelbase/process.c
 +++ b/dlls/kernelbase/process.c
-@@ -502,6 +502,46 @@ done:
+@@ -502,6 +502,36 @@ done:
      return ret;
  }
  
 +static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd_line )
 +{
-+    /* CROSSOVER HACK: bug 13322 (winehq bug 39403)
-+     * Insert --no-sandbox in command line of Steam's web helper process to
-+     * work around rendering problems.
-+     * CROSSOVER HACK: bug 17315
-+     * Insert --in-process-gpu in command line of Steam's web helper process to
-+     * work around page rendering problems.
-+     * CROSSOVER HACK: bug 21883
-+     * Insert --disable-gpu as well.
-+     */
-+
 +    static const struct
 +    {
 +        const WCHAR *exe_name;
@@ -49,7 +39,7 @@ index 2d08481cd35..9972781a183 100644
  /**********************************************************************
   *           CreateProcessInternalW   (kernelbase.@)
   */
-@@ -518,6 +558,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+@@ -518,6 +548,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
      RTL_USER_PROCESS_PARAMETERS *params = NULL;
      RTL_USER_PROCESS_INFORMATION rtl_info;
      HANDLE parent = 0, debug = 0;
@@ -57,7 +47,7 @@ index 2d08481cd35..9972781a183 100644
      ULONG nt_flags = 0;
      USHORT machine = 0;
      NTSTATUS status;
-@@ -543,6 +584,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+@@ -543,6 +574,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
          app_name = name;
      }
  
@@ -79,16 +69,80 @@ index 2d08481cd35..9972781a183 100644
  
      if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |
 diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
-index bad1492e138..a1bf38216fd 100644
+index 2f2a7fe5427..ac525f1a477 100644
 --- a/dlls/ntdll/loader.c
 +++ b/dlls/ntdll/loader.c
-@@ -2712,6 +2712,331 @@ static WINE_MODREF *find_existing_module( HMODULE module )
+@@ -2244,6 +2244,11 @@ static NTSTATUS perform_relocations( void *module, IMAGE_NT_HEADERS *nt, SIZE_T
+     return STATUS_SUCCESS;
+ }
+ 
++#ifdef __x86_64__
++
++static void apply_binary_patches( WINE_MODREF* wm );
++
++#endif
+ 
+ /*************************************************************************
+  *		build_module
+@@ -2324,6 +2329,15 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+     TRACE_(loaddll)( "Loaded %s at %p: %s\n", debugstr_w(wm->ldr.FullDllName.Buffer), *module,
+                      is_builtin ? "builtin" : "native" );
+ 
++#if defined(__x86_64__)
++    /* CW HACK 22434 */
++    if (!wcscmp( wm->ldr.BaseDllName.Buffer, L"libcef.dll" ) ||
++        !wcscmp( wm->ldr.BaseDllName.Buffer, L"Qt5WebEngineCore.dll" ))
++    {
++        apply_binary_patches( wm );
++    }
++#endif
++
+     wm->ldr.LoadCount = 1;
+     *pwm = wm;
+     *module = NULL;
+@@ -2765,6 +2779,399 @@ static WINE_MODREF *find_existing_module( HMODULE module )
      return NULL;
  }
  
 +#ifdef __x86_64__
-+/* CW HACK 19487: Patch out %gs:8h accesses in various versions of libcef.dll */
-+static void patch_libcef( const WCHAR* libname, WINE_MODREF** pwm )
++static BOOL byte_pattern_matches( const char *addr, char wildcard_byte,
++                                  const char *pattern, size_t pattern_size )
++{
++    size_t i;
++    for (i = 0; i < pattern_size; i++)
++    {
++        if (pattern[i] != wildcard_byte && addr[i] != pattern[i])
++            return FALSE;
++    }
++
++    return TRUE;
++}
++
++static void *find_byte_pattern( void *dllbase, size_t size_of_image,
++                                char wildcard_byte, const char *pattern, size_t pattern_size )
++{
++    size_t offset;
++    for (offset = 0; offset <= size_of_image - pattern_size; offset++)
++    {
++        char *addr = (char *)dllbase + offset;
++        if (byte_pattern_matches( addr, wildcard_byte, pattern, pattern_size ))
++            return addr;
++    }
++
++    return NULL;
++}
++
++static void apply_byte_pattern_patch( void *addr, char wildcard_byte, const char *after, size_t after_size )
++{
++    size_t i;
++    for (i = 0; i < after_size; i++)
++    {
++        if (after[i] != wildcard_byte)
++            ((char *)addr)[i] = after[i];
++    }
++}
++
++static void apply_binary_patches( WINE_MODREF* wm )
 +{
 +    static const char before_85_3_9_0[] =
 +    {
@@ -251,6 +305,23 @@ index bad1492e138..a1bf38216fd 100644
 +    };
 +    C_ASSERT( sizeof(before_qt_5_15_2_0_2) == sizeof(after_qt_5_15_2_0_2) );
 +
++
++    static const char before_epic_cmd_line_args_90_6_7[] = {
++        0x8b, 0x47, 0x64,
++        0x89, 0x43, 0x64,
++        0x8b, 0x47, 0x68,              /* mov eax, dword ptr [rdi+0x68] */
++        0x89, 0x43, 0x68,              /* mov dword ptr [rbx + 0x68], eax */
++    };
++    static const char after_epic_cmd_line_args_90_6_7[] = {
++        0x8b, 0x47, 0x64,
++        0x89, 0x43, 0x64,
++        0x31, 0xc0,                     /* xor eax, eax */
++        0x90,                           /* nop */
++        0x89, 0x43, 0x68                /* mov dword ptr [rsi+0x68], eax */
++    };
++    C_ASSERT( sizeof(before_epic_cmd_line_args_90_6_7) == sizeof(after_epic_cmd_line_args_90_6_7) );
++
++
 +    struct
 +    {
 +        const WCHAR *libname;
@@ -266,7 +337,7 @@ index bad1492e138..a1bf38216fd 100644
 +         */
 +        {
 +            L"libcef.dll",
-+            "85.3.11-0",
++            "CEF %gs 85.3.11-0",
 +            /* This patch is identical to the one for 85.3.9, just at a different offset. */
 +            before_85_3_9_0, after_85_3_9_0,
 +            sizeof(before_85_3_9_0),
@@ -275,7 +346,7 @@ index bad1492e138..a1bf38216fd 100644
 +        },
 +        {
 +            L"libcef.dll",
-+            "85.3.11-1",
++            "CEF %gs 85.3.11-1",
 +            before_85_3_11_1, after_85_3_11_1,
 +            sizeof(before_85_3_11_1),
 +            0x28c521a,
@@ -289,7 +360,7 @@ index bad1492e138..a1bf38216fd 100644
 +         */
 +        {
 +            L"libcef.dll",
-+            "85.3.9.0",
++            "CEF %gs 85.3.9.0",
 +            before_85_3_9_0, after_85_3_9_0,
 +            sizeof(before_85_3_9_0),
 +            0x28c4b30,
@@ -302,7 +373,7 @@ index bad1492e138..a1bf38216fd 100644
 +         */
 +        {
 +            L"libcef.dll",
-+            "72.0.3626.121",
++            "CEF %gs 72.0.3626.121-0",
 +            before_72_0_3626_121_1, after_72_0_3626_121_1,
 +            sizeof(before_72_0_3626_121_1),
 +            0x23bb2ad,
@@ -310,7 +381,7 @@ index bad1492e138..a1bf38216fd 100644
 +        },
 +        {
 +            L"libcef.dll",
-+            "72.0.3626.121",
++            "CEF %gs 72.0.3626.121-1",
 +            before_72_0_3626_121_2, after_72_0_3626_121_2,
 +            sizeof(before_72_0_3626_121_2),
 +            0x23bb329,
@@ -318,7 +389,7 @@ index bad1492e138..a1bf38216fd 100644
 +        },
 +        {
 +            L"libcef.dll",
-+            "72.0.3626.121",
++            "CEF %gs 72.0.3626.121-2",
 +            before_72_0_3626_121_3, after_72_0_3626_121_3,
 +            sizeof(before_72_0_3626_121_3),
 +            0x23bb369,
@@ -331,7 +402,7 @@ index bad1492e138..a1bf38216fd 100644
 +         */
 +        {
 +            L"libcef.dll",
-+            "72.0.3626.96",
++            "CEF %gs 72.0.3626.96-0",
 +            /* This patch is identical to the one for 72.0.3626.121, just at a different offset. */
 +            before_72_0_3626_121_1, after_72_0_3626_121_1,
 +            sizeof(before_72_0_3626_121_1),
@@ -340,7 +411,7 @@ index bad1492e138..a1bf38216fd 100644
 +        },
 +        {
 +            L"libcef.dll",
-+            "72.0.3626.96",
++            "CEF %gs 72.0.3626.96-1",
 +            before_72_0_3626_121_2, after_72_0_3626_121_2,
 +            sizeof(before_72_0_3626_121_2),
 +            0x23bb8a9,
@@ -348,7 +419,7 @@ index bad1492e138..a1bf38216fd 100644
 +        },
 +        {
 +            L"libcef.dll",
-+            "72.0.3626.96",
++            "CEF %gs 72.0.3626.96-2",
 +            before_72_0_3626_121_3, after_72_0_3626_121_3,
 +            sizeof(before_72_0_3626_121_3),
 +            0x23bb8e9,
@@ -361,7 +432,7 @@ index bad1492e138..a1bf38216fd 100644
 +         */
 +        {
 +            L"Qt5WebEngineCore.dll",
-+            "5.15.2.0",
++            "CEF/Qt5WebEngineCore %gs 5.15.2.0-0",
 +            before_qt_5_15_2_0_1, after_qt_5_15_2_0_1,
 +            sizeof(before_qt_5_15_2_0_1),
 +            0x2810f10,
@@ -369,39 +440,54 @@ index bad1492e138..a1bf38216fd 100644
 +        },
 +        {
 +            L"Qt5WebEngineCore.dll",
-+            "5.15.2.0",
++            "CEF/Qt5WebEngineCore %gs 5.15.2.0-1",
 +            before_qt_5_15_2_0_2, after_qt_5_15_2_0_2,
 +            sizeof(before_qt_5_15_2_0_2),
 +            0x2810f8d,
 +            TRUE
-+        }
++        },
++
++        /* CW HACK 23854:
++         * Ignore the command_line_args_disabled flag in the cef_settings_t
++         * passed to cef_inititalize. Always set it to 0.
++         */
++        {
++            L"libcef.dll",
++            "CEF cmd_line_args_disabled 90.6.7",
++            before_epic_cmd_line_args_90_6_7,
++            after_epic_cmd_line_args_90_6_7,
++            sizeof(before_epic_cmd_line_args_90_6_7),
++            0x3807,
++            TRUE
++        },
 +    };
 +
 +    unsigned int i;
 +    SIZE_T pagesize = page_size;
++    WCHAR *libname = wm->ldr.BaseDllName.Buffer;
 +
 +    for (i = 0; i < ARRAY_SIZE(patches); i++)
 +    {
 +        DWORD old_prot;
-+        void *dllbase = (*pwm)->ldr.DllBase;
++        void *dllbase = wm->ldr.DllBase;
 +        void *target = (void *)((ULONG_PTR)dllbase + patches[i].offset);
 +        void *target_page = (void *)((ULONG_PTR)target & ~(page_size-1));
 +
 +        if (wcscmp( libname, patches[i].libname ))
 +            continue;
 +
-+        if ((*pwm)->ldr.SizeOfImage < patches[i].offset)
++        if (wm->ldr.SizeOfImage < patches[i].offset)
 +        {
-+            TRACE( "%s too small to be %s\n", debugstr_w(libname), patches[i].name );
++            TRACE( "%s too small to match patch '%s'\n", debugstr_w(libname), patches[i].name );
 +            continue;
 +        }
 +        if (memcmp( target, patches[i].before, patches[i].size ))
 +        {
-+            TRACE( "%s doesn't match %s\n", debugstr_w(libname), patches[i].name );
++            TRACE( "%s doesn't match patch '%s'\n", debugstr_w(libname), patches[i].name );
 +            continue;
 +        }
 +
-+        TRACE( "Found %s %s, patching out gs:0x8 accesses\n", debugstr_w(libname), patches[i].name );
++        TRACE( "Found matching %s, applying patch '%s'\n", debugstr_w(libname), patches[i].name );
 +        NtProtectVirtualMemory( NtCurrentProcess(), &target_page, &pagesize, PAGE_EXECUTE_READWRITE, &old_prot );
 +        memcpy( target, patches[i].after, patches[i].size );
 +        NtProtectVirtualMemory( NtCurrentProcess(), &target_page, &pagesize, old_prot, &old_prot );
@@ -414,18 +500,7 @@ index bad1492e138..a1bf38216fd 100644
  
  /******************************************************************************
   *	load_native_dll  (internal)
-@@ -3285,6 +3610,10 @@ static NTSTATUS load_dll( const WCHAR *load_path, const WCHAR *libname, DWORD fl
- 
-     case STATUS_SUCCESS:  /* valid PE file */
-         nts = load_native_dll( load_path, &nt_name, mapping, &image_info, &id, flags, system, pwm );
-+#ifdef __x86_64__
-+        if (nts == STATUS_SUCCESS && (!wcscmp( libname, L"libcef.dll" ) || !wcscmp( libname, L"Qt5WebEngineCore.dll" )))
-+            patch_libcef( libname, pwm );
-+#endif
-         break;
-     }
- 
-@@ -4309,6 +4638,18 @@ static void release_address_space(void)
+@@ -4365,6 +4772,18 @@ static void release_address_space(void)
  #endif
  }
  
@@ -444,7 +519,7 @@ index bad1492e138..a1bf38216fd 100644
  /******************************************************************
   *		loader_init
   *
-@@ -4388,6 +4729,25 @@ void loader_init( CONTEXT *context, void **entry )
+@@ -4451,6 +4870,25 @@ void loader_init( CONTEXT *context, void **entry )
      }
      else
      {
@@ -471,10 +546,10 @@ index bad1492e138..a1bf38216fd 100644
          if (NtCurrentTeb()->WowTebOffset) init_wow64( context );
  #endif
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index 19fbfb2b68c..0411738ff19 100644
+index 92f2e2eb3a3..0dfee19f714 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
-@@ -1842,6 +1842,48 @@ static ULONG_PTR get_image_address(void)
+@@ -1847,6 +1847,48 @@ static ULONG_PTR get_image_address(void)
      return 0;
  }
  
@@ -523,7 +598,7 @@ index 19fbfb2b68c..0411738ff19 100644
  /***********************************************************************
   *           start_main_thread
   */
-@@ -1864,6 +1906,13 @@ static void start_main_thread(void)
+@@ -1869,6 +1911,13 @@ static void start_main_thread(void)
      load_ntdll();
      load_wow64_ntdll( main_image_info.Machine );
      load_apiset_dll();
@@ -538,10 +613,10 @@ index 19fbfb2b68c..0411738ff19 100644
  }
  
 diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
-index e84044fa805..17ecd21b79d 100644
+index 537e4e1f60e..73d18fc80fb 100644
 --- a/dlls/ntdll/unix/signal_x86_64.c
 +++ b/dlls/ntdll/unix/signal_x86_64.c
-@@ -1003,7 +1003,11 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
+@@ -1023,7 +1023,11 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
          ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_AMD64 );
  #ifdef __APPLE__
          if ((flags & CONTEXT_DEBUG_REGISTERS) && (ret == STATUS_UNSUCCESSFUL))
@@ -554,7 +629,7 @@ index e84044fa805..17ecd21b79d 100644
  #endif
          if (ret || !self) return ret;
          if (flags & CONTEXT_DEBUG_REGISTERS)
-@@ -1216,6 +1220,14 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
+@@ -1236,6 +1240,14 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
      if (!self)
      {
          NTSTATUS ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_I386 );
@@ -569,7 +644,7 @@ index e84044fa805..17ecd21b79d 100644
          if (ret || !self) return ret;
          if (flags & CONTEXT_I386_DEBUG_REGISTERS)
          {
-@@ -1711,6 +1723,135 @@ NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status
+@@ -1742,6 +1754,135 @@ NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status
      user_mode_callback_return( ret_ptr, ret_len, status, NtCurrentTeb() );
  }
  
@@ -705,7 +780,7 @@ index e84044fa805..17ecd21b79d 100644
  
  /***********************************************************************
   *           is_privileged_instr
-@@ -1952,7 +2093,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+@@ -1990,7 +2131,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
          rec.ExceptionCode = EXCEPTION_ARRAY_BOUNDS_EXCEEDED;
          break;
      case TRAP_x86_PRIVINFLT:   /* Invalid opcode exception */
@@ -720,53 +795,7 @@ index e84044fa805..17ecd21b79d 100644
          break;
      case TRAP_x86_STKFLT:  /* Stack fault */
          rec.ExceptionCode = EXCEPTION_STACK_OVERFLOW;
-@@ -2203,6 +2351,34 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
- }
- 
- 
-+#ifdef __APPLE__
-+/* CW HACK 22350 */
-+/**********************************************************************
-+ *		sigsys_handler
-+ *
-+ * Handler for SIGSYS, signals that a non-existent system call was invoked.
-+ * Only called on macOS 14 Sonoma and later.
-+ */
-+static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
-+{
-+    extern const void *__wine_syscall_dispatcher_prolog_end_ptr;
-+    struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
-+    ucontext_t *ctx = sigcontext;
-+
-+    TRACE_(seh)("SIGSYS, rax %#llx, rip %#llx.\n", RAX_sig(ctx), RIP_sig(ctx));
-+
-+    frame->rip = RIP_sig(ctx) + 0xb;
-+    frame->rcx = RIP_sig(ctx);
-+    frame->eflags = EFL_sig(ctx);
-+    frame->restore_flags = 0;
-+    RCX_sig(ctx) = (ULONG_PTR)frame;
-+    R11_sig(ctx) = frame->eflags;
-+    EFL_sig(ctx) &= ~0x100;  /* clear single-step flag */
-+    RIP_sig(ctx) = (ULONG64)__wine_syscall_dispatcher_prolog_end_ptr;
-+}
-+#endif
-+
-+
- /***********************************************************************
-  *           LDT support
-  */
-@@ -2496,6 +2672,10 @@ void signal_init_process(void)
-     if (sigaction( SIGSEGV, &sig_act, NULL ) == -1) goto error;
-     if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
-     if (sigaction( SIGBUS, &sig_act, NULL ) == -1) goto error;
-+#ifdef __APPLE__
-+    sig_act.sa_sigaction = sigsys_handler;
-+    if (sigaction( SIGSYS, &sig_act, NULL ) == -1) goto error;
-+#endif
-     return;
- 
-  error:
-@@ -2530,6 +2710,8 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+@@ -2600,6 +2748,8 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
      __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
      __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
      thread_data->pthread_teb = mac_thread_gsbase();
@@ -776,7 +805,7 @@ index e84044fa805..17ecd21b79d 100644
         thread's gsbase.  Have each thread record its gsbase pointer into its
         TEB so alloc_tls_slot() can find it. */
 diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
-index 3d151e7b2b8..03d1516fc03 100644
+index 3909470dd66..ef6867ecdca 100644
 --- a/dlls/ntdll/unix/thread.c
 +++ b/dlls/ntdll/unix/thread.c
 @@ -1096,6 +1096,16 @@ static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
@@ -797,7 +826,7 @@ index 3d151e7b2b8..03d1516fc03 100644
  }
  
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 0d88315164a..0a19f1aed7b 100644
+index 684a58a724b..bbe82086085 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -62,6 +62,7 @@
@@ -808,7 +837,7 @@ index 0d88315164a..0a19f1aed7b 100644
  #endif
  
  #include "ntstatus.h"
-@@ -1714,6 +1715,42 @@ static void mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
+@@ -1744,6 +1745,42 @@ static void mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
      if (count) mprotect_exec( addr, count << page_shift, prot );
  }
  
@@ -851,7 +880,7 @@ index 0d88315164a..0a19f1aed7b 100644
  
  /***********************************************************************
   *           set_vprot
-@@ -2085,7 +2122,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
+@@ -2114,7 +2151,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
      /* only try mmap if media is not removable (or if we require write access) */
      if (!removable || (flags & MAP_SHARED))
      {
@@ -860,7 +889,7 @@ index 0d88315164a..0a19f1aed7b 100644
              goto done;
  
          switch (errno)
-@@ -2413,7 +2450,7 @@ static NTSTATUS map_pe_header( void *ptr, size_t size, int fd, BOOL *removable )
+@@ -2442,7 +2479,7 @@ static NTSTATUS map_pe_header( void *ptr, size_t size, int fd, BOOL *removable )
  
      if (!*removable)
      {
@@ -869,7 +898,7 @@ index 0d88315164a..0a19f1aed7b 100644
              return STATUS_SUCCESS;
  
          switch (errno)
-@@ -3911,7 +3948,7 @@ void virtual_map_user_shared_data(void)
+@@ -3943,7 +3980,7 @@ void virtual_map_user_shared_data(void)
          exit(1);
      }
      if ((res = server_get_unix_fd( section, 0, &fd, &needs_close, NULL, NULL )) ||
@@ -878,7 +907,7 @@ index 0d88315164a..0a19f1aed7b 100644
      {
          ERR( "failed to remap the process USD: %d\n", res );
          exit(1);
-@@ -6045,6 +6082,56 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
+@@ -6124,6 +6161,56 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
      return status;
  }
  
@@ -935,7 +964,7 @@ index 0d88315164a..0a19f1aed7b 100644
  
  /***********************************************************************
   *             NtWriteVirtualMemory   (NTDLL.@)
-@@ -6065,6 +6152,10 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
+@@ -6144,6 +6231,10 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
              if ((status = wine_server_call( req ))) size = 0;
          }
          SERVER_END_REQ;
