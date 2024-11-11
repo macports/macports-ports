@@ -352,6 +352,7 @@ default python.pkgd     {${python.prefix}/lib/python${python.branch}/site-packag
 default python.libdir   {${python.prefix}/lib/python${python.branch}}
 default python.include  {[python_get_defaults include]}
 default build.cmd       {[python_get_defaults build_cmd]}
+default build.args      {[python_get_defaults build_args]}
 default build.target    {[python_get_defaults build_target]}
 default destroot.cmd    {[python_get_defaults destroot_cmd]}
 default destroot.destdir {[python_get_defaults destroot_destdir]}
@@ -452,7 +453,7 @@ port::register_callback python_add_dependencies
 
 
 proc python_get_defaults {var} {
-    global python.version python.branch python.prefix python.bin python.pep517 workpath python.test_framework
+    global python.version python.branch python.prefix python.bin python.pep517 python.pep517_backend workpath python.test_framework
     switch -- $var {
         binary_suffix {
             if {[string match py-* [option name]]} {
@@ -466,6 +467,13 @@ proc python_get_defaults {var} {
                 return "${python.bin} -m build --no-isolation"
             } else {
                 return "${python.bin} setup.py --no-user-cfg"
+            }
+        }
+        build_args {
+            if {${python.pep517_backend} eq "meson"} {
+                return "-Cbuild-dir=build"
+            } else {
+                return ""
             }
         }
         build_target {
