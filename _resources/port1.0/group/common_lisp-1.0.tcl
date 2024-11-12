@@ -50,6 +50,12 @@ default common_lisp.build_run   yes
 options common_lisp.systems
 default common_lisp.systems     {*.asd}
 
+# This option may be needed for some ports on 32-bit systems.
+# https://github.com/sharplispers/ironclad/issues/80
+# It does not affect 64-bit builds, regardless of its value.
+options common_lisp.large_heap
+default common_lisp.large_heap  no
+
 categories-append               lisp
 
 use_configure                   no
@@ -204,10 +210,14 @@ proc common_lisp::asdf_operate {op name build_system_path} {
 }
 
 proc common_lisp::sbcl_asdf_operate {op name build_system_path} {
-    global prefix
+    global prefix build_arch
     ui_info "Execute asdf:${op} at ${name} by SBCL"
 
-    common_lisp::run "${prefix}/bin/sbcl --no-sysinit --no-userinit --non-interactive" "--eval" ${op} ${name} ${build_system_path}
+    if {[option common_lisp.large_heap] && (${build_arch} in [list i386 ppc])} {
+        common_lisp::run "${prefix}/bin/sbcl --dynamic-space-size 1500 --no-sysinit --no-userinit --non-interactive" "--eval" ${op} ${name} ${build_system_path}
+    } else {
+        common_lisp::run "${prefix}/bin/sbcl --no-sysinit --no-userinit --non-interactive" "--eval" ${op} ${name} ${build_system_path}
+    }
 }
 
 proc common_lisp::ecl_asdf_operate {op name build_system_path} {
