@@ -235,11 +235,12 @@ proc common_lisp::abcl_asdf_operate {op name build_system_path} {
 }
 
 proc common_lisp::ccl_asdf_operate {op name build_system_path} {
-    global prefix configure.build_arch
+    global prefix build_arch
     ui_info "Execute asdf:${op} at ${name} by CCL"
 
     set ccl ccl64
-    if { ${configure.build_arch} in [list i386 ppc] } {
+    # This must be build_arch, not configure.build_arch:
+    if { ${build_arch} in [list i386 ppc] } {
         set ccl ccl
     }
 
