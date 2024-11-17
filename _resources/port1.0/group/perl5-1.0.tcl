@@ -10,7 +10,7 @@ default perl5.default_branch {[perl5_get_default_branch]}
 
 proc perl5_get_default_branch {} {
     global perl5.branches
-    set ret 5.34
+    set ret 5.38
     # if the above default is not supported by this module, use the latest it does support
     if {[info exists perl5.branches] && $ret ni ${perl5.branches}} {
         set ret [lindex ${perl5.branches} end]
