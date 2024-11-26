@@ -80,7 +80,7 @@ begingroup "Selecting Xcode version"
 case "$OS_MAJOR" in
     22) sudo xcode-select --switch /Applications/Xcode_14.3.1.app/Contents/Developer
         ;;
-    23) sudo xcode-select --switch /Applications/Xcode_16.app/Contents/Developer
+    23) sudo xcode-select --switch /Applications/Xcode_15.4.app/Contents/Developer
         ;;
 esac
 endgroup
