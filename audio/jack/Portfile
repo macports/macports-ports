@@ -1,75 +1,135 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
-PortSystem          1.0
-PortGroup           compiler_blacklist_versions 1.0
-PortGroup           github 1.0
-PortGroup           waf 1.0
+PortSystem              1.0
+PortGroup               compiler_blacklist_versions 1.0
+PortGroup               github 1.0
 
-name                jack
-github.setup        jackaudio jack2 1.9.22 v
-revision            1
-checksums           rmd160  1f13a7ac5020d95b5b51f1c43d7cfe3507e7b8b0 \
-                    sha256  1e42b9fc4ad7db7befd414d45ab2f8a159c0b30fcd6eee452be662298766a849 \
-                    size    933448
+name                    jack
 
-categories          audio
-maintainers         nomaintainer
-license             GPL-2+ LGPL-2.1+
+if {${configure.cxx_stdlib} eq "libc++"} {
+    PortGroup           waf 1.0
 
-description         JACK Audio Connection Kit
-long_description    \
-    JACK (JACK Audio Connection Kit) refers to an API and two implementations \
-    of this API, jack1 and jack2. It provides a basic infrastructure for audio \
-    applications to communicate with each other and with audio hardware. \
-    Through JACK, users are enabled to build powerful systems for signal \
-    processing and music production.
+    github.setup        jackaudio jack2 1.9.22 v
+    revision            1
+    checksums           rmd160  1f13a7ac5020d95b5b51f1c43d7cfe3507e7b8b0 \
+                        sha256  1e42b9fc4ad7db7befd414d45ab2f8a159c0b30fcd6eee452be662298766a849 \
+                        size    933448
 
-homepage            https://jackaudio.org
-github.tarball_from archive
+    # This won't be needed after the next update
+    # see: https://github.com/jackaudio/jack2/issues/898#issuecomment-2185323342
+    patchfiles-append   patch-waflib-Context.py.diff
 
-platform darwin {
-    if {${os.major} < 12} {
-        patchfiles  MacTypes.diff
+    if {${os.platform} eq "darwin" && ${os.major} < 12} {
+        patchfiles-append \
+                        MacTypes.diff
     }
+
+    waf.python_branch   3.12
+
+    depends_lib-append  port:aften
+
+    # Fix build failures for 10.12/10.13, with Xcode Clang 9.x:
+    #   error: static_assert failed "fCounter must be aligned within JackAtomicState"
+    # See: https://trac.macports.org/ticket/66681
+    compiler.blacklist-append \
+                        {clang >= 900 < 1000}
+
+    compiler.cxx_standard \
+                        2011
+
+    configure.post_args-delete \
+                        --nocache
+
+    configure.args-append \
+                        --alsa=no \
+                        --celt=no \
+                        --db=no \
+                        --doxygen=no \
+                        --firewire=no \
+                        --iio=no \
+                        --opus=no \
+                        --portaudio=no \
+                        --samplerate=yes \
+                        --winmme=no
+} else {
+    # Fallback for systems using libstdc++
+    # until this is fixed: https://github.com/jackaudio/jack2/issues/950
+    github.setup        jackaudio jack1 0.126.0
+    revision            0
+    # https://github.com/jackaudio/jack1/commit/ab2e7363cacd0bf4b961c0466c13b0b4c1086ed9
+    set headers_hash    2bfa5069718ca4f4dc091e0be845958f2d8a5ba8
+    distfiles-append    headers-${headers_hash}.tar.gz:headers
+    master_sites-append https://github.com/jackaudio/headers/archive/${headers_hash}/:headers
+    checksums           ${distname}${extract.suffix} \
+                        rmd160  5927aafaaab9c39ea6f2eedcdba46e23ac4e4131 \
+                        sha256  e38b1dfedad1274d8eab9ea01eeb2bca82fd67b7179dc4e6df28868e307f79b2 \
+                        size    381743 \
+                        headers-${headers_hash}.tar.gz \
+                        rmd160  56d7a087126353c0d350bab97585a58184129667 \
+                        sha256  1087782bcc650fb76fa784b0551f39041d9b7927f303fcf549cd0c2563444fdd \
+                        size    39508
+
+    extract.only        ${distname}${extract.suffix}
+
+    post-extract {
+        set tar [findBinary tar ${portutil::autoconf::tar_command}]
+        system -W ${workpath} "${tar} -zxf ${distpath}/headers-${headers_hash}.tar.gz"
+        delete ${worksrcpath}/jack
+        move ${workpath}/headers-${headers_hash} ${worksrcpath}/jack
+    }
+
+    set bdb_v           60
+
+    depends_lib-append  port:db${bdb_v} \
+                        port:libxml2 \
+                        port:libxslt \
+                        port:readline \
+                        port:zlib
+
+    # atomicity.h: error: '__ATOMIC_RELAXED' undeclared
+    compiler.c_standard 2011
+
+    use_autoreconf      yes
+    autoreconf.args     -fvi
+
+    configure.args-append \
+                        --disable-alsa \
+                        --disable-firewire \
+                        --disable-oss \
+                        --disable-portaudio \
+                        --with-default-tmpdir=/tmp/
+
+    # coreaudio_driver.c:804:32: error: returning 'int' from a function
+    # with return type 'jack_driver_t *' {aka 'struct _jack_driver *'}
+    # makes pointer from integer without a cast [-Wint-conversion]
+    # https://github.com/jackaudio/jack1/issues/120
+    configure.cflags-append \
+                        -Wno-error=int-conversion
+
+    configure.cppflags-append \
+                        -isystem${prefix}/include/db${bdb_v}
+    configure.ldflags-append \
+                        -L${prefix}/lib/db${bdb_v}
 }
 
-compiler.blacklist-append \
-                    *gcc-3.* *gcc-4.*
+categories              audio
+maintainers             nomaintainer
+license                 GPL-2+ LGPL-2.1+
 
-# Fix build failures for 10.12/10.13, with Xcode Clang 9.x:
-#   error: static_assert failed "fCounter must be aligned within JackAtomicState"
-# See: https://trac.macports.org/ticket/66681
-compiler.blacklist-append \
-                    {clang >= 900 < 1000}
+description             JACK Audio Connection Kit
+long_description        JACK (JACK Audio Connection Kit) refers to an API and two implementations \
+                        of this API, jack1 and jack2. It provides a basic infrastructure for audio \
+                        applications to communicate with each other and with audio hardware. \
+                        Through JACK, users are enabled to build powerful systems for signal \
+                        processing and music production.
 
-compiler.cxx_standard \
-                    2011
+homepage                https://jackaudio.org
+github.tarball_from     archive
 
-# This won't be needed after the next update
-# see: https://github.com/jackaudio/jack2/issues/898#issuecomment-2185323342
-patchfiles-append   patch-waflib-Context.py.diff
+depends_build-append    path:bin/pkg-config:pkgconfig
 
-waf.python_branch   3.12
-
-depends_build-append \
-                    port:pkgconfig
-
-depends_lib         port:libsamplerate \
-                    port:libsndfile \
-                    port:aften
-
-configure.post_args-delete --nocache
-
-configure.args      --doxygen=no \
-                    --alsa=no \
-                    --firewire=no \
-                    --iio=no \
-                    --portaudio=no \
-                    --winmme=no \
-                    --celt=no \
-                    --opus=no \
-                    --samplerate=yes \
-                    --db=no
+depends_lib-append      port:libsamplerate \
+                        port:libsndfile
 
 platform darwin {
     if {[string match *clang* ${configure.compiler}] && ${configure.cxx_stdlib} ne ""} {
