@@ -368,6 +368,13 @@ proc python_add_dependencies {} {
         } else {
             depends_lib-delete port:python${python.version}
             depends_lib-append port:python${python.version}
+            if {${python.version} >= 313} {
+                # Python 3.13 uses atomics, which is not supported in old Xcode compilers.
+                # Python.framework/Versions/3.13/include/python3.13/cpython/pyatomic.h:543:4:
+                # error: #error "no available pyatomic implementation for this platform/compiler"
+                # error: command '/usr/bin/gcc-4.2' failed with exit code 1
+                compiler.c_standard 2011
+            }
             if {[option python.pep517]} {
                 depends_build-delete    port:py${python.version}-build
                 depends_build-append    port:py${python.version}-build
