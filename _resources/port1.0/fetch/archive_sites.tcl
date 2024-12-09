@@ -46,6 +46,7 @@ set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inlin
     ${fastly}://packages.macports.org/:nosubdir
     ${nue.de}://nue.de.packages.macports.org/:nosubdir
     ${fcix.net}://mirror.fcix.net/macports/packages/:nosubdir
+    ${aarnet.au}://aarnet.au.packages.macports.org/pub/macports/packages/:nosubdir
     ${atl.us}://atl.us.packages.macports.org/:nosubdir
     https://mirrors.mit.edu/macports/packages/:nosubdir
     ${bos.us}://bos.us.packages.macports.org/:nosubdir
