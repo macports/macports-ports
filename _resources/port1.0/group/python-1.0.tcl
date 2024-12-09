@@ -181,6 +181,14 @@ proc python_set_versions {option action args} {
                 lappend pycxxflags -isysroot${configure.sysroot}
                 lappend pyobjcflags -isysroot${configure.sysroot}
             }
+            # Only needed for Python 3.12, since later require C11.
+            if {${python.version} == 312} {
+                # python3.12/internal/pycore_frame.h:134: error:
+                # ‘for’ loop initial declaration used outside C99 mode
+                if {[string match *gcc-4.* ${configure.compiler}]} {
+                    lappend pycflags    -std=c99
+                }
+            }
             if {$pycflags ne ""} {
                 build.env-append        CFLAGS=[join $pycflags]
             }
