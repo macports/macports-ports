@@ -3,14 +3,14 @@
 PortSystem          1.0
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           github 1.0
-PortGroup           gobject_introspection 1.0
+PortGroup           meson 1.0
 
 # Please keep the harfbuzz and harfbuzz-devel ports as similar as possible.
 
-github.setup        harfbuzz harfbuzz 8.5.0
-checksums           rmd160  f9078722b07904b370675ea9705846575dfe42a7 \
-                    sha256  77e4f7f98f3d86bf8788b53e6832fb96279956e1c3961988ea3d4b7ca41ddc27 \
-                    size    19468172
+github.setup        harfbuzz harfbuzz 10.1.0
+checksums           rmd160  c882972105fd4bad7d5a12a8f4e161dd68b537d3 \
+                    sha256  6ce3520f2d089a33cef0fc48321334b8e0b72141f6a763719aaaecd2779ecb82 \
+                    size    17922136
 
 name                harfbuzz
 conflicts           harfbuzz-devel
@@ -18,17 +18,44 @@ set my_name         harfbuzz
 categories          graphics
 maintainers         {ryandesign @ryandesign} {mascguy @mascguy} openmaintainer
 license             MIT
-
 description         OpenType text shaping engine
-
 long_description    HarfBuzz is an {*}${description}.
-
 homepage            https://harfbuzz.github.io
+
 github.tarball_from releases
 dist_subdir         ${my_name}
 use_xz              yes
 
-depends_build       path:bin/pkg-config:pkgconfig
+# Disable unexpected download of subprojects
+meson.wrap_mode     nodownload
+
+set py_ver          3.12
+set py_ver_nodot    [string map {. {}} ${py_ver}]
+
+depends_build-append \
+                    path:bin/pkg-config:pkgconfig \
+                    port:python${py_ver_nodot}
+
+configure.python    ${prefix}/bin/python${py_ver}
+
+# Disable legacy non-underscore macros, defined by AssertMacros.h, on older macOS releases; fixes:
+#
+#   ../harfbuzz-10.1.0/src/hb-buffer.hh:214:9: error: too many arguments provided to function-like macro invocation
+#     214 |                hb_font_t          *font,
+#         |                ^
+#   /usr/include/AssertMacros.h:1339:11: note: macro 'verify' defined here
+#     1339 |                 #define verify(assertion) __Verify(assertion)
+#          |                         ^
+patchfiles-append   patch-meson-assert-macros.diff
+
+post-patch {
+    fs-traverse f ${worksrcpath} {
+        if {[string match *.py ${f}]} {
+            ui_info "patching python: ${f}"
+            reinplace -q "s|/usr/bin/env python3$|${configure.python}|" ${f}
+        }
+    }
+}
 
 # https://github.com/harfbuzz/harfbuzz/issues/1642
 compiler.cxx_standard \
@@ -36,14 +63,13 @@ compiler.cxx_standard \
 
 # error: invalid operands to binary expression
 # https://github.com/harfbuzz/harfbuzz/issues/4371
-compiler.blacklist-append {clang < 700}
+compiler.blacklist-append \
+                    {clang < 700}
 
-# Upstream recommends switching to meson but I'm not ready to tackle
-# that yet.
-
-configure.args      --disable-silent-rules \
-                    --without-chafa \
-                    ac_cv_prog_AWK=/usr/bin/awk
+# Options common across main and subport
+configure.args-append \
+                    -Dchafa=disabled \
+                    -Ddocs=disabled
 
 # Do not use -Werror. New compilers may have new warnings; we don't want users
 # to encounter build failures because of that.
@@ -57,20 +83,19 @@ if {${name} eq ${subport}} {
                     path:lib/pkgconfig/cairo.pc:cairo \
                     port:freetype \
                     path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    path:lib/pkgconfig/gobject-introspection-1.0.pc:gobject-introspection \
                     port:graphite2
 
     configure.args-append \
-                    --with-cairo \
-                    --with-freetype \
-                    --with-glib \
-                    --with-graphite2 \
-                    --with-gobject \
-                    --without-icu
-
-    gobject_introspection   yes
+                    -Dcairo=enabled \
+                    -Dfreetype=enabled \
+                    -Dglib=enabled \
+                    -Dgraphite2=enabled \
+                    -Dgobject=enabled \
+                    -Dicu=disabled \
+                    -Dintrospection=enabled
 
     test.run        yes
-    test.target     check
 
     post-destroot {
         set docdir ${prefix}/share/doc/${name}
@@ -84,12 +109,15 @@ if {${name} eq ${subport}} {
                     ${destroot}${docdir}
     }
 
-    if {${os.platform} eq "darwin" && ${os.major} >= 9} {
+    # While CoreText is available for 10.5+, two key constants aren't available until 10.8:
+    #   - kCTFontOrientationHorizontal
+    #   - kCTFontOrientationVertical
+    if {${os.platform} eq "darwin" && ${os.major} >= 12} {
         configure.args-append \
-                    --with-coretext
+                    -Dcoretext=enabled
     } else {
         configure.args-append \
-                    --without-coretext
+                    -Dcoretext=disabled
     }
 
     if {${os.platform} eq "darwin" && ${os.major} < 10} {
@@ -112,23 +140,24 @@ subport harfbuzz-icu {
     long_description This library adds support for ICU (the International Components for Unicode) to HarfBuzz.
 
     depends_lib-append \
-                    path:lib/pkgconfig/harfbuzz.pc:harfbuzz \
+                    port:harfbuzz \
                     path:lib/pkgconfig/icu-uc.pc:icu
 
-    compiler.cxx_standard \
-                    2017
-
     configure.args-append \
-                    --without-cairo \
-                    --without-freetype \
-                    --without-glib \
-                    --without-graphite2 \
-                    --with-icu
+                    -Dcairo=disabled \
+                    -Dfreetype=disabled \
+                    -Dglib=disabled \
+                    -Dgraphite2=disabled \
+                    -Dicu=enabled \
+                    -Dintrospection=disabled
 
-    destroot.dir    ${worksrcpath}/src
-    destroot.args   cmake_DATA= \
-                    lib_LTLIBRARIES=libharfbuzz-icu.la \
-                    nodist_pkginclude_HEADERS= \
-                    pkgconfig_DATA=harfbuzz-icu.pc \
-                    pkginclude_HEADERS=hb-icu.h
+    # Deconflict with parent port contents
+    post-destroot {
+        ui_info "${subport}: removing files from parent"
+
+        foreach f [exec port -q contents ${name}] {
+            ui_info "${subport}: deleting file: ${f}"
+            delete ${destroot}${f}
+        }
+    }
 }

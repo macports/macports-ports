@@ -3,12 +3,19 @@
 # https://trac.macports.org/ticket/57135
 # https://trac.macports.org/ticket/61636
 
-# GCC 10 and above on OSX10.6+
+# GCC 14 on all systems
+lappend compilers macports-gcc-14
+
+# GCC 11 to GCC 13 on OSX10.6+
 if {${os.major} >= 10 || [option os.platform] ne "darwin"} {
-    lappend compilers macports-gcc-14 macports-gcc-13 macports-gcc-12 macports-gcc-11 macports-gcc-10
+    lappend compilers macports-gcc-13 macports-gcc-12 macports-gcc-11
 }
 
-# GCC 9 and older only on OSX10.10 and older
+# GCC 10 on all systems
+lappend compilers macports-gcc-10
+
+# GCC 8 and 9 and older on OSX 10.6 to 10.10
+# GCC 7 or older on OSX 10.6 or older
 # https://trac.macports.org/ticket/65472
 if {${os.major} < 15} {
     if {${os.major} >= 10} {
