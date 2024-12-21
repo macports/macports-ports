@@ -1,0 +1,225 @@
+From https://github.com/staggerpkg/stagger/pull/57.patch
+and a further local patch.
+
+From 74f8d62f2bb2d5fe0ccab96e1270372aef1f9a68 Mon Sep 17 00:00:00 2001
+From: Michael Cook <michael@waxrat.com>
+Date: Sat, 11 May 2024 05:37:43 -0400
+Subject: [PATCH 6/6] imhdr was deprecated in PEP-0594
+
+See https://peps.python.org/pep-0594/#imghdr
+---
+ stagger/frames.py | 4 ++--
+ stagger/id3.py    | 9 ++++-----
+ stagger/tags.py   | 4 ++--
+ stagger/util.py   | 5 +++++
+ 4 files changed, 13 insertions(+), 9 deletions(-)
+
+diff --git stagger/frames.py stagger/frames.py
+index 87e3329..ecf4984 100644
+--- stagger/frames.py
++++ stagger/frames.py
+@@ -34,12 +34,12 @@
+ 
+ import abc
+ import collections
+-import imghdr
+ from abc import abstractmethod
+ from warnings import warn
+ 
+ from stagger.errors import *
+ from stagger.specs import *
++from stagger.util import imghdr_what
+ 
+ try:
+     from collections import Container
+@@ -320,7 +320,7 @@ def __init__(self, value=None, frameid=None, flags=None, frameno=None, **kwargs)
+                 self.data = file.read()
+                 self.type = 0
+                 self.desc = ""
+-                format = imghdr.what(None, self.data[:32])
++                format = imghdr_what(None, self.data[:32])
+                 if not format:
+                     format = value.rpartition(".")[2]
+                 self._set_format(format)
+diff --git stagger/id3.py stagger/id3.py
+index 3fec68a..6105912 100644
+--- stagger/id3.py
++++ stagger/id3.py
+@@ -33,12 +33,11 @@
+ """List of frames defined in the various ID3 versions.
+ """
+ 
+-import imghdr
+-
+ import stagger.tags as tags
+ from stagger.frames import *
+ from stagger.specs import *
+ from stagger.tags import frameclass
++from stagger.util import imghdr_what
+ 
+ 
+ # ID3v2.4
+@@ -422,7 +421,7 @@ def _to_version(self, version):
+             
+     def _str_fields(self):
+         img = "{0} bytes of {1} data".format(len(self.data), 
+-                                             imghdr.what(None, self.data[:32]))
++                                             imghdr_what(None, self.data[:32]))
+         return ("type={0}, desc={1}, mime={2}: {3}"
+                 .format(repr(self._spec("type").to_str(self.type)),
+                         repr(self.desc),
+@@ -819,7 +818,7 @@ def _to_version(self, version):
+         elif self.format.upper() == "JPG":
+             mime = "image/jpeg"
+         else:
+-            mime = imghdr.what(io.StringIO(self.data))
++            mime = imghdr_what(io.StringIO(self.data))
+             if mime is None:
+                 raise ValueError("Unknown image format")
+             mime = "image/" + mime.lower()
+@@ -827,7 +826,7 @@ def _to_version(self, version):
+         
+     def _str_fields(self):
+         img = "{0} bytes of {1} data".format(len(self.data), 
+-                                             imghdr.what(None, self.data[:32]))
++                                             imghdr_what(None, self.data[:32]))
+         return ("type={0}, desc={1}, format={2}: {3}"
+                 .format(repr(self._spec("type").to_str(self.type)),
+                         repr(self.desc),
+diff --git stagger/tags.py stagger/tags.py
+index 2ab4de4..a002452 100644
+--- stagger/tags.py
++++ stagger/tags.py
+@@ -35,7 +35,6 @@
+ import re
+ import collections
+ import io
+-import imghdr
+ import zlib
+ 
+ from abc import abstractmethod, abstractproperty
+@@ -47,6 +46,7 @@
+ 
+ import stagger.frames as Frames
+ import stagger.fileutil as fileutil
++from stagger.util import imghdr_what
+ 
+ try:
+     from collections import MutableMapping
+@@ -523,7 +523,7 @@ def getter(self):
+                                  .format(f._spec("type").to_str(f.type),
+                                          f.desc,
+                                          len(f.data),
+-                                         imghdr.what(None, f.data[:32]))
++                                         imghdr_what(None, f.data[:32]))
+                                  for f in self[frameid])
+         def setter(self, value):
+             if len(value) > 0:
+diff --git stagger/util.py stagger/util.py
+index 6b29cb0..52727bf 100644
+--- stagger/util.py
++++ stagger/util.py
+@@ -137,3 +137,8 @@ def print_warnings(filename, options):
+                     print(filename + ":warning: " + str(w.message),
+                           file=sys.stderr)
+             sys.stderr.flush()
++
++def imghdr_what(file, h):
++    # imhdr.what was deprecated in PEP-0594
++    # See https://peps.python.org/pep-0594/#imghdr
++    return None
+
+From 4b5a867c38bf6be12ed2bd99ed21ccecbb7f326b Mon Sep 17 00:00:00 2001
+From: Mark Mentovai <mark@mentovai.com>
+Date: Thu, 31 Oct 2024 12:04:03 -0400
+Subject: [PATCH] Reimplement imghdr.what to the extent used by stagger, fixes
+ tests
+
+---
+ stagger/util.py | 76 +++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 73 insertions(+), 3 deletions(-)
+
+diff --git stagger/util.py stagger/util.py
+index 52727bf..7bc638e 100644
+--- stagger/util.py
++++ stagger/util.py
+@@ -139,6 +139,76 @@ def print_warnings(filename, options):
+             sys.stderr.flush()
+ 
+ def imghdr_what(file, h):
+-    # imhdr.what was deprecated in PEP-0594
+-    # See https://peps.python.org/pep-0594/#imghdr
+-    return None
++    try:
++        import imghdr
++    except ImportError:
++        # imghdr.what was deprecated in PEP-0594
++        # See https://peps.python.org/pep-0594/#imghdr
++        #
++        # This code is adapted from
++        # https://github.com/python/cpython/blob/v3.12.0/Lib/imghdr.py.
++        tests = []
++
++        def test_jpeg(h, f):
++            """Test for JPEG data with JFIF or Exif markers; and raw JPEG."""
++            if h[6:10] in (b'JFIF', b'Exif'):
++                return 'jpeg'
++            elif h[:4] == b'\xff\xd8\xff\xdb':
++                return 'jpeg'
++
++        tests.append(test_jpeg)
++
++        def test_png(h, f):
++            """Verify if the image is a PNG."""
++            if h.startswith(b'\211PNG\r\n\032\n'):
++                return 'png'
++
++        tests.append(test_png)
++
++        def test_gif(h, f):
++            """Verify if the image is a GIF ('87 or '89 variants)."""
++            if h[:6] in (b'GIF87a', b'GIF89a'):
++                return 'gif'
++
++        tests.append(test_gif)
++
++        def test_tiff(h, f):
++            """Verify if the image is a TIFF (can be in Motorola or Intel byte order)."""
++            if h[:2] in (b'MM', b'II'):
++                return 'tiff'
++
++        tests.append(test_tiff)
++
++        def test_bmp(h, f):
++            """Verify if the image is a BMP file."""
++            if h.startswith(b'BM'):
++                return 'bmp'
++
++        tests.append(test_bmp)
++
++        def test_webp(h, f):
++            """Verify if the image is a WebP."""
++            if h.startswith(b'RIFF') and h[8:12] == b'WEBP':
++                return 'webp'
++
++        tests.append(test_webp)
++
++        f = None
++        try:
++            if h is None:
++                if isinstance(file, (str, PathLike)):
++                    f = open(file, 'rb')
++                    h = f.read(32)
++                else:
++                    location = file.tell()
++                    h = file.read(32)
++                    file.seek(location)
++            for tf in tests:
++                res = tf(h, f)
++                if res:
++                    return res
++        finally:
++            if f: f.close()
++        return None
++
++    return imghdr.what(file, h)

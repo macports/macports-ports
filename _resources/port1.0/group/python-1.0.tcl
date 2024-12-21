@@ -181,6 +181,14 @@ proc python_set_versions {option action args} {
                 lappend pycxxflags -isysroot${configure.sysroot}
                 lappend pyobjcflags -isysroot${configure.sysroot}
             }
+            # Only needed for Python 3.12, since later require C11.
+            if {${python.version} == 312} {
+                # python3.12/internal/pycore_frame.h:134: error:
+                # ‘for’ loop initial declaration used outside C99 mode
+                if {[string match *gcc-4.* ${configure.compiler}]} {
+                    lappend pycflags    -std=c99
+                }
+            }
             if {$pycflags ne ""} {
                 build.env-append        CFLAGS=[join $pycflags]
             }
@@ -368,6 +376,13 @@ proc python_add_dependencies {} {
         } else {
             depends_lib-delete port:python${python.version}
             depends_lib-append port:python${python.version}
+            if {${python.version} >= 313} {
+                # Python 3.13 uses atomics, which is not supported in old Xcode compilers.
+                # Python.framework/Versions/3.13/include/python3.13/cpython/pyatomic.h:543:4:
+                # error: #error "no available pyatomic implementation for this platform/compiler"
+                # error: command '/usr/bin/gcc-4.2' failed with exit code 1
+                compiler.c_standard 2011
+            }
             if {[option python.pep517]} {
                 depends_build-delete    port:py${python.version}-build
                 depends_build-append    port:py${python.version}-build

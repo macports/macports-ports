@@ -112,7 +112,7 @@ if { ${os.major} > 23 } {
 # Similarly, for gcc select the gcc13 variant of the compilers PG.
 # This setting should also be kept in sync with that in the R Port.
 # Updates should be coordinated with the R maintainers.
-if { ${os.major} > 23 } {
+if { ${os.major} < 10 || ${os.major} > 23 } {
     # https://trac.macports.org/ticket/70799
     compiler.blacklist-append   {macports-gcc-1[5-9]}
 } else {
@@ -120,17 +120,17 @@ if { ${os.major} > 23 } {
 }
 # NOTE: upon the update to gcc14, please update the blacklist accordingly,
 # like it is done for clangs. We would prefer using the same version of gcc and gfortran.
-if {${os.platform} eq "darwin" && ${os.major} < 10} {
-    # Until old platforms are switched to the new libgcc.
-    default_variants-append +gcc7
+if { ${os.major} < 10 || ${os.major} > 23 } {
+    # https://trac.macports.org/ticket/70799
+    default_variants-append +gcc14
 } else {
-    if { ${os.major} > 23 } {
-        # https://trac.macports.org/ticket/70799
-        default_variants-append +gcc14
-    } else {
-        default_variants-append +gcc13
-    }
+    default_variants-append +gcc13
 }
+
+# R bakes in the compiler, so if it is built with ccache,
+# then it will require ccache to build R packages.
+# Disable it to avoid an unnecessary dependency.
+configure.ccache            no
 
 port::register_callback R.add_dependencies
 
@@ -193,7 +193,7 @@ if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
 
 global prefix frameworks_dir
 # Please update R version here:
-set Rversion        4.4.1
+set Rversion        4.4.2
 set branch          [join [lrange [split ${Rversion} .] 0 1] .]
 set packages        ${frameworks_dir}/R.framework/Versions/${branch}/Resources/library
 set suffix          .tar.gz
