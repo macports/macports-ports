@@ -72,10 +72,17 @@ namespace eval java {
             # 1.8+, 9* works, 1.7.35+ won't.
             #
             # See https://trac.macports.org/ticket/61445
-            global os.platform os.major
+            global os.platform os.major os.arch
 
             set big_sur_workaround [expr {${os.platform} eq "darwin" && ${os.major} >= 20}]
-            if { ${big_sur_workaround} && [catch {set val [get_jvm_bigsur ${java.version}] } ]
+            if { ${os.platform} eq "darwin" && ${os.arch} eq "powerpc" && ${java.fallback} eq "openjdk8" } {
+                foreach loc { "/Library/Java/JavaVirtualMachines/openjdk8/Contents/Home" } {
+                    if { [file isdirectory $loc] } {
+                        set home_value $loc
+                        ui_debug "Discovered JAVA_HOME via search path: $home_value"
+                    }
+                }
+            } elseif { ${big_sur_workaround} && [catch {set val [get_jvm_bigsur ${java.version}] } ]
             || !${big_sur_workaround} && [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}] } ] } {
                 # Don't return an error because that would prevent the port from
                 # even being indexed when the required Java is missing. Instead, set
@@ -131,13 +138,14 @@ namespace eval java {
     }
 
     proc java_get_default_fallback {} {
-        global os.major java.version
+        global os.arch os.major java.version
         if {[option os.platform] eq "darwin"} {
             if {${os.major} >= 18 && [vercmp ${java.version} < 18]} {
                 return openjdk17
             } elseif {${os.major} >= 15 && [vercmp ${java.version} < 12]} {
                 return openjdk11
-            } elseif {${os.major} >= 11 && [vercmp ${java.version} < 9]} {
+            } elseif {(${os.major} >= 11 && [vercmp ${java.version} < 9]) ||
+                ${os.arch} eq "powerpc"} {
                 return openjdk8
             }
         }
