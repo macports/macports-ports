@@ -30,7 +30,8 @@ proc handle_tarball_from {option action args} {
         github.tarball_from ${args}
         switch ${args} {
             downloads {
-                github.master_sites https://github.com/downloads/${github.author}/${github.project}
+                # GitHub no longer hosts downloads on their servers.
+                github.master_sites macports_distfiles
                 default extract.rename no
             }
             releases {
@@ -38,6 +39,12 @@ proc handle_tarball_from {option action args} {
                 default extract.rename no
             }
             archive {
+                # FIXME: Generate a more specific URL. When a branch and tag
+                # share the same name, this will fail to resolve correctly.
+                #
+                # See:
+                # https://trac.macports.org/ticket/70652
+                # https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives#source-code-archive-urls
                 github.master_sites ${github.homepage}/archive/${git.branch}
                 default extract.rename {[expr {[llength ${extract.only}] == 1}]}
             }

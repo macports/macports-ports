@@ -15,7 +15,7 @@ endgroup() {
     printtag "endgroup"
 }
 
-MACPORTS_VERSION=2.9.3
+MACPORTS_VERSION=2.10.3
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 OS_ARCH=$(uname -m)
@@ -41,7 +41,7 @@ echo "Fetching MacPorts..."
 curl_mpbase_pid=$!
 PORTINDEX_URL="https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex"
 echo "Fetching PortIndex from $PORTINDEX_URL ..."
-/usr/bin/curl -fsSLo ports/PortIndex -o ports/PortIndex.quick "$PORTINDEX_URL" "${PORTINDEX_URL}.quick" &
+/usr/bin/curl -fsSLo ports/PortIndex "$PORTINDEX_URL" &
 curl_portindex_pid=$!
 endgroup
 
@@ -80,7 +80,7 @@ begingroup "Selecting Xcode version"
 case "$OS_MAJOR" in
     22) sudo xcode-select --switch /Applications/Xcode_14.3.1.app/Contents/Developer
         ;;
-    23) sudo xcode-select --switch /Applications/Xcode_15.3.app/Contents/Developer
+    23) sudo xcode-select --switch /Applications/Xcode_15.4.app/Contents/Developer
         ;;
 esac
 endgroup
@@ -111,7 +111,7 @@ begingroup "Configuring MacPorts"
 # Set PATH for portindex
 source /opt/local/share/macports/setupenv.bash
 # Set ports tree to $PWD/ports
-sudo sed -i "" "s|rsync://rsync.macports.org/macports/release/tarballs/ports.tar|file://${PWD}/ports|; /^file:/s/default/nosync,default/" /opt/local/etc/macports/sources.conf
+echo "file://${PWD}/ports [default,nosync]" | sudo tee /opt/local/etc/macports/sources.conf >/dev/null
 # CI is not interactive
 echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Only download from the CDN, not the mirrors
@@ -130,11 +130,11 @@ begingroup "Updating PortIndex"
 git -C ports/ remote add macports https://github.com/macports/macports-ports.git
 git -C ports/ fetch macports master
 git -C ports/ checkout -qf macports/master~10
+git -C ports/ checkout -qf -
+git -C ports/ checkout -qf "$(git -C ports/ merge-base macports/master HEAD)"
 if ! wait $curl_portindex_pid; then
     echo "Fetching PortIndex failed: $?"
 fi
-git -C ports/ checkout -qf -
-git -C ports/ checkout -qf "$(git -C ports/ merge-base macports/master HEAD)"
 ## Ignore portindex errors on common ancestor
 (cd ports/ && portindex)
 git -C ports/ checkout -qf -

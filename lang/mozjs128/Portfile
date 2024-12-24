@@ -1,0 +1,128 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim: fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           muniversal 1.0
+PortGroup           legacysupport 1.1
+
+# clock_gettime, TARGET_OS_SIMULATOR
+legacysupport.newest_darwin_requires_legacy 15
+
+name                mozjs128
+version             128.1.0
+revision            0
+set version_major   128
+
+categories          lang
+license             {MPL-2 LGPL-2.1+}
+maintainers         nomaintainer
+
+# For Rust
+supported_archs     x86_64 arm64
+
+description         JavaScript-C Engine
+long_description    SpiderMonkey is Mozilla's JavaScript engine written in C/C++. \
+                    It is used in various Mozilla products, including Firefox, \
+                    and is available under the MPL2.
+homepage            https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey
+
+# build from GNOME releng tarball
+master_sites        https://ftp.gnome.org/pub/GNOME/teams/releng/tarballs-needing-help/mozjs/
+
+distname            mozjs-${version}gnome1
+worksrcdir          mozjs-${version}
+use_xz              yes
+extract.mkdir       yes
+
+checksums           rmd160  85e7173b1a8978e6d3cc2621adfe8f4841a8bac1 \
+                    sha256  be941fa7cfc5a4ac1c3ee9d381b2770544297ac17e1ef039ee760e7642360691 \
+                    size    148895308
+
+set py_ver          3.12
+set py_ver_nodot    [string map {. {}} ${py_ver}]
+
+depends_build       port:autoconf213 \
+                    port:cargo \
+                    port:cbindgen \
+                    path:bin/pkg-config:pkgconfig \
+                    port:python${py_ver_nodot} \
+                    port:py${py_ver_nodot}-setuptools \
+                    port:yasm
+
+depends_lib         port:xorg-libX11 \
+                    port:xorg-libXt
+
+# requires C++17 compiler to build
+compiler.cxx_standard 2017
+
+# Rust components require a MacPorts clang (i.e. one with llvm-config)
+compiler.blacklist  *gcc* clang macports-clang-3.*
+
+if {[regexp {macports-clang-(.*)} ${configure.compiler} -> llvm_ver]} {
+    configure.env-append \
+                    LLVM_CONFIG=${prefix}/bin/llvm-config-mp-${llvm_ver}
+}
+
+if { ${os.platform} eq "darwin" && ${os.major} < 11 } {
+    depends_build-append port:cctools
+    configure.env-append AR=${prefix}/bin/ar
+}
+
+configure.perl      /usr/bin/perl
+configure.python    ${prefix}/bin/python${py_ver}
+
+patchfiles-append   patch-skip-sdk-check.diff
+patchfiles-append   patch-mozglue-clock_gettime.diff
+patchfiles-append   patch-mozglue-snow-leopard.diff
+
+post-patch {
+    # Use absolute path for install_name
+    reinplace "s|@executable_path|${prefix}/lib|g" \
+        config/rules.mk
+
+    # Fix persistent python references ...
+    reinplace "s|/usr/bin/env python3|${configure.python}|" \
+        build/cargo-linker
+}
+
+# The combination of JS_STANDALONE=1 and --disable-jemalloc are needed
+# to ensure that mozglue is statically linked.
+configure.env-append \
+                    PYTHON3=${configure.python} \
+                    SHELL=/bin/bash \
+                    JS_STANDALONE=1
+
+configure.dir       ${worksrcpath}/js/src/obj
+configure.cmd       ../configure
+
+configure.args      --disable-jemalloc \
+                    --disable-readline
+
+if {${configure.sdkroot} eq ""} {
+    configure.args-append --with-macos-sdk=/
+} else {
+    configure.args-append --with-macos-sdk=${configure.sdkroot}
+}
+
+configure.universal_args-delete --disable-dependency-tracking
+
+build.env-append    SHELL=/bin/bash
+build.dir           ${worksrcpath}/js/src/obj
+destroot.dir        ${worksrcpath}/js/src/obj
+
+post-destroot {
+    # make static lib name version specific to avoid conflict with other mozjs versions
+    move ${destroot}${prefix}/lib/libjs_static.ajs ${destroot}${prefix}/lib/libjs${version_major}_static.ajs
+}
+
+if {${universal_possible} && [variant_isset universal]} {
+    set merger_host(x86_64) x86_64-apple-${os.platform}${os.major}
+    set merger_host(arm64) arm64-apple-${os.platform}${os.major}
+    set merger_configure_args(x86_64) "--host=x86_64-apple-${os.platform}${os.major} --target=x86_64-apple-${os.platform}${os.major}"
+    set merger_configure_args(arm64) "--host=arm64-apple-${os.platform}${os.major} --target=arm64-apple-${os.platform}${os.major}"
+} else {
+    configure.args-append \
+        --host=${build_arch}-apple-${os.platform}${os.major} \
+        --target=${build_arch}-apple-${os.platform}${os.major}
+}
+
+livecheck.type      none

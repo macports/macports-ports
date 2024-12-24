@@ -81,35 +81,35 @@ options compilers.add_gcc_rpath_support
 default compilers.add_gcc_rpath_support yes
 
 # Set a default gcc version
-if {${os.major} < 10 && ${os.platform} eq "darwin" } {
-    # see https://trac.macports.org/ticket/57135
-    set compilers.gcc_default gcc7
-} else {
-    set compilers.gcc_default gcc14
-}
+set compilers.gcc_default gcc14
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
 # Should match those in compilers/gcc_compilers.tcl
 if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
-    set gcc_versions {10 11 12 13 14 devel}
+    set gcc_versions [list]
+    if { [vercmp ${xcodeversion} < 16.0] && [vercmp ${xcodecltversion} < 16.0] } {
+        lappend gcc_versions 10 11 12 13
+    }
+    lappend gcc_versions 14 devel
 } else {
     set gcc_versions [list]
     if { ${os.major} < 15 } {
         lappend gcc_versions 5 6 7 8 9
     }
     if { ${os.major} >= 10 } {
-        lappend gcc_versions 10 11 12 13 14 devel
+        if { [vercmp ${xcodeversion} < 16.0] && [vercmp ${xcodecltversion} < 16.0] } {
+            lappend gcc_versions 10 11 12 13
+        }
     }
+    lappend gcc_versions 14 devel
 }
+
 # GCC version providing the primary runtime
 # Note settings here *must* match those in the lang/libgcc port.
-if { ${os.major} < 10 && ${os.platform} eq "darwin" } {
-    set gcc_main_version 7
-} else {
-    set gcc_main_version 14
-}
+set gcc_main_version 14
+
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
     # Remove dot from version if present
@@ -176,19 +176,21 @@ if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
         }
     }
     if { ${os.major} >= 9 && ${os.major} < 20 } {
-        lappend clang_versions 5.0 6.0 7.0
+        lappend clang_versions 5.0 6.0 7.0 8.0
     }
-    if { ${os.major} >= 9 } {
-        if { ${os.major} < 20 } {
-            lappend clang_versions 8.0
-        }
+    if { ${os.major} >= 9 && ${os.major} < 23 } {
         lappend clang_versions 9.0 10
     }
 }
 if { ${os.major} >= 9 || ${os.platform} ne "darwin" } {
-    lappend clang_versions 11
+    if { ${os.major} <= 23 || ${os.platform} ne "darwin"} {
+        lappend clang_versions 11
+        if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
+            lappend clang_versions 12
+        }
+    }
     if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 12 13 14 15 16 17 18
+        lappend clang_versions 13 14 15 16 17 18 19
     }
     if { ${os.major} >= 14 } {
         lappend clang_versions devel

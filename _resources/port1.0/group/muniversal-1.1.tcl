@@ -1074,10 +1074,14 @@ proc portdestroot::destroot_finish {args} {
 
 # if base code not modified (i.e. not a universal build), append architecture flag to compiler name if requested
 proc muniversal::add_compiler_flags {} {
-    if { (![option universal_possible] || ![variant_isset universal]) && [option muniversal.arch_compiler]} {
+    global configure.build_arch
+    if {${configure.build_arch} ne {} && 
+        (![option universal_possible] || ![variant_isset universal]) &&
+        [option muniversal.arch_compiler]
+    } then {
         # configure.cpp is intentionally left out
         foreach tool {cxx objcxx cc objc fc f90 f77} {
-            configure.${tool}-append   {*}[option configure.${tool}_archflags.[option configure.build_arch]]
+            configure.${tool}-append   {*}[option configure.${tool}_archflags.${configure.build_arch}]
         }
     }
 

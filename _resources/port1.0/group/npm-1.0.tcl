@@ -13,7 +13,7 @@ default distname        {${npm.rootname}-${version}}
 extract.suffix .tgz
 
 options npm.nodejs_version npm.version npm.add_dependencies
-default npm.nodejs_version 20
+default npm.nodejs_version 22
 default npm.version 10
 default npm.add_dependencies yes
 
