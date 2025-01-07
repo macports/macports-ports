@@ -33,118 +33,133 @@ checksums               rmd160  26d3dac149e2fd355e1b8b367a9bf61e01c38fbf \
 
 use_configure           no
 
-patch.pre_args-replace  -p0 -p1
-patchfiles \
-    0001-libunwind-Add-missing-include-of-libunwind_ext.h-to-.patch \
-    0002-libunwind-Use-__builtin_trap-rather-than-__builtin_u.patch \
-    0003-libunwind-MacPorts-availability.patch \
-    0004-MacPorts-Makefile.patch \
-    clang-3.4-workaround.patch \
-    c89.patch
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
 
-post-patch {
-    if {${os.major} < 9} {
-        foreach reg {cr ctr eax ebp ebx ecx edi edx eip esi esp lr mq r0 r1 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r2 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r3 r30 r31 r4 r5 r6 r7 r8 r9 rax rbp rbx rcx rdi rdx rip rsi rsp srr0 srr1 vrsave xer} {
-            reinplace "s|__${reg}|${reg}|g" ${build.dir}/Registers.hpp
+    patch.pre_args-replace  -p0 -p1
+    patchfiles \
+        0001-libunwind-Add-missing-include-of-libunwind_ext.h-to-.patch \
+        0002-libunwind-Use-__builtin_trap-rather-than-__builtin_u.patch \
+        0003-libunwind-MacPorts-availability.patch \
+        0004-MacPorts-Makefile.patch \
+        clang-3.4-workaround.patch \
+        c89.patch
+
+    post-patch {
+        if {${os.major} < 9} {
+            foreach reg {cr ctr eax ebp ebx ecx edi edx eip esi esp lr mq r0 r1 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r2 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r3 r30 r31 r4 r5 r6 r7 r8 r9 rax rbp rbx rcx rdi rdx rip rsi rsp srr0 srr1 vrsave xer} {
+                reinplace "s|__${reg}|${reg}|g" ${build.dir}/Registers.hpp
+            }
         }
     }
-}
 
-build.dir       ${worksrcpath}/src
-destroot.dir    ${build.dir}
+    build.dir       ${worksrcpath}/src
+    destroot.dir    ${build.dir}
 
-if {${subport} eq "${name}-headers"} {
-    revision 0
+    if {${subport} eq "${name}-headers"} {
+        revision 0
 
-    # please keep this test *before* `supported_archs noarch`, which clears `configure.cxx_stdlib`
-    if {${os.platform} eq "darwin" && ${os.major} < 11 && ${configure.cxx_stdlib} eq "libc++"} {
-        # This port is used by clang-3.4 to bootstrap libcxx, which is
-        # indirectly used by the normal xz port.
-        use_xz              no
-        depends_extract     port:xz-bootstrap
-        depends_skip_archcheck-append   xz-bootstrap
-        extract.suffix      .tar.xz
-        extract.cmd         ${prefix}/libexec/xz-bootstrap/bin/xz
+        # please keep this test *before* `supported_archs noarch`, which clears `configure.cxx_stdlib`
+        if {${os.platform} eq "darwin" && ${os.major} < 11 && ${configure.cxx_stdlib} eq "libc++"} {
+            # This port is used by clang-3.4 to bootstrap libcxx, which is
+            # indirectly used by the normal xz port.
+            use_xz              no
+            depends_extract     port:xz-bootstrap
+            depends_skip_archcheck-append   xz-bootstrap
+            extract.suffix      .tar.xz
+            extract.cmd         ${prefix}/libexec/xz-bootstrap/bin/xz
+        }
+
+        supported_archs noarch
+
+        build {}
+
+        destroot.target installhdrs
+        destroot.args \
+            PREFIX="${prefix}"
+
+        # Having the stdlib set to libc++ on 10.6 causes a macports-clang
+        # compiler to be selected.
+        configure.cxx_stdlib
+    } else {
+        revision 0
+
+        # Technically not needed, but subports will expect depending on libunwind to pull in the headers
+        depends_lib-append port:libunwind-headers
+
+        # clang 3.5 and newer are blacklisted to prevent dependency cycles
+        foreach ver {3.5 3.6 3.7 3.8 3.9 4.0 5.0 devel} {
+            if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
+                compiler.blacklist-append macports-clang-${ver}
+            }
+        }
+
+        # https://trac.macports.org/ticket/49779#comment:3
+        compiler.blacklist-append {clang < 100} *gcc-4.\[0123456\]
+
+        variant universal   {}
+        if {$universal_possible} {
+            default_variants +universal
+        }
+
+        set cxx_stdlibflags {}
+        if {[string match *clang* ${configure.cxx}]} {
+            set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
+        }
+
+        set asflags {}
+        if {[variant_isset universal] && "ppc" in ${configure.universal_archs}
+                && [string match *clang* ${configure.cc}]} {
+            set asflags "-fno-integrated-as"
+        }
+
+        if {${os.major} < 11} {
+            # Snow Leopard's libSystem's libmacho does not contain getsectiondata()
+
+            depends_build-append port:libmacho
+            configure.cppflags-append -DUSE_MACPORTS_LIBUNWIND
+            configure.ldflags-append -lmacho
+        }
+
+        configure.cflags-append -std=gnu99
+
+        build.args \
+            PREFIX="${prefix}" \
+            CC="${configure.cc}" \
+            CXX="${configure.cxx}" \
+            OTHER_CPPFLAGS="${configure.cppflags} -DNDEBUG" \
+            OTHER_CFLAGS="${configure.cflags}" \
+            OTHER_CXXFLAGS="${configure.cxxflags} ${cxx_stdlibflags}" \
+            OTHER_ASFLAGS="${asflags}" \
+            OTHER_LDFLAGS="${configure.ldflags} ${cxx_stdlibflags}" \
+            RC_ARCHS="[get_canonical_archs]" \
+            LIBUNWIND_CURRENT_VERSION=${version}
+
+        if {[vercmp $xcodeversion 4.3] < 0 && [string match "*macports*" ${configure.compiler}]} {
+            # Xcode 4.2 fails with load commands in the newer toolchain
+            depends_build-append port:cctools
+
+            build.args-append \
+                AR=${prefix}/bin/ar \
+                RANLIB=${prefix}/bin/ranlib
+        }
+
+        destroot.target installlibs
+        destroot.args \
+            PREFIX="${prefix}" \
+            STRIP_ON_INSTALL="NO"
     }
 
-    supported_archs noarch
-
-    build {}
-
-    destroot.target installhdrs
-    destroot.args \
-        PREFIX="${prefix}"
-
-    # Having the stdlib set to libc++ on 10.6 causes a macports-clang
-    # compiler to be selected.
-    configure.cxx_stdlib
 } else {
-    revision 0
-
-    # Technically not needed, but subports will expect depending on libunwind to pull in the headers
-    depends_lib-append port:libunwind-headers
-
-    # clang 3.5 and newer are blacklisted to prevent dependency cycles
-    foreach ver {3.5 3.6 3.7 3.8 3.9 4.0 5.0 devel} {
-        if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
-            compiler.blacklist-append macports-clang-${ver}
-        }
+    revision                1
+    supported_archs noarch
+    platforms       any
+    distfiles
+    depends_extract
+    build {}
+    destroot {
+        xinstall -d ${destroot}${prefix}/share/doc/${subport}
+        system "echo ${subport} is an empty port on this OS version because the functionality is already provided by the OS. > ${destroot}${prefix}/share/doc/${subport}/README.txt"
     }
-
-    # https://trac.macports.org/ticket/49779#comment:3
-    compiler.blacklist-append {clang < 100} *gcc-4.\[0123456\]
-
-    variant universal   {}
-    if {$universal_possible} {
-        default_variants +universal
-    }
-
-    set cxx_stdlibflags {}
-    if {[string match *clang* ${configure.cxx}]} {
-        set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
-    }
-
-    set asflags {}
-    if {[variant_isset universal] && "ppc" in ${configure.universal_archs}
-            && [string match *clang* ${configure.cc}]} {
-        set asflags "-fno-integrated-as"
-    }
-
-    if {${os.major} < 11} {
-        # Snow Leopard's libSystem's libmacho does not contain getsectiondata()
-
-        depends_build-append port:libmacho
-        configure.cppflags-append -DUSE_MACPORTS_LIBUNWIND
-        configure.ldflags-append -lmacho
-    }
-
-    configure.cflags-append -std=gnu99
-
-    build.args \
-        PREFIX="${prefix}" \
-        CC="${configure.cc}" \
-        CXX="${configure.cxx}" \
-        OTHER_CPPFLAGS="${configure.cppflags} -DNDEBUG" \
-        OTHER_CFLAGS="${configure.cflags}" \
-        OTHER_CXXFLAGS="${configure.cxxflags} ${cxx_stdlibflags}" \
-        OTHER_ASFLAGS="${asflags}" \
-        OTHER_LDFLAGS="${configure.ldflags} ${cxx_stdlibflags}" \
-        RC_ARCHS="[get_canonical_archs]" \
-        LIBUNWIND_CURRENT_VERSION=${version}
-
-    if {[vercmp $xcodeversion 4.3] < 0 && [string match "*macports*" ${configure.compiler}]} {
-        # Xcode 4.2 fails with load commands in the newer toolchain
-        depends_build-append port:cctools
-
-        build.args-append \
-            AR=${prefix}/bin/ar \
-            RANLIB=${prefix}/bin/ranlib
-    }
-
-    destroot.target installlibs
-    destroot.args \
-        PREFIX="${prefix}" \
-        STRIP_ON_INSTALL="NO"
 }
 
 livecheck.type          none
