@@ -138,6 +138,10 @@ proc python_set_versions {option action args} {
         set addcode 1
     }
     if {[info exists addcode] && ![info exists python._addedcode]} {
+        if {[option python.version] >= 313 && [option supported_archs] ne "noarch"} {
+            # Headers need working __atomic_* builtins
+            compiler.blacklist-append   {*gcc-4.[0-7]} {clang < 500}
+        }
         pre-build {
             foreach var {pycflags pycxxflags pyf77flags pyf90flags pyfcflags pyobjcflags pyldflags} {
                 set $var [list]
