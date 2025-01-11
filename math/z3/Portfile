@@ -12,20 +12,38 @@ maintainers         {landonf @landonf} openmaintainer
 description         Z3 Theorem Prover
 long_description    High performance SMT solver from Microsoft Research.
 
-# FStar-qualified Z3 release?
+# If set, a pgo variant will be defined for this subport using profiling data
+# extracted from ${filespath}/${z3.pgo_profile}.profdata.tar.xz
+options     z3.pgo_profile
+default     z3.pgo_profile  {}
+
 if {${subport} eq "${name}-fstar"} {
-    github.setup        Z3Prover z3 4.8.5 Z3-
-    revision            5
+    # Current F*-qualified z3 release
+    github.setup        Z3Prover z3 4.13.3 z3-
+    revision            0
+    checksums           rmd160  89b77de5ad59d633efe90151119540620840baf3 \
+                        sha256  f59c9cf600ea57fb64ffeffbffd0f2d2b896854f339e846f48f069d23bc14ba0 \
+                        size    5583533
+    z3.pgo_profile      ${subport}
+
+    # Also install the legacy F*-qualified z3 release
+    depends_run-append  port:z3-fstar-legacy
+} elseif {${subport} eq "${name}-fstar-legacy"} {
+    # Legacy F*-qualified z3 release
+    github.setup        Z3Prover z3 4.8.5 z3-
+    revision            6
     checksums           rmd160  cb3509b35dc3a428019950df2e2f94c555a7ee94 \
                         sha256  4e8e232887ddfa643adb6a30dcd3743cb2fa6591735fbd302b49f7028cdc0363 \
                         size    4177051
+
+    z3.pgo_profile      ${subport}
 } else {
+    # Current z3 release
     github.setup        Z3Prover z3 4.13.4 z3-
     revision            0
     checksums           rmd160  b1a0d99066be2ecfb50e45e80745f2c342d5dac0 \
                         sha256  4071977e66e9f3d239b7b098ceddfe62ffdf3c71e345e9524a4a5001d1f4adf3 \
                         size    5766645
-    github.tarball_from archive
 }
 
 platforms           darwin freebsd
@@ -88,7 +106,11 @@ variant debug description {Enable the debug build configuration} {
 }
 
 # Options not shared with our language-binding subports
-if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
+if {
+    ${subport} eq "${name}" ||
+    ${subport} eq "${name}-fstar" ||
+    ${subport} eq "${name}-fstar-legacy"
+} {
 
     set py_ver              3.12
     set py_ver_nodot        [string map {. {}} ${py_ver}]
@@ -153,11 +175,41 @@ if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
         default_variants-append +lto
     }
 
-    # TODO: We currently only have profiling data for z3-fstar; we should
-    # investigate bechmark suites we could use to produce general-purpose
-    # profiling data for the main z3 port.
-    if {${subport} eq "${name}-fstar" && ![variant_isset profile]} {
-        default_variants-append +pgo
+
+    if {[info exists z3.pgo_profile]} {
+        if {![variant_isset profile]} {
+           default_variants-append +pgo
+        }
+
+        variant pgo conflicts profile description {Enable profile-guided optimization} {
+            # Requires clang
+            compiler.blacklist-append   {*gcc*}
+
+            # We currently only provide profiling data for the F*-qualified z3
+            # subports; these profiles are generated from a verification run
+            # over Project Everest subprojects, which should be strongly
+            # representative of F*'s use of z3.
+            #
+            # TODO: Investigate bechmark suites we could use to produce general-purpose
+            # profiling data for the main z3 port.
+            #
+            # To regenerate a subport's profiling data, install
+            # z3-fstar(-legacy) with +profile -pgo, and then:
+            #
+            #   ${filespath}/z3-fstar.profdata-generate.sh \
+            #       -l llvm-profdata-mp-<llvm-version> \
+            #       -z ${prefix}/libexec/z3-fstar/bin/z3-<version> \
+            #       -o ${filespath}/${z3.pgo_profile}.profdata.tar.xz \
+            #       -j <njobs> \
+            #       <everest-src>
+            configure.optflags-append   -fprofile-instr-use=${workpath}/z3.profdata
+            depends_extract-append      bin:xz:xz
+            post-extract {
+                set tar [findBinary tar ${portutil::autoconf::tar_command}]
+                set xz [findBinary xz ${portutil::autoconf::xz_path}]
+                system "${xz} -cd ${filespath}/${z3.pgo_profile}.profdata.tar.xz | ${tar} -C ${workpath} --no-same-owner -xf -"
+            }
+        }
     }
 
     variant lto conflicts debug description {Enable link-time (interprocedural) optimization} {
@@ -229,10 +281,14 @@ if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
                                     {macports-clang-10} \
                                     {macports-clang-11} \
                                     {*gcc*}
-        # Currently seems to have problems with macports clang-19 so blacklist that as well
-        # https://trac.macports.org/ticket/70852
+
+
+        # Versions prior to 4.13.2 fail to build with macports clang-19, so
+        # blacklist that as well: https://trac.macports.org/ticket/70852
         # macports-clang-18 is then used instead which is OK
-        compiler.blacklist-append {macports-clang-19}
+        if {[vercmp ${version} "4.13.2"] < 0} {
+            compiler.blacklist-append {macports-clang-19}
+        }
 
         configure.optflags-append   -O3 -mllvm -polly
     }
@@ -295,40 +351,46 @@ if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
 
 # F*-qualified z3 release; may trail behind the current z3 release.
 subport ${name}-fstar {
-    # Should be updated
     description             F*-qualified release of the Z3 Theorem Prover
-    long_description        Private version of the Z3 theorem prover for use by (and qualified to work with) F*.
-    cmake.install_prefix    ${prefix}/libexec/${subport}
+    long_description        Private version of the Z3 Theorem Prover for use by (and qualified to work with) F*.
 
-    depends_build-append    port:py${py_ver_nodot}-setuptools
+    notes-append "
+        Add the following directory to your PATH environment variable to
+        permit F* to automatically discover the installed F*-qualified z3
+        binaries:
+            ${prefix}/libexec/z3-fstar/bin
+        "
+}
 
-    destroot {
-        xinstall -d -m 755 "${destroot}${cmake.install_prefix}/bin"
-        xinstall -m 755 "${cmake.build_dir}/z3" "${destroot}${cmake.install_prefix}/bin/z3"
-        ln -sf "${cmake.install_prefix}/bin/z3" "${destroot}${prefix}/bin/z3-fstar"
+subport ${name}-fstar-legacy {
+    description             Legacy F*-qualified release of the Z3 Theorem Prover
+    long_description        Private version of the Z3 Theorem Prover for use by (and qualified to work with) F* (legacy version).
+}
+
+if {${subport} eq "${name}-fstar" || ${subport} eq "${name}-fstar-legacy"} {
+    cmake.install_prefix    ${prefix}/libexec/z3-fstar/${version}
+
+    if {[vercmp ${version} "4.8.5"] <= 0} {
+        depends_build-append    port:py${py_ver_nodot}-setuptools
     }
 
-    variant pgo conflicts profile description {Enable profile-guided optimization} {
-        # Requires clang
-        compiler.blacklist-append   {*gcc*}
+    destroot {
+        xinstall -d -m 755 \
+            "${destroot}${prefix}/libexec/z3-fstar/bin" \
+            "${destroot}${cmake.install_prefix}/bin"
 
-        # We currently only provide profiling data for z3-fstar; this profile is
-        # generated from a verification run over Project Everest subprojects, which
-        # should be strongly representative of F*'s use of z3.
-        #
-        # To regenerate the profile, install z3-fstar with +profile -pgo, and then:
-        #   ${filespath}/z3-fstar.profdata-generate.sh \
-        #       -l llvm-profdata-mp-<llvm-version> \
-        #       -z ${prefix}/bin/z3-fstar \
-        #       -o ${filespath}/z3-fstar.profdata.tar.xz \
-        #       -j <njobs> \
-        #       <everest-src>
-        configure.optflags-append   -fprofile-instr-use=${workpath}/${subport}.profdata
-        depends_extract-append      bin:xz:xz
-        post-extract {
-            set tar [findBinary tar ${portutil::autoconf::tar_command}]
-            set xz [findBinary xz ${portutil::autoconf::xz_path}]
-            system "${xz} -cd ${filespath}/${subport}.profdata.tar.xz | ${tar} -C ${workpath} --no-same-owner -xf -"
+        xinstall -m 755 "${cmake.build_dir}/z3" \
+            "${destroot}${cmake.install_prefix}/bin/z3"
+
+        ln -sf "${cmake.install_prefix}/bin/z3" \
+            "${destroot}${prefix}/libexec/z3-fstar/bin/z3-${version}"
+
+        # Unversioned symlink for compatibility with the previous port layout;
+        # may be removed (or switched to non-legacy z3-fstar?) once F* adopts
+        # adopts it as the default z3 version.
+        if {${subport} eq "${name}-fstar-legacy"} {
+            ln -sf "${cmake.install_prefix}/bin/z3" \
+                "${destroot}${prefix}/bin/z3-fstar"
         }
     }
 }

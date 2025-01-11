@@ -1,7 +1,7 @@
 #!/bin/sh
 
 EV_PROFILE_DIR_NAME="profiling"
-EV_PROFDATA_OUTPUT_FILE_NAME="z3-fstar.profdata"
+EV_PROFDATA_OUTPUT_FILE_NAME="z3.profdata"
 EV_PROFDATA_ARCHIVE_NAME="${EV_PROFDATA_OUTPUT_FILE_NAME}.tar.xz"
 
 elog() {
