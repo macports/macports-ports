@@ -28,16 +28,16 @@ proc haskell_cabal.add_dependencies {} {
         depends_patch-append \
             port:cabal-prebuilt \
             port:ghc-prebuilt
-        depends_build-append \
+        depends_lib-append \
             port:cabal-prebuilt \
             port:ghc-prebuilt
     } else {
         depends_patch-append \
-            port:cabal
-        depends_build-append \
             port:cabal \
             port:ghc
         depends_lib-append \
+            port:cabal \
+            port:ghc \
             port:gmp \
             port:libiconv
     }
@@ -86,6 +86,9 @@ proc haskell_cabal.get_env {} {
 options haskell_cabal.cabal_root
 default haskell_cabal.cabal_root {${workpath}/.home/.cabal}
 
+# https://github.com/haskell/cabal/issues/10755
+# disable --enable-relocatable until this issue is addressed
+
 post-patch {
     xinstall -m 0755 -d [option haskell_cabal.cabal_root]
     set cabal_config_fd [open ${haskell_cabal.cabal_root}/config w+]
@@ -121,12 +124,12 @@ post-patch {
                     "jobs: \$ncpus" \
                     "documentation: True" \
                     "doc-index-file: \$htmldir/html/${subport}/index.html" \
-                    "relocatable: True" \
+                    "relocatable: False" \
                     "install-method: copy" \
-                    "installdir: ${prefix}/bin" \
                     "logs-dir: [option haskell_cabal.cabal_root]/logs" \
                     "store-dir: [option haskell_cabal.cabal_root]/store" \
                     "" \
+                    "installdir: ${prefix}/bin" \
                     "install-dirs global" \
                     "  prefix: ${prefix}" \
                     "  bindir: ${prefix}/bin" \
@@ -155,6 +158,7 @@ supported_archs     arm64 x86_64
 options haskell_cabal.bin \
         haskell_cabal.env \
         haskell_cabal.global_flags \
+        haskell_cabal.update_flags \
         haskell_cabal.build_dir \
         haskell_cabal.use_prebuilt \
         haskell_cabal.installsubdir \
@@ -177,8 +181,17 @@ default haskell_cabal.bin {[haskell_cabal.getcabalbin]}
 default haskell_cabal.env \
         {[haskell_cabal.get_env]}
 
-default haskell_cabal.global_flags \
-        {--config-file=[option haskell_cabal.cabal_root]/config}
+default haskell_cabal.global_flags {\
+        --config-file=[option haskell_cabal.cabal_root]/config\
+        --store-dir=[option haskell_cabal.cabal_root]/store\
+}
+
+default haskell_cabal.update_flags {\
+        --ghc\
+        --with-compiler=${prefix}/bin/ghc\
+        --prefix=${prefix}\
+        ${haskell_cabal.installdir_args}\
+}
 
 default haskell_cabal.build_dir     {${workpath}/dist}
 
@@ -206,7 +219,7 @@ post-patch {
     if {[tbool haskell_cabal.use_prebuilt]} {
         xinstall -d ${haskell_cabal.cabal_root}/bin
         # bootstrap from *-prebuilt
-        # the link to exedir_prebuilt got ghc and ghc-pkg is a hac
+        # the link to exedir_prebuilt got ghc and ghc-pkg is a hack
         # to accommodate cabal's hack method of locating ghc-pkg
         # https://github.com/haskell/cabal/blob/master/release-notes/Cabal-3.6.1.0.md
         set ghc_prebuilt_version \
@@ -236,13 +249,17 @@ post-patch {
 
 pre-configure {
     system -W ${worksrcpath} \
-        "env ${haskell_cabal.env} ${haskell_cabal.bin} ${haskell_cabal.global_flags} update"
+        "env ${haskell_cabal.env} ${haskell_cabal.bin} ${haskell_cabal.global_flags} update ${haskell_cabal.update_flags}"
 }
 
+use_configure               no
 default configure.cmd       {${haskell_cabal.bin}\
                                 ${haskell_cabal.global_flags}}
 default configure.pre_args  {}
-default configure.args      {configure}
+default configure.args      {\
+                                configure\
+                                ${haskell_cabal.installdir_args}\
+                            }
 default configure.universal_args {}
 default configure.env       {${haskell_cabal.env}}
 
@@ -255,10 +272,12 @@ default build.args          {${build.target}}
 default build.post_args     {\
                                 [haskell_cabal.build_getjobsarg]\
                                 --builddir=${haskell_cabal.build_dir}\
+                                --ghc\
+                                --with-compiler=${prefix}/bin/ghc\
                                 --prefix=${prefix}\
                                 ${haskell_cabal.installdir_args}\
-                                --enable-relocatable\
                             }
+#                                 --enable-relocatable
 default build.env           {${haskell_cabal.env}}
 
 default destroot.cmd        {${haskell_cabal.bin}\
@@ -269,11 +288,13 @@ default destroot.args       {${destroot.target}}
 default destroot.post_args  {\
                                 [haskell_cabal.build_getjobsarg]\
                                 --builddir=${haskell_cabal.build_dir}\
+                                --ghc\
+                                --with-compiler=${prefix}/bin/ghc\
                                 --installdir=${destroot}${prefix}/bin\
                                 --install-method=copy\
-                                --enable-relocatable\
                                 --overwrite-policy=always\
                             }
+#                                 --enable-relocatable
 default destroot.env        {${haskell_cabal.env}}
 
 default test.cmd            {${haskell_cabal.bin}\
