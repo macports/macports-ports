@@ -113,6 +113,7 @@ proc crossbinutils.setup {target version} {
 
     crossbinutils.target ${target}
 
+    PortGroup           compiler_blacklist_versions 1.0
     default name        ${target}-binutils
     version             ${version}
     default categories  {cross devel}
@@ -187,6 +188,12 @@ proc crossbinutils.setup {target version} {
     # Opportunistic links zstd for compression
     if {[vercmp ${version} >= "2.40"]} {
         depends_lib-append  port:zstd
+    }
+
+    # fatal error: error in backend: Cannot select: intrinsic %llvm.x86.sha1rnds4
+    # https://github.com/macports/macports-ports/pull/27345#issuecomment-2601373548
+    if {[vercmp ${version} >= "2.41"]} {
+        compiler.blacklist-append {clang < 1001}
     }
 
     build.dir ${workpath}/build
