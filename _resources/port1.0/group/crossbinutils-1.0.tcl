@@ -192,7 +192,7 @@ proc crossbinutils.setup {target version} {
 
     # fatal error: error in backend: Cannot select: intrinsic %llvm.x86.sha1rnds4
     # https://github.com/macports/macports-ports/pull/27345#issuecomment-2601373548
-    if {[vercmp ${xcodeversion} > "2.41"]} {
+    if {[vercmp ${version} >= "2.41"]} {
         compiler.blacklist-append {clang < 1001}
     }
 
