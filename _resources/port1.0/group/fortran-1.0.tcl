@@ -17,7 +17,7 @@ depends_build-append \
 global os.platform os.arch os.major
 if {${os.major} < 14} {
 	# FPM uses Git to fetch modules. Put it here so that we do not keep getting failures.
-	depends_build-append    port:git
+	depends_build-append    path:bin/git:git
 	git.cmd                 ${prefix}/bin/git
 }
 

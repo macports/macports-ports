@@ -80,7 +80,7 @@ proc python_get_version {} {
 
 proc python_get_default_version {} {
     global python.versions
-    set def_v 312
+    set def_v 313
     if {[info exists python.versions]} {
         if {${def_v} in ${python.versions}} {
             return ${def_v}
@@ -138,6 +138,10 @@ proc python_set_versions {option action args} {
         set addcode 1
     }
     if {[info exists addcode] && ![info exists python._addedcode]} {
+        if {[option python.version] >= 313 && [option supported_archs] ne "noarch"} {
+            # Headers need working __atomic_* builtins
+            compiler.blacklist-append   {*gcc-4.[0-7]} {clang < 500}
+        }
         pre-build {
             foreach var {pycflags pycxxflags pyf77flags pyf90flags pyfcflags pyobjcflags pyldflags} {
                 set $var [list]
@@ -180,6 +184,14 @@ proc python_set_versions {option action args} {
                 lappend pycflags -isysroot${configure.sysroot}
                 lappend pycxxflags -isysroot${configure.sysroot}
                 lappend pyobjcflags -isysroot${configure.sysroot}
+            }
+            # Only needed for Python 3.12, since later require C11.
+            if {${python.version} == 312} {
+                # python3.12/internal/pycore_frame.h:134: error:
+                # ‘for’ loop initial declaration used outside C99 mode
+                if {[string match *gcc-4.* ${configure.compiler}]} {
+                    lappend pycflags    -std=c99
+                }
             }
             if {$pycflags ne ""} {
                 build.env-append        CFLAGS=[join $pycflags]
@@ -344,6 +356,7 @@ default python.pkgd     {${python.prefix}/lib/python${python.branch}/site-packag
 default python.libdir   {${python.prefix}/lib/python${python.branch}}
 default python.include  {[python_get_defaults include]}
 default build.cmd       {[python_get_defaults build_cmd]}
+default build.args      {[python_get_defaults build_args]}
 default build.target    {[python_get_defaults build_target]}
 default destroot.cmd    {[python_get_defaults destroot_cmd]}
 default destroot.destdir {[python_get_defaults destroot_destdir]}
@@ -437,7 +450,7 @@ port::register_callback python_add_dependencies
 
 
 proc python_get_defaults {var} {
-    global python.version python.branch python.prefix python.bin python.pep517 workpath python.test_framework
+    global python.version python.branch python.prefix python.bin python.pep517 python.pep517_backend workpath python.test_framework
     switch -- $var {
         binary_suffix {
             if {[string match py-* [option name]]} {
@@ -451,6 +464,13 @@ proc python_get_defaults {var} {
                 return "${python.bin} -m build --no-isolation"
             } else {
                 return "${python.bin} setup.py --no-user-cfg"
+            }
+        }
+        build_args {
+            if {${python.pep517_backend} eq "meson"} {
+                return "-Cbuild-dir=build"
+            } else {
+                return ""
             }
         }
         build_target {
