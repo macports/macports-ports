@@ -28,16 +28,16 @@ proc haskell_cabal.add_dependencies {} {
         depends_patch-append \
             port:cabal-prebuilt \
             port:ghc-prebuilt
-        depends_lib-append \
+        depends_build-append \
             port:cabal-prebuilt \
             port:ghc-prebuilt
     } else {
         depends_patch-append \
+            port:cabal
+        depends_build-append \
             port:cabal \
             port:ghc
         depends_lib-append \
-            port:cabal \
-            port:ghc \
             port:gmp \
             port:libiconv
     }
@@ -187,8 +187,6 @@ default haskell_cabal.global_flags {\
 }
 
 default haskell_cabal.update_flags {\
-        --ghc\
-        --with-compiler=${prefix}/bin/ghc\
         --prefix=${prefix}\
         ${haskell_cabal.installdir_args}\
 }
@@ -232,16 +230,16 @@ post-patch {
                     ${haskell_cabal.cabal_root}/bin/ghc-pkg
         # provides symlinks to ${prefix}/bin/*-prebuilt for the rest
         foreach f {\
-             cabal\
-             ghci\
-             haddock\
-             hp2ps\
-             hpc\
-             hsc2hs\
-             runghc\
-             runhaskell\
-             } {
-             ln -s  ${prefix}/bin/${f}-prebuilt \
+            cabal\
+            ghci\
+            haddock\
+            hp2ps\
+            hpc\
+            hsc2hs\
+            runghc\
+            runhaskell\
+            } {
+            ln -s   ${prefix}/bin/${f}-prebuilt \
                     ${haskell_cabal.cabal_root}/bin/${f}
         }
     }
@@ -272,8 +270,6 @@ default build.args          {${build.target}}
 default build.post_args     {\
                                 [haskell_cabal.build_getjobsarg]\
                                 --builddir=${haskell_cabal.build_dir}\
-                                --ghc\
-                                --with-compiler=${prefix}/bin/ghc\
                                 --prefix=${prefix}\
                                 ${haskell_cabal.installdir_args}\
                             }
@@ -288,8 +284,6 @@ default destroot.args       {${destroot.target}}
 default destroot.post_args  {\
                                 [haskell_cabal.build_getjobsarg]\
                                 --builddir=${haskell_cabal.build_dir}\
-                                --ghc\
-                                --with-compiler=${prefix}/bin/ghc\
                                 --installdir=${destroot}${prefix}/bin\
                                 --install-method=copy\
                                 --overwrite-policy=always\
