@@ -1,0 +1,199 @@
+diff --git a/frontend/src/api/files.ts b/frontend/src/api/files.ts
+index a36de03f78..928f528298 100644
+--- a/frontend/src/api/files.ts
++++ b/frontend/src/api/files.ts
+@@ -1,7 +1,8 @@
+-import { createURL, fetchURL, removePrefix } from "./utils";
+-import { baseURL } from "@/utils/constants";
+ import { useAuthStore } from "@/stores/auth";
++import { useLayoutStore } from "@/stores/layout";
++import { baseURL } from "@/utils/constants";
+ import { upload as postTus, useTus } from "./tus";
++import { createURL, fetchURL, removePrefix } from "./utils";
+ 
+ export async function fetch(url: string) {
+   url = removePrefix(url);
+@@ -156,6 +157,7 @@ function moveCopy(
+   overwrite = false,
+   rename = false
+ ) {
++  const layoutStore = useLayoutStore();
+   const promises = [];
+ 
+   for (const item of items) {
+@@ -166,7 +168,7 @@ function moveCopy(
+     }&destination=${to}&override=${overwrite}&rename=${rename}`;
+     promises.push(resourceAction(url, "PATCH"));
+   }
+-
++  layoutStore.closeHovers();
+   return Promise.all(promises);
+ }
+ 
+diff --git a/frontend/src/components/Sidebar.vue b/frontend/src/components/Sidebar.vue
+index d88d2d2f9d..543818ad70 100644
+--- a/frontend/src/components/Sidebar.vue
++++ b/frontend/src/components/Sidebar.vue
+@@ -101,7 +101,7 @@
+           href="https://github.com/filebrowser/filebrowser"
+           >File Browser</a
+         >
+-        <span> {{ ' ' }} {{ version }}</span>
++        <span> {{ " " }} {{ version }}</span>
+       </span>
+       <span>
+         <a @click="help">{{ $t("sidebar.help") }}</a>
+diff --git a/frontend/src/components/prompts/Prompts.vue b/frontend/src/components/prompts/Prompts.vue
+index 4ecde79428..71e4e753df 100644
+--- a/frontend/src/components/prompts/Prompts.vue
++++ b/frontend/src/components/prompts/Prompts.vue
+@@ -3,7 +3,7 @@
+ </template>
+ 
+ <script setup lang="ts">
+-import { ref, watch } from "vue";
++import { watch } from "vue";
+ import { ModalsContainer, useModal } from "vue-final-modal";
+ import { storeToRefs } from "pinia";
+ import { useLayoutStore } from "@/stores/layout";
+@@ -30,8 +30,6 @@ const layoutStore = useLayoutStore();
+ 
+ const { currentPromptName } = storeToRefs(layoutStore);
+ 
+-const closeModal = ref<() => Promise<string>>();
+-
+ const components = new Map<string, any>([
+   ["info", Info],
+   ["help", Help],
+@@ -52,11 +50,6 @@ const components = new Map<string, any>([
+ ]);
+ 
+ watch(currentPromptName, (newValue) => {
+-  if (closeModal.value) {
+-    closeModal.value();
+-    closeModal.value = undefined;
+-  }
+-
+   const modal = components.get(newValue!);
+   if (!modal) return;
+ 
+@@ -67,7 +60,7 @@ watch(currentPromptName, (newValue) => {
+     },
+   });
+ 
+-  closeModal.value = close;
++  layoutStore.setCloseOnPrompt(close, newValue!);
+   open();
+ });
+ 
+diff --git a/frontend/src/components/prompts/Upload.vue b/frontend/src/components/prompts/Upload.vue
+index bb8ec40ea4..538e84b5d1 100644
+--- a/frontend/src/components/prompts/Upload.vue
++++ b/frontend/src/components/prompts/Upload.vue
+@@ -48,8 +48,6 @@ const layoutStore = useLayoutStore();
+ 
+ // TODO: this is a copy of the same function in FileListing.vue
+ const uploadInput = (event: Event) => {
+-  layoutStore.closeHovers();
+-
+   let files = (event.currentTarget as HTMLInputElement)?.files;
+   if (files === null) return;
+ 
+diff --git a/frontend/src/stores/layout.ts b/frontend/src/stores/layout.ts
+index 1911643a19..faf8bca721 100644
+--- a/frontend/src/stores/layout.ts
++++ b/frontend/src/stores/layout.ts
+@@ -29,6 +29,12 @@ export const useLayoutStore = defineStore("layout", {
+     toggleShell() {
+       this.showShell = !this.showShell;
+     },
++    setCloseOnPrompt(closeFunction: () => Promise<string>, onPrompt: string) {
++      const prompt = this.prompts.find((prompt) => prompt.prompt === onPrompt);
++      if (prompt) {
++        prompt.close = closeFunction;
++      }
++    },
+     showHover(value: PopupProps | string) {
+       if (typeof value !== "object") {
+         this.prompts.push({
+@@ -36,6 +42,7 @@ export const useLayoutStore = defineStore("layout", {
+           confirm: null,
+           action: undefined,
+           props: null,
++          close: null,
+         });
+         return;
+       }
+@@ -45,6 +52,7 @@ export const useLayoutStore = defineStore("layout", {
+         confirm: value?.confirm,
+         action: value?.action,
+         props: value?.props,
++        close: value?.close,
+       });
+     },
+     showError() {
+@@ -53,6 +61,7 @@ export const useLayoutStore = defineStore("layout", {
+         confirm: null,
+         action: undefined,
+         props: null,
++        close: null,
+       });
+     },
+     showSuccess() {
+@@ -61,10 +70,11 @@ export const useLayoutStore = defineStore("layout", {
+         confirm: null,
+         action: undefined,
+         props: null,
++        close: null,
+       });
+     },
+     closeHovers() {
+-      this.prompts.pop();
++      this.prompts.shift()?.close?.();
+     },
+     // easily reset state using `$reset`
+     clearLayout() {
+diff --git a/frontend/src/types/layout.d.ts b/frontend/src/types/layout.d.ts
+index fa05a48496..b625cc070d 100644
+--- a/frontend/src/types/layout.d.ts
++++ b/frontend/src/types/layout.d.ts
+@@ -3,6 +3,7 @@ interface PopupProps {
+   confirm?: any;
+   action?: PopupAction;
+   props?: any;
++  close?: (() => Promise<string>) | null;
+ }
+ 
+ type PopupAction = (e: Event) => void;
+diff --git a/frontend/src/utils/upload.ts b/frontend/src/utils/upload.ts
+index e7ce8becbe..cdd974e83c 100644
+--- a/frontend/src/utils/upload.ts
++++ b/frontend/src/utils/upload.ts
+@@ -1,3 +1,4 @@
++import { useLayoutStore } from "@/stores/layout";
+ import { useUploadStore } from "@/stores/upload";
+ import url from "@/utils/url";
+ 
+@@ -126,6 +127,9 @@ export function handleFiles(
+   overwrite = false
+ ) {
+   const uploadStore = useUploadStore();
++  const layoutStore = useLayoutStore();
++
++  layoutStore.closeHovers();
+ 
+   for (const file of files) {
+     const id = uploadStore.id;
+diff --git a/frontend/src/views/files/FileListing.vue b/frontend/src/views/files/FileListing.vue
+index 72171f4e06..ec75aec5aa 100644
+--- a/frontend/src/views/files/FileListing.vue
++++ b/frontend/src/views/files/FileListing.vue
+@@ -753,8 +753,6 @@ const drop = async (event: DragEvent) => {
+ };
+ 
+ const uploadInput = (event: Event) => {
+-  layoutStore.closeHovers();
+-
+   let files = (event.currentTarget as HTMLInputElement)?.files;
+   if (files === null) return;
+ 
