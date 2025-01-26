@@ -1,6 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem                  1.0
+PortGroup                   active_variants 1.1
 PortGroup                   app 1.0
 PortGroup                   cmake 1.1
 PortGroup                   conflicts_build 1.0
@@ -8,7 +9,7 @@ PortGroup                   github 1.0
 
 name                        Aseprite
 categories                  graphics
-platforms                   {macosx >= 16}
+platforms                   {macosx >= 13}
 maintainers                 {ryandesign @ryandesign} openmaintainer
 license                     Restrictive
 
@@ -41,20 +42,26 @@ license                     Restrictive
 # Aseprite (official or compiled). About the EULA is that you cannot
 # compile Aseprite for commercial purposes (e.g. resell it)."
 
-github.setup                aseprite aseprite 1.3.10.1 v
+github.setup                aseprite aseprite 1.3.11 v
 revision                    0
-checksums                   rmd160  052eeb72394157c07a03af1da37e609b04c5debc \
-                            sha256  8eea1db7f3465c5d1442c19599de53ab6d69431767ffa320459f5c3ff8cc80b4 \
-                            size    73743039
+checksums                   rmd160  02a6aff0b6c0fd6330c8da52e4ea8aab4e0535d9 \
+                            sha256  e608b7a77a1d77a50394323759ba12cf3543e1d05745e1d907fe9818157f2d4c \
+                            size    73750698
 
 # Aseprite doesn't specify which commit of depot_tools we should use, so I'm
 # using the most recent commit before this version of Aseprite was tagged.
-set depot_tools_commit      090b7be49149a3045a01838df94af192c4e570cd
+set depot_tools_commit      423f1e1914ab4aa7b2bdf804e216d4c097853ba2
 
 # Latest commit in the skia branch indicated in INSTALL.md at the time this
 # version of Aseprite was released.
 set skia_branch             m102
 set skia_commit             857111b32703e9e8cb14053e25f56b21d636a3c2
+
+# Also fetch extra code not in distfiles. The maintainer can use "sudo port
+# -dn checksum fetch.extra=no" and "sudo port -dn patch fetch.extra=no" to
+# avoid unnecessary fetching when preparing a port update.
+options fetch.extra
+default fetch.extra         yes
 
 homepage                    https://aseprite.org
 github.tarball_from         releases
@@ -83,21 +90,23 @@ description                 animated sprite editor & pixel art tool
 long_description            ${name} is an image editor for creating animated \
                             sprites and other pixel art.
 
-set python_branch           3.12
+set python_branch           3.13
 set python_version          [string map {. {}} ${python_branch}]
 configure.python            ${prefix}/bin/python${python_branch}
 
-# TODO: Don't use git to fetch depot_tools or skia's dependencies.
-if {${os.platform} eq "darwin" && ${os.major} < 14} {
-    set git_dep             port:git
-} else {
-    set git_dep             bin:git:git
-}
+if {${fetch.extra}} {
+    # TODO: Don't use git to fetch depot_tools or skia's dependencies.
+    if {${os.platform} eq "darwin" && ${os.major} < 14} {
+        set git_dep         port:git
+    } else {
+        set git_dep         bin:git:git
+    }
 
-depends_fetch-append        ${git_dep}
+    depends_fetch-append    ${git_dep}
 
-depends_extract-append      ${git_dep} \
+    depends_extract-append  ${git_dep} \
                             port:python${python_version}
+}
 
 depends_build-append        path:bin/pkg-config:pkgconfig \
                             port:python${python_version}
@@ -127,6 +136,21 @@ depends_lib-append          port:cmark \
 # or figure out how to prevent this build from seeing it.
 conflicts_build             lua lua50
 
+# aseprite/laf/os/osx/dnd.mm:56:8: error: unknown type name 'NSPasteboardType'
+set min_sdk_version         10.13
+if {${os.platform} eq "darwin" && [vercmp ${configure.sdk_version} < ${min_sdk_version}]} {
+    configure.sdk_version   ${min_sdk_version}
+    configure.sdkroot       ${prefix}/Developer/SDKs/MacOSX${configure.sdk_version}.sdk
+    depends_build-append    port:MacOSX${configure.sdk_version}.sdk
+    # This SDK requires an ld with tapi support.
+    if {[vercmp ${xcodeversion} < 8.3]} {
+        depends_build-append \
+                            port:ld64
+        require_active_variants \
+                            ld64 {} {ld64_97 ld64_127 ld64_236 ld64_274 ld64_xcode ld64_xtools}
+    }
+}
+
 # Invoke a procedure on each item in a list.
 # You'd think this would be in Tcl or MacPorts base already.
 # http://wiki.tcl.tk/4884
@@ -145,29 +169,37 @@ proc quoted_shellescape {arg} {
 worksrcdir                  ${github.project}
 extract.mkdir               yes
 
-post-fetch {
-    # depot_tools is hosted on googlesource.com which doesn't generate
-    # deterministic tarballs. https://github.com/google/gitiles/issues/84
-    file mkdir ${workpath}/depot_tools
-    system -W ${workpath}/depot_tools "\
-        git -c init.defaultBranch=main init &&\
-        git remote add origin https://chromium.googlesource.com/chromium/tools/depot_tools &&\
-        git fetch --depth 1 origin ${depot_tools_commit} &&\
-        git -c advice.detachedHead=false checkout FETCH_HEAD\
-        "
+if {${fetch.extra}} {
+    post-fetch {
+        # depot_tools is hosted on googlesource.com which doesn't generate
+        # deterministic tarballs. https://github.com/google/gitiles/issues/84
+        file mkdir ${workpath}/depot_tools
+        system -W ${workpath}/depot_tools "\
+            git -c init.defaultBranch=main init &&\
+            git remote add origin https://chromium.googlesource.com/chromium/tools/depot_tools &&\
+            git fetch --depth 1 origin ${depot_tools_commit} &&\
+            git -c advice.detachedHead=false checkout FETCH_HEAD\
+            "
+    }
 }
 
 set user_notified no
 proc one_moment_please {} {
     global user_notified
     if {!${user_notified}} {
-        ui_msg "The extract, configure, and build phases may each take several minutes to complete."
+        if {[option fetch.extra]} {
+            ui_msg "The extract, configure, and build phases may each take several minutes to complete."
+        } else {
+            ui_msg "The configure and build phases may each take several minutes to complete."
+        }
         set user_notified yes
     }
 }
 
-pre-extract {
-    one_moment_please
+if {${fetch.extra}} {
+    pre-extract {
+        one_moment_please
+    }
 }
 
 pre-configure {
@@ -187,23 +219,25 @@ post-extract {
         move {*}[glob ${workpath}/[file tail ${submodule}]-*] ${worksrcpath}/${submodule}
     }
 
-    # Various skia gn scripts run "python" but are compatible with python 3.
-    ln -s ${configure.python} ${workpath}/depot_tools/python
+    if {${fetch.extra}} {
+        # Various skia gn scripts run "python" but are compatible with python 3.
+        ln -s ${configure.python} ${workpath}/depot_tools/python
 
-    # depot_tools runs "python3".
-    ln -s ${configure.python} ${workpath}/depot_tools/python3
+        # depot_tools runs "python3".
+        ln -s ${configure.python} ${workpath}/depot_tools/python3
 
-    # Avoid fetching unnecessary dependencies.
-    system -W ${workpath} "${patch.cmd} ${patch.pre_args} < [shellescape ${filespath}/DEPS.patch]"
+        # Avoid fetching unnecessary dependencies.
+        system -W ${workpath} "${patch.cmd} ${patch.pre_args} < [shellescape ${filespath}/DEPS.patch]"
 
-    # Avoid fetching unnecessary data for necessary dependencies.
-    system -W ${workpath} "${patch.cmd} ${patch.pre_args} < [shellescape ${filespath}/git-sync-deps.patch]"
+        # Avoid fetching unnecessary data for necessary dependencies.
+        system -W ${workpath} "${patch.cmd} ${patch.pre_args} < [shellescape ${filespath}/git-sync-deps.patch]"
 
-    # Fetch skia's dependencies.
-    # TODO: Fetch these as distfiles instead, maybe using a strategy similar
-    # to the one formerly used by the MoltenVK port. Many of them aren't even
-    # needed since we're using MacPorts deps rather than bundled versions.
-    system -W ${workpath}/skia "${configure.python} tools/git-sync-deps"
+        # Fetch skia's dependencies.
+        # TODO: Fetch these as distfiles instead, maybe using a strategy similar
+        # to the one formerly used by the MoltenVK port. Many of them aren't even
+        # needed since we're using MacPorts deps rather than bundled versions.
+        system -W ${workpath}/skia "${configure.python} tools/git-sync-deps"
+    }
 }
 
 patch.dir                   ${workpath}
@@ -212,8 +246,7 @@ patchfiles                  json11.patch \
                             no-base_aligned_alloc.patch \
                             prefix.patch \
                             USE_SHARED_LIBARCHIVE.patch \
-                            USE_SHARED_LIBWEBP.patch \
-                            USE_SHARED_TINYEXIF.patch
+                            USE_SHARED_LIBWEBP.patch
 
 post-patch {
     # https://github.com/aseprite/skia/issues/19
