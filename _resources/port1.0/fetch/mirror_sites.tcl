@@ -133,7 +133,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirror.softaculous.com/cpan/modules/by-module/
     http://mirror.sov.uk.goscomb.net/CPAN/modules/by-module/
     http://mirror.team-cymru.org/CPAN/modules/by-module/
-    http://mirror.transip.net/CPAN/modules/by-module/
     http://mirror.truenetwork.ru/CPAN/modules/by-module/
     http://mirror.ucu.ac.ug/cpan/modules/by-module/
     https://mirror.uic.edu/CPAN/modules/by-module/
