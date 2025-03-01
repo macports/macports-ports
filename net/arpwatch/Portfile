@@ -1,65 +1,83 @@
-PortSystem        1.0
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
-name              arpwatch
-version           2.1a15
-revision          2
-categories        net
-license           BSD
-maintainers       {wohner.eu:normen @Gminfly} openmaintainer
+PortSystem          1.0
 
-description       Monitor ARP & RARP requests
-long_description  Arpwatch monitors ethernet activity and maintains a \
-                  database of ethernet/ip address pairings. It also \
-                  reports certain changes via email.
+name                arpwatch
+version             3.7
+revision            0
+categories          net
+license             BSD
+maintainers         {wohner.eu:normen @Gminfly} openmaintainer
 
-homepage          http://online.securityfocus.com/tools/142
-master_sites      ftp://ftp.ee.lbl.gov
+description         Monitor ARP & RARP requests
+long_description    Arpwatch monitors ethernet activity and maintains a \
+                    database of ethernet/ip address pairings. It also \
+                    reports certain changes via email.
 
-checksums         sha1 9dffaec0f132e5bb7aedfc840c5c67068bfbce69 \
-		  rmd160 a27ee53275dcec3cafb85eb3df2451d42ec32b0c
+homepage            https://ee.lbl.gov
+master_sites        ${homepage}/downloads/arpwatch/
 
-livecheck.url	  "http://www.freebsd.org/cgi/ports.cgi?query=${name}&stype=all"
-livecheck.regex	  ">${name}-(.*?)<"
-livecheck.version 2.1.a15_4
+checksums           rmd160  e2a961a16690e91f10aa546e41128e8627252445 \
+                    sha256  3eb63ea79fbafc8174653e557e28899873c4c3908c66fc81f6f29ced3a10987e \
+                    size    117274
 
-depends_lib       port:libpcap
+livecheck.url       "http://www.freebsd.org/cgi/ports.cgi?query=${name}&stype=all"
+livecheck.regex     ">${name}-(.*?)<"
 
-patchfiles        implicit.patch
+set python_branch   3.13
+set python_version  [string map {. ""} ${python_branch}]
 
 # Update config.guess and config.sub to be able to build on arm64.
-depends_build-append    port:automake
+depends_build-append \
+                    port:automake \
+                    port:wget
+
+depends_run-append  port:net-snmp
+
+# Python is need for helper scripts only but we need it in post-destroot
+depends_lib-append  port:libpcap \
+                    port:python${python_version}
+
+post-extract {
+    # See ${worksrcpath}/update-ethercodes.sh.in
+    system -W ${worksrcpath} "wget https://standards-oui.ieee.org/oui/oui.csv"
+}
+
+set sharedir ${prefix}/share/${name}-${version}
+set ethercodes ${sharedir}/ethercodes.dat
 post-patch {
+    reinplace "s|-DARPDIR|-DETHERCODES=\\\\\"${ethercodes}\\\\\" -DARPDIR|" ${worksrcpath}/Makefile.in
+    reinplace "s|INCLS = -I.|INCLS = -I. -I${prefix}/include|" ${worksrcpath}/Makefile.in
+    reinplace "s|LIBS = @LIBS@|LIBS = -L${prefix}/lib @LIBS@|" ${worksrcpath}/Makefile.in
+    reinplace "s|ARPDIR ?= .*|ARPDIR ?= ${prefix}/var/arpwatch|" ${worksrcpath}/Makefile.in
+    reinplace "s|/usr/local/arpwatch|${prefix}/var/arpwatch|" {*}[glob -directory ${worksrcpath} *.8.in]
+    reinplace "/.*\\/etc\\/rc.d.*/D" ${worksrcpath}/Makefile.in
+    reinplace "s|/usr/local|${prefix}|" ${worksrcpath}/arpfetch ${worksrcpath}/bihourly.sh
+    reinplace "s|sort +2rn arp.dat|(\[ -f arp.dat \] \\&\\& sort +2rn arp.dat \\|\\| sort +2rn \$1)|" ${worksrcpath}/arp2ethers
+    reinplace -E "s%(.\\.awk)%${sharedir}/\\1%g" ${worksrcpath}/arp2ethers
     set automake_dirs [glob -directory ${prefix}/share automake-*]
     set automake_dir [lindex [lsort -command vercmp $automake_dirs] end]
     copy -force ${automake_dir}/config.guess ${automake_dir}/config.sub \
         ${worksrcpath}
 }
 
-set sharedir ${prefix}/share/${name}-${version}
-pre-configure {
-    reinplace "s|INCLS = -I.|INCLS = -I. -I${prefix}/include|" ${worksrcpath}/Makefile.in
-    reinplace "s|LIBS = @LIBS@|LIBS = -L${prefix}/lib @LIBS@|" ${worksrcpath}/Makefile.in
-    reinplace "s|ARPDIR = .*|ARPDIR = ${prefix}/var/arpwatch|" ${worksrcpath}/Makefile.in
-
-    set ethercodes ${sharedir}/ethercodes.dat
-    reinplace "s|-DARPDIR|-DETHERCODES=\\\\\"${ethercodes}\\\\\" -DARPDIR|" \
-        ${worksrcpath}/Makefile.in
-}
-
-configure.cflags-append     "-DBIND_8_COMPAT=1"
-configure.args    --mandir=${prefix}/share/man
+configure.cflags-append \
+                    "-DBIND_8_COMPAT=1"
+configure.args-append \
+                    PYTHON=${prefix}/bin/python${python_branch}
 
 post-configure {
-    reinplace "s|-o bin -g bin||g" ${worksrcpath}/Makefile
     reinplace "/#define ETHERCODES .*/D" ${worksrcpath}/arpwatch.h
 }
 
-destroot.target   install install-man
 post-destroot {
     set destsharedir ${destroot}${sharedir}
     file mkdir ${destsharedir}
-
-    xinstall -W ${build.dir} CHANGES FILES INSTALL README arp2ethers arpfetch \
-    	bihourly.sh ethercodes.dat d.awk duplicates.awk e.awk euppertolower.awk \
-	massagevendor p.awk ${destsharedir}
+    xinstall -m 755 -W ${build.dir} massagevendor-old massagevendor.py ${destroot}${prefix}/bin
+    xinstall -m 755 -W ${build.dir} arp2ethers arpfetch bihourly.sh ${destroot}${prefix}/sbin
+    xinstall -m 644 -W ${build.dir} CHANGES FILES INSTALL README d.awk duplicates.awk \
+                                        e.awk euppertolower.awk p.awk \
+                                        ${destsharedir}
+    system -W ${worksrcpath} "${prefix}/bin/python${python_branch} ${destroot}${prefix}/bin/massagevendor.py \
+                                ./oui.csv > ${destroot}${ethercodes}"
 }
