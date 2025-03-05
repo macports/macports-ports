@@ -569,8 +569,9 @@ options python.add_archflags python.add_cflags python.add_cxxflags \
         python.move_binaries python.move_binaries_suffix
 
 default python.add_archflags yes
-default python.add_cflags no
-default python.add_cxxflags no
+# Setuptool 75.7.0 (supporting Python 3.9+) changed how CFLAGS is handled. 
+default python.add_cflags {[expr {$supported_archs ne "noarch" && [info exists python.version] && ${python.version} >= 39}]}
+default python.add_cxxflags {${python.add_cflags}}
 default python.add_fflags no
 default python.add_ldflags no
 default python.set_compiler yes
