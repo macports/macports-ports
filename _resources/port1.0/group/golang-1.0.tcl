@@ -81,6 +81,7 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
         github.com {
             uplevel "PortGroup github 1.0"
             github.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+            github.tarball_from archive
         }
         gitlab.com {
             uplevel "PortGroup gitlab 1.0"
@@ -299,6 +300,7 @@ proc handle_set_go_vendors {vendors_str} {
 
                 switch ${vdomain} {
                     github.com {
+                        # TODO: At some point this should be migrated to use the GitHub "archive" tarball
                         if {${vsubproject} eq ""} {
                             set distfile ${vauthor}-${vproject}-${vversion}.tar.gz
                             set master_site https://codeload.github.com/${vauthor}/${vproject}/legacy.tar.gz/${vversion}?dummy=

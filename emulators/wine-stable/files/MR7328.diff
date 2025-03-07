@@ -1,0 +1,160 @@
+From fd59962827a715d321f91c9bdb43f3e61f9ebbcb Mon Sep 17 00:00:00 2001
+From: Jacek Caban <jacek@codeweavers.com>
+Date: Thu, 13 Feb 2025 14:34:25 +0100
+Subject: [PATCH 1/2] ntdll: Use signed type for IAT offset in
+ LdrResolveDelayLoadedAPI.
+
+Allows negative IAT offsets.
+---
+ dlls/ntdll/loader.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index 3872f2b237b..5be6e44435f 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -3739,7 +3739,7 @@ void* WINAPI LdrResolveDelayLoadedAPI( void* base, const IMAGE_DELAYLOAD_DESCRIP
+     HMODULE *phmod;
+     NTSTATUS nts;
+     FARPROC fp;
+-    DWORD id;
++    INT_PTR id;
+ 
+     TRACE( "(%p, %p, %p, %p, %p, 0x%08lx)\n", base, desc, dllhook, syshook, addr, flags );
+ 
+-- 
+GitLab
+
+
+From c9519f68ea04915a60704534ab3afec5ec1b8fd7 Mon Sep 17 00:00:00 2001
+From: Jacek Caban <jacek@codeweavers.com>
+Date: Thu, 13 Feb 2025 14:37:02 +0100
+Subject: [PATCH 2/2] winebuild: Avoid using .idata section for delay-load
+ import libraries.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Recent binutils changes merge .idata sections into the read-only .rdata section.
+This is intended to make the IAT read-only, as with other modern linkers, but as
+a side effect, it broke delay-load import libraries. Delay-load import libraries
+should use separate sections regardless.
+
+Since these new sections are not recognized by the linker, it won’t apply special
+handling to maintain proper sorting. In practice, this isn’t an issue as long as
+the name table and IAT maintain the same order. This may result in negative IAT
+offsets (if the base symbol ends up in the middle of the IAT), but Windows appears
+to handle this without issues.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=57819
+---
+ tools/winebuild/import.c | 36 +++++++++++++++++++++++-------------
+ 1 file changed, 23 insertions(+), 13 deletions(-)
+
+diff --git a/tools/winebuild/import.c b/tools/winebuild/import.c
+index 6aee0fa98f8..9a635a8e8f7 100644
+--- a/tools/winebuild/import.c
++++ b/tools/winebuild/import.c
+@@ -1331,6 +1331,16 @@ static void build_dlltool_import_lib( const char *lib_name, DLLSPEC *spec, struc
+     if (files.count) output_static_lib( output_file_name, files, 0 );
+ }
+ 
++static void output_import_section( int index, int is_delay )
++{
++    if (!is_delay)
++        output( "\n\t.section .idata$%d\n", index );
++    else if (index == 5)
++        output( "\n\t.section .data$didat%d\n", index );
++    else
++        output( "\n\t.section .rdata$didat%d\n", index );
++}
++
+ /* create a Windows-style import library */
+ static void build_windows_import_lib( const char *lib_name, DLLSPEC *spec, struct strarray files )
+ {
+@@ -1454,20 +1464,20 @@ static void build_windows_import_lib( const char *lib_name, DLLSPEC *spec, struc
+         output( "\t.long 0\n" );                         /* UnloadInformationTableRVA */
+         output( "\t.long 0\n" );                         /* TimeDateStamp */
+ 
+-        output( "\n\t.section .idata$5\n" );
++        output_import_section( 5, is_delay );
+         output( "\t%s 0\n", get_asm_ptr_keyword() );     /* FirstThunk tail */
+         output( ".L__wine_import_addrs:\n" );
+ 
+-        output( "\n\t.section .idata$4\n" );
++        output_import_section( 4, is_delay );
+         output( "\t%s 0\n", get_asm_ptr_keyword() );     /* OriginalFirstThunk tail */
+         output( ".L__wine_import_names:\n" );
+ 
+         /* required to avoid internal linker errors with some binutils versions */
+-        output( "\n\t.section .idata$2\n" );
++        output_import_section( 2, is_delay );
+     }
+     else
+     {
+-        output( "\n\t.section .idata$2\n" );
++        output_import_section( 2, is_delay );
+         output( "%s\n", asm_globl( import_desc ) );
+         output_rva( ".L__wine_import_names" );           /* OriginalFirstThunk */
+         output( "\t.long 0\n" );                         /* TimeDateStamp */
+@@ -1475,10 +1485,10 @@ static void build_windows_import_lib( const char *lib_name, DLLSPEC *spec, struc
+         output_rva( "%s", asm_name( import_name ) );     /* Name */
+         output_rva( ".L__wine_import_addrs" );           /* FirstThunk */
+ 
+-        output( "\n\t.section .idata$4\n" );
++        output_import_section( 4, is_delay );
+         output( ".L__wine_import_names:\n" );            /* OriginalFirstThunk head */
+ 
+-        output( "\n\t.section .idata$5\n" );
++        output_import_section( 5, is_delay );
+         output( ".L__wine_import_addrs:\n" );            /* FirstThunk head */
+     }
+ 
+@@ -1489,11 +1499,11 @@ static void build_windows_import_lib( const char *lib_name, DLLSPEC *spec, struc
+ 
+     new_output_as_file();
+ 
+-    output( "\n\t.section .idata$4\n" );
++    output_import_section( 4, is_delay );
+     output( "\t%s 0\n", get_asm_ptr_keyword() );         /* OriginalFirstThunk tail */
+-    output( "\n\t.section .idata$5\n" );
++    output_import_section( 5, is_delay );
+     output( "\t%s 0\n", get_asm_ptr_keyword() );         /* FirstThunk tail */
+-    output( "\n\t.section .idata$7\n" );
++    output_import_section( 7, is_delay );
+     output( "%s\n", asm_globl( import_name ) );
+     output( "\t%s \"%s\"\n", get_asm_string_keyword(), spec->file_name );
+ 
+@@ -1584,10 +1594,10 @@ static void build_windows_import_lib( const char *lib_name, DLLSPEC *spec, struc
+                 break;
+             }
+ 
+-            output( "\n\t.section .idata$4\n" );
++            output_import_section( 4, is_delay );
+             output_thunk_rva( by_name ? -1 : odp->ordinal, ".L__wine_import_name" );
+ 
+-            output( "\n\t.section .idata$5\n" );
++            output_import_section( 5, is_delay );
+             output( "%s\n", asm_globl( imp_name ) );
+             if (is_delay)
+                 output( "\t%s .L__wine_delay_import\n", get_asm_ptr_keyword() );
+@@ -1596,14 +1606,14 @@ static void build_windows_import_lib( const char *lib_name, DLLSPEC *spec, struc
+ 
+             if (by_name)
+             {
+-                output( "\n\t.section .idata$6\n" );
++                output_import_section( 6, is_delay );
+                 output( ".L__wine_import_name:\n" );
+                 output( "\t.short %d\n", odp->hint );
+                 output( "\t%s \"%s\"\n", get_asm_string_keyword(), name );
+             }
+ 
+             /* reference head object to always pull its sections */
+-            output( "\n\t.section .idata$7\n" );
++            output_import_section( 7, is_delay );
+             output_rva( "%s", asm_name( import_desc ) );
+ 
+             free( imp_name );
+-- 
+GitLab
+

@@ -103,7 +103,7 @@ compiler.blacklist-append   {clang}
 # is then in the hands of the R maintainers and will not change
 # from the current defaults when these get bumped centrally.
 # NOTE : Keep this setting in sync with the one in the R port.
-if { ${os.major} > 23 } {
+if { ${os.major} > 22 } {
     # https://trac.macports.org/ticket/70799
     compiler.blacklist-append   {macports-clang-19} {macports-clang-2[0-9]}
 } else {
@@ -112,7 +112,7 @@ if { ${os.major} > 23 } {
 # Similarly, for gcc select the gcc13 variant of the compilers PG.
 # This setting should also be kept in sync with that in the R Port.
 # Updates should be coordinated with the R maintainers.
-if { ${os.major} < 10 || ${os.major} > 23 } {
+if { ${os.major} < 10 || ${os.major} > 22 } {
     # https://trac.macports.org/ticket/70799
     compiler.blacklist-append   {macports-gcc-1[5-9]}
 } else {
@@ -120,7 +120,7 @@ if { ${os.major} < 10 || ${os.major} > 23 } {
 }
 # NOTE: upon the update to gcc14, please update the blacklist accordingly,
 # like it is done for clangs. We would prefer using the same version of gcc and gfortran.
-if { ${os.major} < 10 || ${os.major} > 23 } {
+if { ${os.major} < 10 || ${os.major} > 22 } {
     # https://trac.macports.org/ticket/70799
     default_variants-append +gcc14
 } else {
