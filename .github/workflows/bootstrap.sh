@@ -2,6 +2,8 @@
 
 set -e
 
+MPBB=$1
+
 printtag() {
     # GitHub Actions tag format
     echo "::$1::${2-}"
@@ -15,7 +17,7 @@ endgroup() {
     printtag "endgroup"
 }
 
-MACPORTS_VERSION=2.10.3
+MACPORTS_VERSION=${MP_CI_RELEASE:-2.10.3}
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 OS_ARCH=$(uname -m)
@@ -33,25 +35,29 @@ MACPORTS_FILENAME=MacPorts-${MACPORTS_VERSION}-${OS_MAJOR}.tar.bz2
 begingroup "Fetching files"
 # Download resources in background ASAP but use later.
 # Use /usr/bin/curl so that we don't use Homebrew curl.
-echo "Fetching getopt..."
-/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
-curl_getopt_pid=$!
 echo "Fetching MacPorts..."
 /usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/${MACPORTS_FILENAME}" &
 curl_mpbase_pid=$!
+echo "Fetching getopt..."
+/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
+curl_getopt_pid=$!
+if [ -n "$MPBB" ] ; then
 PORTINDEX_URL="https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex"
 echo "Fetching PortIndex from $PORTINDEX_URL ..."
 /usr/bin/curl -fsSLo ports/PortIndex "$PORTINDEX_URL" &
 curl_portindex_pid=$!
+fi
 endgroup
 
 
+if [ -n "$MPBB" ] ; then
 begingroup "Info"
 echo "macOS version: $(sw_vers -productVersion)"
 echo "IP address: $(/usr/bin/curl -fsS https://www-origin.macports.org/ip.php)"
 /usr/bin/curl -fsSIo /dev/null https://packages-private.macports.org/.org.macports.packages-private.healthcheck.txt && private_packages_available=yes || private_packages_available=no
 echo "Can reach private packages server: $private_packages_available"
 endgroup
+fi
 
 
 begingroup "Disabling Spotlight"
@@ -125,6 +131,7 @@ echo "archive_site_local https://packages-private.macports.org/:tbz2" | sudo tee
 endgroup
 
 
+if [ -n "$MPBB" ] ; then
 begingroup "Updating PortIndex"
 ## Run portindex on recent commits if PR is newer
 git -C ports/ remote add macports https://github.com/macports/macports-ports.git
@@ -140,6 +147,7 @@ fi
 git -C ports/ checkout -qf -
 (cd ports/ && portindex -e)
 endgroup
+fi
 
 
 begingroup "Running postflight"
