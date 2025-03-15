@@ -1,0 +1,316 @@
+From b4be6db082f369b8edf67760305bf5e0667148e2 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Wed, 4 Dec 2024 05:34:42 +0800
+Subject: [PATCH 1/2] Allow X11 build on macOS
+
+---
+ CMakeLists.txt          | 15 +++++++++++---
+ src/xlib/CMakeLists.txt | 44 ++++++++++++++++++++++++++++++-----------
+ src/xlib/main.h         |  5 ++++-
+ src/xlib/tray.c         |  9 ++++-----
+ src/xlib/tray.h         | 30 ++++++++++++++++++++++++++++
+ src/xlib/video.c        | 10 ++++++++++
+ 6 files changed, 92 insertions(+), 21 deletions(-)
+
+diff --git CMakeLists.txt CMakeLists.txt
+index 7cb079c1..90ca2c9e 100644
+--- CMakeLists.txt
++++ CMakeLists.txt
+@@ -92,6 +92,8 @@ option(ENABLE_TESTS       "Whether to build test binaries (currently Unix-like O
+ option(ENABLE_WERROR      "Error on Warning, whether to put -Werror flag to the compiler"       OFF)
+ option(ENABLE_FILTERAUDIO "Enable Filter Audio"                                                 ON )
+ option(ENABLE_LTO         "Enable link time optimizations"                                      ON )
++# This needs to be optional, since existing implementation does not build on < 10.7.
++option(ENABLE_COCOA       "Enable native Cocoa GUI on macOS"                                    ON )
+ 
+ 
+ #################################
+@@ -105,7 +107,7 @@ if(WINDOWS AND NOT CROSS_COMPILING)
+         # Helping Cygwin out again..
+         set(WIN64 TRUE)
+     endif()
+-elseif(APPLE)
++elseif(APPLE AND ENABLE_COCOA)
+     include(cmake/macOS.cmake)
+ endif()
+ 
+@@ -298,7 +300,7 @@ if(WIN32)
+     set(WINDOWS_ICON src/windows/utox.rc)
+ 
+     add_subdirectory(src/windows)
+-elseif(APPLE)
++elseif(APPLE AND ENABLE_COCOA)
+     set(GUI_TYPE MACOSX_BUNDLE)
+ 
+     add_definitions("-x objective-c")
+@@ -380,9 +382,16 @@ target_link_libraries(utox
+     qrcodegen
+ )
+ 
++if(APPLE AND NOT ENABLE_COCOA)
++    target_link_options(utox
++        PRIVATE
++        -sectcreate __DATA __icons_utox_png ${CMAKE_SOURCE_DIR}/icons/utox.png
++    )
++endif()
++
+ set_property(TARGET utox PROPERTY C_STANDARD 11)
+ 
+-if(APPLE)
++if(APPLE AND ENABLE_COCOA)
+     set_target_properties(utox PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${uTox_SOURCE_DIR}/src/cocoa/Info.plist")
+     # check that the app is valid and when the app is static
+     # also check that it does not depend on external libs (system libs excepted)
+diff --git src/xlib/CMakeLists.txt src/xlib/CMakeLists.txt
+index fd4048f5..c43a34c7 100644
+--- src/xlib/CMakeLists.txt
++++ src/xlib/CMakeLists.txt
+@@ -2,6 +2,9 @@ project(utoxNATIVE LANGUAGES C)
+ 
+ option(ENABLE_DBUS "Compile with dbus notification support" ON)
+ 
++if(APPLE)
++    set(ENABLE_XLIB_VIDEO 0)
++endif()
+ 
+ if(ENABLE_DBUS)
+     find_package(DBus REQUIRED)
+@@ -12,12 +15,14 @@ endif()
+ #########################################
+ ## Native Icon data
+ #########################################
+-add_custom_command(OUTPUT icon.o
+-    COMMAND cd ${uTox_SOURCE_DIR}/ && ld -r -b binary -o ${utoxNATIVE_BINARY_DIR}/icon.o icons/utox-128x128.png
+-    DEPENDS ../../icons/utox-128x128.png )
+-set_source_files_properties( icon.o PROPERTIES EXTERNAL_OBJECT true GENERATED true )
+-add_library(icon STATIC icon.o)
+-set_target_properties( icon PROPERTIES LINKER_LANGUAGE C )
++if(NOT APPLE)
++    add_custom_command(OUTPUT icon.o
++        COMMAND cd ${uTox_SOURCE_DIR}/ && ld -r -b binary -o ${utoxNATIVE_BINARY_DIR}/icon.o icons/utox.png
++        DEPENDS ../../icons/utox.png)
++    set_source_files_properties(icon.o PROPERTIES EXTERNAL_OBJECT true GENERATED true)
++    add_library(icon STATIC icon.o)
++    set_target_properties(icon PROPERTIES LINKER_LANGUAGE C)
++endif()
+ 
+ #########################################
+ ## Native Interface
+@@ -34,7 +39,7 @@ add_library(utoxNATIVE STATIC
+     $<$<BOOL:${ENABLE_UNITY_MMENU}>:mmenu.c>
+     screen_grab.c
+     tray.c
+-    v4l.c
++    $<$<BOOL:${ENABLE_XLIB_VIDEO}>:v4l.c>
+     video.c
+     window.c
+ 
+@@ -57,10 +62,12 @@ message("X library:         ${X11_LIBRARIES}")
+ message("Xrender include:   ${X11_Xrender_INCLUDE_PATH}")
+ message("Xrender library:   ${X11_Xrender_LIB}")
+ 
+-find_package(libv4lconvert REQUIRED)
+-include_directories("${LIBV4LCONVERT_INCLUDE_DIRS}")
+-message("V4Lconvert include: ${LIBV4LCONVERT_INCLUDE_DIRS}")
+-message("V4Lconvert library: ${LIBV4LCONVERT_LIBRARIES}")
++if(NOT APPLE)
++    find_package(libv4lconvert REQUIRED)
++    include_directories("${LIBV4LCONVERT_INCLUDE_DIRS}")
++    message("V4Lconvert include: ${LIBV4LCONVERT_INCLUDE_DIRS}")
++    message("V4Lconvert library: ${LIBV4LCONVERT_LIBRARIES}")
++endif()
+ 
+ if(ENABLE_DBUS AND DBUS_LIBRARIES)
+     message("DBus include:  ${DBUS_INCLUDE_DIRS}")
+@@ -71,7 +78,6 @@ endif()
+ 
+ target_link_libraries(utoxNATIVE
+     PUBLIC
+-        icon
+         ${LIBV4LCONVERT_LIBRARIES}
+         ${LIBFONTCONFIG_LIBRARIES}
+         ${X11_LIBRARIES}
+@@ -82,6 +88,13 @@ target_link_libraries(utoxNATIVE
+         stb
+ )
+ 
++if(NOT APPLE)
++    target_link_libraries(utoxNATIVE
++        PUBLIC
++            icon
++    )
++endif()
++
+ if(LINUX OR NETBSD)
+     target_link_libraries(utoxNATIVE
+         PUBLIC
+@@ -96,6 +109,13 @@ if(LINUX)
+     )
+ endif()
+ 
++if(APPLE)
++    target_link_libraries(utoxNATIVE
++        PUBLIC
++            "-framework OpenAL"
++    )
++endif()
++
+ include(GNUInstallDirs)
+ 
+ install(FILES
+diff --git src/xlib/main.h src/xlib/main.h
+index 19a408c2..52edb257 100644
+--- src/xlib/main.h
++++ src/xlib/main.h
+@@ -47,7 +47,9 @@ extern bool     _redraw;
+ 
+ extern XImage *screen_image;
+ 
++#ifndef __APPLE__
+ extern int utox_v4l_fd;
++#endif
+ 
+ /* dynamically load libgtk */
+ extern void *libgtk;
+@@ -83,12 +85,13 @@ void pastedata(void *data, Atom type, size_t len, bool select);
+ // Brute Force, the video window we got a close command on (xlib/video.c)
+ uint16_t find_video_windows(Window w);
+ 
+-
++#ifndef __APPLE__
+ // video4linux
+ bool v4l_init(char *dev_name);
+ void v4l_close(void);
+ bool v4l_startread(void);
+ bool v4l_endread(void);
+ int v4l_getframe(uint8_t *y, uint8_t *u, uint8_t *v, uint16_t width, uint16_t height);
++#endif
+ 
+ #endif
+diff --git src/xlib/tray.c src/xlib/tray.c
+index 24e54992..d89a080c 100644
+--- src/xlib/tray.c
++++ src/xlib/tray.c
+@@ -14,9 +14,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-// Converted to a binary and linked at build time
+-extern uint8_t _binary_icons_utox_128x128_png_start;
+-extern uint8_t _binary_icons_utox_128x128_png_end;
++/* Converted to a binary and linked at build time */
++EXTLD(icons_utox_png)
+ 
+ static void send_message(Display *dpy, /* display */
+                   Window w, /* sender (tray window) */
+@@ -93,8 +92,8 @@ static void draw_tray_icon(void) {
+     LOG_NOTE("XLib Tray", "Draw Tray");
+ 
+     uint16_t width, height;
+-    uint8_t *icon_data = &_binary_icons_utox_128x128_png_start;
+-    size_t   icon_size = &_binary_icons_utox_128x128_png_end - &_binary_icons_utox_128x128_png_start;
++    uint8_t *icon_data = LDVAR(icons_utox_png);
++    size_t   icon_size = LDLEN(icons_utox_png);
+ 
+     NATIVE_IMAGE *icon = utox_image_to_native(icon_data, icon_size, &width, &height, 0);
+     if (NATIVE_IMAGE_IS_VALID(icon)) {
+diff --git src/xlib/tray.h src/xlib/tray.h
+index 6e24c77d..45a92862 100644
+--- src/xlib/tray.h
++++ src/xlib/tray.h
+@@ -21,4 +21,34 @@ void destroy_tray_icon(void);
+ 
+ bool tray_window_event(XEvent *event);
+ 
++#ifdef __APPLE__
++#include <mach-o/getsect.h>
++
++#define EXTLD(NAME) \
++    extern uint8_t _section$__DATA__ ## NAME [];
++#define LDVAR(NAME) _section$__DATA__ ## NAME
++#define LDLEN(NAME) (getsectbyname("__DATA", "__" #NAME)->size)
++
++#elif (defined __WIN32__)  /* mingw */
++
++#define EXTLD(NAME) \
++    extern uint8_t binary_ ## NAME ## _start[]; \
++    extern uint8_t binary_ ## NAME ## _end[];
++#define LDVAR(NAME) \
++    binary_ ## NAME ## _start
++#define LDLEN(NAME) \
++    ((binary_ ## NAME ## _end) - (binary_ ## NAME ## _start))
++
++#else /* gnu/linux ld */
++
++#define EXTLD(NAME) \
++    extern uint8_t _binary_ ## NAME ## _start[]; \
++    extern uint8_t _binary_ ## NAME ## _end[];
++#define LDVAR(NAME) \
++    _binary_ ## NAME ## _start
++#define LDLEN(NAME) \
++    ((_binary_ ## NAME ## _end) - (_binary_ ## NAME ## _start))
++
++#endif
++
+ #endif
+diff --git src/xlib/video.c src/xlib/video.c
+index 7ed42c97..be44cf97 100644
+--- src/xlib/video.c
++++ src/xlib/video.c
+@@ -211,6 +211,7 @@ uint16_t native_video_detect(void) {
+ static uint16_t video_x, video_y;
+ 
+ bool native_video_init(void *handle) {
++#ifndef __APPLE__
+     if (isdesktop(handle)) {
+         utox_v4l_fd = -1;
+ 
+@@ -258,34 +259,42 @@ bool native_video_init(void *handle) {
+     }
+ 
+     return v4l_init(handle);
++#endif
+ }
+ 
+ void native_video_close(void *handle) {
++#ifndef __APPLE__
+     if (isdesktop(handle)) {
+         XShmDetach(deskdisplay, &shminfo);
+         return;
+     }
+ 
+     v4l_close();
++#endif
+ }
+ 
+ bool native_video_startread(void) {
++#ifndef __APPLE__
+     if (utox_v4l_fd == -1) {
+         return true;
+     }
+ 
+     return v4l_startread();
++#endif
+ }
+ 
+ bool native_video_endread(void) {
++#ifndef __APPLE__
+     if (utox_v4l_fd == -1) {
+         return true;
+     }
+ 
+     return v4l_endread();
++#endif
+ }
+ 
+ int native_video_getframe(uint8_t *y, uint8_t *u, uint8_t *v, uint16_t width, uint16_t height) {
++#ifndef __APPLE__
+     if (utox_v4l_fd == -1) {
+         static uint64_t lasttime;
+         uint64_t        t = get_time();
+@@ -305,4 +314,5 @@ int native_video_getframe(uint8_t *y, uint8_t *u, uint8_t *v, uint16_t width, ui
+     }
+ 
+     return v4l_getframe(y, u, v, width, height);
++#endif
+ }

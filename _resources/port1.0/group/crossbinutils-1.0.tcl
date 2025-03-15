@@ -106,6 +106,11 @@ array set crossbinutils.versions_info {
         sha256  13f74202a3c4c51118b797a39ea4200d3f6cfbe224da6d1d95bb938480132dfd \
         size    28174300
     }}
+    2.44 {xz {
+        rmd160  44386f5741ed548a4648f0b71192a301efa4e351 \
+        sha256  ce2017e059d63e67ddb9240e9d4ec49c2893605035cd60e92ad53177f4377237 \
+        size    27285788
+    }}
 }
 
 proc crossbinutils.setup {target version} {
@@ -113,6 +118,7 @@ proc crossbinutils.setup {target version} {
 
     crossbinutils.target ${target}
 
+    PortGroup           compiler_blacklist_versions 1.0
     default name        ${target}-binutils
     version             ${version}
     default categories  {cross devel}
@@ -187,6 +193,12 @@ proc crossbinutils.setup {target version} {
     # Opportunistic links zstd for compression
     if {[vercmp ${version} >= "2.40"]} {
         depends_lib-append  port:zstd
+    }
+
+    # fatal error: error in backend: Cannot select: intrinsic %llvm.x86.sha1rnds4
+    # https://github.com/macports/macports-ports/pull/27345#issuecomment-2601373548
+    if {[vercmp ${version} >= "2.41"]} {
+        compiler.blacklist-append {clang < 1001}
     }
 
     build.dir ${workpath}/build

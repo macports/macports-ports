@@ -133,7 +133,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirror.softaculous.com/cpan/modules/by-module/
     http://mirror.sov.uk.goscomb.net/CPAN/modules/by-module/
     http://mirror.team-cymru.org/CPAN/modules/by-module/
-    http://mirror.transip.net/CPAN/modules/by-module/
     http://mirror.truenetwork.ru/CPAN/modules/by-module/
     http://mirror.ucu.ac.ug/cpan/modules/by-module/
     https://mirror.uic.edu/CPAN/modules/by-module/
@@ -422,9 +421,7 @@ set fastly      ${letsencrypt_https_or_http}
 #set aarnet.au   ${letsencrypt_https_or_http}
 set aarnet.au   http
 set atl.us      http
-# bos.us letsencrypt certs not set up yet, update when they are
-# (and also remove separate mirrors.mit.edu entry)
-set bos.us      http
+set bos.us      ${letsencrypt_https_or_http}
 set cph.dk      ${letsencrypt_https_or_http}
 set cjj.kr      http
 # cert doesn't have macports.org SANs; admin notified
@@ -452,7 +449,6 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${fcix.net}://mirror.fcix.net/macports/distfiles/:mirror
     ${aarnet.au}://aarnet.au.distfiles.macports.org/pub/macports/distfiles/:mirror
     ${atl.us}://atl.us.distfiles.macports.org/:mirror
-    https://mirrors.mit.edu/macports/distfiles/:mirror
     ${bos.us}://bos.us.distfiles.macports.org/:mirror
     ${cjj.kr}://cjj.kr.distfiles.macports.org/:mirror
     ${cph.dk}://cph.dk.distfiles.macports.org/:mirror
