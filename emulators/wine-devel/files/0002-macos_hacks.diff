@@ -69,10 +69,10 @@ index df3447a9014..4d70b83ee14 100644
  
      if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |
 diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
-index 33415b6dda8..2413fb537d7 100644
+index 74eb1b7f500..272a7e54058 100644
 --- a/dlls/ntdll/loader.c
 +++ b/dlls/ntdll/loader.c
-@@ -2197,6 +2197,11 @@ done:
+@@ -2231,6 +2231,11 @@ done:
      return status;
  }
  
@@ -84,7 +84,7 @@ index 33415b6dda8..2413fb537d7 100644
  
  /*************************************************************************
   *		build_module
-@@ -2278,6 +2283,15 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+@@ -2312,6 +2317,15 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
      TRACE_(loaddll)( "Loaded %s at %p: %s\n", debugstr_w(wm->ldr.FullDllName.Buffer), *module,
                       is_builtin ? "builtin" : "native" );
  
@@ -100,7 +100,7 @@ index 33415b6dda8..2413fb537d7 100644
      wm->ldr.LoadCount = 1;
      *pwm = wm;
      *module = NULL;
-@@ -2723,6 +2737,399 @@ static WINE_MODREF *find_existing_module( HMODULE module )
+@@ -2757,6 +2771,399 @@ static WINE_MODREF *find_existing_module( HMODULE module )
      return NULL;
  }
  
@@ -500,7 +500,7 @@ index 33415b6dda8..2413fb537d7 100644
  
  /******************************************************************************
   *	load_native_dll  (internal)
-@@ -4324,6 +4731,18 @@ static void release_address_space(void)
+@@ -4358,6 +4765,18 @@ static void release_address_space(void)
  #endif
  }
  
@@ -519,7 +519,7 @@ index 33415b6dda8..2413fb537d7 100644
  /******************************************************************
   *		loader_init
   *
-@@ -4414,6 +4833,25 @@ void loader_init( CONTEXT *context, void **entry )
+@@ -4448,6 +4867,25 @@ void loader_init( CONTEXT *context, void **entry )
      }
      else
      {
@@ -613,10 +613,60 @@ index 0bade5b35f0..1e4c485894f 100644
  }
  
 diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
-index 52c907f1a32..f41eb03e26b 100644
+index 26b540bd629..457af046085 100644
 --- a/dlls/ntdll/unix/signal_x86_64.c
 +++ b/dlls/ntdll/unix/signal_x86_64.c
-@@ -1023,7 +1023,11 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
+@@ -80,6 +80,15 @@ WINE_DECLARE_DEBUG_CHANNEL(seh);
+ 
+ #include "dwarf.h"
+ 
++#ifdef __APPLE__
++/* CW Hack 24256 */
++#include <sys/sysctl.h>
++static BOOL is_rosetta2;
++
++/* CW Hack 23427 */
++static BOOL sequoia_or_later = FALSE;
++#endif
++
+ /***********************************************************************
+  * signal context platform-specific definitions
+  */
+@@ -447,6 +456,9 @@ struct amd64_thread_data
+     DWORD                 xstate_features_size;  /* 033c */
+     UINT64                xstate_features_mask;  /* 0340 */
+     void                **instrumentation_callback; /* 0348 */
++#ifdef __APPLE__  /* CW Hack 24265 */
++    DWORD                 mxcsr;         /* 350 */
++#endif
+ };
+ 
+ C_ASSERT( sizeof(struct amd64_thread_data) <= sizeof(((struct ntdll_thread_data *)0)->cpu_data) );
+@@ -456,6 +468,9 @@ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, sys
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, fs ) == 0x338 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, xstate_features_size ) == 0x33c );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, xstate_features_mask ) == 0x340 );
++#ifdef __APPLE__  /* CW Hack 24265 */
++C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, mxcsr ) == 0x350 );
++#endif
+ 
+ static inline struct amd64_thread_data *amd64_thread_data(void)
+ {
+@@ -919,6 +934,13 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
+ 
+         context->ContextFlags |= CONTEXT_FLOATING_POINT;
+         context->FltSave = *FPU_sig(sigcontext);
++#ifdef __APPLE__
++        /* CW Hack 24256: mxcsr in signal contexts is incorrect in Rosetta.
++           In Rosetta only, the actual value of the register from within the
++           handler is correct (on Intel it has some default value). */
++        if (is_rosetta2)
++            __asm__ volatile( "stmxcsr %0" : "=m" (context->FltSave.MxCsr) );
++#endif
+         context->MxCsr = context->FltSave.MxCsr;
+         if (xstate_extended_features() && (xs = XState_sig(FPU_sig(sigcontext))))
+         {
+@@ -1023,7 +1045,11 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
          ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_AMD64 );
  #ifdef __APPLE__
          if ((flags & CONTEXT_DEBUG_REGISTERS) && (ret == STATUS_UNSUCCESSFUL))
@@ -629,7 +679,7 @@ index 52c907f1a32..f41eb03e26b 100644
  #endif
          if (ret || !self) return ret;
          if (flags & CONTEXT_DEBUG_REGISTERS)
-@@ -1236,6 +1240,14 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
+@@ -1236,6 +1262,14 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
      if (!self)
      {
          NTSTATUS ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_I386 );
@@ -644,7 +694,7 @@ index 52c907f1a32..f41eb03e26b 100644
          if (ret || !self) return ret;
          if (flags & CONTEXT_I386_DEBUG_REGISTERS)
          {
-@@ -1742,6 +1754,135 @@ NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status
+@@ -1742,6 +1776,167 @@ NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status
      user_mode_callback_return( ret_ptr, ret_len, status, NtCurrentTeb() );
  }
  
@@ -711,10 +761,7 @@ index 52c907f1a32..f41eb03e26b 100644
 +    }
 +    return FALSE;
 +}
-+#endif
 +
-+
-+#ifdef __APPLE__
 +/***********************************************************************
 + *           handle_fndisi
 + *
@@ -775,37 +822,135 @@ index 52c907f1a32..f41eb03e26b 100644
 +    }
 +    return FALSE;
 +}
++
++/***********************************************************************
++ *           emulate_xgetbv
++ *
++ * Check if the fault location is an Intel XGETBV instruction for xcr0 and
++ * emulate it if so. Actual Intel hardware supports this instruction, so this
++ * will only take effect under Rosetta.
++ * CW HACK 23427
++ */
++static inline BOOL emulate_xgetbv( ucontext_t *sigcontext, CONTEXT *context )
++{
++    BYTE instr[3];
++    unsigned int len = virtual_uninterrupted_read_memory( (BYTE *)context->Rip, instr, sizeof(instr) );
++
++    /* Prefixed xgetbv is illegal, so no need to check. */
++    if (len < 3 || instr[0] != 0x0f || instr[1] != 0x01 || instr[2] != 0xd0 ||
++        (RCX_sig(sigcontext) & 0xffffffff) != 0 /* only handling xcr0 (ecx==0) */)
++    {
++        return FALSE;
++    }
++
++    RDX_sig(sigcontext) = 0;
++    if (sequoia_or_later)
++    {
++        /* Arguably we should only claim AVX support if ROSETTA_ADVERTISE_AVX is
++           set, but presumably apps will also check cpuid. */
++        RAX_sig(sigcontext) = 0xe7;  /* fpu/mmx, sse, avx, full avx-512 */
++    }
++    else
++        RAX_sig(sigcontext) = 0x07;  /* fpu/mmx, sse */
++
++    RIP_sig(sigcontext) += 3;
++    TRACE_(seh)( "emulated an XGETBV instruction\n" );
++    return TRUE;
++}
 +#endif
 +
  
  /***********************************************************************
   *           is_privileged_instr
-@@ -1990,7 +2131,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+@@ -1990,6 +2185,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
          rec.ExceptionCode = EXCEPTION_ARRAY_BOUNDS_EXCEEDED;
          break;
      case TRAP_x86_PRIVINFLT:   /* Invalid opcode exception */
 +#ifdef __APPLE__
 +        /* CW HACK 20186 */
 +        if (handle_cet_nop( ucontext, &context.c )) return;
++        /* Winehq bug 56441 */
++        if (handle_fndisi( ucontext, &context.c )) return;
++        /* CW HACK 23427 */
++        if (emulate_xgetbv( ucontext, &context.c )) return;
 +#endif
          rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
-+#ifdef __APPLE__
-+	if (handle_fndisi( ucontext, &context.c )) return;
-+#endif
          break;
      case TRAP_x86_STKFLT:  /* Stack fault */
-         rec.ExceptionCode = EXCEPTION_STACK_OVERFLOW;
-@@ -2600,6 +2748,8 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+@@ -2248,6 +2451,15 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+ 
+ 
+ #ifdef __APPLE__
++/* CW Hack 24265 */
++extern void __restore_mxcsr_thunk(void);
++__ASM_GLOBAL_FUNC( __restore_mxcsr_thunk,
++                   "pushq %rcx\n\t"
++                   "movq %gs:0x30,%rcx\n\t"
++                   "ldmxcsr 0x350(%rcx)\n\t"  /* amd64_thread_data()->mxcsr */
++                   "popq %rcx\n\t"
++                   "jmp " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_prolog_end") );
++
+ /**********************************************************************
+  *		sigsys_handler
+  *
+@@ -2275,6 +2487,23 @@ static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+         frame->restore_flags |= CONTEXT_CONTROL;
+     }
+     RIP_sig(ucontext) = (ULONG64)__wine_syscall_dispatcher_prolog_end_ptr;
++
++    /* CW Hack 24265 */
++    if (is_rosetta2)
++    {
++        unsigned int direct_mxcsr;
++        __asm__ volatile( "stmxcsr %0" : "=m" (direct_mxcsr) );
++        if (direct_mxcsr != FPU_sig(ucontext)->MxCsr)
++        {
++            FPU_sig(ucontext)->MxCsr = direct_mxcsr;
++
++            /* On the M3, Rosetta will restore mxcsr to the initial, incorrect
++               value from the sigcontext, even if we change it. So we jump to a
++               thunk that restores the value from amd64_thread_data. */
++            amd64_thread_data()->mxcsr = direct_mxcsr;
++            RIP_sig(ucontext) = (ULONG64)__restore_mxcsr_thunk;
++        }
++    }
+ }
+ #endif
+ 
+@@ -2553,6 +2782,23 @@ void signal_init_process(void)
+     }
+ #endif
+ 
++#ifdef __APPLE__
++    /* CW Hack 24256: We need the value of sysctl.proc_translated in signal
++       handlers but sysctl[byname] is not signal-safe. */
++    {
++        int ret = 0;
++        size_t size = sizeof(ret);
++        if (sysctlbyname( "sysctl.proc_translated", &ret, &size, NULL, 0 ) == -1)
++            is_rosetta2 = 0;
++        else
++            is_rosetta2 = ret;
++    }
++
++    /* CW Hack 23427: __builtin_available presumably isn't signal-safe. */
++    if (__builtin_available( macOS 15.0, * ))
++        sequoia_or_later = TRUE;
++#endif
++
+     sig_act.sa_mask = server_block_set;
+     sig_act.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
+ 
+@@ -2611,6 +2857,7 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+ #elif defined (__APPLE__)
      __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
      __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
++    __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Peb), "n" (FIELD_OFFSET(TEB, Peb)));
      thread_data->pthread_teb = mac_thread_gsbase();
-+    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->Peb), "n" (FIELD_OFFSET(TEB, Peb)));
-+    amd64_thread_data()->pthread_teb = mac_thread_gsbase();
      /* alloc_tls_slot() needs to poke a value to an address relative to each
         thread's gsbase.  Have each thread record its gsbase pointer into its
-        TEB so alloc_tls_slot() can find it. */
 diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
-index b64a7dd40af..3da3606cfd3 100644
+index b31f8969c21..fe8c61acd37 100644
 --- a/dlls/ntdll/unix/thread.c
 +++ b/dlls/ntdll/unix/thread.c
 @@ -1099,6 +1099,16 @@ static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
@@ -826,7 +971,7 @@ index b64a7dd40af..3da3606cfd3 100644
  }
  
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 06a260cfe3f..06612e84440 100644
+index 7b565b6c113..99f6f009d17 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -68,6 +68,7 @@
@@ -837,13 +982,13 @@ index 06a260cfe3f..06612e84440 100644
  #endif
  
  #include "ntstatus.h"
-@@ -1750,6 +1751,42 @@ static void mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
+@@ -1750,6 +1751,40 @@ static void mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
      if (count) mprotect_exec( addr, count << page_shift, prot );
  }
  
++#ifdef __APPLE__
 +static BOOL is_catalina_or_later(void)
 +{
-+#ifdef __APPLE__
 +    static int result = -1;
 +    struct utsname name;
 +    unsigned major, minor;
@@ -855,10 +1000,8 @@ index 06a260cfe3f..06612e84440 100644
 +                  major >= 19 /* macOS 10.15 Catalina */);
 +    }
 +    return (result == 1) ? TRUE : FALSE;
-+#else
-+    return FALSE;
-+#endif
 +}
++#endif
 +
 +static void *wine_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 +{
@@ -880,7 +1023,7 @@ index 06a260cfe3f..06612e84440 100644
  
  /***********************************************************************
   *           set_vprot
-@@ -2120,7 +2157,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
+@@ -2120,7 +2155,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
      /* only try mmap if media is not removable (or if we require write access) */
      if (!removable || (flags & MAP_SHARED))
      {
@@ -889,16 +1032,16 @@ index 06a260cfe3f..06612e84440 100644
              goto done;
  
          switch (errno)
-@@ -2448,7 +2485,7 @@ static NTSTATUS map_pe_header( void *ptr, size_t size, int fd, BOOL *removable )
+@@ -2448,7 +2483,7 @@ static NTSTATUS map_pe_header( void *ptr, size_t size, size_t map_size, int fd,
  
-     if (!*removable)
+     if (!*removable && map_size)
      {
--        if (mmap( ptr, size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_FIXED|MAP_PRIVATE, fd, 0 ) != MAP_FAILED)
-+        if (wine_mmap( ptr, size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_FIXED|MAP_PRIVATE, fd, 0 ) != MAP_FAILED)
-             return STATUS_SUCCESS;
- 
-         switch (errno)
-@@ -3962,7 +3999,7 @@ void virtual_map_user_shared_data(void)
+-        if (mmap( ptr, map_size, PROT_READ | PROT_WRITE | PROT_EXEC,
++        if (wine_mmap( ptr, map_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                   MAP_FIXED | MAP_PRIVATE, fd, 0 ) != MAP_FAILED)
+         {
+             if (size > map_size) pread( fd, (char *)ptr + map_size, size - map_size, map_size );
+@@ -3970,7 +4005,7 @@ void virtual_map_user_shared_data(void)
          exit(1);
      }
      if ((res = server_get_unix_fd( section, 0, &fd, &needs_close, NULL, NULL )) ||
@@ -907,7 +1050,18 @@ index 06a260cfe3f..06612e84440 100644
      {
          ERR( "failed to remap the process USD: %d\n", res );
          exit(1);
-@@ -6143,6 +6180,56 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
+@@ -4102,6 +4137,10 @@ NTSTATUS virtual_handle_fault( EXCEPTION_RECORD *rec, void *stack )
+                 ret = STATUS_SUCCESS;
+         }
+     }
++
++#ifdef __APPLE__
++done:
++#endif
+     mutex_unlock( &virtual_mutex );
+     rec->ExceptionCode = ret;
+     return ret;
+@@ -6147,6 +6186,56 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
      return status;
  }
  
@@ -964,7 +1118,7 @@ index 06a260cfe3f..06612e84440 100644
  
  /***********************************************************************
   *             NtWriteVirtualMemory   (NTDLL.@)
-@@ -6163,6 +6250,10 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
+@@ -6167,6 +6256,10 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
              if ((status = wine_server_call( req ))) size = 0;
          }
          SERVER_END_REQ;
@@ -1169,7 +1323,7 @@ index 6c6b2352bb6..2edac50a51c 100644
      NtProtectVirtualMemory( GetCurrentProcess(), (void **)&thunk, &size, PAGE_EXECUTE_READ, &old_prot );
      return STATUS_SUCCESS;
 diff --git a/server/mach.c b/server/mach.c
-index 0472e7a6701..aa34a56e887 100644
+index 50d21e2810a..96f0480bb86 100644
 --- a/server/mach.c
 +++ b/server/mach.c
 @@ -48,6 +48,7 @@
