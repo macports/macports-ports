@@ -210,7 +210,7 @@ pre-configure {
     configure.pre_args -q -f -H --eval
     configure.post_args
 
-    configure.cxxflags-append -std=c++11
+    configure.cxxflags-append -std=gnu++17
 }
 
 build {}
