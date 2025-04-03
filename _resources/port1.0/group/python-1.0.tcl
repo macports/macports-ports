@@ -393,10 +393,13 @@ proc python_add_dependencies {} {
                 }
                 switch -- [option python.pep517_backend] {
                     setuptools {
-                        depends_build-delete    port:py${python.version}-setuptools \
-                                                port:py${python.version}-wheel
-                        depends_build-append    port:py${python.version}-setuptools \
-                                                port:py${python.version}-wheel
+                        depends_build-delete    port:py${python.version}-setuptools
+                        depends_build-append    port:py${python.version}-setuptools
+                        # setuptools >= 70.1 provides bdist_wheel
+                        if {${python.version} <= 37} {
+                            depends_build-delete    port:py${python.version}-wheel
+                            depends_build-append    port:py${python.version}-wheel
+                        }
                     }
                     flit {
                         depends_build-delete    port:py${python.version}-flit_core
