@@ -396,7 +396,9 @@ proc python_add_dependencies {} {
                         depends_build-delete    port:py${python.version}-setuptools
                         depends_build-append    port:py${python.version}-setuptools
                         # setuptools >= 70.1 provides bdist_wheel
-                        if {${python.version} <= 37} {
+                        # ... but it breaks without wheel.macosx_libfile
+                        # https://trac.macports.org/ticket/72342
+                        if {1 || ${python.version} <= 37} {
                             depends_build-delete    port:py${python.version}-wheel
                             depends_build-append    port:py${python.version}-wheel
                         }
