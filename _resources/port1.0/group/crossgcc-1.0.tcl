@@ -207,6 +207,9 @@ proc crossgcc.setup {target version} {
 
         worksrcdir      gcc-${version}
 
+        depends_build   port:gettext \
+                        bin:makeinfo:texinfo
+
         depends_lib     port:${crossgcc.target}-binutils \
                         port:gmp \
                         port:mpfr \
@@ -214,8 +217,6 @@ proc crossgcc.setup {target version} {
                         port:libiconv \
                         port:libmpc \
                         port:zlib
-
-        depends_build   port:gettext
 
         # Extract gcc distfiles only. libc tarball might be available as gzip only;
         # handled below in post-extract in the variant.
