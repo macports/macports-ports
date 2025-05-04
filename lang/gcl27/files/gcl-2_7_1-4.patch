@@ -573,8 +573,68 @@ index 766b675ef..2d10d4109 100755
      if [ "$GCL_PROF" = "" ] ; then
  	EXE=saved_gcl;
      else
+diff --git a/cmpnew/gcl_cmpcall.lsp b/cmpnew/gcl_cmpcall.lsp
+index f72c5fee7..1ff8eabb7 100644
+--- a/cmpnew/gcl_cmpcall.lsp
++++ b/cmpnew/gcl_cmpcall.lsp
+@@ -334,8 +334,10 @@
+ 	  ((append at '(*))))));let call_proc_new foil fast linking and catch errors
+ 
+ (defun add-fast-link (fname la &optional apnarg
+-			    &aux n
+-			    (at (call-arg-types (mapcar (lambda (x) (link-rt x t)) (get-arg-types fname)) la apnarg))
++		      &aux n
++			(at (call-arg-types
++			     (adj-call-tps-max (mapcar (lambda (x) (link-rt x t)) (get-arg-types fname)))
++			     la apnarg))
+ 			    (rt (link-rt (get-return-type fname) t))
+ 			    (clp (cclosure-p fname))
+ 			    (tail (list rt at clp apnarg)))
+diff --git a/cmpnew/gcl_cmpeval.lsp b/cmpnew/gcl_cmpeval.lsp
+index 6c5c62f55..16898b353 100644
+--- a/cmpnew/gcl_cmpeval.lsp
++++ b/cmpnew/gcl_cmpeval.lsp
+@@ -2353,6 +2353,12 @@
+    (otherwise                          (when (or always (ltvp val))
+ 					 `(vv ,val)))))
+ 
++(defun encap-src-val (val)
++  (typecase val
++    (function  (afe (cons 'df nil) (mf (fle val))))
++    (cons (cons (encap-src-val (car val)) (encap-src-val (cdr val))))
++    (t val)))
++
+ (defun c1constant-value (val always &aux (val (if (exit-to-fmla-p) (not (not val)) val)))
+   (case 
+    val
+@@ -2363,11 +2369,7 @@
+       (when l 
+ 	`(location 
+ 	  ,(make-info :type (or (ltvp val)
+-				(object-type
+-				 (typecase val
+-				   (function  (afe (cons 'df nil) (mf (fle val))))
+-				   (list (copy-tree val))
+-				   (t val)))))
++				(object-type (encap-src-val val))))
+ 	  ,l))))))
+ 
+ (defvar *compiler-temps*
+diff --git a/cmpnew/gcl_cmpflet.lsp b/cmpnew/gcl_cmpflet.lsp
+index e1e7bdb65..ba0b3046a 100644
+--- a/cmpnew/gcl_cmpflet.lsp
++++ b/cmpnew/gcl_cmpflet.lsp
+@@ -495,7 +495,7 @@
+ 	 (clp (when clp (ccb-vs-str (fun-ref-ccb fun))))
+ 	 (nm (if clp (ms clp "->fun.fun_self") nm))
+ 	 (inl (g1 clp nm sig ap clp (if clp -1 (fun-level fun)))))
+-    `(,(car sig) ,(cadr sig) 
++    `(,(adj-call-tps-max (car sig)) ,(cadr sig)
+       ,(if mv (flags rfa svt) (flags rfa))
+       ,inl)))
+ 
 diff --git a/cmpnew/gcl_cmptop.lsp b/cmpnew/gcl_cmptop.lsp
-index 33c4c7ea7..41cc03c02 100644
+index 33c4c7ea7..d8d7d4545 100644
 --- a/cmpnew/gcl_cmptop.lsp
 +++ b/cmpnew/gcl_cmptop.lsp
 @@ -823,7 +823,7 @@
@@ -595,21 +655,64 @@ index 33c4c7ea7..41cc03c02 100644
  	   (if *compiler-new-safety*
  	       (let ((v (member key '(:char :int :fixnum))))
  		 (if v (si::string-concatenate (setq p "object_to_") (strcat key))
-@@ -1127,11 +1127,11 @@
+@@ -1127,11 +1127,19 @@
      (let ((x (position x +c-global-arg-types+ :test 'type<=)))
        (if x (1+ x) 0))))
  
--(defun new-proclaimed-argd (args return)
-+(defun new-proclaimed-argd (args return);FIXME room for more, but F_NARG_WIDTH = 6
++(defconstant +max-typed-args+
++  (let ((x (cdr (tp-bnds (cadr (si::sig 'c-function-argd))))))
++    (if (typep x 'fixnum) (1- (truncate (integer-length x) 2)) 0)))
++
++(defun adj-call-tps-max (tps &aux (i -1))
++  (mapcar (lambda (x) (type-or1 (>= (incf i) +max-typed-args+) x)) tps))
++
+ (defun new-proclaimed-argd (args return)
    (do* ((type (f-type return) (f-type (pop args)))
  	(i 0 (+ 2 i))
  	(ans type (logior ans (ash type i))))
 -       ((or (>= i 32) (null args)) (the (unsigned-byte 32) ans))))
-+       ((or (>= i 14) (null args)) (the (unsigned-byte 15) ans))))
++       ((or (>= i #.(ash +max-typed-args+ 1)) (null args))
++	(the (unsigned-byte #.(1+ (ash +max-typed-args+ 1))) ans))))
  
  (defun type-f (x)
    (declare (fixnum x))
-@@ -1811,6 +1811,12 @@
+@@ -1300,14 +1308,16 @@
+ (defun t3defun-local-entry (fname cfun lambda-expr sp inline-info
+ 				  &aux specials *reg-clv* (requireds (caaddr lambda-expr)) nargs)
+   (do ((vl requireds (cdr vl))
+-       (types (cadr inline-info) (cdr types)))
++       (types (cadr inline-info) (cdr types))
++       (i 0 (1+ i)))
+       ((endp vl))
+       (cond ((eq (var-kind (car vl)) 'special)
+ 	     (push (cons (car vl) (var-loc (car vl))) specials))
+ 	    ((var-cb (car vl)) (push (list (eq 'clb (var-loc (car vl))) (car vl)) *reg-clv*))
+-;	    ((var-cb (car vl)) (push (car vl) *reg-clv*))
+ 	    ((setf (var-kind (car vl))
+-		   (or (car (member (promoted-c-type (var-type (car vl))) +c-local-arg-types+)) 'object))))
++		   (or (when (< i +max-typed-args+)
++			 (car (member (promoted-c-type (var-type (car vl))) +c-local-arg-types+)))
++		       'object))))
+       (setf (var-loc (car vl)) (cs-push (var-type (car vl)) t)))
+   (when (is-narg-le lambda-expr)
+     (setq nargs (car (last requireds)))
+@@ -1382,13 +1392,12 @@
+     (wt-h "#define VMRV" cm "(a_,b_)" vstu bdsu frsu " return((" (declaration-type (rep-type return-type)) ")a_);")
+     (wt-h "#define VMR" cm "(a_) VMRV" cm "(a_,0);")))
+ 
+-
+-(defun wt-requireds (requireds arg-types &optional first narg)
++(defun wt-requireds (requireds arg-types &optional first narg &aux (i -1))
+   (declare (ignore arg-types))
+   (flet ((wt (x) (wt x) (let ((*compiler-output1* *compiler-output2*)) (wt x))))
+ 	(dolist (v requireds (wt (if narg ",...)" ")")))
+ 	  (setq narg (or narg (is-narg-var v)))
+-	  (let* ((gt (global-type-bump (var-type v)))
++	  (let* ((gt (global-type-bump (if (< (incf i) +max-typed-args+) (var-type v) t)))
+ 		 (cvar (cs-push gt t)))
+ 	    (when first (wt ","))
+ 	    (setq first t)
+@@ -1811,6 +1820,12 @@
  ;; 			  ,@(mapcar (lambda (x y) 
  ;; 				      `(unbox ,(intern (symbol-name x) 'keyword) ,y)) args syms)))))))
  
@@ -622,7 +725,7 @@ index 33c4c7ea7..41cc03c02 100644
  (defmacro defentry (n args c &optional (lt t)
  		      &aux (tsyms (load-time-value
  				   (mapl (lambda (x) (setf (car x) (gensym "DEFENTRY")))
-@@ -1824,9 +1830,9 @@
+@@ -1824,9 +1839,9 @@
  	 (tps (mapcar (lambda (x) (intern (string (if (consp x) (car x) x)) 'keyword)) args))
  	 (decl (reduce (lambda (y x)
  			 (strcat y (if (> (length y) 0) "," "")
@@ -634,6 +737,31 @@ index 33c4c7ea7..41cc03c02 100644
  	 (decl (if st "" decl))
  	 (syms (mapcar (lambda (x) (declare (ignore x)) (pop tsyms)) args)))
    `(defun ,n ,syms 
+@@ -1881,14 +1896,16 @@
+ 
+   (setq h (fun-call fun) at (caar h) rt (cadar h)
+ 	at (mapcar 'global-type-bump at) rt (global-type-bump rt));FIXME
+-  (dolist (vl requireds)
+-    (cond ((eq (var-kind vl) 'special)
+-	   (push (cons vl (var-loc vl)) specials))
+-	  ((var-cb vl) (push (list (eq 'clb (var-loc vl)) vl) *reg-clv*))
+-;	  ((var-cb vl) (push vl *reg-clv*))
+-	  ((setf (var-kind vl)
+-		 (or (car (member (promoted-c-type (var-type vl)) +c-global-arg-types+)) 'object))))
+-    (setf (var-loc vl) (cs-push (var-type vl) t)))
++  (do ((vlp requireds (cdr vlp))(i 0 (1+ i)))((endp vlp))
++    (let ((vl (car vlp)))
++      (cond ((eq (var-kind vl) 'special)
++	     (push (cons vl (var-loc vl)) specials))
++	    ((var-cb vl) (push (list (eq 'clb (var-loc vl)) vl) *reg-clv*))
++	    ((setf (var-kind vl)
++		   (or (when (< i +max-typed-args+)
++			 (car (member (promoted-c-type (var-type vl)) +c-global-arg-types+)))
++		       'object))))
++      (setf (var-loc vl) (cs-push (var-type vl) t))))
+ 
+   (wt-comment "local function " (if (fun-name fun) (fun-name fun) nil))
+   (wt-h   "static " (declaration-type (rep-type rt))
 diff --git a/cmpnew/gcl_cmptype.lsp b/cmpnew/gcl_cmptype.lsp
 index 4d9d9f2e3..a55d3bc31 100644
 --- a/cmpnew/gcl_cmptype.lsp
@@ -892,6 +1020,27 @@ index c35373aa3..cb02d9931 100644
  BASE_LDFLAGS="$LDFLAGS"
  LDFLAGS=""
  AC_SUBST(BASE_LDFLAGS)
+diff --git a/git.tag b/git.tag
+index 14ee5e366..fb66ed5d3 100644
+--- a/git.tag
++++ b/git.tag
+@@ -1,2 +1,2 @@
+-"Version_2_7_2ore2"
++"Version_2_7_2ore3"
+ 
+diff --git a/h/386-macosx.h b/h/386-macosx.h
+index d724430ed..f00069f9a 100644
+--- a/h/386-macosx.h
++++ b/h/386-macosx.h
+@@ -132,7 +132,7 @@ if (realpath (buf, fub) == 0) {                             \
+ #define UC(a_) ((ucontext_t *)a_)
+ #define SF(a_) ((siginfo_t *)a_)
+ 
+-#define FPE_CODE(i_,v_) make_fixnum(FFN(fSfpe_code)(*(fixnum *)&UC(v_)->uc_mcontext->__fs.__fpu_fsw,UC(v_)->uc_mcontext->__fs.__fpu_mxcsr))
++#define FPE_CODE(i_,v_) make_fixnum((fixnum)FFN(fSfpe_code)(*(fixnum *)&UC(v_)->uc_mcontext->__fs.__fpu_fsw,UC(v_)->uc_mcontext->__fs.__fpu_mxcsr))
+ #define FPE_ADDR(i_,v_) make_fixnum(UC(v_)->uc_mcontext->__fs.__fpu_fop ? UC(v_)->uc_mcontext->__fs.__fpu_ip : (fixnum)SF(i_)->si_addr)
+ #define FPE_CTXT(v_) list(3,make_fixnum((fixnum)&UC(v_)->uc_mcontext->__ss), \
+ 			  make_fixnum((fixnum)&UC(v_)->uc_mcontext->__fs.__fpu_stmm0), \
 diff --git a/h/compprotos.h b/h/compprotos.h
 index 4008be19f..1347f02d3 100644
 --- a/h/compprotos.h
@@ -932,6 +1081,19 @@ index aa98d8610..069435b85 100644
  /* use readline library */
  #undef USE_READLINE
  
+diff --git a/h/protoize.h b/h/protoize.h
+index 8abf19849..c053e8985 100644
+--- a/h/protoize.h
++++ b/h/protoize.h
+@@ -1450,8 +1450,6 @@ void init_shared_memory(void);
+ 
+ void * object_to_pointer(object);
+ 
+-void * alloca(unsigned long);
+-
+ object make_dcomplex(dcomplex);
+ 
+ object find_init_string(const char *);
 diff --git a/info/internal.texi b/info/internal.texi
 index 5a9b88dc4..5adc7e8c1 100755
 --- a/info/internal.texi
