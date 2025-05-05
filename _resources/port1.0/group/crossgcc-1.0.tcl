@@ -208,7 +208,7 @@ proc crossgcc.setup {target version} {
         worksrcdir      gcc-${version}
 
         depends_build   port:gettext \
-                        bin:makeinfo:texinfo
+                        port:texinfo
 
         depends_lib     port:${crossgcc.target}-binutils \
                         port:gmp \
