@@ -1,0 +1,157 @@
+Description: Update to git tag Version_2_7_2pre5
+ Git tag update
+Forwarded: not-needed
+Author: Camm Maguire <camm@debian.org>
+
+--- gcl27-2.7.1.orig/git.tag
++++ gcl27-2.7.1/git.tag
+@@ -1,2 +1,2 @@
+-"Version_2_7_2ore3"
++"Version_2_7_2ore5"
+ 
+--- gcl27-2.7.1.orig/h/cstack.h
++++ gcl27-2.7.1/h/cstack.h
+@@ -16,40 +16,31 @@
+ #define SET_STACK_POINTER "mov %0,r15\n\t"
+ #endif
+ 
+-#define FIXED_STACK (1UL<<23)/*FIXME configure?*/
+-#if defined(__SH4__)/*FIXME is this just due to qemu?*/
+-#define CTOP (void *)0x80000000
+-#define SS FIXED_STACK
++#define CTOP (void *)0xc0000000/*FIXME configure?*/
++#define MIN_STACK (1UL<<23)/*QEMU will not grow the stack*/
++
++#if defined(__SH4__)
++#undef CTOP
++#define CTOP (void *)0x80000000/*FIXME is this just due to qemu?*/
+ #elif defined(__gnu_hurd__)
+-#define CTOP (void *)0xc0000000
+-#define SS FIXED_STACK
+ #define MAP_GROWSDOWN 0
+ #define MAP_STACK 0
+-#else
+-#define CTOP (void *)0xc0000000/*FIXME configure?*/
+-#define SS getpagesize()
+ #endif
+ 
+ #ifdef SET_STACK_POINTER
+ {
+-  void *p,*p1,*b,*s;
++  void *p,*p1,*b=CTOP-MIN_STACK,*s;
+   int a,f=MAP_FIXED|MAP_PRIVATE|MAP_ANON|MAP_STACK;
+-  int ss=
+-#ifdef CHECK_FOR_QEMU
+-    qemu_p() ? FIXED_STACK :
+-#endif
+-    SS;
+ 
+   p=alloca(1);
+   p1=alloca(1);
+-  b=CTOP-(p1<p ? ss : FIXED_STACK);
+   a=p1<p ? p-p1 : p1-p;
+-  a<<=2;
++  a<<=3;
+   s=p1<p ? CTOP-a : b+a;
+   if (p1<p) f|=MAP_GROWSDOWN;
+ 
+   if (p > CTOP || p < b) {
+-    if (mmap(b,ss,PROT_READ|PROT_WRITE|PROT_EXEC,f,-1,0)!=(void *)-1) {
++    if (mmap(b,MIN_STACK,PROT_READ|PROT_WRITE|PROT_EXEC,f,-1,0)!=(void *)-1) {
+       stack_map_base=b;
+       asm volatile (SET_STACK_POINTER::"r" (s):"memory");
+       if (p1>p)
+--- gcl27-2.7.1.orig/h/elf64_alpha_reloc_special.h
++++ gcl27-2.7.1/h/elf64_alpha_reloc_special.h
+@@ -94,7 +94,7 @@ find_special_params(void *v,Shdr *sec1,S
+ static int
+ label_got_symbols(void *v1,Shdr *sec1,Shdr *sece,Sym *sym1,Sym *syme,const char *st1,const char *sn,ul *gs) {
+ 
+-  Sym *sym,*fsym=sym1;
++  Sym *sym;
+   Rela *r;
+   Shdr *sec;
+   void *v,*ve;
+@@ -142,12 +142,9 @@ label_got_symbols(void *v1,Shdr *sec1,Sh
+ 
+ 	case R_ALPHA_GPDISP:
+ 
+-	  for (sym=fsym;sym<syme && (sym->st_shndx!=1 || LOW(sym->st_value)!=r->r_offset);sym++);/*ordered search*/
+-
+-	  if (sym<syme) {
+-	    fsym=sym;
+-	    SET_HIGH(fsym->st_value,gotp=*gs+1);
+-	  }
++	  for (sym=sym1;sym<syme && (sym->st_shndx!=1 || !LOW(sym->st_size) || LOW(sym->st_value)!=r->r_offset);sym++);
++	  if (sym<syme)
++	    SET_HIGH(sym->st_value,gotp=*gs+1);
+ 
+ 	  SET_HIGH(r->r_addend,gotp);
+ 
+@@ -157,9 +154,8 @@ label_got_symbols(void *v1,Shdr *sec1,Sh
+ 
+ 	  q=LOW(sym1[ELF_R_SYM(r->r_info)].st_value)+r->r_addend;
+ 
+-	  /*unordered search*/
+-	  for (sym=sym1;sym<syme && (sym->st_shndx!=1 || LOW(sym->st_value)>q || LOW(sym->st_value)+LOW(sym->st_size)<q);sym++);
+-	  massert(sym<syme);
++	  for (sym=sym1;sym<syme && (sym->st_shndx!=1 || LOW(sym->st_value)>q || LOW(sym->st_value)+LOW(sym->st_size)<=q);sym++);
++	  massert(sym<syme && HIGH(sym->st_value));
+ 
+ 	  SET_HIGH(r->r_addend,HIGH(sym->st_value));
+ 
+--- gcl27-2.7.1.orig/lsp/gcl_directory.lsp
++++ gcl27-2.7.1/lsp/gcl_directory.lsp
+@@ -75,8 +75,7 @@
+   (let ((r (with-open-file (s (apply 'string-concatenate "|" #-winnt "command -v "
+ 				     #+winnt "for %i in (" s #+winnt ".exe) do @echo.%~$PATH:i" nil))
+ 			   (read-line s nil 'eof))))
+-    (unless (eq r 'eof)
+-      (string-downcase r))))
++    (unless (eq r 'eof) r)))
+ 
+ (defun get-path (s &aux
+ 		   (e (unless (minusp (string-match #v"([^\n\t\r ]+)([\n\t\r ]|$)" s))(match-end 1)))
+--- gcl27-2.7.1.orig/o/main.c
++++ gcl27-2.7.1/o/main.c
+@@ -407,32 +407,6 @@ setup_maxpages(double scale) {
+ 
+ }
+ 
+-int
+-qemu_p(void)  {
+-
+-#if !defined(DARWIN) && !defined(__CYGWIN__) && !defined(__MINGW32__) && !defined(__MINGW64__)/*FIXME*/
+-
+-  char *c;
+-  ufixnum e,r=0;
+-  int l;
+-
+-  massert((l=open("/proc/cpuinfo",O_RDONLY))!=-1);
+-
+-  for (e=0;!e && (c=next_line(l,&r));)
+-    e=!memcmp("model",c,5) && strstr(c,"QEMU");
+-
+-  massert(!close(l));
+-
+-  return e;
+-
+-#else
+-
+-  return 0;
+-
+-#endif
+-}
+-
+-
+ static void *
+ next_shared_lib_map_no_malloc(void)  {
+ 
+@@ -753,7 +727,6 @@ main(int argc, char **argv, char **envp)
+   bds_top = bds_org-1;
+   frs_top = frs_org-1;
+ 
+-#define CHECK_FOR_QEMU
+ #include "cstack.h"
+ 
+   gcl_init_alloc(alloca(1));
