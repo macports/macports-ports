@@ -75,3 +75,5 @@ if {${os.platform} eq "darwin" && ${os.major} <= 12} {
 } else {
     set portfetch::mirror_sites::archive_delete_la_files(macports_archives) yes
 }
+set portfetch::mirror_sites::archive_sigtype(macports_archives) rmd160
+set portfetch::mirror_sites::archive_pubkey(macports_archives) /opt/local/share/macports/macports-pubkey.pem
