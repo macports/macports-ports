@@ -1,4 +1,4 @@
-#!@PREFIX@/bin/port-tclsh
+#! @PREFIX@/bin/port-tclsh
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
 # Copyright (c) 2011,2013 The MacPorts Project
@@ -384,13 +384,7 @@ proc action_stats {subcommands} {
 
     # Build dictionary of os information
     dict set os macports_version [macports::version]
-    # TODO Remove this if and just use macosx_version after 2.7.0 has been
-    # released, since that will change the meaning of macosx_version.
-    if {[vercmp ${macports::macosx_version} 11] >= 0} {
-        dict set os osx_version [lindex [split ${macports::macosx_version} .] 0]
-    } else {
-        dict set os osx_version [join [lrange [split ${macports::macosx_version} .] 0 1] .]
-    }
+    dict set os osx_version ${macports::macos_version_major}
     dict set os os_arch ${macports::os_arch}
     dict set os os_platform ${macports::os_platform}
     dict set os build_arch ${macports::build_arch}

@@ -94,38 +94,23 @@ default categories          "R science"
 # For w/e reason universal is presently disabled for R in Macports.
 default universal_variant   no
 
-compiler.cxx_standard       2011
+compiler.cxx_standard       2014
 
 # Avoid Apple clangs:
 compiler.blacklist-append   {clang}
-# Blacklist macports-clang-17+. See discussion: https://trac.macports.org/ticket/67144
+# Blacklist macports-clang-20+. See discussion: https://trac.macports.org/ticket/67144
 # for rationale. The decision when to migrate to a new compiler
 # is then in the hands of the R maintainers and will not change
 # from the current defaults when these get bumped centrally.
 # NOTE : Keep this setting in sync with the one in the R port.
-if { ${os.major} > 22 } {
-    # https://trac.macports.org/ticket/70799
-    compiler.blacklist-append   {macports-clang-19} {macports-clang-2[0-9]}
-} else {
-    compiler.blacklist-append   {macports-clang-1[7-9]} {macports-clang-2[0-9]}
-}
-# Similarly, for gcc select the gcc13 variant of the compilers PG.
+compiler.blacklist-append   {macports-clang-2[0-9]}
+# Similarly, for gcc select the gcc14 variant of the compilers PG.
 # This setting should also be kept in sync with that in the R Port.
 # Updates should be coordinated with the R maintainers.
-if { ${os.major} < 10 || ${os.major} > 22 } {
-    # https://trac.macports.org/ticket/70799
-    compiler.blacklist-append   {macports-gcc-1[5-9]}
-} else {
-    compiler.blacklist-append   {macports-gcc-1[4-9]}
-}
+compiler.blacklist-append   {macports-gcc-1[5-9]}
 # NOTE: upon the update to gcc14, please update the blacklist accordingly,
 # like it is done for clangs. We would prefer using the same version of gcc and gfortran.
-if { ${os.major} < 10 || ${os.major} > 22 } {
-    # https://trac.macports.org/ticket/70799
-    default_variants-append +gcc14
-} else {
-    default_variants-append +gcc13
-}
+default_variants-append     +gcc14
 
 # R bakes in the compiler, so if it is built with ccache,
 # then it will require ccache to build R packages.
@@ -193,7 +178,7 @@ if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
 
 global prefix frameworks_dir
 # Please update R version here:
-set Rversion        4.4.3
+set Rversion        4.5.0
 set branch          [join [lrange [split ${Rversion} .] 0 1] .]
 set packages        ${frameworks_dir}/R.framework/Versions/${branch}/Resources/library
 set suffix          .tar.gz
