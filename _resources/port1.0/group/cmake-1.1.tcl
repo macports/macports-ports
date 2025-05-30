@@ -124,6 +124,19 @@ proc cmake::system_prefix_path {} {
     }
 }
 
+proc cmake::framework_path {} {
+    global prefix
+    if {[option cmake.install_prefix] ne ${prefix}} {
+        return [list \
+                 -DCMAKE_FRAMEWORK_PATH="${prefix}/Library/Frameworks\;[option cmake.install_prefix]/Library/Frameworks\;/System/Library/Frameworks"
+        ]
+    } else {
+        return [list \
+                 -DCMAKE_FRAMEWORK_PATH="${prefix}/Library/Frameworks\;/System/Library/Frameworks"
+        ]
+    }
+}
+
 proc cmake::module_path {} {
     if {[llength [option cmake.module_path]]} {
         set modpath "[join [concat [option cmake_share_module_dir] [option cmake.module_path]] \;]"
@@ -235,6 +248,7 @@ default configure.pre_args {[list \
                     -DCMAKE_INSTALL_PREFIX="${cmake.install_prefix}" \
                     -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib" \
                     {*}[cmake::system_prefix_path] \
+                    {*}[cmake::framework_path] \
                     {*}[cmake::ccaching] \
                     {-DCMAKE_C_COMPILER="$CC"} \
                     {-DCMAKE_CXX_COMPILER="$CXX"} \

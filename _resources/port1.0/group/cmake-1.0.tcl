@@ -72,6 +72,7 @@ default configure.args {[list \
                     -DCMAKE_MAKE_PROGRAM=${build.cmd} \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr" \
+                    -DCMAKE_FRAMEWORK_PATH="${cmake.install_prefix}/Library/Frameworks\;${prefix}/Library/Frameworks\;/Library/Frameworks\;/System/Library/Frameworks" \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
                     -Wno-dev
