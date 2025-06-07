@@ -8,20 +8,20 @@ namespace eval cmake {
     variable currentportgroupdir [file dirname [dict get [info frame 0] file]]
 }
 
-options                             cmake.build_dir \
-                                    cmake.source_dir \
-                                    cmake.generator \
-                                    cmake.generator_blacklist \
-                                    cmake.build_type \
-                                    cmake.install_prefix \
-                                    cmake.install_rpath \
-                                    cmake.module_path \
-                                    cmake_share_module_dir \
-                                    cmake.ignore_prefix_path \
-                                    cmake.out_of_source \
-                                    cmake.set_osx_architectures \
-                                    cmake.set_c_standard \
-                                    cmake.set_cxx_standard
+options cmake.build_dir \
+        cmake.source_dir \
+        cmake.generator \
+        cmake.generator_blacklist \
+        cmake.build_type \
+        cmake.install_prefix \
+        cmake.install_rpath \
+        cmake.module_path \
+        cmake_share_module_dir \
+        cmake.ignore_prefix_path \
+        cmake.out_of_source \
+        cmake.set_osx_architectures \
+        cmake.set_c_standard \
+        cmake.set_cxx_standard
 
 ## Explanation of and default values for the options defined above ##
 
@@ -57,7 +57,7 @@ default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
 default cmake.module_path           {}
 
 # locations that cmake should ignore when searching for dependencies
-default cmake.ignore_prefix_path    {/Library/Frameworks /usr/local}
+default cmake.ignore_prefix_path    {/Library/Frameworks /usr/local /opt/homebrew}
 
 # Propagate c/c++ standards to the build
 default cmake.set_c_standard        no
@@ -99,15 +99,18 @@ depends_build-append                path:bin/cmake:cmake
 
 proc cmake::rpath_flags {} {
     global prefix
-    if {[llength [option cmake.install_rpath]]} {
-        # make sure a single ${cmake.install_prefix} is included in the rpath
+    set install_rpath  [option cmake.install_rpath]
+    set install_prefix [option cmake.install_prefix]
+
+    if {[llength ${install_rpath}]} {
+        # make sure a single cmake.install_prefix is included in the rpath
         # careful, we are likely to be called more than once.
-        if {"[option cmake.install_prefix]/lib" ni [option cmake.install_rpath]} {
-            cmake.install_rpath-append [option cmake.install_prefix]/lib
+        if {"${install_prefix}/lib" ni ${install_rpath}} {
+            cmake.install_rpath-append ${install_prefix}/lib
         }
         return [list \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
-            -DCMAKE_INSTALL_RPATH="[join [option cmake.install_rpath] \;]"
+            -DCMAKE_INSTALL_RPATH="[join ${install_rpath} \;]"
         ]
     }
     # always build with full RPATH; this is the default on Mac.
@@ -117,9 +120,11 @@ proc cmake::rpath_flags {} {
 
 proc cmake::system_prefix_path {} {
     global prefix
-    if {[option cmake.install_prefix] ne ${prefix}} {
+    set install_prefix [option cmake.install_prefix]
+
+    if {${install_prefix} ne ${prefix}} {
         return [list \
-                 -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;[option cmake.install_prefix]\;/usr"
+                 -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;${install_prefix}\;/usr"
         ]
     } else {
         return [list \
@@ -130,9 +135,11 @@ proc cmake::system_prefix_path {} {
 
 proc cmake::system_framework_path {} {
     global prefix
-    if {[option cmake.install_prefix] ne ${prefix}} {
+    set install_prefix [option cmake.install_prefix]
+
+    if {${install_prefix} ne ${prefix}} {
         return [list \
-                 -DCMAKE_SYSTEM_FRAMEWORK_PATH="${prefix}/Library/Frameworks\;[option cmake.install_prefix]/Library/Frameworks\;/System/Library/Frameworks"
+                 -DCMAKE_SYSTEM_FRAMEWORK_PATH="${prefix}/Library/Frameworks\;${install_prefix}/Library/Frameworks\;/System/Library/Frameworks"
         ]
     } else {
         return [list \
@@ -142,9 +149,12 @@ proc cmake::system_framework_path {} {
 }
 
 proc cmake::system_ignore_prefix_path {} {
-    if {[llength [option cmake.ignore_prefix_path]] == 0} {
+    set ignore_paths [option cmake.ignore_prefix_path]
+
+    if {[llength ${ignore_paths}] == 0} {
         return {}
     }
+
     # Doing this for / is deliberate; CMake for some ridiculous reason doesn't
     # consider /foo and //foo to be equivalent paths for the purposes of
     # ignoring directories.
@@ -154,17 +164,21 @@ proc cmake::system_ignore_prefix_path {} {
     if {${sdkroot} eq ""} {
         set sdkroot "/"
     }
+
     return [list \
-             -DCMAKE_SYSTEM_IGNORE_PREFIX_PATH="[join [option cmake.ignore_prefix_path] \;]\;${sdkroot}[join [option cmake.ignore_prefix_path] \;${sdkroot}]" \
-             -DCMAKE_SYSTEM_IGNORE_PATH="[join [option cmake.ignore_prefix_path] \;]\;${sdkroot}[join [option cmake.ignore_prefix_path] \;${sdkroot}]"]
+             -DCMAKE_SYSTEM_IGNORE_PREFIX_PATH="[join ${ignore_paths} \;]\;${sdkroot}[join ${ignore_paths}] \;${sdkroot}]" \
+             -DCMAKE_SYSTEM_IGNORE_PATH="[join ${ignore_paths}] \;]\;${sdkroot}[join ${ignore_paths}] \;${sdkroot}]"]
 }
 
 
 proc cmake::module_path {} {
-    if {[llength [option cmake.module_path]]} {
-        set modpath "[join [concat [option cmake_share_module_dir] [option cmake.module_path]] \;]"
+    set module_path      [option cmake.module_path]
+    set share_module_dir [option cmake_share_module_dir]
+
+    if {[llength ${module_path}]} {
+        set modpath "[join [concat ${share_module_dir} ${module_path}] \;]"
     } else {
-        set modpath [option cmake_share_module_dir]
+        set modpath ${share_module_dir}
     }
     return [list \
         -DCMAKE_MODULE_PATH="${modpath}" \

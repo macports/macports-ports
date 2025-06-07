@@ -3,11 +3,15 @@
 # Usage:
 # PortGroup     cmake 1.0
 
-options cmake.build_dir cmake.install_prefix cmake.out_of_source
+options cmake.build_dir \
+        cmake.install_prefix \
+        cmake.out_of_source \
+        cmake.ignore_prefix_path
 
-default cmake.build_dir         {${workpath}/build}
-default cmake.install_prefix    {${prefix}}
-default cmake.out_of_source     no
+default cmake.build_dir           {${workpath}/build}
+default cmake.install_prefix      {${prefix}}
+default cmake.out_of_source       no
+default cmake.ignore_prefix_path  {/Library/Frameworks /usr/local /opt/homebrew}
 
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
@@ -50,12 +54,18 @@ proc cmake_ccaching_flags {} {
 }
 
 proc cmake_ignore_prefix_paths {} {
+    set ignore_paths [option cmake.ignore_prefix_path]
+
+    if {[llength ${ignore_paths}] == 0} {
+        return "\;"
+    }
+
     set sdkroot [option configure.sysroot]
     if {${sdkroot} eq ""} {
         set sdkroot "/"
     }
-    set paths [list /Library/Frameworks /usr/local]
-    return "[join ${paths} \;]\;${sdkroot}[join ${paths} \;${sdkroot}]"
+
+    return "[join ${ignore_paths} \;]\;${sdkroot}[join ${ignore_paths} \;${sdkroot}]"
 }
 
 configure.cmd       ${prefix}/bin/cmake
