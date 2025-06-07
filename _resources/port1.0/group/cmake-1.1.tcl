@@ -8,19 +8,20 @@ namespace eval cmake {
     variable currentportgroupdir [file dirname [dict get [info frame 0] file]]
 }
 
-options                             cmake.build_dir \
-                                    cmake.source_dir \
-                                    cmake.generator \
-                                    cmake.generator_blacklist \
-                                    cmake.build_type \
-                                    cmake.install_prefix \
-                                    cmake.install_rpath \
-                                    cmake.module_path \
-                                    cmake_share_module_dir \
-                                    cmake.out_of_source \
-                                    cmake.set_osx_architectures \
-                                    cmake.set_c_standard \
-                                    cmake.set_cxx_standard
+options cmake.build_dir \
+        cmake.source_dir \
+        cmake.generator \
+        cmake.generator_blacklist \
+        cmake.build_type \
+        cmake.install_prefix \
+        cmake.install_rpath \
+        cmake.module_path \
+        cmake_share_module_dir \
+        cmake.ignore_prefix_path \
+        cmake.out_of_source \
+        cmake.set_osx_architectures \
+        cmake.set_c_standard \
+        cmake.set_cxx_standard
 
 ## Explanation of and default values for the options defined above ##
 
@@ -54,6 +55,9 @@ default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
 # extra locations to search for modules can be specified with
 # cmake.module_path; they come after ${cmake_share_module_dir}
 default cmake.module_path           {}
+
+# locations that cmake should ignore when searching for dependencies
+default cmake.ignore_prefix_path    {/Library/Frameworks /usr/local /opt/homebrew}
 
 # Propagate c/c++ standards to the build
 default cmake.set_c_standard        no
@@ -123,6 +127,42 @@ proc cmake::system_prefix_path {} {
         ]
     }
 }
+
+proc cmake::system_framework_path {} {
+    global prefix
+    if {[option cmake.install_prefix] ne ${prefix}} {
+        return [list \
+                 -DCMAKE_SYSTEM_FRAMEWORK_PATH="${prefix}/Library/Frameworks\;[option cmake.install_prefix]/Library/Frameworks\;/System/Library/Frameworks"
+        ]
+    } else {
+        return [list \
+                 -DCMAKE_SYSTEM_FRAMEWORK_PATH="${prefix}/Library/Frameworks\;/System/Library/Frameworks"
+        ]
+    }
+}
+
+proc cmake::system_ignore_prefix_path {} {
+    set ignore_paths [option cmake.ignore_prefix_path]
+
+    if {[llength ${ignore_paths}] == 0} {
+        return {}
+    }
+
+    # Doing this for / is deliberate; CMake for some ridiculous reason doesn't
+    # consider /foo and //foo to be equivalent paths for the purposes of
+    # ignoring directories.
+    # CMake also doesn't honor CMAKE_IGNORE_PREFIX_PATH when the prefix is
+    # exactly the directory in question.
+    set sdkroot [option configure.sysroot]
+    if {${sdkroot} eq ""} {
+        set sdkroot "/"
+    }
+
+    return [list \
+             -DCMAKE_SYSTEM_IGNORE_PREFIX_PATH="[join ${ignore_paths} \;]\;${sdkroot}[join ${ignore_paths}] \;${sdkroot}]" \
+             -DCMAKE_SYSTEM_IGNORE_PATH="[join ${ignore_paths}] \;]\;${sdkroot}[join ${ignore_paths}] \;${sdkroot}]"]
+}
+
 
 proc cmake::module_path {} {
     if {[llength [option cmake.module_path]]} {
@@ -235,6 +275,8 @@ default configure.pre_args {[list \
                     -DCMAKE_INSTALL_PREFIX="${cmake.install_prefix}" \
                     -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib" \
                     {*}[cmake::system_prefix_path] \
+                    {*}[cmake::system_framework_path] \
+                    {*}[cmake::system_ignore_prefix_path] \
                     {*}[cmake::ccaching] \
                     {-DCMAKE_C_COMPILER="$CC"} \
                     {-DCMAKE_CXX_COMPILER="$CXX"} \
