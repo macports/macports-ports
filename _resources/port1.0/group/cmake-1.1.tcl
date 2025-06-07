@@ -8,20 +8,20 @@ namespace eval cmake {
     variable currentportgroupdir [file dirname [dict get [info frame 0] file]]
 }
 
-options                             cmake.build_dir \
-                                    cmake.source_dir \
-                                    cmake.generator \
-                                    cmake.generator_blacklist \
-                                    cmake.build_type \
-                                    cmake.install_prefix \
-                                    cmake.install_rpath \
-                                    cmake.module_path \
-                                    cmake_share_module_dir \
-                                    cmake.ignore_prefix_path \
-                                    cmake.out_of_source \
-                                    cmake.set_osx_architectures \
-                                    cmake.set_c_standard \
-                                    cmake.set_cxx_standard
+options cmake.build_dir \
+        cmake.source_dir \
+        cmake.generator \
+        cmake.generator_blacklist \
+        cmake.build_type \
+        cmake.install_prefix \
+        cmake.install_rpath \
+        cmake.module_path \
+        cmake_share_module_dir \
+        cmake.ignore_prefix_path \
+        cmake.out_of_source \
+        cmake.set_osx_architectures \
+        cmake.set_c_standard \
+        cmake.set_cxx_standard
 
 ## Explanation of and default values for the options defined above ##
 
@@ -57,7 +57,7 @@ default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
 default cmake.module_path           {}
 
 # locations that cmake should ignore when searching for dependencies
-default cmake.ignore_prefix_path    {/Library/Frameworks /usr/local}
+default cmake.ignore_prefix_path    {/Library/Frameworks /usr/local /opt/homebrew}
 
 # Propagate c/c++ standards to the build
 default cmake.set_c_standard        no
@@ -142,9 +142,12 @@ proc cmake::system_framework_path {} {
 }
 
 proc cmake::system_ignore_prefix_path {} {
-    if {[llength [option cmake.ignore_prefix_path]] == 0} {
+    set ignore_paths [option cmake.ignore_prefix_path]
+
+    if {[llength ${ignore_paths}] == 0} {
         return {}
     }
+
     # Doing this for / is deliberate; CMake for some ridiculous reason doesn't
     # consider /foo and //foo to be equivalent paths for the purposes of
     # ignoring directories.
@@ -154,9 +157,10 @@ proc cmake::system_ignore_prefix_path {} {
     if {${sdkroot} eq ""} {
         set sdkroot "/"
     }
+
     return [list \
-             -DCMAKE_SYSTEM_IGNORE_PREFIX_PATH="[join [option cmake.ignore_prefix_path] \;]\;${sdkroot}[join [option cmake.ignore_prefix_path] \;${sdkroot}]" \
-             -DCMAKE_SYSTEM_IGNORE_PATH="[join [option cmake.ignore_prefix_path] \;]\;${sdkroot}[join [option cmake.ignore_prefix_path] \;${sdkroot}]"]
+             -DCMAKE_SYSTEM_IGNORE_PREFIX_PATH="[join ${ignore_paths} \;]\;${sdkroot}[join ${ignore_paths}] \;${sdkroot}]" \
+             -DCMAKE_SYSTEM_IGNORE_PATH="[join ${ignore_paths}] \;]\;${sdkroot}[join ${ignore_paths}] \;${sdkroot}]"]
 }
 
 
