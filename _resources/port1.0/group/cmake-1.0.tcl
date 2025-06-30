@@ -3,11 +3,15 @@
 # Usage:
 # PortGroup     cmake 1.0
 
-options cmake.build_dir cmake.install_prefix cmake.out_of_source
+options cmake.build_dir \
+        cmake.install_prefix \
+        cmake.out_of_source \
+        cmake.ignore_prefix_path
 
-default cmake.build_dir         {${workpath}/build}
-default cmake.install_prefix    {${prefix}}
-default cmake.out_of_source     no
+default cmake.build_dir           {${workpath}/build}
+default cmake.install_prefix      {${prefix}}
+default cmake.out_of_source       no
+default cmake.ignore_prefix_path  {/Library/Frameworks /usr/local /opt/homebrew}
 
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
@@ -49,6 +53,21 @@ proc cmake_ccaching_flags {} {
     }
 }
 
+proc cmake_ignore_prefix_paths {} {
+    set ignore_paths [option cmake.ignore_prefix_path]
+
+    if {[llength ${ignore_paths}] == 0} {
+        return "\;"
+    }
+
+    set sdkroot [option configure.sysroot]
+    if {${sdkroot} eq ""} {
+        set sdkroot "/"
+    }
+
+    return "[join ${ignore_paths} \;]\;${sdkroot}[join ${ignore_paths} \;${sdkroot}]"
+}
+
 configure.cmd       ${prefix}/bin/cmake
 
 default configure.pre_args {-DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}'}
@@ -72,6 +91,9 @@ default configure.args {[list \
                     -DCMAKE_MAKE_PROGRAM=${build.cmd} \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr" \
+                    -DCMAKE_SYSTEM_FRAMEWORK_PATH="${cmake.install_prefix}/Library/Frameworks\;${prefix}/Library/Frameworks\;/System/Library/Frameworks" \
+                    -DCMAKE_SYSTEM_IGNORE_PREFIX_PATH="[cmake_ignore_prefix_paths]" \
+                    -DCMAKE_SYSTEM_IGNORE_PATH="[cmake_ignore_prefix_paths]" \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
                     -Wno-dev
