@@ -1,0 +1,1258 @@
+diff -NaurdwB -I ^;;[[:space:]]* ./collects/launcher/launcher.rkt ./collects/launcher/launcher.rkt
+--- ./collects/launcher/launcher.rkt	2025-07-10 07:36:43
++++ ./collects/launcher/launcher.rkt	2025-07-10 07:37:09
+@@ -430,6 +430,8 @@
+          [use-librktdir? (if alt-exe
+                              alt-exe-is-gracket?
+                              (eq? kind 'mred))]
++         [use-guibin? (and alt-exe
++                           (not use-librktdir?))]
+          [addon? (let ([im (assoc 'install-mode aux)])
+                    (and im (eq? (cdr im) 'addon-tethered)))]
+          [config? (let ([im (assoc 'install-mode aux)])
+@@ -490,8 +492,11 @@
+         (newline)
+         ;; comments needed to rehack launchers when paths change
+         ;; (see setup/unixstyle-install.rkt)
+-        (when use-librktdir?
+-          (display "# unixstyle-install: use librktdir\n"))
++        (cond
++          [use-librktdir?
++           (display "# unixstyle-install: use librktdir\n")]
++          [use-guibin?
++           (display "# unixstyle-install: use guibindir\n")])
+         (display "# {{{ bindir\n")
+         (display dir-finder)
+         (display "# }}} bindir\n")
+diff -NaurdwB -I ^;;[[:space:]]* ./collects/setup/unixstyle-install.rkt ./collects/setup/unixstyle-install.rkt
+--- ./collects/setup/unixstyle-install.rkt	2025-07-10 07:38:14
++++ ./collects/setup/unixstyle-install.rkt	2025-07-10 07:38:57
+@@ -36,7 +36,9 @@
+          (submod compiler/private/collects-path set-executable-tag)
+          racket/file
+          racket/list
+-         compiler/private/mach-o)
++         racket/path
++         compiler/private/mach-o
++         compiler/private/macfw)
+ 
+ (module test racket/base)
+ 
+@@ -66,12 +68,13 @@
+                 [(collects) "collects"]
+                 [(pkgs) (build-path "share" "pkgs")]
+                 [(apps) (build-path "share" "applications")]
++                [(guibin) "bin"]
+                 [else (symbol->string name)])))
+ (define dirs (map (lambda (name) (list name 
+                                        (if base-destdir
+                                            (build-dest-arg name)
+                                            (get-arg))))
+-		  '(bin collects pkgs doc lib includerkt librkt sharerkt config apps man #|src|#)))
++		  '(bin guibin collects pkgs doc lib includerkt librkt sharerkt config apps man #|src|#)))
+ 
+ (define (dir: name)
+   (cadr (or (assq name dirs) (error 'getdir "unknown dir name: ~e" name))))
+@@ -89,6 +92,7 @@
+   (let ([dir (string->symbol (basename dir))])
+     (case dir
+       [(bin)      #f]
++      [(guibin)   #f]
+       [(collects) 1]
+       [(pkgs)     1]
+       [(doc)      1]
+@@ -238,7 +242,7 @@
+   (register-wrote-path! dst))
+ 
+ (define (fix-executable file #:ignore-non-executable? [ignore-non-executable? #f])
+-  (define (fix-binary file)
++  (define (fix-binary file mach-o?)
+     (define (fix-one tag desc dir)
+       (set-executable-tag 'unixstyle-install tag desc file ignore-non-executable? dir
+                           (path->bytes
+@@ -249,6 +253,8 @@
+       (remove-signature file))
+     (fix-one #rx#"coLLECTs dIRECTORy:" "collects" (dir: 'collects))
+     (fix-one #rx#"coNFIg dIRECTORy:" "config" (dir: 'config))
++    (when mach-o?
++      (update-framework-path (path->directory-path (dir: 'librkt)) file #f))
+     (when (exectuable-for-signing? file)
+       (add-ad-hoc-signature file)))
+   (define (fix-script file)
+@@ -258,51 +264,68 @@
+                    #rx#"\n# {{{ bindir\n(.*?\n)# }}} bindir\n" buf)
+                   (error (format "could not find binpath block in script: ~a"
+                                  file)))]
+-           [m2 (regexp-match-positions
+-                #rx#"\n# unixstyle-install: use librktdir\n" buf)])
++           [use-librkt? (regexp-match?
++                         #rx#"\n# unixstyle-install: use librktdir\n" buf)]
++           [use-guibin? (regexp-match?
++                         #rx#"\n# unixstyle-install: use guibindir\n" buf)])
+       ;; 'truncate file to keep it executable
+       (with-output-to-file file #:exists 'truncate
+         (lambda ()
+           (write-bytes buf (current-output-port) 0 (caadr m))
+           (define (escaped-dir: sym)
+             (regexp-replace* #rx"[\"`'$\\]" (dir: sym) "\\\\&"))
+-          (printf "bindir=\"~a\"\n" (if m2
+-                                        (escaped-dir: 'librkt)
+-                                        (escaped-dir: 'bin)))
++          (printf "bindir=\"~a\"\n" (cond
++                                      [use-librkt? (escaped-dir: 'librkt)]
++                                      [use-guibin? (escaped-dir: 'guibin)]
++                                      [else (escaped-dir: 'bin)]))
+           (write-bytes buf (current-output-port) (cdadr m))))))
++  (cond
++    [(file-exists? file)
+   (let ([magic (with-input-from-file file (lambda () (let ([r (read-bytes 10)])
+                                                        (if (eof-object? r)
+                                                            #""
+                                                            r))))])
+-    (cond [(or (regexp-match #rx#"^\177ELF" magic)
++       (define elf? (regexp-match #rx#"^\177ELF" magic))
++       (define mach-o? (and (not elf?)
++                            (or
+                ;; Mach-O magic numbers for LE/BE, 32/64-bit
+                (regexp-match #rx#"^\316\372\355\376" magic)
+                (regexp-match #rx#"^\317\372\355\376" magic)
+                (regexp-match #rx#"^\376\355\372\316" magic)
+-               (regexp-match #rx#"^\376\355\372\317" magic))
++                             (regexp-match #rx#"^\376\355\372\317" magic))))
++       (cond [(or elf? mach-o?)
+            (let ([temp (format "~a-temp-for-install"
+                                (regexp-replace* #rx"/" file "_"))])
+              (with-handlers ([exn? (lambda (e) (rm temp) (raise e))])
+                ;; always copy so we never change the running executable
+                (rm temp)
+                (copy-file file temp)
+-               (fix-binary temp)
++                  (fix-binary temp mach-o?)
+                (rm file)
+                (mv temp file)))]
+           [(regexp-match #rx#"^#!/bin/sh" magic)
+            (fix-script file)]
+           [ignore-non-executable? (void)]
+-          [else (error (format "unknown executable: ~a" file))])))
++             [else (error (format "unknown executable: ~a" file))]))]
++    [else
++     ;; must be an ".app" bundle
++     (define-values (base name dir?) (split-path file))
++     (define exe-file (build-path file "Contents" "MacOS" (path-replace-extension name #"")))
++     (when (file-exists? exe-file)
++       (fix-executable (path->string exe-file)))]))
+ 
+-(define (fix-executables bindir librktdir [binfiles #f] [libfiles #f])
+-  (for ([dir (in-list (list bindir librktdir))]
+-        [files (in-list (list binfiles libfiles))]
+-        [ignore-non-executable? (in-list (list #f #t))])
++(define (fix-executables bindir guibindir librktdir [binfiles #f] [guibinfiles '()] [libfiles #f])
++  (for ([dir (in-list (list bindir guibindir librktdir))]
++        [files (in-list (list binfiles guibinfiles libfiles))]
++        [ignore-non-executable? (in-list (list #f #t #t))])
+     (parameterize ([current-directory dir])
+-      (for ([f (in-list (or files (ls)))] #:when (file-exists? f))
++      (for ([f (in-list (or files (ls)))]
++            #:when (or (file-exists? f)
++                       (and (directory-exists? f)
++                            (equal? (path-get-extension f) #".app"))))
+         (fix-executable f #:ignore-non-executable? ignore-non-executable?)))))
+ 
+-(define (fix-desktop-files appsdir bindir sharerktdir [appfiles #f])
++(define (fix-desktop-files appsdir [appfiles #f])
+   ;; For absolute mode, change `Exec' and `Icon' lines to
+   ;; have absolute paths:
+   (define (fixup-path at-dir orig-path)
+@@ -319,7 +342,7 @@
+                          ;; Assume anything after a space is the argument spec:
+                          (let ([m (regexp-match #rx"Exec=([^ ]*)(.*)" l)])
+                            (format "Exec=~a~a" 
+-                                   (fixup-path (dir: 'bin) (cadr m))
++                                   (fixup-path (dir: 'guibin) (cadr m))
+                                    (caddr m)))]
+                         [(regexp-match? #rx"^Icon=" l)
+                          (format "Icon=~a" (fixup-path (dir: 'sharerkt) (substring l 5)))]
+@@ -461,6 +484,9 @@
+            (out! 'share-dir (dir: 'sharerkt))
+            (out! 'include-dir (dir: 'includerkt))
+            (out! 'bin-dir (dir: 'bin))
++           (if (equal? (dir: 'bin) (dir: 'guibin))
++               (hash-set! handled 'gui-bin-dir #t)
++               (out! 'gui-bin-dir (dir: 'guibin)))
+            (out! 'apps-dir (dir: 'apps))
+            (out! 'man-dir (dir: 'man))
+            (out! 'absolute-installation? #t)
+@@ -556,6 +582,7 @@
+     (error "Cannot handle distribution of shared-libraries (yet)"))
+   (with-handlers ([exn? (lambda (e) (undo-changes) (raise e))])
+     (define binfiles (ls* "bin"))
++    (define guibinfiles null) ; must be the same as bin or not yet relevant (e.g., build from source)
+     (define libfiles (ls* "lib"))
+     (if (eq? 'windows (cross-system-type))
+         ;; Windows executables appear in the immediate directory:
+@@ -590,8 +617,8 @@
+       (error (format "leftovers in source tree: ~s" (ls))))
+     ;; we need to know which files need fixing
+     (unless bundle?
+-      (fix-executables (dir: 'bin) (dir: 'librkt) binfiles libfiles)
+-      (fix-desktop-files (dir: 'apps) (dir: 'bin) (dir: 'sharerkt) appfiles)
++      (fix-executables (dir: 'bin) (dir: 'guibin) (dir: 'librkt) binfiles guibinfiles libfiles)
++      (fix-desktop-files (dir: 'apps) appfiles)
+       (write-uninstaller)
+       (write-config)))
+   (when move?
+@@ -683,6 +710,7 @@
+   (define libzo? (equal? "libzo" (get-arg)))
+   ;; grab paths before we change them
+   (define bindir      (dir: 'bin))
++  (define guibindir   (dir: 'guibin))
+   (define librktdir   (dir: 'librkt))
+   (define sharerktdir   (dir: 'sharerkt))
+   (define configdir   (dir: 'config))
+@@ -691,8 +719,9 @@
+   ;; no need to send an explicit binfiles argument -- this function is used
+   ;; only when DESTDIR is present, so we're installing to a directory that
+   ;; has only our binaries
+-  (fix-executables bindir librktdir)
+-  (fix-desktop-files appsdir bindir sharerktdir)
++  (fix-executables bindir guibindir librktdir
++                   #f (if (equal? bindir guibindir) '() #f) #f)
++  (fix-desktop-files appsdir)
+   (unless origtree? (write-config configdir libzo?)))
+ 
+ (define (post-adjust)
+@@ -706,6 +735,13 @@
+          (or (regexp-match? #rx"^build$" (basename p))
+              (chez-skip p)))))
+     (do-tree "src" (build-path base-destdir "src") #:build-path? #t)
++    (let ([tag (build-path base-destdir "src" "source-dist.txt")])
++      (unless (file-exists? tag)
++        (call-with-output-file*
++         tag
++         (lambda (o)
++           (fprintf o "This is a source distribution.\n")
++           (fprintf o "(The existence of this file is a hint to build scripts.)\n")))))
+     ;; Copy pb boot files, if present
+     (let ([src-pb "src/ChezScheme/boot/pb"])
+       (when (directory-exists? src-pb)
+diff -NaurdwB -I ^;;[[:space:]]* ./src/ac/path.m4 ./src/ac/path.m4
+--- ./src/ac/path.m4	2025-07-10 07:42:01
++++ ./src/ac/path.m4	2025-07-10 07:42:38
+@@ -10,6 +10,9 @@
+   if test "${bindir}" != '${exec_prefix}/bin' ; then
+    unixstyle=yes
+   fi
++  if test "${guibindir}" != '${bindir}' ; then
++   unixstyle=yes
++  fi
+   if test "${datadir}" != '${prefix}/share' ; then
+    # Newer autoconf uses datarootdir:
+    if test "${datadir}" = '${datarootdir}' ; then
+@@ -51,6 +54,13 @@
+   fi
+ fi
+ 
++update_guibin_default_as_root()
++{
++  if test "${guibindir_is_default}" = "yes" ; then
++     guibindir='${prefix}'
++  fi
++}
++
+ MAKE_COPYTREE=no
+ if test "${unixstyle}" = "no" ; then
+   if test "${enable_useprefix}" = "no" -o "${prefix}" = "NONE" ; then
+@@ -60,6 +70,8 @@
+     MAKE_COPYTREE=copytree
+   fi
+   bindir='${prefix}/bin'
++  guibindir='${bindir}'
++  guibindir_is_default=yes
+   libpltdir='${prefix}/lib'
+   libpltdir_rel='lib'
+   sharepltdir='${prefix}/share'
+@@ -121,6 +133,7 @@
+ AC_SUBST(includepltdir)
+ AC_SUBST(docdir)
+ AC_SUBST(pkgsdir)
++AC_SUBST(guibindir)
+ 
+ AC_SUBST(COLLECTS_PATH)
+ AC_SUBST(GUI_COLLECTS_PATH)
+@@ -166,6 +179,7 @@
+   else
+     echo ">>> Installation targets:"
+     echo " executables        : ${bindir}/..."
++    echo " GUI executables    : ${guibindir}/..."
+     echo " core docs          : ${docdir}/..."
+     echo " C libraries        : ${libdir}/..."
+     echo " C headers          : ${includepltdir}/..."
+@@ -178,10 +192,11 @@
+     echo " man pages          : ${mandir}/..."
+     echo "     where prefix = ${prefix}"
+     echo "  and datarootdir = ${datarootdir}"
++    echo "  and datadir = ${datadir}"
++    echo "  and bindir = ${bindir}"
+     if test "${unixstyle}" = "yes" ; then
+       echo "  and exec_prefix = ${exec_prefix}"
+       echo "  and PACKAGE = racket"
+     fi
+   fi
+ }
+-  
+diff -NaurdwB -I ^;;[[:space:]]* ./src/ac/rktio_keep.m4 ./src/ac/rktio_keep.m4
+--- ./src/ac/rktio_keep.m4	2025-07-10 07:43:07
++++ ./src/ac/rktio_keep.m4	2025-07-10 07:44:01
+@@ -9,7 +9,7 @@
+   # Strip away all feature choices
+   -enable* | --enable* | -disable* | --disable*)
+     ;;
+-  -collects* | --collects* | -apps* | --apps* | -pkgs* | --pkgs*)
++  -collects* | --collects* | -apps* | --apps* | -pkgs* | --pkgs* | -guibin*  | --guibin*)
+     ;;
+   *)
+     case $fixup_arg in
+diff -NaurdwB -I ^;;[[:space:]]* ./src/bc/Makefile.in ./src/bc/Makefile.in
+--- ./src/bc/Makefile.in	2025-07-10 07:45:04
++++ ./src/bc/Makefile.in	2025-07-10 07:45:46
+@@ -107,6 +107,7 @@
+ datarootdir = @datarootdir@
+ datadir = @datadir@
+ bindir = @bindir@
++guibindir = @guibindir@
+ libdir = @libdir@
+ includepltdir = @includepltdir@
+ libpltdir = @libpltdir@
+@@ -125,6 +126,10 @@
+ 
+ MAKE_INSTALL_PKGSCOPE = @MAKE_INSTALL_PKGSCOPE@
+ INSTALL_PKGSCOPE = @INSTALL_PKGSCOPE@
++
++INSTALL_PKGS = @INSTALL_PKGS@
++INSTALL_MISSING_PKGS = @INSTALL_MISSING_PKGS@
++INSTALL_PKG_CATALOG = @INSTALL_PKG_CATALOG@
+ 
+ INSTALL_LIBZO = @INSTALL_LIBZO@
+ 
+diff -NaurdwB -I ^;;[[:space:]]* ./src/bc/build.zuo ./src/bc/build.zuo
+--- ./src/bc/build.zuo	2025-07-10 07:46:27
++++ ./src/bc/build.zuo	2025-07-10 07:46:56
+@@ -1648,7 +1648,11 @@
+                   [windows?
+                    (set-collects-path racket dest-exe "../collects" "../etc")]
+                   [mac?
+-                   (set-collects-path racket dest-exe "../../../../collects" "../../../../etc")
++                   (cond
++                     [(equal? (lookup 'INSTALL_ORIG_TREE) "yes")
++                      (set-collects-path racket dest-exe "../../../../collects" "../../../../etc")]
++                     [else
++                      (set-collects-path racket dest-exe collects-path configdir)])
+                    (install_name_tool "-change"
+                                       (~a "@executable_path/Racket.framework/Versions/" version fw-suffix "/Racket")
+                                       (~a (get-framework-prefix #t) "Racket.framework/Versions/" version fw-suffix "/Racket")
+diff -NaurdwB -I ^;;[[:space:]]* ./src/bc/configure ./src/bc/configure
+--- ./src/bc/configure	2025-07-10 07:47:21
++++ ./src/bc/configure	2025-07-10 07:48:24
+@@ -625,6 +625,9 @@
+ upsrcdir
+ CFLAGS_FOR_BUILD
+ CC_FOR_BUILD
++INSTALL_PKG_CATALOG
++INSTALL_MISSING_PKGS
++INSTALL_PKGS
+ RKTIO_CONFIGURE_ARGS
+ LIBFFI_CONFIGURE_ARGS
+ INSTALL_NAME_TOOL
+@@ -736,6 +739,7 @@
+ GR_APP_COLLECTS_PATH
+ GUI_COLLECTS_PATH
+ COLLECTS_PATH
++guibindir
+ pkgsdir
+ includepltdir
+ etcpltdir
+@@ -782,7 +786,7 @@
+ datadir
+ datarootdir
+ libexecdir
+-sbindir
++guibindir
+ bindir
+ program_transform_name
+ prefix
+@@ -896,7 +900,7 @@
+ # Use braces instead of parens because sh, perl, etc. also accept them.
+ # (The list follows the same order as the GNU Coding Standards.)
+ bindir='${exec_prefix}/bin'
+-sbindir='${exec_prefix}/sbin'
++guibindir='${bindir}'
+ libexecdir='${exec_prefix}/libexec'
+ datarootdir='${prefix}/share'
+ datadir='${datarootdir}'
+@@ -1182,11 +1186,11 @@
+   | -silent | --silent | --silen | --sile | --sil)
+     silent=yes ;;
+ 
+-  -sbindir | --sbindir | --sbindi | --sbind | --sbin | --sbi | --sb)
+-    ac_prev=sbindir ;;
+-  -sbindir=* | --sbindir=* | --sbindi=* | --sbind=* | --sbin=* \
++  -guibindir | --guibindir | --guibindi | --guibind | --guibin | --sbi | --sb)
++    ac_prev=guibindir ;;
++  -guibindir=* | --guibindir=* | --guibindi=* | --guibind=* | --guibin=* \
+   | --sbi=* | --sb=*)
+-    sbindir=$ac_optarg ;;
++    guibindir=$ac_optarg ;;
+ 
+   -sharedstatedir | --sharedstatedir | --sharedstatedi \
+   | --sharedstated | --sharedstate | --sharedstat | --sharedsta \
+@@ -1316,7 +1320,7 @@
+ fi
+ 
+ # Check all directory arguments for consistency.
+-for ac_var in	exec_prefix prefix bindir sbindir libexecdir datarootdir \
++for ac_var in	exec_prefix prefix bindir guibindir libexecdir datarootdir \
+ 		datadir sysconfdir sharedstatedir localstatedir includedir \
+ 		oldincludedir docdir infodir htmldir collectsdir appsdir psdir \
+ 		libdir appsdir mandir
+@@ -1468,6 +1472,7 @@
+ 
+ Fine tuning of the installation directories:
+   --bindir=DIR            user executables [EPREFIX/bin]
++  --guibindir=DIR         GUI programs [BINDIR]
+   --sysconfdir=DIR        read-only single-machine data [PREFIX/etc]
+   --libdir=DIR            object code libraries [EPREFIX/lib]
+   --includedir=DIR        C header files [PREFIX/include]
+@@ -1514,6 +1519,7 @@
+   --enable-usersetup      setup user-specific files on install
+   --enable-portable       prefer portable to host-specific
+   --enable-natipkg        add "-natipkg" to library subpath
++  --enable-nonatipkg      add "-nonatipkg" to library subpath
+   --enable-shared         create shared libraries (ok, but not recommended)
+   --enable-dynlib         same as --enable-shared
+   --enable-lt=<prog>      use <prog> instead of libtool; disable to use bundled
+@@ -2771,6 +2777,10 @@
+   enableval=$enable_natipkg;
+ fi
+ 
++# Check whether --enable-natipkg was given.
++if test "${enable_natipkg+set}" = set; then :
++  enableval=$enable_natipkg;
++fi
+ 
+ 
+ 
+@@ -3149,6 +3160,9 @@
+   if test "${bindir}" != '${exec_prefix}/bin' ; then
+    unixstyle=yes
+   fi
++  if test "${guibindir}" != '${bindir}' ; then
++   unixstyle=yes
++  fi
+   if test "${datadir}" != '${prefix}/share' ; then
+    # Newer autoconf uses datarootdir:
+    if test "${datadir}" = '${datarootdir}' ; then
+@@ -3190,6 +3204,13 @@
+   fi
+ fi
+ 
++update_guibin_default_as_root()
++{
++  if test "${guibindir_is_default}" = "yes" ; then
++     guibindir='${prefix}'
++  fi
++}
++
+ MAKE_COPYTREE=no
+ if test "${unixstyle}" = "no" ; then
+   if test "${enable_useprefix}" = "no" -o "${prefix}" = "NONE" ; then
+@@ -3199,6 +3220,8 @@
+     MAKE_COPYTREE=copytree
+   fi
+   bindir='${prefix}/bin'
++  guibindir='${bindir}'
++  guibindir_is_default=yes
+   libpltdir='${prefix}/lib'
+   libpltdir_rel='lib'
+   sharepltdir='${prefix}/share'
+@@ -3305,6 +3329,7 @@
+   else
+     echo ">>> Installation targets:"
+     echo " executables        : ${bindir}/..."
++    echo " GUI executables    : ${guibindir}/..."
+     echo " core docs          : ${docdir}/..."
+     echo " C libraries        : ${libdir}/..."
+     echo " C headers          : ${includepltdir}/..."
+@@ -3317,6 +3342,8 @@
+     echo " man pages          : ${mandir}/..."
+     echo "     where prefix = ${prefix}"
+     echo "  and datarootdir = ${datarootdir}"
++    echo "  and datadir = ${datadir}"
++    echo "  and bindir = ${bindir}"
+     if test "${unixstyle}" = "yes" ; then
+       echo "  and exec_prefix = ${exec_prefix}"
+       echo "  and PACKAGE = racket"
+@@ -3414,6 +3440,7 @@
+ show_explicitly_enabled "${enable_portable}" "portable"
+ 
+ show_explicitly_enabled "${enable_natipkg}" "Adding \"-natipkg\" suffix to library subpath"
++show_explicitly_enabled "${enable_nonatipkg}" "Adding \"-nonatipkg\" suffix to library subpath"
+ 
+ 
+ show_explicitly_enabled "${enable_xonx}" "Unix style"
+@@ -3555,7 +3582,25 @@
+ 
+ 
+ 
++show_pkg_catalog="no"
+ 
++if test "$enable_pkgs" != ""  ; then
++  echo "=== Adding extra packages on install: $enable_pkgs"
++  show_pkg_catalog="yes"
++fi
++
++if test "$enable_missingpkgs" == "yes"  ; then
++  echo "=== Adding any missing package dependencies on install"
++  show_pkg_catalog="yes"
++fi
++
++if test "$show_pkg_catalog" != ""  ; then
++  if test "$enable_catalog" != "" ; then
++    echo "=== Installing packages from: $enable_catalog"
++  fi
++fi
++
++
+ show_explicitly_enabled "${enable_crossany}" "Own cross-compile target as machine-independent"
+ 
+ CROSS_COMPILE_TARGET_KIND=machine
+@@ -3601,6 +3646,8 @@
+ ar_libtool_no_undefined=""
+ LIBRACKET_DEP=""
+ 
++dist_install_missing_pkgs=no
++
+ EXE_SUFFIX=
+ SO_SUFFIX=.so
+ 
+@@ -3722,7 +3769,7 @@
+   esac
+   case "${enable_ios}" in
+     iPhoneOS|iPhoneSimulator)
+-     IOS_SDK=/Applications/Xcode.app/Contents/Developer/Platforms/${enable_ios}.platform/Developer/SDKs/${enable_ios}.sdk
++     IOS_SDK="$(xcode-select -p)/Platforms/${enable_ios}.platform/Developer/SDKs/${enable_ios}.sdk"
+      echo "=== Using inferred iOS SDK path ${IOS_SDK}"
+      ;;
+     *)
+@@ -5174,6 +5221,8 @@
+     mzrt_needs_pthread=no
+     use_flag_pthread=no
+     skip_curses_check=yes
++    dist_install_missing_pkgs=yes
++    update_guibin_default_as_root
+     MZOPTIONS="$MZOPTIONS -fno-omit-frame-pointer" # to make JIT backtraces work
+     MINGW="t"
+     WXVARIANT="wx_win"
+@@ -5366,6 +5415,8 @@
+       if test "${enable_libs}" = "" ; then
+         INSTALL_LIBS_ENABLE=no-install
+       fi
++      dist_install_missing_pkgs=yes
++      update_guibin_default_as_root
+     else
+       PREFLAGS="$PREFLAGS -DXONX "
+       LIBS="$LIBS -framework CoreFoundation"
+@@ -7364,8 +7415,19 @@
+ 
+ $as_echo "#define SPLS_SUFFIX \"-natipkg\"" >>confdefs.h
+ 
++  dist_install_missing_pkgs=yes
+ fi
++if test "${enable_nonatipkg}" = "yes" ; then
++  if test "${enable_natipkg}" = "yes" ; then
++     echo 'cannot specify both `--enable-natipkg` and `--enable-nonatipkg`'
++     exit 1
++  fi
+ 
++$as_echo "#define SPLS_SUFFIX \"-nonatipkg\"" >>confdefs.h
++
++  dist_install_missing_pkgs=no
++fi
++
+ ############## Racket for Racket ################
+ 
+ if test "${enable_racket}" = "" ; then
+@@ -7465,6 +7527,20 @@
+   CFLAGS="-Werror ${CFLAGS}"
+ fi
+ 
++############## packages ################
++
++INSTALL_PKGS="$enable_pkgs"
++INSTALL_PKG_CATALOG="$enable_catalog"
++
++if test "$enable_missingpkgs" = "" ; then
++  if test "$dist_install_missing_pkgs" = "yes" ; then
++    INSTALL_MISSING_PKGS="dist"
++  fi
++else
++  INSTALL_MISSING_PKGS="$enable_missingpkgs"
++fi
++
++
+ ############## subconfigures ################
+ 
+ # Make sure the --enable-shared default is propagated:
+@@ -7509,7 +7585,7 @@
+   # Strip away all feature choices
+   -enable* | --enable* | -disable* | --disable*)
+     ;;
+-  -collects* | --collects* | -apps* | --apps* | -pkgs* | --pkgs*)
++  -collects* | --collects* | -apps* | --apps* | -pkgs* | --pkgs* | -guibin*  | --guibin*)
+     ;;
+   *)
+     case $fixup_arg in
+diff -NaurdwB -I ^;;[[:space:]]* ./src/bc/configure.ac ./src/bc/configure.ac
+--- ./src/bc/configure.ac	2025-07-10 07:49:13
++++ ./src/bc/configure.ac	2025-07-10 07:50:05
+@@ -241,6 +241,7 @@
+ fi
+ 
+ m4_include(../ac/path_pkgscope.m4)
++m4_include(../ac/pkgs_show.m4)
+ 
+ m4_include(../ac/crossany.m4)
+ 
+@@ -281,6 +282,8 @@
+ ar_libtool_no_undefined=""
+ LIBRACKET_DEP=""
+ 
++dist_install_missing_pkgs=no
++
+ EXE_SUFFIX=
+ SO_SUFFIX=.so
+ 
+@@ -616,6 +619,8 @@
+     mzrt_needs_pthread=no
+     use_flag_pthread=no
+     skip_curses_check=yes
++    dist_install_missing_pkgs=yes
++    update_guibin_default_as_root
+     MZOPTIONS="$MZOPTIONS -fno-omit-frame-pointer" # to make JIT backtraces work
+     MINGW="t"
+     WXVARIANT="wx_win"
+@@ -719,6 +724,8 @@
+       if test "${enable_libs}" = "" ; then
+         INSTALL_LIBS_ENABLE=no-install
+       fi
++      dist_install_missing_pkgs=yes
++      update_guibin_default_as_root
+     else
+       PREFLAGS="$PREFLAGS -DXONX "
+       LIBS="$LIBS -framework CoreFoundation"
+@@ -1227,7 +1234,16 @@
+ 
+ if test "${enable_natipkg}" = "yes" ; then
+   AC_DEFINE(SPLS_SUFFIX,"-natipkg",[Library subpath suffix])
++  dist_install_missing_pkgs=yes
+ fi
++if test "${enable_nonatipkg}" = "yes" ; then
++  if test "${enable_natipkg}" = "yes" ; then
++     echo 'cannot specify both `--enable-natipkg` and `--enable-nonatipkg`'
++     exit 1
++  fi
++  AC_DEFINE(SPLS_SUFFIX,"-nonatipkg",[Library subpath suffix])
++  dist_install_missing_pkgs=no
++fi
+ 
+ ############## Racket for Racket ################
+ 
+@@ -1328,6 +1344,10 @@
+   CFLAGS="-Werror ${CFLAGS}"
+ fi
+ 
++############## packages ################
++
++m4_include(../ac/pkgs.m4)
++
+ ############## subconfigures ################
+ 
+ # Make sure the --enable-shared default is propagated:
+@@ -1480,6 +1500,10 @@
+ 
+ AC_SUBST(LIBFFI_CONFIGURE_ARGS)
+ AC_SUBST(RKTIO_CONFIGURE_ARGS)
++
++AC_SUBST(INSTALL_PKGS)
++AC_SUBST(INSTALL_MISSING_PKGS)
++AC_SUBST(INSTALL_PKG_CATALOG)
+ 
+ AC_SUBST(CC_FOR_BUILD)
+ AC_SUBST(CFLAGS_FOR_BUILD)
+diff -NaurdwB -I ^;;[[:space:]]* ./src/cs/c/Makefile.in ./src/cs/c/Makefile.in
+--- ./src/cs/c/Makefile.in	2025-07-10 07:51:01
++++ ./src/cs/c/Makefile.in	2025-07-10 07:52:10
+@@ -176,6 +176,7 @@
+ datarootdir = @datarootdir@
+ datadir = @datadir@
+ bindir = @bindir@
++guibindir = @guibindir@
+ libdir = @libdir@
+ includepltdir = @includepltdir@
+ libpltdir = @libpltdir@
+@@ -190,7 +191,7 @@
+ mandir = @mandir@
+ 
+ # Whether `setup/unixstyle-install.rkt copytree` is needed for
+-# installation ("yes" or "no")
++# installation ("copytree" or "no")
+ MAKE_COPYTREE = @MAKE_COPYTREE@
+ 
+ # Whether copytree should preserve the source shape ("yes")
+@@ -204,6 +205,18 @@
+ # The value to install as the default installation scope
+ # (e.g., "user")
+ INSTALL_PKGSCOPE = @INSTALL_PKGSCOPE@
++
++# Extra packages to install, and where to find then if not
++# the default package catalog
++INSTALL_PKGS = @INSTALL_PKGS@
++INSTALL_PKG_CATALOG = @INSTALL_PKG_CATALOG@
++
++# Can be "yes", "no" (or ""), or "dist" to indicate whether an install
++# step should check for missing packages, especially platform-specific
++# packages like "racket-aarch64-macosx-4"; a value of "dist"
++# means "yes" if "../../source-dist.txt" exists; installation uses
++# `INSTALL_PKG_CATALOG`
++INSTALL_MISSING_PKGS = @INSTALL_MISSING_PKGS@
+ 
+ # Whether ".zo" files should be moved to "lib" instead of "share"
+ # for a Unix-style installation ("yes" or "no")
+diff -NaurdwB -I ^;;[[:space:]]* ./src/cs/c/build.zuo ./src/cs/c/build.zuo
+--- ./src/cs/c/build.zuo	2025-07-10 07:52:25
++++ ./src/cs/c/build.zuo	2025-07-10 07:53:12
+@@ -1051,7 +1051,11 @@
+                              (~a (get-framework-prefix #t) "Racket.framework/Versions/" version "_CS/Racket")
+                              dest-gracket)
+           (strip-signature dest-gracket)
+-          (set-collects-path dest-gracket "../../../../collects" "../../../../etc")
++          (cond
++            [(equal? (lookup 'INSTALL_ORIG_TREE) "yes")
++             (set-collects-path dest-gracket "../../../../collects" "../../../../etc")]
++            [else
++             (set-collects-path dest-gracket collects-path configdir)])
+           (strip-debug config dest-gracket)
+           (restore-signature dest-gracket)
+ 
+diff -NaurdwB -I ^;;[[:space:]]* ./src/cs/c/configure ./src/cs/c/configure
+--- ./src/cs/c/configure	2025-07-10 07:53:30
++++ ./src/cs/c/configure	2025-07-10 07:54:08
+@@ -623,6 +623,9 @@
+ ac_subst_vars='LTLIBOBJS
+ LIBOBJS
+ upsrcdir
++INSTALL_PKG_CATALOG
++INSTALL_MISSING_PKGS
++INSTALL_PKGS
+ CFLAGS_FOR_BUILD
+ CC_FOR_BUILD
+ RKTIO_CONFIGURE_ARGS
+@@ -705,6 +708,7 @@
+ GR_APP_COLLECTS_PATH
+ GUI_COLLECTS_PATH
+ COLLECTS_PATH
++guibindir
+ pkgsdir
+ includepltdir
+ etcpltdir
+@@ -753,7 +757,7 @@
+ datadir
+ datarootdir
+ libexecdir
+-sbindir
++guibindir
+ bindir
+ program_transform_name
+ prefix
+@@ -816,6 +820,9 @@
+ enable_crossany
+ enable_libz
+ enable_liblz4
++enable_pkgs
++enable_missingpkgs
++enable_catalog
+ '
+       ac_precious_vars='build_alias
+ host_alias
+@@ -857,7 +864,7 @@
+ # Use braces instead of parens because sh, perl, etc. also accept them.
+ # (The list follows the same order as the GNU Coding Standards.)
+ bindir='${exec_prefix}/bin'
+-sbindir='${exec_prefix}/sbin'
++guibindir='${bindir}'
+ libexecdir='${exec_prefix}/libexec'
+ datarootdir='${prefix}/share'
+ datadir='${datarootdir}'
+@@ -1143,11 +1150,11 @@
+   | -silent | --silent | --silen | --sile | --sil)
+     silent=yes ;;
+ 
+-  -sbindir | --sbindir | --sbindi | --sbind | --sbin | --sbi | --sb)
+-    ac_prev=sbindir ;;
+-  -sbindir=* | --sbindir=* | --sbindi=* | --sbind=* | --sbin=* \
++  -guibindir | --guibindir | --guibindi | --guibind | --guibin | --sbi | --sb)
++    ac_prev=guibindir ;;
++  -guibindir=* | --guibindir=* | --guibindi=* | --guibind=* | --guibin=* \
+   | --sbi=* | --sb=*)
+-    sbindir=$ac_optarg ;;
++    guibindir=$ac_optarg ;;
+ 
+   -sharedstatedir | --sharedstatedir | --sharedstatedi \
+   | --sharedstated | --sharedstate | --sharedstat | --sharedsta \
+@@ -1277,7 +1284,7 @@
+ fi
+ 
+ # Check all directory arguments for consistency.
+-for ac_var in	exec_prefix prefix bindir sbindir libexecdir datarootdir \
++for ac_var in	exec_prefix prefix bindir guibindir libexecdir datarootdir \
+ 		datadir sysconfdir sharedstatedir localstatedir includedir \
+ 		oldincludedir docdir infodir htmldir collectsdir appsdir psdir \
+ 		libdir appsdir mandir
+@@ -1429,6 +1436,7 @@
+ 
+ Fine tuning of the installation directories:
+   --bindir=DIR            user executables [EPREFIX/bin]
++  --guibindir=DIR         GUI programs [BINDIR]
+   --sysconfdir=DIR        read-only single-machine data [PREFIX/etc]
+   --libdir=DIR            object code libraries [EPREFIX/lib]
+   --includedir=DIR        C header files [PREFIX/include]
+@@ -1483,6 +1491,7 @@
+   --enable-check          enable extra safety checks for testing
+   --enable-portable       prefer portable to host-specific
+   --enable-natipkg        add "-natipkg" to library subpath
++  --enable-nonatipkg      add "-nonatipkg" to library subpath
+   --enable-sdk=<path>     use Mac OS 10.4 SDK directory
+   --enable-sdk5=<path>    use Mac OS 10.5 SDK directory
+   --enable-sdk6=<path>    use Mac OS 10.6 SDK directory
+@@ -1511,6 +1520,9 @@
+   --enable-crossany       Record own cross target as machine-independent
+   --enable-libz           use installed libz if available
+   --enable-liblz4         use installed liblz4 if available
++  --enable-pkgs=<pkgs>    add <pkgs> on install
++  --enable-missingpkgs    add missing package dependencies on install
++  --enable-catalog=<url>  install packages from <url>
+ 
+ Some influential environment variables:
+   CC          C compiler command
+@@ -2700,6 +2712,10 @@
+   enableval=$enable_natipkg;
+ fi
+ 
++# Check whether --enable-natipkg was given.
++if test "${enable_natipkg+set}" = set; then :
++  enableval=$enable_natipkg;
++fi
+ 
+ 
+ # Check whether --enable-sdk was given.
+@@ -2861,7 +2878,24 @@
+ fi
+ 
+ 
++# Check whether --enable-pkgs was given.
++if test "${enable_pkgs+set}" = set; then :
++  enableval=$enable_pkgs;
++fi
+ 
++# Check whether --enable-missingpkgs was given.
++if test "${enable_missingpkgs+set}" = set; then :
++  enableval=$enable_missingpkgs;
++fi
++
++# Check whether --enable-catalog was given.
++if test "${enable_catalog+set}" = set; then :
++  enableval=$enable_catalog;
++fi
++
++
++
++
+ enable_quartz=no
+ if test "${enable_xonx}" = "yes" ; then
+   enable_quartz=no
+@@ -2947,6 +2981,7 @@
+ show_explicitly_enabled "${enable_portable}" "portable"
+ 
+ show_explicitly_enabled "${enable_natipkg}" "Adding \"-natipkg\" suffix to library subpath"
++show_explicitly_enabled "${enable_nonatipkg}" "Adding \"-nonatipkg\" suffix to library subpath"
+ 
+ show_explicitly_enabled "${enable_libz}" "Installed libz"
+ show_explicitly_disabled "${enable_libz}" "Installed libz"
+@@ -3102,7 +3137,25 @@
+ 
+ 
+ 
++show_pkg_catalog="no"
+ 
++if test "$enable_pkgs" != ""  ; then
++  echo "=== Adding extra packages on install: $enable_pkgs"
++  show_pkg_catalog="yes"
++fi
++
++if test "$enable_missingpkgs" == "yes"  ; then
++  echo "=== Adding any missing package dependencies on install"
++  show_pkg_catalog="yes"
++fi
++
++if test "$show_pkg_catalog" != ""  ; then
++  if test "$enable_catalog" != "" ; then
++    echo "=== Installing packages from: $enable_catalog"
++  fi
++fi
++
++
+ show_explicitly_enabled "${enable_crossany}" "Own cross-compile target as machine-independent"
+ 
+ CROSS_COMPILE_TARGET_KIND=machine
+@@ -3145,6 +3198,9 @@
+   if test "${bindir}" != '${exec_prefix}/bin' ; then
+    unixstyle=yes
+   fi
++  if test "${guibindir}" != '${bindir}' ; then
++   unixstyle=yes
++  fi
+   if test "${datadir}" != '${prefix}/share' ; then
+    # Newer autoconf uses datarootdir:
+    if test "${datadir}" = '${datarootdir}' ; then
+@@ -3186,6 +3242,13 @@
+   fi
+ fi
+ 
++update_guibin_default_as_root()
++{
++  if test "${guibindir_is_default}" = "yes" ; then
++     guibindir='${prefix}'
++  fi
++}
++
+ MAKE_COPYTREE=no
+ if test "${unixstyle}" = "no" ; then
+   if test "${enable_useprefix}" = "no" -o "${prefix}" = "NONE" ; then
+@@ -3195,6 +3258,8 @@
+     MAKE_COPYTREE=copytree
+   fi
+   bindir='${prefix}/bin'
++  guibindir='${bindir}'
++  guibindir_is_default=yes
+   libpltdir='${prefix}/lib'
+   libpltdir_rel='lib'
+   sharepltdir='${prefix}/share'
+@@ -3301,6 +3367,7 @@
+   else
+     echo ">>> Installation targets:"
+     echo " executables        : ${bindir}/..."
++    echo " GUI executables    : ${guibindir}/..."
+     echo " core docs          : ${docdir}/..."
+     echo " C libraries        : ${libdir}/..."
+     echo " C headers          : ${includepltdir}/..."
+@@ -3313,6 +3380,8 @@
+     echo " man pages          : ${mandir}/..."
+     echo "     where prefix = ${prefix}"
+     echo "  and datarootdir = ${datarootdir}"
++    echo "  and datadir = ${datadir}"
++    echo "  and bindir = ${bindir}"
+     if test "${unixstyle}" = "yes" ; then
+       echo "  and exec_prefix = ${exec_prefix}"
+       echo "  and PACKAGE = racket"
+@@ -3362,6 +3430,8 @@
+ 
+ cs_auto_flags=--disable-auto-flags
+ 
++dist_install_missing_pkgs=no
++
+ COPY_NEW_CFLAGS_TO_CPPFLAGS=no
+ 
+ SCHEME_LIBFFI=no
+@@ -3386,7 +3456,7 @@
+   esac
+   case "${enable_ios}" in
+     iPhoneOS|iPhoneSimulator)
+-     IOS_SDK=/Applications/Xcode.app/Contents/Developer/Platforms/${enable_ios}.platform/Developer/SDKs/${enable_ios}.sdk
++     IOS_SDK="$(xcode-select -p)/Platforms/${enable_ios}.platform/Developer/SDKs/${enable_ios}.sdk"
+      echo "=== Using inferred iOS SDK path ${IOS_SDK}"
+      ;;
+     *)
+@@ -4583,6 +4653,8 @@
+     skip_curses_check=yes
+     use_flag_pthread=no
+     use_own_zlibs=yes
++    dist_install_missing_pkgs=yes
++    update_guibin_default_as_root
+     MACH_OS=nt
+     LIBS="${LIBS} -lshell32 -luser32 -lole32 -lrpcrt4 -luuid -lws2_32 -ladvapi32 -lwinmm"
+     MINGW="t"
+@@ -4609,6 +4681,8 @@
+     SIGNED_EXE="t"
+     if test "${enable_xonx}" = "no" ; then
+       OSX="t"
++      dist_install_missing_pkgs=yes
++      update_guibin_default_as_root
+     else
+       CONFIGURE_RACKET_SO_COMPILE="PLT_CS_MAKE_UNIX_STYLE_MACOS=y"
+       CPPFLAGS="${CPPFLAGS} -DRACKET_XONX"
+@@ -5136,7 +5210,17 @@
+ if test "${enable_natipkg}" = "yes" ; then
+   CONFIGURE_RACKET_SO_COMPILE="${CONFIGURE_RACKET_SO_COMPILE} PLT_CS_SLSP_SUFFIX=-natipkg"
+   PLT_CS_SLSP_SUFFIX="-natipkg"
++  dist_install_missing_pkgs=yes
+ fi
++if test "${enable_nonatipkg}" = "yes" ; then
++  if test "${enable_natipkg}" = "yes" ; then
++     echo 'cannot specify both `--enable-natipkg` and `--enable-nonatipkg`'
++     exit 1
++  fi
++  CONFIGURE_RACKET_SO_COMPILE="${CONFIGURE_RACKET_SO_COMPILE} PLT_CS_SLSP_SUFFIX=-nonatipkg"
++  PLT_CS_SLSP_SUFFIX="-nonatipkg"
++  dist_install_missing_pkgs=no
++fi
+ 
+ ############## ubsan ################
+ 
+@@ -6124,6 +6208,20 @@
+   ENABLE_EXTRA_CHECKS=yes
+ fi
+ 
++############## Packages tool ################
++
++INSTALL_PKGS="$enable_pkgs"
++INSTALL_PKG_CATALOG="$enable_catalog"
++
++if test "$enable_missingpkgs" = "" ; then
++  if test "$dist_install_missing_pkgs" = "yes" ; then
++    INSTALL_MISSING_PKGS="dist"
++  fi
++else
++  INSTALL_MISSING_PKGS="$enable_missingpkgs"
++fi
++
++
+ ############## subconfigure ################
+ 
+ # Before libtool setup
+@@ -6239,7 +6337,7 @@
+   # Strip away all feature choices
+   -enable* | --enable* | -disable* | --disable*)
+     ;;
+-  -collects* | --collects* | -apps* | --apps* | -pkgs* | --pkgs*)
++  -collects* | --collects* | -apps* | --apps* | -pkgs* | --pkgs* | -guibin*  | --guibin*)
+     ;;
+   *)
+     case $fixup_arg in
+diff -NaurdwB -I ^;;[[:space:]]* ./src/cs/c/configure.ac ./src/cs/c/configure.ac
+--- ./src/cs/c/configure.ac	2025-07-10 07:54:32
++++ ./src/cs/c/configure.ac	2025-07-10 07:55:17
+@@ -42,6 +42,7 @@
+ m4_include(../ac/crossany_arg.m4)
+ AC_ARG_ENABLE(libz,       [  --enable-libz           use installed libz if available])
+ AC_ARG_ENABLE(liblz4,     [  --enable-liblz4         use installed liblz4 if available])
++m4_include(../ac/pkgs_arg.m4)
+ 
+ m4_include(../ac/sdk.m4)
+ 
+@@ -118,6 +119,7 @@
+ fi
+ 
+ m4_include(../ac/path_pkgscope.m4)
++m4_include(../ac/pkgs_show.m4)
+ 
+ m4_include(../ac/crossany.m4)
+ 
+@@ -183,6 +185,8 @@
+ 
+ cs_auto_flags=--disable-auto-flags
+ 
++dist_install_missing_pkgs=no
++
+ COPY_NEW_CFLAGS_TO_CPPFLAGS=no
+ 
+ SCHEME_LIBFFI=no
+@@ -308,6 +312,8 @@
+     skip_curses_check=yes
+     use_flag_pthread=no
+     use_own_zlibs=yes
++    dist_install_missing_pkgs=yes
++    update_guibin_default_as_root
+     MACH_OS=nt
+     LIBS="${LIBS} -lshell32 -luser32 -lole32 -lrpcrt4 -luuid -lws2_32 -ladvapi32 -lwinmm"
+     MINGW="t"
+@@ -334,6 +340,8 @@
+     SIGNED_EXE="t"
+     if test "${enable_xonx}" = "no" ; then
+       OSX="t"
++      dist_install_missing_pkgs=yes
++      update_guibin_default_as_root
+     else
+       CONFIGURE_RACKET_SO_COMPILE="PLT_CS_MAKE_UNIX_STYLE_MACOS=y"
+       CPPFLAGS="${CPPFLAGS} -DRACKET_XONX"
+@@ -618,7 +626,17 @@
+ if test "${enable_natipkg}" = "yes" ; then
+   CONFIGURE_RACKET_SO_COMPILE="${CONFIGURE_RACKET_SO_COMPILE} PLT_CS_SLSP_SUFFIX=-natipkg"
+   PLT_CS_SLSP_SUFFIX="-natipkg"
++  dist_install_missing_pkgs=yes
+ fi
++if test "${enable_nonatipkg}" = "yes" ; then
++  if test "${enable_natipkg}" = "yes" ; then
++     echo 'cannot specify both `--enable-natipkg` and `--enable-nonatipkg`'
++     exit 1
++  fi
++  CONFIGURE_RACKET_SO_COMPILE="${CONFIGURE_RACKET_SO_COMPILE} PLT_CS_SLSP_SUFFIX=-nonatipkg"
++  PLT_CS_SLSP_SUFFIX="-nonatipkg"
++  dist_install_missing_pkgs=no
++fi
+ 
+ ############## ubsan ################
+ 
+@@ -770,6 +788,10 @@
+   ENABLE_EXTRA_CHECKS=yes
+ fi
+ 
++############## Packages tool ################
++
++m4_include(../ac/pkgs.m4)
++
+ ############## subconfigure ################
+ 
+ # Before libtool setup
+@@ -933,6 +955,9 @@
+ AC_SUBST(RKTIO_CONFIGURE_ARGS)
+ AC_SUBST(CC_FOR_BUILD)
+ AC_SUBST(CFLAGS_FOR_BUILD)
++AC_SUBST(INSTALL_PKGS)
++AC_SUBST(INSTALL_MISSING_PKGS)
++AC_SUBST(INSTALL_PKG_CATALOG)
+ AC_SUBST(upsrcdir)
+ 
+ makefiles="Makefile"
+diff -NaurdwB -I ^;;[[:space:]]* ./src/lib.zuo ./src/lib.zuo
+--- ./src/lib.zuo	2025-07-10 07:55:49
++++ ./src/lib.zuo	2025-07-10 07:56:40
+@@ -97,7 +97,8 @@
+   (define p (apply process (cons command args)))
+   (process-wait (hash-ref p 'process))
+   (unless (= 0 (process-status (hash-ref p 'process)))
+-    (error "failed")))
++    (error "failed"))
++  (hash-ref p 'stdout (void)))
+ 
+ (struct raco-driver (vars target config-getter))
+ 
+@@ -131,7 +132,8 @@
+       (thread-process-wait pid)
+       (process-wait pid))
+   (unless (= 0 (process-status pid))
+-    (error "failed")))
++    (error "failed"))
++  (hash-ref p 'stdout (void)))
+ 
+ (define (raco/process vars . args)
+   (apply racket/process (list* vars
+@@ -230,7 +232,7 @@
+ 
+ (define (shell-subst-pwd str wrt)
+   (string-join (string-split str "`pwd`")
+-               (string->shell wrt)))
++               (string->shell (path->complete-path wrt))))
+ 
+ (define (configured-targets-at options)
+   (define who 'configured-targets-at)
+@@ -434,27 +437,76 @@
+   (define self-root-config-flags (if (equal? self-root-config-dir "")
+                                      '()
+                                      (list "-G" self-root-config-dir)))
+-  (define setup-args (list
++  (define pre-raco-args (list
+                       (extras 'INSTALL_SETUP_RACKET_FLAGS)
+-                      (extras 'SETUP_MACHINE_FLAGS)
+-                      "-N" "raco" "-l-" "setup"
+-                      (extras 'INSTALL_SETUP_FLAGS)
+-                      (extras 'PLT_SETUP_OPTIONS)))
++                         (extras 'SETUP_MACHINE_FLAGS)))
++  (define (run-raco options . args)
+   (cond
+     [(not cross-bootstrap-racket)
+      (process/wait dest-racket
+                    "-X" collectsdir
+                    "-G" configdir
+                    self-root-config-flags
+-                   setup-args)]
++                     pre-raco-args
++                     args
++                     options)]
+     [else
+      (racket (hash 'racket cross-bootstrap-racket)
+              self-root-config-flags
+              cross-compiler-args
+              "-X" collectsdir
+              "-G" configdir
+-             setup-args)]))
++               pre-raco-args
++               args
++               options)]))
+ 
++  (define pkgs (hash-ref config 'INSTALL_PKGS ""))
++  (define missing-pkgs? (let ([v (hash-ref config 'INSTALL_MISSING_PKGS "")])
++                          (or (equal? v "yes")
++                              (and (equal? v "dist")
++                                   ;; added by `setup/unixstyle-install` when
++                                   ;; assembling a source distribrution:
++                                   (file-exists? (at-source "source-dist.txt"))))))
++  (unless (and (equal? pkgs "") (not missing-pkgs?))
++    (define pkg-catalog (hash-ref config 'INSTALL_PKG_CATALOG ""))
++    (alert "setting up enough to install packages")
++    (run-raco '()
++              "-N" "raco" "-l-" "setup"
++              (extras 'INSTALL_SETUP_FLAGS)
++              (extras 'PLT_SETUP_OPTIONS)
++              "-D"
++              "pkg")
++    (define missing-pkgs
++      (cond
++        [missing-pkgs?
++         (alert "checking for missing packages")
++         (define stdout
++           (run-raco (hash 'stdout 'pipe)
++                     "-l" "pkg/private/missing-deps"))
++         (define missing-pkgs
++           (string-split (string-trim (fd-read stdout eof) "\n") "\n"))
++         (if (equal? missing-pkgs '(""))
++             '()
++             missing-pkgs)]
++        [else '()]))
++    (unless (and (equal? pkgs "") (null? missing-pkgs))
++      (alert "installing packages")
++      (run-raco '()
++                "-N" "raco" "-l-" "pkg" "install"
++                "-i" "--no-setup" "--skip-installed" "--auto"
++                (if (equal? pkg-catalog "")
++                    '()
++                    (list "--catalog" pkg-catalog))
++                (string-split pkgs)
++                missing-pkgs)
++      (alert "packages installed")))
++
++  (define setup-args (list
++                      "-N" "raco" "-l-" "setup"
++                      (extras 'INSTALL_SETUP_FLAGS)
++                      (extras 'PLT_SETUP_OPTIONS)))
++  (run-raco '() setup-args))
++
+ (define (raco-setup-prepare-to-here config built-racket at-dir at-root-dir)
+   (define collects-dir (at-root-dir "collects"))
+   ;; set up configuration that points to local "doc" and "info-domain" dirs,
+@@ -522,6 +574,7 @@
+       (map (lambda (dir)
+              (at-destdir config (shell-subst (hash-ref config dir) config)))
+            '(bindir
++             guibindir
+              collectsdir
+              pkgsdir
+              docdir
