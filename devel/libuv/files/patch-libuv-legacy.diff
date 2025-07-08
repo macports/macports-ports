@@ -70,7 +70,49 @@
  # include <paths.h>
  # include <sys/kauth.h>
  # include <sys/types.h>
-@@ -417,7 +419,7 @@
+@@ -70,6 +72,41 @@
+ #define UV_USE_SIGCHLD
+ #endif
+ 
++//on 10.7 and lower we adopt an approach from chrome
++//(admittedly not thread-safe, but it worked fine for some time)
++//that closes all fds on execution, since spawning with
++//FD_CLOEXEC will panic on 10.7 (not sure about 10.6)
++
++#if defined(__APPLE__) && (MAC_OS_X_VERSION_MIN_REQUIRED >= 1070)
++// Sets all file descriptors to close on exec except for stdin, stdout
++// and stderr.
++// TODO(agl): Remove this function. It's fundamentally broken for multithreaded
++// apps.
++void SetAllFDsToCloseOnExec() {
++  const char fd_dir[] = "/dev/fd";
++  opendir(fd_dir);
++  DIR *dir = opendir(fd_dir);
++  closedir(dir); 
++  if (NULL == dir) {
++    fprintf(stderr, "Unable to open %s\n", fd_dir);
++    return;
++  }
++  struct dirent *ent;
++  while ((ent = readdir(dir))) {
++    // Skip . and .. entries.
++    if (ent->d_name[0] == '.')
++      continue;
++    int i = atoi(ent->d_name);
++    // We don't close stdin, stdout or stderr.
++    if (i <= STDERR_FILENO)
++      continue;
++    int flags = fcntl(i, F_GETFD);
++    if ((flags == -1) || (fcntl(i, F_SETFD, flags | FD_CLOEXEC) == -1)) {
++      fprintf(stderr, "fcntl failure.\n");
++    }
++  }
++}
++#endif
+ 
+ #ifdef UV_USE_SIGCHLD
+ static void uv__chld(uv_signal_t* handle, int signum) {
+@@ -417,7 +454,7 @@
  }
  
  
@@ -79,20 +121,33 @@
  typedef struct uv__posix_spawn_fncs_tag {
    struct {
      int (*addchdir_np)(const posix_spawn_file_actions_t *, const char *);
-@@ -500,7 +502,11 @@
+@@ -500,7 +537,11 @@
     *    spawn-sigmask in attributes
     * 4) POSIX_SPAWN_SETSID: Make the process a new session leader if a detached
     *    session was requested. */
 -  flags = POSIX_SPAWN_CLOEXEC_DEFAULT |
 +  flags = 
-+#if (defined(__APPLE__) && (defined(MAC_OS_VERSION_10_8) || \
-+      MAC_OS_X_VERSION_MIN_ALLOWED > MAC_OS_VERSION_10_8))
++#if defined(__APPLE__) && (MAC_OS_X_VERSION_MIN_REQUIRED >= 1080)
++          //CLOEXEC only works on 10.8 and higher (maybe 10.6). panics on 10.7
 +          POSIX_SPAWN_CLOEXEC_DEFAULT |
 +#endif
            POSIX_SPAWN_SETSIGDEF |
            POSIX_SPAWN_SETSIGMASK;
    if (options->flags & UV_PROCESS_DETACHED) {
-@@ -618,9 +624,11 @@
+@@ -518,6 +559,12 @@
+   if (err != 0)
+     goto error;
+ 
++#if defined(__APPLE__) && (MAC_OS_X_VERSION_MIN_REQUIRED >= 1070)
++  //set all FDS to close on exec for 10.7 and lower
++  //manually, as the flag causes a panic on 10.7 (maybe not 10.6)
++  if(!(flags & POSIX_SPAWN_CLOEXEC_DEFAULT))
++      SetAllFDsToCloseOnExec();
++#endif
+   /* Reset all signal the child to their default behavior */
+   sigfillset(&signal_set);
+   err = posix_spawnattr_setsigdefault(attrs, &signal_set);
+@@ -618,9 +665,11 @@
        }
      }
  
@@ -104,7 +159,7 @@
          err = posix_spawn_file_actions_adddup2(actions, use_fd, fd);
      assert(err != ENOSYS);
      if (err != 0)
-@@ -869,7 +877,7 @@
+@@ -869,7 +918,7 @@
    int exec_errorno;
    ssize_t r;
  
