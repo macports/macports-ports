@@ -18,7 +18,7 @@ legacysupport.use_static              yes
 legacysupport.disable_function_wrap   yes
 
 categories              lang
-platforms               {darwin >= 11}
+platforms               {darwin >= 10}
 license                 NCSA
 maintainers             nomaintainer
 
@@ -53,8 +53,8 @@ conflicts_build-append  libunwind libunwind-headers
 compiler.blacklist      *gcc* {clang < 1001} macports-clang-3.*
 # work/build/include/c++/v1/optional:224:5: error: destructor cannot be marked constexpr
 #     _LIBCPP_CONSTEXPR_AFTER_CXX17 ~__optional_destruct_base()
-compiler.blacklist-append {clang < 1204} {macports-clang-[5-9].0} {macports-clang-1[0-3]}
-compiler.fallback       clang macports-clang-14 macports-clang-15
+compiler.blacklist-append {clang < 1204} {macports-clang-[5-9].0} {macports-clang-10}
+compiler.fallback       clang macports-clang-11 macports-clang-14 macports-clang-15
 
 cmake.generator         Ninja
 cmake.install_prefix    ${sub_prefix}
@@ -107,6 +107,23 @@ if {[string match macports-clang-* ${configure.compiler}]} {
     configure.args-append           -DCMAKE_LIBTOOL=${prefix}/bin/libtool
 }
 
+# build fails on 10.6.8 with ld64-127, the current default
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+  depends_build-append            port:ld64-latest
+  depends_skip_archcheck-append   ld64-latest
+  #fuse-ld doesn't work. so we need to tell CMAKE to use
+  #ld-latest for C/CXX 
+  configure.args-append           -DCMAKE_C_LINK_EXECUTABLE=ld-latest
+  configure.args-append           -DCMAKE_C_LINK_EXECUTABLE=ld-latest
+
+  #need to include llvm-11's emulated tls so it works on clang-19
+  #wonder why this wasn't done on succeeding clangs? this static library
+  #will embed emutls 
+  configure.args-append           -DLIBCXX_ADDITIONAL_LIBRARIES=${prefix}/libexec/llvm-11/lib/clang/11.1.0/lib/darwin/libclang_rt.osx.a
+  configure.args-append           -DLIBCXXABI_ADDITIONAL_LIBRARIES=${prefix}/libexec/llvm-11/lib/clang/11.1.0/lib/darwin/libclang_rt.osx.a
+}
+
+
 set py_ver              3.12
 set py_ver_nodot        [string map {. {}} ${py_ver}]
 depends_build-append    port:python${py_ver_nodot} \
@@ -136,7 +153,7 @@ patchfiles-append \
     0013-clang-add-back-runtime-libraries-used-on-10.4-and-10.patch \
     0014-Fix-float.h-to-work-on-Snow-Leopard-and-earlier.patch \
     0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
-    0025-lldb-add-defines-needed-for-older-SDKs.patch
+    0025-lldb-add-defines-needed-for-older-SDKs.patch 
 
 if {${os.platform} eq "darwin" && ${os.major} < 14} {
     patchfiles-append \
@@ -263,7 +280,7 @@ if { ${subport} eq "clang-${llvm_version}" } {
     select.group        clang
     select.file         ${filespath}/mp-${subport}
 
-    platforms           {darwin >= 15}
+    platforms           {darwin >= 10}
 
     configure.args-append   \
         -DLLVM_ENABLE_PROJECTS="clang\;clang-tools-extra\;compiler-rt\;lld" \
@@ -339,7 +356,38 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
     if {${os.platform} eq "darwin" && ${os.major} <= 11} {
         # xpc.h available 10.7 but doesn't support nullable features
         configure.args-append    -DCLANGD_BUILD_XPC=OFF
+    
     }
+    if {${os.platform} eq "darwin" && ${os.major} < 16} {
+        # 1. Remove version check that prohibits configure for 10.6
+        # 2. Appropriately modify DirectoryWatcher so that:
+        #     - neither os/log.h (10.11 or higher), or;
+        #     - pthread/introspection.h are included (10.12 and higher)
+        #     - FSEventStreamEventFlags are only called on 10.7 and higher
+        # 3. modify libunwind.cpp so that the mach_header is either 32 or 64 bit, and uses the
+        #    older getsectbyheadername, where appropriate.
+        # 4. prevent the use of reexported_symbols_list in libcxx/src/CMakeLists.abi unless
+        #    the minimum sdk is 10.7 or higher
+        patchfiles-append 0026-changes_for_el_crapitan_and_lower.patch
+        
+        if {${os.platform} eq "darwin" && ${os.major} > 10} {
+          configure.cppflags-append -DON_LION_OR_LATER
+        }
+        if {${os.platform} eq "darwin" && ${os.major} < 15} {
+          configure.cppflags-append -DON_BROSEMITE_OR_LOWER
+        }
+        if {${os.platform} eq "darwin" && ${os.major} < 16} {
+          configure.cppflags-append -DON_EL_CAPITAN_OR_LOWER
+        }
+        if {${os.platform} eq "darwin" && ${os.major} < 11} {
+          pre-build {
+          #we need a way to shoehorn in this string replacement, because the build system inserts no
+          #version number and compilation will fail.
+          reinplace "s|work/build/runtimes/runtimes-stamps/runtimes-configure|work/build/runtimes/runtimes-stamps/runtimes-configure \\&\\& sed -i '' 's:\-current_version  /usr/lib/libSystem.B.dylib:\-current_version 1.0.0 /usr/lib/libSystem.B.dylib:g' ${portpath}/work/build/runtimes/runtimes-bins/build.ninja|g" ${portpath}/work/build/build.ninja
+          }
+        }
+    }
+
 }
 
 if {${subport} eq "lldb-${llvm_version}"} {
