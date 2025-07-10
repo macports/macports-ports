@@ -223,11 +223,24 @@ proc get_installed_ports {active} {
 # @returns
 #        0 on success and a non-zero value on error
 proc action_stats {subcommands} {
-    global stats_url stats_id
-
-    # If no subcommands are given (subcommands is empty) print out usage message
-    if {[llength $subcommands] == 0} {
+    # If no subcommand is given (subcommands is empty), or multiple
+    # subcommands are given, print out usage message.
+    set subcommands_len [llength $subcommands]
+    if {$subcommands_len != 1} {
+        if {$subcommands_len > 1} {
+            ui_error "Please select only one subcommand."
+        }
         usage
+        return 1
+    }
+
+    global stats_url stats_id
+    if {![info exists stats_url]} {
+        ui_error "Configuration variable stats_url is not set"
+        return 1
+    }
+    if {![info exists stats_id]} {
+        ui_error "Configuration variable stats_id is not set"
         return 1
     }
 
@@ -244,22 +257,6 @@ proc action_stats {subcommands} {
 
     # Build dictionary of port information
     dict set ports active [get_installed_ports yes]
-
-    # Make sure there aren't too many subcommands
-    if {[llength $subcommands] > 1} {
-        ui_error "Please select only one subcommand."
-        usage
-        return 1
-    }
-
-    if {![info exists stats_url]} {
-        ui_error "Configuration variable stats_url is not set"
-        return 1
-    }
-    if {![info exists stats_id]} {
-        ui_error "Configuration variable stats_id is not set"
-        return 1
-    }
 
     # Get the subcommand
     set cmd [lindex $subcommands 0]
