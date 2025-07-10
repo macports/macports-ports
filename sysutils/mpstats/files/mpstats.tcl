@@ -178,39 +178,18 @@ proc json_encode_stats {id os ports} {
 #        The variants value is encoded using \c _variants_to_variations, the version entry has the form
 #        "$version_$revision".
 proc get_installed_ports {active} {
-    set ilist {}
-    if {[catch {set ilist [registry::installed]} result]} {
-        if {$result ne "Registry error: No ports registered as installed."} {
-            ui_debug "$::errorInfo"
-            return -code error "registry::installed failed: $result"
-        }
+    if {$active} {
+        set ilist [registry::entry installed]
+    } else {
+        set ilist [registry::entry search state imaged]
     }
 
-    set results {}
-    foreach i $ilist {
-        set iactive [lindex $i 4]
-
-        if {(${active} eq "yes") == (${iactive} != 0)} {
-            set iname [lindex $i 0]
-            set iversion [lindex $i 1]
-            set irevision [lindex $i 2]
-            set ivariants [lindex $i 3]
-            set iepoch [lindex $i 5]
-
-            set regref [registry::open_entry $iname $iversion $irevision $ivariants $iepoch]
-            if {[registry::property_retrieve $regref "requested"]} {
-                set irequested "true"
-            } else {
-                set irequested ""
-            }
-
-            set ivariantdict [macports::_variants_to_variations $ivariants]
-
-            lappend results [list name $iname version "${iversion}_${irevision}" requested $irequested variants $ivariantdict]
-        }
-    }
-
-    return $results
+    return [lmap i $ilist {
+        list name [$i name] \
+            version [$i version]_[$i revision] \
+            requested [expr {[$i requested] ? "true" : ""}] \
+            variants [macports::_variants_to_variations [$i variants]]
+    }]
 }
 
 ##
