@@ -30,6 +30,7 @@
 
 set prefix "@PREFIX@"
 
+package require json::write
 package require macports
 if {[catch {mportinit} result]} {
     puts stderr "Error: $result"
@@ -121,117 +122,18 @@ proc getcltinfo {} {
 ###### JSON Encoding helper procs ######
 
 ##
-# Return JSON encoding of a flat "key":"value" dictionary
-#
-# @param data
-#        the variable name of the dict to encode
-# @param indent
-#        an optional indentation string that will be printed at the start of each new line
-# @returns
-#        the given dict, as JSON-formatted string
-proc json_encode_dict {data {indent ""}} {
-    upvar 1 $data db
-
-    set size [dict size $db]
-    set i 1
-
-    # Initialize the JSON string string
-    set json "\{"
-
-    dict for {key values} $db {
-        set line "\n${indent}  \"$key\": \"[dict get $db $key]\""
-
-        # Check if there are any subsequent items
-        if {$i < $size} {
-            append line ","
-        }
-
-        # Add line to the JSON string
-        append json $line
-
-        incr i
-    }
-
-    if {$size > 0} {
-        append json "\n${indent}"
-    }
-    append json "\}"
-
-    return $json
-}
-
-##
-# Encodes a list of strings as a JSON array
-#
-# @param data
-#        the list to be encoded in JSON
-# @param indent
-#        an optional indentation string that will be printed at the start of each new line
-# @returns
-#        the given list, as JSON-formatted string
-proc json_encode_list {data {indent ""}} {
-    set size [llength $data]
-    set i 1
-
-    set json "\["
-
-    foreach item $data {
-        append json "\n  "
-        append json $data
-
-        # Check if there are any subsequent items
-        if {$i < $size} {
-            append json ","
-        }
-
-        incr i
-    }
-
-    if {$size > 0} {
-        append json "\n${indent}"
-    }
-    append json "\]"
-
-    return $json
-}
-
-##
 # Encode a port (from a portlist entry) as a JSON object
 #
-# @param data
-#        the name of the portinfo variable for the port to be encoded
-# @param indent
-#        an optional indentation string that will be printed at the start of each new line
+# @param port_info
+#        the portinfo dict for the port to be encoded
 # @returns
 #        the given port, represented as JSON object with the keys name, version and variants, if
 #        present
-proc json_encode_port {port_info {indent ""}} {
-    upvar 1 $port_info port
-
-    set first true
-
-    set json "\{"
-    foreach name {name version requested variants} {
-        # Skip empty strings
-        if {$port($name) eq ""} {
-            continue
-        }
-
-        # Prepend a comma if this isn't the first item that has been processed
-        if {!$first} {
-            # Add a comma
-            append json ", "
-        } else {
-            set first false
-        }
-
-        # Format the entry as "name_string":"value"
-        append json "\"$name\": \"$port($name)\""
-    }
-
-    append json "\}"
-
-    return $json
+proc json_encode_port {port_info} {
+    set port_info [dict filter $port_info script {key val} {
+        expr {$val ne ""}
+    }]
+    return [json::write object-strings {*}$port_info]
 }
 
 ##
@@ -239,37 +141,11 @@ proc json_encode_port {port_info {indent ""}} {
 #
 # @param data
 #        the list of ports to be encoded in JSON
-# @param indent
-#        an optional indentation string that will be printed at the start of each new line
 # @returns
 #        the given list of ports, encoded as JSON array of return values of json_encode_port
-proc json_encode_portlist {portlist {indent ""}} {
-    set json "\["
-    set first true
-
-    foreach i $portlist {
-        array set port $i
-
-        set encoded [json_encode_port port "${indent}  "]
-
-        # Prepend a comma if this isn't the first item that has been processed
-        if {!$first} {
-            # Add a comma
-            append json ","
-        } else {
-            set first false
-        }
-
-        # Append encoded json object
-        append json "\n${indent}  ${encoded}"
-    }
-
-    if {!$first} {
-        append json "\n${indent}"
-    }
-    append json "\]"
-
-    return $json
+proc json_encode_portlist {portlist} {
+    set portlist [lmap i $portlist {json_encode_port $i}]
+    return [json::write array {*}$portlist]
 }
 
 ##
@@ -277,23 +153,17 @@ proc json_encode_portlist {portlist {indent ""}} {
 #
 # @param id
 #        the statistics UUID for this installation
-# @param os_dict
-#        the variable name of the dict holding statistics about the OS
-# @param ports_dict
-#        the variable name of the dict holding statistics about the installed ports
+# @param os
+#        dict holding statistics about the OS
+# @param ports
+#        dict holding statistics about the installed ports
 # @returns
 #        a JSON-encoded string in the format required by the statistics server ready for submission
-proc json_encode_stats {id os_dict ports_dict} {
-    upvar 1 $os_dict os
-    upvar 1 $ports_dict ports
-
-    set json "\{"
-    append json "\n  \"id\": \"$id\","
-    append json "\n  \"os\": [json_encode_dict os "  "],"
-    append json "\n  \"active_ports\": [json_encode_portlist [dict get $ports "active"] "  "]"
-    append json "\n\}"
-
-    return $json
+proc json_encode_stats {id os ports} {
+    return [json::write object \
+            id [json::write string $id] \
+            os [json::write object-strings {*}$os] \
+            active_ports [json_encode_portlist [dict get $ports active]]]
 }
 
 ##
@@ -394,7 +264,7 @@ proc action_stats {subcommands} {
     dict set os clt_version [getcltinfo]
 
     # Build dictionary of port information
-    dict set ports active   [get_installed_ports yes]
+    dict set ports active [get_installed_ports yes]
 
     # Make sure there aren't too many subcommands
     if {[llength $subcommands] > 1} {
@@ -412,10 +282,14 @@ proc action_stats {subcommands} {
         return 1
     }
 
-    set json [json_encode_stats $stats_id os ports]
-
     # Get the subcommand
     set cmd [lindex $subcommands 0]
+    # Use compact form for submission.
+    if {$cmd eq "submit"} {
+        json::write indented 0
+    }
+
+    set json [json_encode_stats $stats_id $os $ports]
 
     switch $cmd {
         submit {
