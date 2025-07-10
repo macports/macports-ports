@@ -167,23 +167,6 @@ proc json_encode_stats {id os ports} {
 }
 
 ##
-# Helper proc to encode the variants list in a canonical way
-#
-# @param variants
-#        the string of all variants for any given port
-# @returns
-#        a Tcl array object converted to a list where the keys are variant names and the values
-#        are either + or -, depending on whether the variant was selected, or not.
-proc split_variants {variants} {
-    set result {}
-    set l [regexp -all -inline -- {([-+])([[:alpha:]_]+[\w\.]*)} $variants]
-    foreach {match sign variant} $l {
-        lappend result $variant $sign
-    }
-    return $result
-}
-
-##
 # Helper proc to build a list of all installed ports
 #
 # @param active
@@ -192,7 +175,7 @@ proc split_variants {variants} {
 # @returns
 #        a list of installed ports chosen according to the \a active parameter, where each entry is
 #        the list representation of a Tcl array with the keys name, version, requested and variants.
-#        The variants value is encoded using \c split_variants, the version entry has the form
+#        The variants value is encoded using \c _variants_to_variations, the version entry has the form
 #        "$version_$revision".
 proc get_installed_ports {active} {
     set ilist {}
@@ -221,13 +204,9 @@ proc get_installed_ports {active} {
                 set irequested ""
             }
 
-            set nvariants [registry::property_retrieve $regref "negated_variants"]
-            if {$nvariants == 0} {
-                set nvariants ""
-            }
-            set ivariantlist [split_variants "$ivariants$nvariants"]
+            set ivariantdict [macports::_variants_to_variations $ivariants]
 
-            lappend results [list name $iname version "${iversion}_${irevision}" requested $irequested variants $ivariantlist]
+            lappend results [list name $iname version "${iversion}_${irevision}" requested $irequested variants $ivariantdict]
         }
     }
 
