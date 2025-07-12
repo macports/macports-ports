@@ -1,0 +1,402 @@
+diff -NaurdwB -I ^;;[[:space:]]* ./collects/compiler/private/mach-o.rkt ./collects/compiler/private/mach-o.rkt
+--- ./collects/compiler/private/mach-o.rkt	2025-07-06 20:13:09
++++ ./collects/compiler/private/mach-o.rkt	2025-07-06 20:19:26
+@@ -4,25 +4,34 @@
+ (provide add-plt-segment
+          remove-signature
+          add-ad-hoc-signature
+-         get/set-dylib-path)
++         get/set-dylib-path
++         exectuable-for-signing?)
+ 
+-(define (check-exe-id exe-id)
+-  (unless (memv exe-id '(#xFeedFacf #xFeedFace))
+-    (error 'mach-o "unrecognized #x~x" exe-id)))
++(define current-big-endian (make-parameter (system-big-endian?)))
+ 
++(define (check-exe-id exe-id #:error? [error? #t])
++  (cond
++    [(memv exe-id '(#xcfFaedFe #xceFaedFe))
++     (current-big-endian (not (current-big-endian)))
++     #t]
++    [else
++     (or (memv exe-id '(#xFeedFacf #xFeedFace))
++         (and error?
++              (error 'mach-o "unrecognized #x~x" exe-id)))]))
++
+ (define aarch64-machine-type #x0100000C)
+ 
+ (define (read-ulong p)
+-  (integer-bytes->integer (read-bytes 4 p) #f))
++  (integer-bytes->integer (read-bytes 4 p) #f (current-big-endian)))
+ 
+ (define (read-xulong p)
+-  (integer-bytes->integer (read-bytes 8 p) #f))
++  (integer-bytes->integer (read-bytes 8 p) #f (current-big-endian)))
+ 
+ (define (write-ulong v out)
+-  (display (integer->integer-bytes v 4 #f) out))
++  (display (integer->integer-bytes v 4 #f (current-big-endian)) out))
+ 
+ (define (write-xulong v out)
+-  (display (integer->integer-bytes v 8 #f) out))
++  (display (integer->integer-bytes v 8 #f (current-big-endian)) out))
+ 
+ (define (write-be-ulong v out)
+   (display (integer->integer-bytes v 4 #f #t) out))
+@@ -283,7 +292,8 @@
+                                 (if (equal? exe-id #xFeedFacf) 32 28)
+                                 (- code-signature-lc-sz))]
+                     [new-cmd-sz (if segdata
+-                                    (if link-edit-64? 72 56)
++                                    (+ (if link-edit-64? 72 56)  ; segment
++                                       (if link-edit-64? 80 68)) ; section
+                                     0)]
+                     [outlen (if segdata
+                                 (round-up-page (bytes-length segdata) machine-id)
+@@ -321,8 +331,22 @@
+                    ((if link-edit-64? write-xulong write-ulong) outlen out)
+                    (write-ulong 0 out) ; maxprot
+                    (write-ulong 0 out) ; minprot
+-                   (write-ulong 0 out)
++                   (write-ulong 1 out) ; 1 segment
+                    (write-ulong 4 out) ; 4 means SG_NORELOC
++                   (display (pad-segment-name
++                             ;; create secction name as downcased segment name:
++                             (string->bytes/utf-8 (string-downcase (bytes->string/utf-8 segment-name)))) out)
++                   (display (pad-segment-name segment-name) out)
++                   ((if link-edit-64? write-xulong write-ulong) out-addr out)
++                   ((if link-edit-64? write-xulong write-ulong) outlen out)
++                   (write-ulong out-offset out)
++                   (write-ulong 0 out) ; alignment
++                   (write-ulong 0 out) ; reloff
++                   (write-ulong 0 out) ; nreloc
++                   (write-ulong #x10000000 #| S_ATTR_NO_DEAD_STRIP |# out) ; flags
++                   (write-ulong 0 out) ; reserved1
++                   (write-ulong 0 out) ; reserved2
++                   (when link-edit-64? (write-ulong 0 out)) ; reserved3
+                    ;; Shift command positions
+                    (unless sym-tab-pos
+                      (error 'mach-o "symtab position not found"))
+@@ -446,6 +470,9 @@
+         (write-ulong (+ offset delta) out)
+         (flush-output out)))))
+ 
++(define (sign-machine-id? machine-id)
++  (eqv? machine-id aarch64-machine-type))
++
+ (define (remove-signature file)
+   (add-plt-segment file #f))
+ 
+@@ -461,7 +488,7 @@
+        (check-exe-id exe-id)
+        (define machine-id (read-ulong p))
+        (cond
+-         [(eqv? machine-id aarch64-machine-type)
++         [(sign-machine-id? machine-id)
+           (define orig-size (file-size file))
+           (define file-identity (let-values ([(base name dir?) (split-path file)])
+                                   (bytes-append (path->bytes name) #"\0")))
+@@ -698,3 +725,13 @@
+           (close-input-port p)
+           (when out
+             (close-output-port out))))))
++
++(define (exectuable-for-signing? path)
++  (call-with-input-file*
++   path
++   (lambda (p)
++     (define bstr (peek-bytes 8 0 p))
++     (and (bytes? bstr)
++          (= 8 (bytes-length bstr))
++          (check-exe-id (read-ulong p) #:error? #f)
++          (sign-machine-id? (read-ulong p))))))
+diff -NaurdwB -I ^;;[[:space:]]* ./collects/setup/unixstyle-install.rkt ./collects/setup/unixstyle-install.rkt
+--- ./collects/setup/unixstyle-install.rkt	2025-07-06 20:13:33
++++ ./collects/setup/unixstyle-install.rkt	2025-07-06 20:19:53
+@@ -35,7 +35,8 @@
+ (require setup/cross-system
+          (submod compiler/private/collects-path set-executable-tag)
+          racket/file
+-         racket/list)
++         racket/list
++         compiler/private/mach-o)
+ 
+ (module test racket/base)
+ 
+@@ -244,8 +245,12 @@
+                            (if (string? dir)
+                                (string->path dir)
+                                dir))))
++    (when (exectuable-for-signing? file)
++      (remove-signature file))
+     (fix-one #rx#"coLLECTs dIRECTORy:" "collects" (dir: 'collects))
+-    (fix-one #rx#"coNFIg dIRECTORy:" "config" (dir: 'config)))
++    (fix-one #rx#"coNFIg dIRECTORy:" "config" (dir: 'config))
++    (when (exectuable-for-signing? file)
++      (add-ad-hoc-signature file)))
+   (define (fix-script file)
+     (let* ([size (file-size file)]
+            [buf (with-input-from-file file (lambda () (read-bytes size)))]
+diff -NaurdwB -I ^;;[[:space:]]* ./share/pkgs/gui-lib/mred/private/wx/gtk/button.rkt ./share/pkgs/gui-lib/mred/private/wx/gtk/button.rkt
+--- ./share/pkgs/gui-lib/mred/private/wx/gtk/button.rkt	2025-07-07 21:54:10
++++ ./share/pkgs/gui-lib/mred/private/wx/gtk/button.rkt	2025-07-07 21:54:39
+@@ -36,7 +36,7 @@
+ (define _GtkSettings (_cpointer 'GtkSettings))
+ (define-gtk gtk_settings_get_default (_fun -> _GtkSettings))
+ (define-gobj g_object_set/boolean 
+-  (_fun _GtkSettings _string _gboolean (_pointer = #f) -> _void)
++  (_fun #:varargs-after 2 _GtkSettings _string _gboolean (_pointer = #f) -> _void)
+   #:c-id g_object_set)
+ (define (force-button-images-on gtk)
+   ;; Globally turning on button images isn't really the right thing.
+diff -NaurdwB -I ^;;[[:space:]]* ./share/pkgs/gui-lib/mred/private/wx/gtk/canvas.rkt ./share/pkgs/gui-lib/mred/private/wx/gtk/canvas.rkt
+--- ./share/pkgs/gui-lib/mred/private/wx/gtk/canvas.rkt	2025-07-07 21:55:29
++++ ./share/pkgs/gui-lib/mred/private/wx/gtk/canvas.rkt	2025-07-07 21:55:51
+@@ -37,9 +37,11 @@
+ (define-gobj g_object_freeze_notify (_fun _GtkWidget -> _void))
+ (define-gobj g_object_thaw_notify (_fun _GtkWidget -> _void))
+ 
+-(define-gobj g_object_set_double (_fun _GtkWidget _string _double* (_pointer = #f) -> _void)
++(define-gobj g_object_set_double (_fun #:varargs-after 2
++                                       _GtkWidget _string _double* (_pointer = #f) -> _void)
+   #:c-id g_object_set)
+-(define-gobj g_object_get_double (_fun _GtkWidget _string (r : (_ptr o _double)) (_pointer = #f) 
++(define-gobj g_object_get_double (_fun #:varargs-after 2
++                                       _GtkWidget _string (r : (_ptr o _double)) (_pointer = #f)
+ 				       -> _void -> r)
+   #:c-id g_object_get)
+ 
+@@ -124,7 +126,8 @@
+ (define-gtk gtk_container_remove (_fun _GtkWidget _GtkWidget -> _void))
+ (define-gtk gtk_bin_get_child (_fun _GtkWidget -> _GtkWidget))
+ 
+-(define-gobj g_object_set_bool (_fun _GtkWidget _string _gboolean [_pointer = #f] -> _void)
++(define-gobj g_object_set_bool (_fun #:varargs-after 2
++                                     _GtkWidget _string _gboolean [_pointer = #f] -> _void)
+   #:c-id g_object_set)
+ 
+ (define _GtkIMContext (_cpointer 'GtkIMContext))
+diff -NaurdwB -I ^;;[[:space:]]* ./share/pkgs/gui-lib/mred/private/wx/gtk/combo.rkt ./share/pkgs/gui-lib/mred/private/wx/gtk/combo.rkt
+--- ./share/pkgs/gui-lib/mred/private/wx/gtk/combo.rkt	2025-07-07 21:57:10
++++ ./share/pkgs/gui-lib/mred/private/wx/gtk/combo.rkt	2025-07-07 21:57:02
+@@ -46,7 +46,8 @@
+ (define-gobj g_signal_handler_block (_fun _GtkWidget _uint -> _void))
+ (define-gobj g_signal_handler_unblock (_fun _GtkWidget _uint -> _void))
+ 
+-(define-gobj g_signal_emit (_fun _GtkWidget
++(define-gobj g_signal_emit (_fun #:varargs-after 3
++                                 _GtkWidget
+                                  _uint
+                                  _GQuark
+                                  _pointer
+diff -NaurdwB -I ^;;[[:space:]]* ./share/pkgs/gui-lib/mred/private/wx/gtk/list-box.rkt ./share/pkgs/gui-lib/mred/private/wx/gtk/list-box.rkt
+--- ./share/pkgs/gui-lib/mred/private/wx/gtk/list-box.rkt	2025-07-07 21:57:43
++++ ./share/pkgs/gui-lib/mred/private/wx/gtk/list-box.rkt	2025-07-07 21:58:24
+@@ -39,13 +39,16 @@
+ (define-gtk gtk_list_store_newv (_fun _int (_list i _long) -> _GtkListStore))
+ (define-gtk gtk_list_store_clear (_fun _GtkListStore -> _void))
+ (define-gtk gtk_list_store_append (_fun _GtkListStore _GtkTreeIter-pointer _pointer -> _void))
+-(define-gtk gtk_list_store_set (_fun _GtkListStore _GtkTreeIter-pointer _int _string _int -> _void))
++(define-gtk gtk_list_store_set (_fun #:varargs-after 2
++                                     _GtkListStore _GtkTreeIter-pointer _int _string _int -> _void))
+ (define-gtk gtk_tree_view_new_with_model (_fun _GtkListStore -> _GtkWidget))
+ (define-gtk gtk_tree_view_set_model (_fun _GtkWidget _GtkListStore -> _void))
+ (define-gtk gtk_tree_view_set_headers_visible (_fun _GtkWidget _gboolean -> _void))
+ (define-gtk gtk_cell_renderer_text_new (_fun -> _GtkCellRenderer))
+-(define-gtk gtk_tree_view_column_new_with_attributes (_fun _string _GtkCellRenderer _string _int _pointer -> _GtkTreeViewColumn))
+-(define-gtk gtk_tree_view_column_set_attributes (_fun _GtkTreeViewColumn _GtkCellRenderer _string _int _pointer -> _void))
++(define-gtk gtk_tree_view_column_new_with_attributes (_fun #:varargs-after 2
++                                                           _string _GtkCellRenderer _string _int _pointer -> _GtkTreeViewColumn))
++(define-gtk gtk_tree_view_column_set_attributes (_fun #:varargs-after 2
++                                                      _GtkTreeViewColumn _GtkCellRenderer _string _int _pointer -> _void))
+ (define-gtk gtk_tree_view_column_set_resizable (_fun _GtkTreeViewColumn _gboolean -> _void))
+ (define-gtk gtk_tree_view_column_set_clickable (_fun _GtkTreeViewColumn _gboolean -> _void))
+ (define-gtk gtk_tree_view_column_set_reorderable (_fun _GtkTreeViewColumn _gboolean -> _void))
+@@ -75,7 +78,8 @@
+ (define-gtk gtk_tree_selection_unselect_all (_fun  _GtkWidget -> _void))
+ (define-gtk gtk_tree_selection_select_path (_fun  _GtkWidget _pointer -> _void))
+ (define-gtk gtk_tree_selection_unselect_path (_fun  _GtkWidget _pointer -> _void))
+-(define-gtk gtk_tree_path_new_from_indices (_fun _int _int -> _pointer))
++(define-gtk gtk_tree_path_new_from_indices (_fun #:varargs-after 1
++                                                 _int _int -> _pointer))
+ (define-gtk gtk_tree_path_free (_fun _pointer -> _void))
+ (define-gtk gtk_tree_path_get_indices (_fun _pointer -> _pointer))
+ 
+diff -NaurdwB -I ^;;[[:space:]]* ./share/pkgs/gui-lib/mred/private/wx/gtk/procs.rkt ./share/pkgs/gui-lib/mred/private/wx/gtk/procs.rkt
+--- ./share/pkgs/gui-lib/mred/private/wx/gtk/procs.rkt	2025-07-07 21:59:03
++++ ./share/pkgs/gui-lib/mred/private/wx/gtk/procs.rkt	2025-07-07 21:59:20
+@@ -91,11 +91,13 @@
+ 
+ (define _GtkSettings (_cpointer 'GtkSettings))
+ (define-gtk gtk_settings_get_default (_fun -> _GtkSettings))
+-(define-gobj g_object_get/int (_fun _GtkSettings _string (r : (_ptr o _int)) (_pointer = #f) 
++(define-gobj g_object_get/int (_fun #:varargs-after 2
++                                    _GtkSettings _string (r : (_ptr o _int)) (_pointer = #f)
+ 				    -> _void
+ 				    -> r)
+   #:c-id g_object_get)
+-(define-gobj g_object_get/string (_fun _GtkSettings _string (r : (_ptr o _pointer)) (_pointer = #f)
++(define-gobj g_object_get/string (_fun #:varargs-after 2
++                                       _GtkSettings _string (r : (_ptr o _pointer)) (_pointer = #f)
+ 				       -> _void
+ 				       -> r)
+   #:c-id g_object_get)
+diff -NaurdwB -I ^;;[[:space:]]* ./share/pkgs/gui-lib/mred/private/wx/gtk/style.rkt ./share/pkgs/gui-lib/mred/private/wx/gtk/style.rkt
+--- ./share/pkgs/gui-lib/mred/private/wx/gtk/style.rkt	2025-07-07 22:00:09
++++ ./share/pkgs/gui-lib/mred/private/wx/gtk/style.rkt	2025-07-07 22:00:31
+@@ -104,7 +104,8 @@
+ 
+ (define _GtkSettings (_cpointer 'GtkSettings))
+ (define-gtk gtk_settings_get_default (_fun -> _GtkSettings))
+-(define-gobj g_object_get/string (_fun _GtkSettings _string (r : (_ptr o _pointer)) (_pointer = #f)
++(define-gobj g_object_get/string (_fun #:varargs-after 2
++                                       _GtkSettings _string (r : (_ptr o _pointer)) (_pointer = #f)
+                                        -> _void
+                                        -> r)
+   #:c-id g_object_get)
+diff -NaurdwB -I ^;;[[:space:]]* ./src/ChezScheme/c/prim5.c ./src/ChezScheme/c/prim5.c
+--- ./src/ChezScheme/c/prim5.c	2025-07-06 20:14:24
++++ ./src/ChezScheme/c/prim5.c	2025-07-06 20:20:12
+@@ -1463,13 +1463,15 @@
+   } else
+     return pow(x, y);
+ }
+-#elif defined(MACOSX)
+-/* intel macosx delivers precise results for integer inputs, e.g.,
+- * 10.0^21.0, only with long double version of pow */
++#elif (machine_type == machine_type_i3osx || machine_type == machine_type_ti3osx)
++/* intel macosx delivers accurate results for integer inputs, e.g.,
++ * 10.0^21.0, only with long double version of pow; it's not clear
++ * whether that has been true for x86_64 as opposed to i386, but as
++ * of macOS 10.15 (Catalina), pow seems ok for x86_64 */
+ static double s_pow(double x, double y) { return powl(x, y); }
+-#else /* i3fb/ti3fb */
++#else /* i3fb/ti3fb/i3osx/ti3osx */
+ static double s_pow(double x, double y) { return pow(x, y); }
+-#endif /* i3fb/ti3fb */
++#endif /* i3fb/ti3fb/i3osx/ti3osx */
+ 
+ #ifdef __MINGW32__
+ /* asinh() and atanh() sometimes get zero sign wrong */
+diff -NaurdwB -I ^;;[[:space:]]* ./src/ChezScheme/mats/5_3.ms ./src/ChezScheme/mats/5_3.ms
+--- ./src/ChezScheme/mats/5_3.ms	2025-07-06 20:15:16
++++ ./src/ChezScheme/mats/5_3.ms	2025-07-06 20:20:29
+@@ -2706,6 +2706,65 @@
+                        (begin (set! ls (reverse ls)) 3))])
+           (cons n ls)))
+       '(8 c b a c b a))
++    (eqv? 0.0 (expt 0.0 (add1 (expt 2 10))))
++    (eqv? +inf.0 (expt 0.0 (- (add1 (expt 2 10)))))
++    (eqv? -0.0 (expt -0.0 (add1 (expt 2 10))))
++    (eqv? -inf.0 (expt -0.0 (- (add1 (expt 2 10)))))
++    (eqv? 0.0 (expt 0.0 (add1 (expt 2 55))))
++    (eqv? +inf.0 (expt 0.0 (- (add1 (expt 2 55)))))
++    (eqv? -0.0 (expt -0.0 (add1 (expt 2 55))))
++    (eqv? -inf.0 (expt -0.0 (- (add1 (expt 2 55)))))
++    (eqv? 0.0 (expt 0.0 (add1 (expt 2 155))))
++    (eqv? +inf.0 (expt 0.0 (- (add1 (expt 2 155)))))
++    (eqv? -0.0 (expt -0.0 (add1 (expt 2 155))))
++    (eqv? -inf.0 (expt -0.0 (- (add1 (expt 2 155)))))
++    (begin
++      (define ($flexpt~= a b)
++        ;; The accuracy of `expt` ultimately depends on the C
++        ;; library's `pow`, and platforms vary. The `fl~=` predicate
++        ;; reflects that variation for most purposes, but `pow` can
++        ;; vary more. Enumerate a few platforms where we trust `pow` to
++        ;; be good, and increase the fuzz for other platforms.
++        (fl~= a b
++              (case (machine-type)
++                [(i3le ti3le a6le ta6le a6osx ta6osx arm64osx tarm64osx)
++                 *fuzz*]
++                [else
++                 1e-5])))
++      #t)
++    ;; In the following tests, the expected value comes from taking
++    ;; the number represented the flonum first argument to `expt` and
++    ;; finding the flonum that most accurately represents the exact
++    ;; power of that number --- as computed by Brad Lucier's package
++    ;; for computable reals.
++    ($flexpt~= (expt 1.000000000000001 72057594037927936) 5.540622384393264e34)
++    ($flexpt~= (expt -1.000000000000001 72057594037927936) 5.540622384393264e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927937) 5.54062238439327e34)
++    ($flexpt~= (expt -1.000000000000001 72057594037927937) -5.54062238439327e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927938) 5.5406223843932765e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927939) 5.540622384393282e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927940) 5.5406223843932885e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927941) 5.540622384393295e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927942) 5.5406223843933005e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927943) 5.540622384393307e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927944) 5.540622384393313e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927945) 5.540622384393319e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927946) 5.540622384393325e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927947) 5.540622384393332e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927948) 5.540622384393337e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927949) 5.540622384393344e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927950) 5.54062238439335e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927951) 5.540622384393357e34)
++    ($flexpt~= (expt 1.000000000000001 72057594037927952) 5.540622384393362e34)
++    ($flexpt~= (expt .999999999999923 9113206036900117) 1.1282707411034352e-305)
++    ($flexpt~= (expt .999999999999923 9113206036900118) 1.1282707411033483e-305)
++    ($flexpt~= (expt .999999999999923 9113206036900119) 1.1282707411032614e-305)
++    ($flexpt~= (expt .999999999999923 9113206036900120) 1.1282707411031744e-305)
++    ($flexpt~= (expt .999999999999923 9113206036900121) 1.1282707411030875e-305)
++    ($flexpt~= (expt .999999999999923 9113206036900122) 1.1282707411030006e-305)
++    ($flexpt~= (expt .999999999999923 9113206036900123) 1.1282707411029136e-305)
++    ($flexpt~= (expt .999999999999923 9113206036900124) 1.1282707411028267e-305)
++    ($flexpt~= (expt .999999999999923 9113206036900125) 1.1282707411027398e-305)
+  )
+ 
+ (mat expt-mod
+diff -NaurdwB -I ^;;[[:space:]]* ./src/cs/c/build.zuo ./src/cs/c/build.zuo
+--- ./src/cs/c/build.zuo	2025-07-06 20:15:42
++++ ./src/cs/c/build.zuo	2025-07-06 20:20:47
+@@ -322,7 +322,7 @@
+     (when signed-exe?
+       (restore-signature* cross? bootstrap-racket dest)))
+   (define entitlements
+-    (if (and mac? signed-exe?)
++    (if signed-exe?  ; wanted for XOX, too, so no `mac?` check
+         (list (at-source "../../mac/entitlements.plist"))
+         '()))
+ 
+@@ -340,6 +340,7 @@
+     (strip-signature dest)
+     (unless mac-fw?
+       (bootstrap-racket (at-source "embed-boot.rkt")
++                        "--target" m
+                         boot-compress-flags
+                         ""
+                         dest
+@@ -974,7 +975,8 @@
+                        m (lookup 'KERNEL_TARGET_MACH m)
+                        (lookup 'CROSS_COMPILE_TARGET_KIND "machine")
+                        (at-source ".")
+-                       (lookup 'PLT_CS_SLSP_SUFFIX))
++                       (lookup 'PLT_CS_SLSP_SUFFIX)
++                       (if mac? "macosx" "other"))
+        
+        (icp* (at-source "api.h") (build-path includepltdir "racketcs.h"))
+        (icp* (at-source "boot.h") (build-path includepltdir "racketcsboot.h"))
+@@ -1003,8 +1005,10 @@
+ 
+        (cond
+          [mac?
+-          (define dest-framework-dir (build-path (shell-subst (lookup 'FRAMEWORK_INSTALL_DIR) config)
+-                                                 "Racket.framework"))
++          (define dest-framework-dir (at-destdir
++                                      config
++                                      (build-path (shell-subst (lookup 'FRAMEWORK_INSTALL_DIR) config)
++                                                  "Racket.framework")))
+           (define fw-vers-dir (build-path dest-framework-dir "Versions" (~a version "_CS")))
+           (define dest-racket (build-path bindir (cs-suffix "racket")))
+           (define (get-framework-prefix gui?)
+@@ -1120,7 +1124,7 @@
+        (run-raco-setup config dest-racket copytree-racket
+                        ;; this can be redundant if it's also supplied via `SETUP_MACHINE_FLAGS`,
+                        ;; but redundant should be ok:
+-                       (list "-MCR" (~a (at-dir "compiled") ":")
++                       (list "-MCR" (~a (path->complete-path (at-dir "compiled")) ":")
+                              "--cross-compiler" m (at-dir ".")))
+        (maybe-libzo-move config dest-racket copytree-racket at-dir)
+        (maybe-destdir-fix config dest-racket copytree-racket at-dir)
