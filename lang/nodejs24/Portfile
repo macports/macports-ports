@@ -3,6 +3,7 @@
 PortSystem              1.0
 PortGroup               compiler_blacklist_versions 1.0
 PortGroup               legacysupport 1.1
+PortGroup               openssl 1.0
 
 configure.cxx_stdlib    libc++
 compiler.cxx_standard   2020
@@ -41,9 +42,8 @@ depends_build-append    port:pkgconfig \
                         port:python${py_ver_nodot}
 
 depends_lib-append      path:lib/pkgconfig/icu-uc.pc:icu \
-                        path:lib/libz.dylib:zlib \
+                        port:zlib \
                         path:lib/libuv.dylib:libuv-devel \
-                        port:openssl \
                         port:c-ares \
                         port:nghttp2 \
                         port:brotli
@@ -51,10 +51,20 @@ depends_lib-append      path:lib/pkgconfig/icu-uc.pc:icu \
 # all sub-10.15 macs will need macports-libcxx, which (hopefully at this time)
 # will be updated to llvm-19
 if { ${os.platform} eq "darwin" && ${os.major} < 19} {
-    if {${configure.cxx_stdlib} eq "libc++"} {
-        depends_lib-append        port:macports-libcxx
-        configure.cxx-append      -Wl,-L${prefix}/lib/libcxx
-    }
+     if {${os.major} < 11} {
+     #for snow leopard node is pretty weird, we have to include
+     #libc++abi.a or it will fail to link libnode.a at the end
+         configure.cxx-append      /opt/local/lib/libcxx/libc++abi.a
+     #also need to include SecItem.h
+         configure.cppflags-append -I${developer_dir}/SDKs/MacOSX10.6.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/
+     } else {
+        configure.cppflags-append -DON_LION_OR_LATER
+     }
+
+     if {${configure.cxx_stdlib} eq "libc++"} {
+         depends_lib-append        port:macports-libcxx
+         configure.cxx-append      -Wl,-L${prefix}/lib/libcxx
+     }
      if { ${os.major} > 17 } {
      #only mojave and higher have SecTrustEvaluateError
          configure.cppflags-append  -DON_MOJAVE_OR_LATER
@@ -94,7 +104,14 @@ configure.python        ${prefix}/bin/python${py_ver}
 
 patchfiles              patch-common.gypi.diff \
                         patch-add-pthread-qos-guard-for-older-macs.patch \
-                        patch-use-sectrustevaluate-on-1013-and-lower.patch
+                        patch-use-sectrustevaluate-on-1013-and-lower.patch \
+                        patch-add-guard-for-map-jit.patch
+
+if { ${os.major} < 11 } {
+    #snow leopard does not use getsectiondata, so we need to patch it
+    #accordingly.
+    patchfiles-append   patch-modify-getsectiondata-for-snow-leopard.patch
+}
 
 post-patch {
     foreach f [concat ${worksrcpath}/configure \
@@ -126,7 +143,6 @@ pre-configure {
     file copy ${prefix}/include/zconf.h ${prefix}/include/zlib.h \
         ${workpath}/zlib-inc/
     system "cp ${prefix}/include/*ares*.h ${workpath}/cares-inc"
-
 }
 
 # use the system libuv instead of the bundled version, for two reasons:
@@ -139,8 +155,8 @@ configure.args-append   --shared-libuv
 configure.args-append   --without-npm
 configure.args-append   --with-intl=system-icu
 configure.args-append   --shared-openssl
-configure.args-append   --shared-openssl-includes=${prefix}/libexec/openssl3/include/openssl
-configure.args-append   --shared-openssl-libpath=${prefix}/libexec/openssl3/lib
+configure.args-append   --shared-openssl-includes=[openssl::include_dir]
+configure.args-append   --shared-openssl-libpath=[openssl::include_dir]
 configure.args-append   --shared-nghttp2
 configure.args-append   --shared-nghttp2-includes=${prefix}/include/nghttp2
 configure.args-append   --shared-nghttp2-libpath=${prefix}/lib
@@ -154,9 +170,6 @@ configure.args-append   --shared-brotli-libpath=${prefix}/lib
 supported_archs         i386 x86_64 arm64
 
 universal_variant       no
-
-# "V8 doesn't like cache."
-configure.ccache        yes 
 
 test.run                yes
 test.cmd                ${build.cmd} -j${build.jobs}
