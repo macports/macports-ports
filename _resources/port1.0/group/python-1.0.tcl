@@ -435,14 +435,16 @@ proc python_add_dependencies {} {
             if {[tbool test.run]} {
                 switch -- [option python.test_framework] {
                     pytest {
-                        depends_test-delete    port:py${python.version}-pytest
-                        depends_test-append    port:py${python.version}-pytest
+                        depends_test-delete     port:py${python.version}-pytest
+                        depends_test-append     port:py${python.version}-pytest
                     }
                     nose {
-                        depends_test-delete    port:py${python.version}-nose
+                        depends_test-delete     port:py${python.version}-nose \
+                                                port:py${python.version}-pynose
                         if {${python.version} < 312} {
-                            depends_test-append \
-                                                port:py${python.version}-nose
+                            depends_test-append port:py${python.version}-nose
+                        } else {
+                            depends_test-append port:py${python.version}-pynose
                         }
                     }
                     default {}
@@ -574,7 +576,7 @@ options python.add_archflags python.add_cflags python.add_cxxflags \
         python.move_binaries python.move_binaries_suffix
 
 default python.add_archflags yes
-# Setuptool 75.7.0 (supporting Python 3.9+) changed how CFLAGS is handled. 
+# Setuptool 75.7.0 (supporting Python 3.9+) changed how CFLAGS is handled.
 default python.add_cflags {[expr {$supported_archs ne "noarch" && [info exists python.version] && ${python.version} >= 39}]}
 default python.add_cxxflags {${python.add_cflags}}
 default python.add_fflags no
