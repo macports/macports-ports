@@ -236,7 +236,7 @@ pre-destroot {
         } elseif { ${configure.build_arch} eq "ppc64" } {
             set short_host_name powerpc64-apple-${os.platform}${os.major}.x.x
         } elseif { ${os.arch} eq "i386" } {
-            if { ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
+            if { [sysctl hw.cpu64bit_capable] == 1 } {
                 set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
             } else {
                 set short_host_name i686-apple-${os.platform}${os.major}.x.x
