@@ -178,7 +178,6 @@ proc crossgcc.setup {target version} {
     set crossgcc.version $version
 
     uplevel {
-        PortGroup       compiler_blacklist_versions 1.0
         name            ${crossgcc.target}-gcc
         version         ${crossgcc.version}
         categories      cross devel

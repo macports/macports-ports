@@ -133,8 +133,6 @@
 # If you switch to a different version of wxWidgets it would also be
 # sufficient to change one single line line with 'wxWidgets.use <name>'.
 
-PortGroup   compiler_blacklist_versions 1.0
-
 options     wxWidgets.name
 options     wxWidgets.port
 options     wxWidgets.version
@@ -160,8 +158,6 @@ wxWidgets.macosx_version_min
 
 options     wxWidgets.use
 option_proc wxWidgets.use wxWidgets._set
-
-PortGroup   compiler_blacklist_versions 1.0
 
 ## TODO: it would be nice to make the changes reversible
 ##

@@ -30,7 +30,6 @@ default octave.config_h {no}
 # some header files from Octave >= 10.1.0 require C++-17
 compiler.cxx_standard       2017
 # error: field has incomplete type 'const octave::cdef_class'
-PortGroup compiler_blacklist_versions 1.0
 compiler.blacklist-append {clang < 700}
 
 # see https://trac.macports.org/ticket/51643
