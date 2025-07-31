@@ -143,6 +143,7 @@ proc crossgdb.setup {target version} {
                             --mandir=${prefix}/share/man \
                             --with-docdir=${prefix}/share/doc \
                             --with-gdb-datadir=${prefix}/share/${name} \
+                            --with-system-zlib \
                             --without-guile \
                             --without-python \
                             --disable-werror
