@@ -179,8 +179,10 @@ proc crossgdb.setup {target version} {
             file delete ${destroot}${prefix}/share/info/bfd.info
 
             # Avoid conflicts with another crossgdb ports
-            move ${destroot}${prefix}/include/sim \
-                ${destroot}${prefix}/include/${crossgdb.target}-sim
+            if {[file exists ${destroot}${prefix}/include/sim]} {
+                move ${destroot}${prefix}/include/sim \
+                    ${destroot}${prefix}/include/${crossgdb.target}-sim
+            }
         }
 
         notes "
