@@ -177,6 +177,7 @@ proc crossgdb.setup {target version} {
             file delete -force ${destroot}${prefix}/share/locale
             file delete -force ${destroot}${prefix}/include/gdb
             file delete ${destroot}${prefix}/share/info/bfd.info
+            file delete ${destroot}${prefix}/share/info/sframe-spec.info
 
             # Avoid conflicts with another crossgdb ports
             if {[file exists ${destroot}${prefix}/include/sim]} {
