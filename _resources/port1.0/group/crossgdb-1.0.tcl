@@ -31,6 +31,11 @@ array set crossgdb.version_info {
         sha256  115ad5c18d69a6be2ab15882d365dda2a2211c14f480b3502c6eba576e2e95a0 \
         size    23665472
     }}
+    16.3 {xz {
+        rmd160  a278e27886e6523cf22c66fb8e4653ab2518c257 \
+        sha256  bcfcd095528a987917acf9fff3f1672181694926cc18d609c99d0042c00224c5 \
+        size    24434444
+    }}
 }
 
 proc crossgdb.setup {target version} {
@@ -172,10 +177,13 @@ proc crossgdb.setup {target version} {
             file delete -force ${destroot}${prefix}/share/locale
             file delete -force ${destroot}${prefix}/include/gdb
             file delete ${destroot}${prefix}/share/info/bfd.info
+            file delete ${destroot}${prefix}/share/info/sframe-spec.info
 
             # Avoid conflicts with another crossgdb ports
-            move ${destroot}${prefix}/include/sim \
-                ${destroot}${prefix}/include/${crossgdb.target}-sim
+            if {[file exists ${destroot}${prefix}/include/sim]} {
+                move ${destroot}${prefix}/include/sim \
+                    ${destroot}${prefix}/include/${crossgdb.target}-sim
+            }
         }
 
         notes "
