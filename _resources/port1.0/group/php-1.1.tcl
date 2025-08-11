@@ -103,7 +103,7 @@ proc php._set_name {option action args} {
 # when the php port is updated.
 
 options php.latest_stable_branch
-default php.latest_stable_branch 8.3
+default php.latest_stable_branch 8.4
 
 
 # php.default_branch: the branch of PHP for which the port should be installed
