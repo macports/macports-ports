@@ -553,7 +553,7 @@ proc rust::get_sdkroot {sdk_version} {
     }
 
     ui_error "Rust PG: unable to find SDK for ${sdk_version}"
-    return -code error {}
+    return {}
 }
 
 # Is build caching enabled ?
