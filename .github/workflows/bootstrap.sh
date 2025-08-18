@@ -17,7 +17,7 @@ endgroup() {
     printtag "endgroup"
 }
 
-MACPORTS_VERSION=${MP_CI_RELEASE:-2.11.4}
+MACPORTS_VERSION=${MP_CI_RELEASE:-2.11.5}
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 OS_ARCH=$(uname -m)
