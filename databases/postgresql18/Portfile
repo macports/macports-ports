@@ -1,0 +1,185 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           compilers 1.0
+PortGroup           muniversal 1.0
+PortGroup           legacysupport 1.1
+PortGroup           openssl 1.0
+
+name                postgresql18
+version             18.0
+revision            0
+
+categories          databases
+maintainers         {gmail.com:davidgilman1 @dgilman} \
+                    {@barracuda156 gmail.com:vital.had} \
+                    openmaintainer
+license             Permissive
+description         The most advanced open-source database available anywhere.
+long_description    PostgreSQL is Object-Relational Database Management System.\
+                    It supports almost all SQL constructs, including transactions, \
+                    subselects, and user-defined types and functions. Write-ahead \
+                    logging means increased performance while retaining data \
+                    integrity.
+conflicts           postgresql96-doc postgresql10-doc postgresql11-doc postgresql12-doc \
+                    postgresql13-doc postgresql14-doc postgresql15-doc
+
+homepage            https://www.postgresql.org/
+master_sites        postgresql:source/v${version}/
+distname            postgresql-${version}
+
+checksums           rmd160  e12b24e7ae50022b9dfcdb6b019d112ea23bac35 \
+                    sha256  0d5b903b1e5fe361bca7aa9507519933773eb34266b1357c4e7780fdee6d6078 \
+                    size    22412570
+
+use_bzip2           yes
+
+# https://trac.macports.org/ticket/66060
+# https://trac.macports.org/ticket/67365
+# https://postgrespro.ru/list/thread-id/2551610
+# The problem is specific to PPC: https://github.com/macports/macports-ports/pull/16460
+platform darwin powerpc {
+    patchfiles-append  patch-icu.diff \
+                       patch-fix-ppc-asm.diff
+}
+
+openssl.branch      3
+depends_lib         port:readline port:zlib \
+                    port:libxml2 port:libxslt \
+                    path:lib/pkgconfig/icu-uc.pc:icu \
+                    path:lib/libgssapi_krb5.dylib:kerberos5 \
+                    path:lib/libzstd.dylib:zstd \
+                    path:lib/liblz4.dylib:lz4
+depends_build       port:bison port:pkgconfig \
+                    port:docbook-xml-4.5 port:docbook-xsl-nons \
+                    path:bin/perl:perl5
+depends_run         port:postgresql_select-18 \
+                    path:share/curl/curl-ca-bundle.crt:curl-ca-bundle
+
+legacysupport.newest_darwin_requires_legacy \
+                    15
+worksrcdir          postgresql-${version}
+
+if {${universal_possible} && [variant_isset universal]} {
+    set zicpath     ${worksrcpath}-${build_arch}/src/timezone/zic
+} else {
+    set zicpath     ${worksrcpath}/src/timezone/zic
+}
+if {${os.platform} eq "darwin" && ${os.major} < 10} {
+    depends_build-append port:flex
+}
+set libdir          ${prefix}/lib/${name}
+set mandir          ${prefix}/share/doc/${name}/man
+configure.args      PG_SYSROOT=disabled \
+                    ZIC=${zicpath} \
+                    --sysconfdir=${prefix}/etc/${name} \
+                    --bindir=${libdir}/bin \
+                    --libdir=${libdir} \
+                    --includedir=${prefix}/include/${name} \
+                    --datadir=${prefix}/share/${name} \
+                    --docdir=${prefix}/share/doc/${name} \
+                    --mandir=${mandir} \
+                    --with-includes=${prefix}/include \
+                    --with-libraries=${prefix}/lib \
+                    --with-openssl \
+                    --with-bonjour \
+                    --with-readline \
+                    --with-zlib \
+                    --with-lz4 \
+                    --with-zstd \
+                    --with-libxml \
+                    --with-libxslt \
+                    --with-gssapi \
+                    --with-uuid=e2fs \
+                    --with-icu
+
+configure.universal_args-delete --disable-dependency-tracking
+
+# building psql with clang from Xcode prior to 4.4 causes segfault on query; see #31717
+compiler.blacklist-append {clang < 421}
+compilers.choose          cc cxx
+compilers.setup           -gcc -fortran -clang33 -clang34 -clang37 -clang90 -clang13
+notes "To use the postgresql server as a startup item install the ${name}-server port."
+
+if {${universal_possible} && [variant_isset universal]} {
+    configure.cflags-append    -DAC_APPLE_UNIVERSAL_BUILD
+}
+
+build.type          gnu
+build.target        world
+
+destroot.target     install-world
+
+test.run            yes
+test.target         check
+
+# remember to change livecheck with first proper release
+livecheck.type      regex
+#livecheck.regex    (18\\.\[.0-9\]*\[a-z\]+\[0-9\])
+#livecheck.regex    (18\[a-z\]+\[0-9\])
+livecheck.regex    alt="v(18\\.\[.0-9\]+)"
+livecheck.url       ${homepage}/ftp/source/
+
+post-destroot {
+    ln -s ${libdir}/bin/psql ${destroot}${prefix}/bin/psql18
+
+    reinplace -E "s#^CFLAGS =#CFLAGS +=#g" \
+        ${destroot}${prefix}/lib/${name}/pgxs/src/Makefile.global
+    reinplace -E "s#^MKDIR_P.*#MKDIR_P = /bin/mkdir -p#g" \
+        ${destroot}${prefix}/lib/${name}/pgxs/src/Makefile.global
+
+    set gzip [findBinary gzip ${portutil::autoconf::gzip_path}]
+    foreach manpage [glob -type f ${destroot}${mandir}/man\[1-9\]/*] {
+        system "$gzip -9vf ${manpage}"
+    }
+}
+
+if {!${universal_possible} || ![variant_isset universal]} {
+    post-destroot {
+        reinplace -E "s#-arch\[\[:space:\]\]+\[\[:alnum:\]_\]+##g" \
+            ${destroot}${prefix}/lib/${name}/pgxs/src/Makefile.global
+    }
+} else {
+    merger-post-destroot {
+        foreach arch ${configure.universal_archs} {
+            reinplace -E "s#-arch\[\[:space:\]\]+\[\[:alnum:\]_\]+##g" \
+                ${destroot}-${arch}${prefix}/lib/${name}/pgxs/src/Makefile.global
+
+            reinplace -E "s#${worksrcpath}-${arch}#${worksrcpath}#g" \
+                ${destroot}-${arch}${prefix}/lib/${name}/pgxs/src/Makefile.global
+        }
+    }
+}
+
+variant python3 description {add support for python 3.x} {
+    depends_lib-append      port:python313
+    configure.args-append   --with-python
+    configure.python        ${prefix}/bin/python3.13
+}
+
+variant perl description {add Perl support} {
+    depends_lib-append      bin:perl:perl5
+    configure.args-append   --with-perl
+}
+
+variant tcl description {add Tcl support} {
+    depends_lib-append      port:tcl
+    configure.args-append   --with-tcl --with-tclconfig=${prefix}/lib
+    configure.env-append    TCLSH=${prefix}/bin/tclsh
+}
+
+variant llvm description {add support for JIT compilation} {
+    set llvm_ver 21
+
+    foreach clang ${compilers.clang_variants} {
+        if { [variant_exists ${clang}] && [variant_isset ${clang}] } {
+            set clang_port_ver [string range ${clang} 5 6]
+            set llvm_ver ${clang_port_ver}
+        }
+    }
+
+    depends_lib-append      port:llvm-${llvm_ver}
+    configure.args-append   --with-llvm
+    configure.env-append    LLVM_CONFIG=${prefix}/libexec/llvm-${llvm_ver}/bin/llvm-config \
+                            CLANG=${configure.cc}
+}
