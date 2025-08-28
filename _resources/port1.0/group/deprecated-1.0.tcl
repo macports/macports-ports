@@ -11,6 +11,7 @@
 # deprecated.maximum_osmajor:      maximum OS version supported
 # deprecated.upstream_support:     is the project supported upstream?
 # deprecated.macports_support:     does the project have proper support from the MacPorts maintainers?
+# deprecated.eol_version:          is this port for a version that no longer receives upstream updates?
 
 options deprecated.maximum_xcodeversion \
         deprecated.maximum_osmajor      \
