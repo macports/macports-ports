@@ -103,12 +103,12 @@ if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
             lappend gcc_versions 10 11 12 13
         }
     }
-    lappend gcc_versions 14 devel
+    lappend gcc_versions 14 15 devel
 }
 
 # GCC version providing the primary runtime
 # Note settings here *must* match those in the lang/libgcc port.
-set gcc_main_version 14
+set gcc_main_version 15
 
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
@@ -186,7 +186,10 @@ if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
     lappend clang_versions 13 14 15 16 17 18
 }
 if { ${os.major} >= 15 || ${os.platform} ne "darwin"} {
-    lappend clang_versions 19 20 devel
+    lappend clang_versions 19 20
+}
+if { ${os.major} >= 16 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 21 devel
 }
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
 foreach ver ${clang_versions} {

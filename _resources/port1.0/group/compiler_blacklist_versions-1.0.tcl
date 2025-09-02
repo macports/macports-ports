@@ -3,3 +3,5 @@
 pre-fetch {
     ui_warn "Port maintainers: the compiler_blacklist_versions PortGroup is obsolete and should be removed from Portfiles."
 }
+
+# This PortGroup is scheduled for deletion after: 2026-08-12

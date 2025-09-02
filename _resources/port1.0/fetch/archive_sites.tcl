@@ -24,7 +24,6 @@ set cjj.kr      http
 #set fco.it      ${letsencrypt_https_or_http}
 set fco.it      http
 set fra.de      ${letsencrypt_https_or_http}
-set jnb.za      ${letsencrypt_https_only}
 set jog.id      http
 set kmq.jp      ${letsencrypt_https_or_http}
 set lis.pt      ${letsencrypt_https_or_http}
@@ -50,7 +49,6 @@ set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inlin
     ${cph.dk}://cph.dk.packages.macports.org/:nosubdir
     ${fco.it}://fco.it.packages.macports.org/:nosubdir
     ${fra.de}://fra.de.packages.macports.org/:nosubdir
-    ${jnb.za}://jnb.za.packages.macports.org/packages/:nosubdir
     ${jog.id}://jog.id.packages.macports.org/macports/packages/:nosubdir
     ${kmq.jp}://kmq.jp.packages.macports.org/:nosubdir
     ${lis.pt}://lis.pt.packages.macports.org/:nosubdir
