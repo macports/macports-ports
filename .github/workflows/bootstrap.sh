@@ -17,7 +17,7 @@ endgroup() {
     printtag "endgroup"
 }
 
-MACPORTS_VERSION=${MP_CI_RELEASE:-2.10.7}
+MACPORTS_VERSION=${MP_CI_RELEASE:-2.11.5}
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 OS_ARCH=$(uname -m)
@@ -122,6 +122,8 @@ echo "file://${PWD}/ports [default,nosync]" | sudo tee /opt/local/etc/macports/s
 echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Only download from the CDN, not the mirrors
 echo "host_blacklist *.distfiles.macports.org *.packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+# Prefer hosts close to github
+echo "preferred_hosts mirror.fcix.net github.com *.github.com" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Also try downloading archives from the private server
 echo "archive_site_local https://packages-private.macports.org/:tbz2" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Prefer to get archives from the public server instead of the private server

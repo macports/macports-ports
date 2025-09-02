@@ -316,6 +316,12 @@ array set qt6::components {
         libexec/qt6/lib/QtQuick3DPhysics.framework/QtQuick3DPhysics
         ""
     }
+    qtgrpc {
+        6.5
+        7.0
+        libexec/qt6/lib/QtGrpc.framework/QtGprc
+        ""
+    }
     qtlocation {
         6.5
         7.0

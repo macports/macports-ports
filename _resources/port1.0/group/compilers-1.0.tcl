@@ -103,12 +103,12 @@ if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
             lappend gcc_versions 10 11 12 13
         }
     }
-    lappend gcc_versions 14 devel
+    lappend gcc_versions 14 15 devel
 }
 
 # GCC version providing the primary runtime
 # Note settings here *must* match those in the lang/libgcc port.
-set gcc_main_version 14
+set gcc_main_version 15
 
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
@@ -167,34 +167,29 @@ foreach ver ${gcc_versions} {
 set clang_versions [list]
 if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
     if {${os.major} < 16} {
-        if {${os.major} < 9} {
-            lappend clang_versions 3.3
-        }
-        lappend clang_versions 3.4
-        if {${os.major} >= 9} {
-            lappend clang_versions 3.7
-        }
+        lappend clang_versions 3.4 3.7
     }
-    if { ${os.major} >= 9 && ${os.major} < 20 } {
+    if { ${os.major} < 20 } {
         lappend clang_versions 5.0 6.0 7.0 8.0
     }
-    if { ${os.major} >= 9 && ${os.major} < 23 } {
+    if { ${os.major} < 23 } {
         lappend clang_versions 9.0 10
     }
 }
-if { ${os.major} >= 9 || ${os.platform} ne "darwin" } {
-    if { ${os.major} <= 23 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 11
-        if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
-            lappend clang_versions 12
-        }
-    }
+if { ${os.major} <= 23 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 11
     if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 13 14 15 16 17 18
+        lappend clang_versions 12
     }
-    if { ${os.major} >= 15 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 19 20 devel
-    }
+}
+if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 13 14 15 16 17 18
+}
+if { ${os.major} >= 15 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 19 20
+}
+if { ${os.major} >= 16 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 21 devel
 }
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
 foreach ver ${clang_versions} {
@@ -851,7 +846,7 @@ proc compilers::add_gcc_rpath_support {} {
     global prefix os.platform os.major
     set gcc_v [compilers::get_current_gcc_version]
     if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
-        if {${os.platform} eq "darwin" && ${os.major} > 8} {
+        if {${os.platform} eq "darwin"} {
             ui_debug "compilers PG: RPATH added to ldflags as GCC version is ${gcc_v}"
             configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
             configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc

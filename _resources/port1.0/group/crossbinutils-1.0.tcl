@@ -118,7 +118,6 @@ proc crossbinutils.setup {target version} {
 
     crossbinutils.target ${target}
 
-    PortGroup           compiler_blacklist_versions 1.0
     default name        ${target}-binutils
     version             ${version}
     default categories  {cross devel}
