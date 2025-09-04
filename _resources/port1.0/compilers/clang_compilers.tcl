@@ -18,9 +18,10 @@ if {${os.major} >= 17 || ${os.platform} ne "darwin"} {
     # https://github.com/macports/macports-ports/pull/21051
     # https://trac.macports.org/ticket/68640
     if {${os.major} >= 22 || ${os.platform} ne "darwin"} {
-        if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2020 } {
-            lappend compilers macports-clang-21
-        }
+        # Disable clang 21 until a bit more mature
+        #if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2020 } {
+        #    lappend compilers macports-clang-21
+        #}
         if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2014 } {
             lappend compilers macports-clang-20 macports-clang-19
         }
