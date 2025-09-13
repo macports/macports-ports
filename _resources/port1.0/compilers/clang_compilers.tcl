@@ -18,11 +18,12 @@ if {${os.major} >= 17 || ${os.platform} ne "darwin"} {
     # https://github.com/macports/macports-ports/pull/21051
     # https://trac.macports.org/ticket/68640
     if {${os.major} >= 22 || ${os.platform} ne "darwin"} {
-        if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2017 } {
-            lappend compilers macports-clang-20
+        # Expose clang-21 to ports needing the newest standards
+        if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2023 } {
+            lappend compilers macports-clang-21
         }
         if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2014 } {
-            lappend compilers macports-clang-19
+            lappend compilers macports-clang-20 macports-clang-19
         }
         # Always allow clang-18 on macOS15+, otherwise if c++11 or newer is required
         if { ${os.platform} ne "darwin" || ${os.major} >= 24 || ${compiler.cxx_standard} >= 2011 } {
@@ -47,7 +48,7 @@ if { ${os.major} >= 10 || ${os.platform} ne "darwin"} {
 }
 
 if {${os.platform} eq "darwin"} {
-    if {${os.major} >= 9 && ${os.major} <= 23} {
+    if {${os.major} <= 23} {
         lappend compilers macports-clang-11
         if {[option build_arch] ne "arm64"} {
             lappend compilers macports-clang-10 macports-clang-9.0
@@ -56,19 +57,14 @@ if {${os.platform} eq "darwin"} {
             }
         }
     }
-    if {${os.major} >= 9 && ${os.major} < 20} {
+    if {${os.major} < 20} {
         lappend compilers macports-clang-7.0 \
             macports-clang-6.0 \
             macports-clang-5.0
     }
     if {${os.major} < 16} {
         # The Sierra SDK requires a toolchain that supports class properties
-        if {${os.major} >= 9} {
-            lappend compilers macports-clang-3.7
-        }
-        lappend compilers macports-clang-3.4
-        if {${os.major} < 9} {
-            lappend compilers macports-clang-3.3
-        }
+        lappend compilers macports-clang-3.7 \
+                          macports-clang-3.4
     }
 }

@@ -2,7 +2,6 @@
 
 PortSystem                                       1.0
 PortGroup           select                       1.0
-PortGroup           compiler_blacklist_versions  1.0
 PortGroup           active_variants              1.1
 PortGroup           conflicts_build              1.0
 
@@ -11,9 +10,7 @@ name                gcc13
 
 homepage            https://gcc.gnu.org/
 
-if {${subport} eq "gcc13"} {
-    platforms           {darwin >= 10}
-}
+platforms           {darwin >= 10}
 
 categories          lang
 maintainers         nomaintainer
@@ -22,20 +19,20 @@ license             {GPL-3+ Permissive}
 
 description         The GNU compiler collection
 long_description    {*}${description}, including front ends for \
-                    C, C++, Objective-C, Objective-C++ and Fortran.
+                    C, C++, Objective-C, Objective-C++, Modula-2 and Fortran.
 
 # Remember to reset all revision increments below to 0 on new versions
-version             13.3.0
-revision            2
+version             13.4.0
+revision            1
 
 set libgccname      lib${name}
 subport             ${libgccname} { revision [ expr ${revision} + 0 ] }
 
 set libcxxname      ${name}-libcxx
 
-checksums           rmd160  a01df0d39af53b8bef8ff42f87469212589984ec \
-                    sha256  0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083 \
-                    size    87909952
+checksums           rmd160  db87d281d0623f56b808b4e28c99f17d955f0524 \
+                    sha256  9c4ce6dbb040568fdc545588ac03c5cbc95a8dbf0c7aa490170843afb59ca8f5 \
+                    size    88530720
 
 # Primary releases
 master_sites        https://ftpmirror.gnu.org/gcc/gcc-${version}/ \
@@ -64,8 +61,6 @@ depends_lib-append  port:cctools \
                     port:mpfr \
                     port:zlib \
                     port:zstd
-depends_run-append  port:gcc_select \
-                    port:libgcc13
 
 depends_skip_archcheck-append gcc_select ld64 cctools
 license_noconflict  gmp mpfr ppl libmpc zlib
@@ -86,7 +81,7 @@ platform darwin {
     configure.pre_args-append --build=${gcc_triple}
 }
 
-set gcc_configure_langs {c c++ objc obj-c++ lto fortran}
+set gcc_configure_langs {c c++ objc obj-c++ lto fortran m2}
 if {${subport} eq ${name} && ${build_arch} ne "i386"} {
     # jit compiler is not building on i386 systems
     # https://trac.macports.org/ticket/61130
@@ -173,18 +168,8 @@ if { ${subport} ne ${libcxxname} && ${os.platform} eq "darwin" && ${subport} ne 
 
 if { ${os.platform} eq "darwin" } {
     # Patch generated from https://github.com/iains/gcc-13-branch
-    # git diff --no-prefix releases/gcc-13.3.0 gcc-13.3-darwin-r1
+    # git diff --no-prefix releases/gcc-13.4.0 gcc-13.4-darwin-r0
     patchfiles-append      patch-darwin-gcc-${version}.diff
-
-    # Additional patches from https://github.com/iains/gcc-13-branch, from
-    # branch gcc-13-3-darwin, after tag gcc-13.3-darwin-r1, including macOS 15
-    # (and macOS 14 with Xcode 16) compatibility patches.
-    patchfiles-append      0001-Darwin-Recognise-weak_framework-in-the-driver-PR1162.patch \
-                           0002-Darwin-Allow-for-as-versions-that-need-for-std-in.patch \
-                           0003-libgcc-Darwin-Drop-the-legacy-library-build-for-macO.patch \
-                           0004-c-family-Allow-placement-of-attributes-on-function-d.patch \
-                           0005-c-family-Advertise-the-availability-attribute-suppor.patch \
-                           0006-libgcc-aarch64-Darwin-Fix-ordering-of-function-label.patch
 
     # GCC fixinc work-around for sys/ucred.h on OSX10.14.4 no longer seems to work ???
     if { ${os.major} == 18 } {
@@ -287,7 +272,6 @@ subport ${libcxxname} {
     extract.rename          no
     use_configure           no
     supported_archs         noarch
-    platforms               any
     # Find clang/llvm version to use from active variant
     proc getClangVersion {} {
         if { [regexp {clang(.*)} [clang_variant_name] -> clang_v] } {
@@ -421,26 +405,107 @@ if {${subport} eq ${libgccname}} {
         }
     }
 
-    # No need to build as nothing that isn't provided by libgcc14
-    platforms   any
+    # Need to deactivate current libgcc before destrooting the new build otherwise
+    # the right libs are not picked up to be included
+    pre-destroot {
+        if {![catch {registry_active ${libgccname}}]} {
+            registry_deactivate_composite ${libgccname} "" [list ports_nodepcheck 1]
+        }
+    }
 
-    depends_run path:share/doc/libgcc/README:libgcc
-    depends_lib
+    # http://trac.macports.org/ticket/35770
+    # http://trac.macports.org/ticket/38814
+    # While there can be multiple versions of these runtimes in a single
+    # process, it is not possible to pass objects between different versions,
+    # so we simplify this by having the libgcc port provide the newest version
+    # of these runtimes for all versions of gcc to use.
+    #
+    # If there is a binary incompatible change to the runtime in a future
+    # version of gcc, then the latest version of gcc to provide a given ABI
+    # version should continue to provide a subport for that and older gcc
+    # versions.
 
-    fetch.type    none
-    build         { }
-    use_configure no
-    patchfiles
+    depends_build-append  {*}${depends_lib}
+    depends_lib           port:zlib port:libiconv port:libgcc14
+    depends_build-delete  {*}${depends_lib}
 
-    destroot {
+    configure.args-replace \
+        --libdir=${prefix}/lib/${name} \
+        --libdir=${prefix}/lib/libgcc
+
+    configure.args-replace \
+        --with-gxx-include-dir=${prefix}/include/${name}/c++/ \
+        --with-gxx-include-dir=${prefix}/include/gcc/c++/
+
+    post-destroot {
+
+        # Temporary working dir for dylibs
+        file mkdir ${destroot}${prefix}/lib/libgcc.merged
+
+        # loop over libs to install
+        set dylibs [dylib_list ${destroot}${prefix}/lib/libgcc]
+        foreach dylib ${dylibs} {
+
+            # Different OS versions (e.g. Leopard) or architectures (e.g. PPC) don't produce all the dylibs
+            # https://trac.macports.org/ticket/40098
+            # https://trac.macports.org/ticket/40100
+            if { ![file exists ${destroot}${prefix}/lib/libgcc/${dylib}] } {
+                continue
+            }
+
+            # Skip anything provided by a newer libgcc version (i.e. already installed in prefix)
+            if { [file exists ${prefix}/lib/libgcc/${dylib}] } {
+                continue
+            }
+
+            # Move dylib to temp area
+            move ${destroot}${prefix}/lib/libgcc/${dylib} ${destroot}${prefix}/lib/libgcc.merged
+
+            # Universal support
+            if {[variant_exists universal] && [variant_isset universal]} {
+                foreach archdir [glob ${destroot}${prefix}/lib/libgcc/*/] {
+                    set archdir_nodestroot [string map "${destroot}/ /" ${archdir}]
+                    if {[file exists ${archdir}/${dylib}]} {
+                        system "install_name_tool -id ${prefix}/lib/libgcc/${dylib} ${archdir}/${dylib}"
+                        foreach link [glob -tails -directory ${archdir} *.dylib] {
+                            system "install_name_tool -change ${archdir_nodestroot}${link} ${prefix}/lib/libgcc/${link} ${archdir}/${dylib}"
+                        }
+                        system "lipo -create -output ${destroot}${prefix}/lib/libgcc.merged/${dylib}~ ${destroot}${prefix}/lib/libgcc.merged/${dylib} ${archdir}/${dylib} && mv ${destroot}${prefix}/lib/libgcc.merged/${dylib}~ ${destroot}${prefix}/lib/libgcc.merged/${dylib}"
+                    }
+                }
+            }
+
+            # strip debug symbols to supress debugger warnings:
+            # http://trac.macports.org/attachment/ticket/34831
+            if {! [string match *libgcc_ext* ${dylib}]} {
+                system "strip -x ${destroot}${prefix}/lib/libgcc.merged/${dylib}"
+            }
+        }
+
+        # Remove stuff not provided by libgccX ports
+        file delete -force ${destroot}${prefix}/bin
+        file delete -force ${destroot}${prefix}/share
+        file delete -force ${destroot}${prefix}/lib/libgcc
+        file delete -force ${destroot}${prefix}/libexec
+
+        # Move temporary lib dir back in place
+        move ${destroot}${prefix}/lib/libgcc.merged ${destroot}${prefix}/lib/libgcc
+
+        # Remove includes. Provided by newer libgcc.
+        file delete -force ${destroot}${prefix}/include
+
         set doc_dir ${destroot}${prefix}/share/doc/${subport}
         xinstall -m 755 -d ${doc_dir}
-        system "echo ${subport} provides no runtime > ${doc_dir}/README"
+        system "echo ${subport} provides additional runtime > ${doc_dir}/README"
+
     }
 
 }
 
 if {${subport} eq ${name}} {
+
+    depends_run-append    port:gcc_select
+    depends_lib-append    port:${libgccname}
 
     post-destroot {
 

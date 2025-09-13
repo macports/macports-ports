@@ -133,8 +133,6 @@
 # If you switch to a different version of wxWidgets it would also be
 # sufficient to change one single line line with 'wxWidgets.use <name>'.
 
-PortGroup   compiler_blacklist_versions 1.0
-
 options     wxWidgets.name
 options     wxWidgets.port
 options     wxWidgets.version
@@ -160,8 +158,6 @@ wxWidgets.macosx_version_min
 
 options     wxWidgets.use
 option_proc wxWidgets.use wxWidgets._set
-
-PortGroup   compiler_blacklist_versions 1.0
 
 ## TODO: it would be nice to make the changes reversible
 ##
@@ -223,22 +219,10 @@ proc wxWidgets._set {option action args} {
         wxWidgets.name      "wxWidgets"
         wxWidgets.version   "3.0"
         wxWidgets.port      "wxWidgets-3.0"
-        if {${os.major} < 9} {
-            pre-fetch {
-                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
-                return -code error "incompatible macOS version"
-            }
-        }
     } elseif {${args} eq "wxPython-3.0"} {
         wxWidgets.name      "wxPython"
         wxWidgets.version   "3.0"
         wxWidgets.port      "wxPython-3.0"
-        if {${os.major} < 9} {
-            pre-fetch {
-                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
-                return -code error "incompatible macOS version"
-            }
-        }
     # ugly workaround to allow some C++11-only applications to be built on < 10.9
     } elseif {${args} eq "wxWidgets-3.0-cxx11"} {
         global cxx_stdlib
@@ -249,12 +233,6 @@ proc wxWidgets._set {option action args} {
         } else {
             wxWidgets.version   "3.0"
             wxWidgets.port      "wxWidgets-3.0"
-        }
-        if {${os.major} < 9} {
-            pre-fetch {
-                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
-                return -code error "incompatible macOS version"
-            }
         }
         # this doesn't work
         # PortGroup cxx11 1.1

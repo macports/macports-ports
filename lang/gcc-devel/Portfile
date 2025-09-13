@@ -2,7 +2,6 @@
 
 PortSystem                                       1.0
 PortGroup           select                       1.0
-PortGroup           compiler_blacklist_versions  1.0
 PortGroup           active_variants              1.1
 PortGroup           conflicts_build              1.0
 
@@ -27,13 +26,13 @@ set libgccname      lib${name}
 
 set libcxxname      ${name}-libcxx
 
-version         15-20240630
+version         15-20250510
 revision        0
 subport         ${libgccname} { revision [ expr ${revision} + 0 ] }
 
-checksums       rmd160  5a5baf2efa5750eb6952fe48c3cd061b58039b37 \
-                sha256  e5d214bafbce9fc30ac916603765f3bf4bd79faee4ad0d2693772b066638568f \
-                size    88427396
+checksums       rmd160  36294e955fe0834efe59e02e17e1c434fe5fb1f9 \
+                sha256  d019003a5caadf35df04d22f6d398d602ff16318db928443aab0a6b7f756843f \
+                size    92092512
 
 # Primary releases
 master_sites    https://ftpmirror.gnu.org/gcc/gcc-${version}/ \
@@ -71,6 +70,17 @@ depends_lib-append  port:cctools \
 depends_run-append  port:gcc_select \
                     port:libgcc-devel
 
+platform darwin {
+    if {(${configure.build_arch} in [list ppc ppc64]) || ${os.major} < 10} {
+        configure.compiler.add_deps \
+                        no
+        depends_build-append \
+                        port:gcc10-bootstrap
+        configure.cc    ${prefix}/libexec/gcc10-bootstrap/bin/gcc
+        configure.cxx   ${prefix}/libexec/gcc10-bootstrap/bin/g++
+    }
+}
+
 depends_skip_archcheck-append gcc_select ld64 cctools
 license_noconflict  gmp mpfr ppl libmpc zlib
 
@@ -82,6 +92,8 @@ set major           devel
 proc gcc_arch {arch} {
     switch ${arch} {
         arm64       {return aarch64}
+        ppc64       {return powerpc64}
+        ppc         {return powerpc}
         default     {return ${arch}}
     }
 }
@@ -99,9 +111,20 @@ if {${subport} eq ${name} && ${build_arch} ne "i386"} {
 }
 
 proc get_clean_sysroot {} {
-    global configure.sdkroot
-    # if the sdkroot is one of the current, rapidly changing SDKS, use the generic one
-    return [regsub {MacOSX1[1-9]\.[0-9]+\.sdk} ${configure.sdkroot} {MacOSX.sdk}]
+    global configure.sdkroot configure.sdk_version
+    set new_sdk ${configure.sdkroot}
+    if { [regexp {MacOSX(.*).sdk} ${configure.sdkroot} -> sdk_v] } {
+        if { ${sdk_v} != "" } {
+            # If present strip minor version from SDK version
+            set sdk_major [lindex [split $sdk_v .] 0]
+            ui_debug "Detected versioned SDK ${sdk_v} ${sdk_major} ${configure.sdkroot}"
+            set new_sdk [regsub {MacOSX1[1-9]\.[0-9]+\.sdk} ${configure.sdkroot} MacOSX${sdk_major}.sdk]
+            if { ${new_sdk} != ${configure.sdkroot} } {
+                ui_debug " New SDK ${new_sdk}"
+            }
+        }
+    }
+    return ${new_sdk}
 }
 
 set mp_extra_rpath  ${prefix}/lib/libgcc
@@ -204,7 +227,8 @@ configure.env-append \
                     OTOOL64=${prefix}/bin/otool
 
 if {${os.platform} eq "darwin" && ${os.major} >= 22} {
-    if { [vercmp ${xcodeversion} >= 15.0] || [vercmp ${xcodecltversion} >= 15.0] } {
+    if { ([vercmp ${xcodeversion}    >= 15.0] && [vercmp ${xcodeversion}    < 16.0]) ||
+         ([vercmp ${xcodecltversion} >= 15.0] && [vercmp ${xcodecltversion} < 16.0]) } {
         # On macOS13 and newer ensure the 'legacy' linker is used as GCC currently has problems
         # with the new default linker in Xcode 15. See e.g.
         # https://developer.apple.com/documentation/xcode-release-notes/xcode-15-release-notes#Linking
@@ -248,7 +272,11 @@ subport ${libcxxname} {
         if { ${os.platform} eq "darwin" && ${os.major} < 11 } {
             default_variants-append +clang11
         } else {
-            default_variants-append +clang16
+            if { ${os.major} < 24 } {
+                default_variants-append +clang17
+            } else {
+                default_variants-append +clang18
+            }
         }
     }
     revision                [ expr ${revision} + 0 ]
@@ -303,7 +331,7 @@ if { ${subport} ne ${libcxxname} } {
     }
 
     # libcxx is unavailable on PPC
-    if {${build_arch} ni [list ppc ppc64]} {
+    if {${build_arch} ni [list ppc ppc64] && ${os.major} > 8} {
         default_variants-append +stdlib_flag
     }
 
@@ -341,8 +369,8 @@ build.target        bootstrap-lean
 
 destroot.target     install install-info-host
 
-# gcc cannot build if libunwind-headers is active
-conflicts_build-append libunwind-headers
+# gcc cannot build if these are active
+conflicts_build-append libunwind-headers binutils gdb
 
 # Find dylibs at a given location
 proc dylib_list {location} {
@@ -466,18 +494,20 @@ if {${subport} eq ${name}} {
         # loop over libs to install
         set dylibs [dylib_list ${destroot}${prefix}/lib/${name}]
         foreach dylib ${dylibs} {
-            # Different OS versions (e.g. Leopard) or architectures (e.g. PPC) don't produce all the dylibs
-            # https://trac.macports.org/ticket/40098
-            # https://trac.macports.org/ticket/40100
-            if {[file exists ${destroot}${prefix}/lib/${name}/${dylib}]} {
-                delete ${destroot}${prefix}/lib/${name}/${dylib}
-                ln -s ${prefix}/lib/libgcc/${dylib} ${destroot}${prefix}/lib/${name}/${dylib}
-            }
-            if {[variant_exists universal] && [variant_isset universal]} {
-                foreach archdir [glob ${destroot}${prefix}/lib/${name}/*/] {
-                    if {[file exists ${archdir}/${dylib}]} {
-                        delete ${archdir}/${dylib}
-                        ln -s ${prefix}/lib/libgcc/${dylib} ${archdir}/${dylib}
+            if { [file exists ${prefix}/lib/libgcc/${dylib}] } {
+                # Different OS versions (e.g. Leopard) or architectures (e.g. PPC) don't produce all the dylibs
+                # https://trac.macports.org/ticket/40098
+                # https://trac.macports.org/ticket/40100
+                if {[file exists ${destroot}${prefix}/lib/${name}/${dylib}]} {
+                    delete ${destroot}${prefix}/lib/${name}/${dylib}
+                    ln -s ${prefix}/lib/libgcc/${dylib} ${destroot}${prefix}/lib/${name}/${dylib}
+                }
+                if {[variant_exists universal] && [variant_isset universal]} {
+                    foreach archdir [glob ${destroot}${prefix}/lib/${name}/*/] {
+                        if {[file exists ${archdir}/${dylib}]} {
+                            delete ${archdir}/${dylib}
+                            ln -s ${prefix}/lib/libgcc/${dylib} ${archdir}/${dylib}
+                        }
                     }
                 }
             }
@@ -515,23 +545,22 @@ if { ${subport} ne ${libcxxname} } {
         }
     }
 
-    platform powerpc {
-        configure.universal_archs ppc ppc64
-    }
-    if { ${os.platform} eq "darwin" && ${os.major} >= 20 } {
-        platform i386 {
-            configure.universal_archs x86_64 arm64
+   if {${os.platform} eq "darwin" && ${os.major} <= 18} {
+        switch -- $build_arch {
+            i386 -
+            x86_64 {
+                configure.universal_archs i386 x86_64
+            }
+            ppc -
+            ppc64 {
+                configure.universal_archs ppc ppc64
+            }
         }
-        platform arm {
-            configure.universal_archs x86_64 arm64
+        variant universal {
+            configure.args-delete --disable-multilib
         }
     } else {
-        platform i386 {
-            configure.universal_archs i386 x86_64
-        }
-    }
-    variant universal {
-        configure.args-delete --disable-multilib
+        universal_variant   no
     }
     # the generated compiler doesn't accept -arch
     configure.env-append \

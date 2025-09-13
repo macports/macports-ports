@@ -151,10 +151,6 @@ proc set_gnustep_env {} {
 options gnustep.cc
 default gnustep.cc          {CC=${configure.cc}}
 
-platform darwin 8 {
-    configure.compiler      apple-gcc-4.2
-    depends_build           port:apple-gcc42
-}
 platform darwin 9 {
     configure.compiler      gcc-4.2
 }

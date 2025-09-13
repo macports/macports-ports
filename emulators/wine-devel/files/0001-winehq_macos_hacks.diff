@@ -1,0 +1,769 @@
+diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
+index b75963fef1d..cd112bfe4ee 100644
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -502,6 +502,36 @@ done:
+     return ret;
+ }
+ 
++static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd_line )
++{
++    static const struct
++    {
++        const WCHAR *exe_name;
++        const WCHAR *append;
++        const WCHAR *required_args;
++        const WCHAR *forbidden_args;
++    }
++    options[] =
++    {
++        {L"steamwebhelper.exe", L" --no-sandbox --in-process-gpu --disable-gpu", NULL, L"--type=crashpad-handler"},
++    };
++    unsigned int i;
++
++    if (!cmd) return NULL;
++
++    for (i = 0; i < ARRAY_SIZE(options); ++i)
++    {
++        if (wcsstr( cmd, options[i].exe_name )
++            && (!options[i].required_args || wcsstr(cmd_line, options[i].required_args))
++            && (!options[i].forbidden_args || !wcsstr(cmd_line, options[i].forbidden_args)))
++        {
++            FIXME( "HACK: appending %s to command line.\n", debugstr_w(options[i].append) );
++            return options[i].append;
++        }
++    }
++    return NULL;
++}
++
+ /**********************************************************************
+  *           CreateProcessInternalW   (kernelbase.@)
+  */
+@@ -518,6 +548,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+     RTL_USER_PROCESS_PARAMETERS *params = NULL;
+     RTL_USER_PROCESS_INFORMATION rtl_info;
+     HANDLE parent = 0, debug = 0;
++    const WCHAR *append;
+     ULONG nt_flags = 0;
+     USHORT machine = 0;
+     NTSTATUS status;
+@@ -543,6 +574,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+         app_name = name;
+     }
+ 
++    /* CROSSOVER HACK */
++    if ((append = hack_append_command_line( app_name, tidy_cmdline )))
++    {
++        WCHAR *new_cmdline = RtlAllocateHeap( GetProcessHeap(), 0,
++                                              sizeof(WCHAR) * (lstrlenW(cmd_line) + lstrlenW(append) + 1) );
++        lstrcpyW(new_cmdline, tidy_cmdline);
++        lstrcatW(new_cmdline, append);
++        if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
++        tidy_cmdline = new_cmdline;
++    }
++    /* end CROSSOVER HACK */
++
++    TRACE( "app %s cmdline %s after all hacks\n", debugstr_w(app_name), debugstr_w(tidy_cmdline) );
++
+     /* Warn if unsupported features are used */
+ 
+     if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index 058e3976ef1..06d06ca4987 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -88,6 +88,15 @@ WINE_DECLARE_DEBUG_CHANNEL(seh);
+ 
+ #include "dwarf.h"
+ 
++#ifdef __APPLE__
++/* CW Hack 24256 */
++#include <sys/sysctl.h>
++static BOOL is_rosetta2;
++
++/* CW Hack 23427 */
++static BOOL sequoia_or_later = FALSE;
++#endif
++
+ /***********************************************************************
+  * signal context platform-specific definitions
+  */
+@@ -444,6 +453,10 @@ struct amd64_thread_data
+     DWORD_PTR             frame_size;    /* 0328 syscall frame size including xstate */
+     void                **instrumentation_callback; /* 0330 */
+     DWORD                 fs;            /* 0338 WOW TEB selector */
++    DWORD                 unused[5];     /* 033c */
++#ifdef __APPLE__  /* CW Hack 24265 */
++    DWORD                 mxcsr;         /* 350 */
++#endif
+ };
+ 
+ C_ASSERT( sizeof(struct amd64_thread_data) <= sizeof(((struct ntdll_thread_data *)0)->cpu_data) );
+@@ -451,6 +464,9 @@ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, pth
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, frame_size ) == 0x328 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, instrumentation_callback ) == 0x330 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, fs ) == 0x338 );
++#ifdef __APPLE__  /* CW Hack 24265 */
++C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, mxcsr ) == 0x350 );
++#endif
+ 
+ static inline struct amd64_thread_data *amd64_thread_data(void)
+ {
+@@ -920,6 +936,13 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
+ 
+         context->ContextFlags |= CONTEXT_FLOATING_POINT;
+         context->FltSave = *FPU_sig(sigcontext);
++#ifdef __APPLE__
++        /* CW Hack 24256: mxcsr in signal contexts is incorrect in Rosetta.
++           In Rosetta only, the actual value of the register from within the
++           handler is correct (on Intel it has some default value). */
++        if (is_rosetta2)
++            __asm__ volatile( "stmxcsr %0" : "=m" (context->FltSave.MxCsr) );
++#endif
+         context->MxCsr = context->FltSave.MxCsr;
+         if (xstate_extended_features && (xs = XState_sig(FPU_sig(sigcontext))))
+         {
+@@ -1024,7 +1047,11 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
+         ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_AMD64 );
+ #ifdef __APPLE__
+         if ((flags & CONTEXT_DEBUG_REGISTERS) && (ret == STATUS_UNSUCCESSFUL))
+-            WARN_(seh)( "Setting debug registers is not supported under Rosetta\n" );
++        {
++            /* CW HACK 22131 */
++            WARN_(seh)( "Setting debug registers is not supported under Rosetta, faking success\n" );
++            ret = STATUS_SUCCESS;
++        }
+ #endif
+         if (ret || !self) return ret;
+         if (flags & CONTEXT_DEBUG_REGISTERS)
+@@ -1247,6 +1274,14 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
+     if (!self)
+     {
+         NTSTATUS ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_I386 );
++#ifdef __APPLE__
++        if ((flags & CONTEXT_DEBUG_REGISTERS) && (ret == STATUS_UNSUCCESSFUL))
++        {
++            /* CW HACK 22131 */
++            WARN_(seh)( "Setting debug registers is not supported under Rosetta, faking success\n" );
++            ret = STATUS_SUCCESS;
++        }
++#endif
+         if (ret || !self) return ret;
+         if (flags & CONTEXT_I386_DEBUG_REGISTERS)
+         {
+@@ -1781,6 +1816,166 @@ NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status
+     user_mode_callback_return( ret_ptr, ret_len, status, NtCurrentTeb() );
+ }
+ 
++#ifdef __APPLE__
++/***********************************************************************
++ *           handle_cet_nop
++ *
++ * Check if the fault location is an Intel CET instruction that should be treated as a NOP.
++ * Rosetta on Big Sur throws an exception for this, but is fixed in Monterey.
++ * CW HACK 20186
++ */
++static inline BOOL handle_cet_nop( ucontext_t *sigcontext, CONTEXT *context )
++{
++    BYTE instr[16];
++    unsigned int i, prefix_count = 0;
++    unsigned int len = virtual_uninterrupted_read_memory( (BYTE *)context->Rip, instr, sizeof(instr) );
++
++    for (i = 0; i < len; i++) switch (instr[i])
++    {
++    /* instruction prefixes */
++    case 0x2e:  /* %cs: */
++    case 0x36:  /* %ss: */
++    case 0x3e:  /* %ds: */
++    case 0x26:  /* %es: */
++    case 0x40:  /* rex */
++    case 0x41:  /* rex */
++    case 0x42:  /* rex */
++    case 0x43:  /* rex */
++    case 0x44:  /* rex */
++    case 0x45:  /* rex */
++    case 0x46:  /* rex */
++    case 0x47:  /* rex */
++    case 0x48:  /* rex */
++    case 0x49:  /* rex */
++    case 0x4a:  /* rex */
++    case 0x4b:  /* rex */
++    case 0x4c:  /* rex */
++    case 0x4d:  /* rex */
++    case 0x4e:  /* rex */
++    case 0x4f:  /* rex */
++    case 0x64:  /* %fs: */
++    case 0x65:  /* %gs: */
++    case 0x66:  /* opcode size */
++    case 0x67:  /* addr size */
++    case 0xf0:  /* lock */
++    case 0xf2:  /* repne */
++    case 0xf3:  /* repe */
++        if (++prefix_count >= 15) return FALSE;
++        continue;
++
++    case 0x0f: /* extended instruction */
++        if (i == len - 1) return 0;
++        switch (instr[i + 1])
++        {
++        case 0x1E:
++            /* RDSSPD/RDSSPQ: (prefixes) 0F 1E (modrm) */
++            RIP_sig(sigcontext) += prefix_count + 3;
++            TRACE_(seh)( "skipped RDSSPD/RDSSPQ instruction\n" );
++            return TRUE;
++        }
++        break;
++    default:
++        return FALSE;
++    }
++    return FALSE;
++}
++
++/***********************************************************************
++ *           emulate_xgetbv
++ *
++ * Check if the fault location is an Intel XGETBV instruction for xcr0 and
++ * emulate it if so. Actual Intel hardware supports this instruction, so this
++ * will only take effect under Rosetta.
++ * CW HACK 23427
++ */
++static inline BOOL emulate_xgetbv( ucontext_t *sigcontext, CONTEXT *context )
++{
++    BYTE instr[3];
++    unsigned int len = virtual_uninterrupted_read_memory( (BYTE *)context->Rip, instr, sizeof(instr) );
++
++    /* Prefixed xgetbv is illegal, so no need to check. */
++    if (len < 3 || instr[0] != 0x0f || instr[1] != 0x01 || instr[2] != 0xd0 ||
++        (RCX_sig(sigcontext) & 0xffffffff) != 0 /* only handling xcr0 (ecx==0) */)
++    {
++        return FALSE;
++    }
++
++    RDX_sig(sigcontext) = 0;
++    if (sequoia_or_later)
++    {
++        /* Arguably we should only claim AVX support if ROSETTA_ADVERTISE_AVX is
++           set, but presumably apps will also check cpuid. */
++        RAX_sig(sigcontext) = 0xe7;  /* fpu/mmx, sse, avx, full avx-512 */
++    }
++    else
++        RAX_sig(sigcontext) = 0x07;  /* fpu/mmx, sse */
++
++    RIP_sig(sigcontext) += 3;
++    TRACE_(seh)( "emulated an XGETBV instruction\n" );
++    return TRUE;
++}
++
++/***********************************************************************
++ *           handle_fndisi
++ *
++ * Check if the fault location is an x87 FNDISI instruction that should be treated as a NOP.
++ */
++static inline BOOL handle_fndisi( ucontext_t *sigcontext, CONTEXT *context )
++{
++    BYTE instr[16];
++    unsigned int i, prefix_count = 0;
++    unsigned int len = virtual_uninterrupted_read_memory( (BYTE *)context->Rip, instr, sizeof(instr) );
++
++    for (i = 0; i < len; i++) switch (instr[i])
++    {
++    /* instruction prefixes */
++    case 0x2e:  /* %cs: */
++    case 0x36:  /* %ss: */
++    case 0x3e:  /* %ds: */
++    case 0x26:  /* %es: */
++    case 0x40:  /* rex */
++    case 0x41:  /* rex */
++    case 0x42:  /* rex */
++    case 0x43:  /* rex */
++    case 0x44:  /* rex */
++    case 0x45:  /* rex */
++    case 0x46:  /* rex */
++    case 0x47:  /* rex */
++    case 0x48:  /* rex */
++    case 0x49:  /* rex */
++    case 0x4a:  /* rex */
++    case 0x4b:  /* rex */
++    case 0x4c:  /* rex */
++    case 0x4d:  /* rex */
++    case 0x4e:  /* rex */
++    case 0x4f:  /* rex */
++    case 0x64:  /* %fs: */
++    case 0x65:  /* %gs: */
++    case 0x66:  /* opcode size */
++    case 0x67:  /* addr size */
++    case 0xf0:  /* lock */
++    case 0xf2:  /* repne */
++    case 0xf3:  /* repe */
++        if (++prefix_count >= 15) return FALSE;
++        continue;
++
++    case 0xdb:
++        if (i == len - 1) return 0;
++        switch (instr[i + 1])
++        {
++        case 0xe1:
++            /* RDSSPD/RDSSPQ: (prefixes) DB E1 */
++            RIP_sig(sigcontext) += prefix_count + 2;
++            TRACE_(seh)( "skipped FNDISI instruction\n" );
++            return TRUE;
++        }
++        break;
++    default:
++        return FALSE;
++    }
++    return FALSE;
++}
++#endif
+ 
+ /***********************************************************************
+  *           is_privileged_instr
+@@ -2030,6 +2225,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+         rec.ExceptionCode = EXCEPTION_ARRAY_BOUNDS_EXCEEDED;
+         break;
+     case TRAP_x86_PRIVINFLT:   /* Invalid opcode exception */
++#ifdef __APPLE__
++        /* CW HACK 20186 */
++        if (handle_cet_nop( ucontext, &context.c )) return;
++        /* CW HACK 23427 */
++        if (emulate_xgetbv( ucontext, &context.c )) return;
++        /* Winehq Bug 56441 */
++        if (handle_fndisi( ucontext, &context.c )) return;
++#endif
+         rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
+         break;
+     case TRAP_x86_STKFLT:  /* Stack fault */
+@@ -2289,6 +2492,15 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+ 
+ 
+ #ifdef __APPLE__
++/* CW Hack 24265 */
++extern void __restore_mxcsr_thunk(void);
++__ASM_GLOBAL_FUNC( __restore_mxcsr_thunk,
++                   "pushq %rcx\n\t"
++                   "movq %gs:0x30,%rcx\n\t"
++                   "ldmxcsr 0x350(%rcx)\n\t"  /* amd64_thread_data()->mxcsr */
++                   "popq %rcx\n\t"
++                   "jmp " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_prolog_end") );
++
+ /**********************************************************************
+  *		sigsys_handler
+  *
+@@ -2316,6 +2528,23 @@ static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+         frame->restore_flags |= CONTEXT_CONTROL;
+     }
+     RIP_sig(ucontext) = (ULONG64)__wine_syscall_dispatcher_prolog_end_ptr;
++
++    /* CW Hack 24265 */
++    if (is_rosetta2)
++    {
++        unsigned int direct_mxcsr;
++        __asm__ volatile( "stmxcsr %0" : "=m" (direct_mxcsr) );
++        if (direct_mxcsr != FPU_sig(ucontext)->MxCsr)
++        {
++            FPU_sig(ucontext)->MxCsr = direct_mxcsr;
++
++            /* On the M3, Rosetta will restore mxcsr to the initial, incorrect
++               value from the sigcontext, even if we change it. So we jump to a
++               thunk that restores the value from amd64_thread_data. */
++            amd64_thread_data()->mxcsr = direct_mxcsr;
++            RIP_sig(ucontext) = (ULONG64)__restore_mxcsr_thunk;
++        }
++    }
+ }
+ #endif
+ 
+@@ -2551,6 +2780,23 @@ void signal_init_process(void)
+     }
+ #endif
+ 
++#ifdef __APPLE__
++    /* CW Hack 24256: We need the value of sysctl.proc_translated in signal
++       handlers but sysctl[byname] is not signal-safe. */
++    {
++        int ret = 0;
++        size_t size = sizeof(ret);
++        if (sysctlbyname( "sysctl.proc_translated", &ret, &size, NULL, 0 ) == -1)
++            is_rosetta2 = 0;
++        else
++            is_rosetta2 = ret;
++    }
++
++    /* CW Hack 23427: __builtin_available presumably isn't signal-safe. */
++    if (__builtin_available( macOS 15.0, * ))
++        sequoia_or_later = TRUE;
++#endif
++
+     sig_act.sa_mask = server_block_set;
+     sig_act.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
+ 
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index f82929ef57f..063d90a39b1 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -71,6 +71,7 @@
+ # include <mach/thread_state.h>
+ # include <mach/vm_map.h>
+ #undef host_page_size
++# include <sys/utsname.h> /* CrossOver Hack #22011 */
+ #endif
+ 
+ #if defined(HAVE_LINUX_USERFAULTFD_H) && defined(HAVE_LINUX_FS_H)
+@@ -1974,6 +1975,42 @@ static int mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
+ }
+ 
+ 
++#ifdef __APPLE__
++static BOOL is_catalina_or_later(void)
++{
++    static int result = -1;
++    struct utsname name;
++    unsigned major, minor;
++
++    if (result == -1)
++    {
++        result = (uname(&name) == 0 &&
++                  sscanf(name.release, "%u.%u", &major, &minor) == 2 &&
++                  major >= 19 /* macOS 10.15 Catalina */);
++    }
++    return (result == 1) ? TRUE : FALSE;
++}
++#endif
++
++
++static void *wine_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
++{
++#if defined(__APPLE__) && defined(__x86_64__)
++    // In Catalina-and-later, mapping files with execute permissions can make
++    // Gatekeeper prompt the user, or just fail outright.
++    if (!(flags & MAP_ANON) && fd >= 0 && prot & PROT_EXEC && is_catalina_or_later())
++    {
++        void *ret = mmap(addr, len, prot & ~PROT_EXEC, flags, fd, offset);
++
++        if (ret != MAP_FAILED && mprotect(ret, len, prot))
++            WARN("failed to mprotect region: %d\n", errno);
++        return ret;
++    }
++#endif
++    return mmap(addr, len, prot, flags, fd, offset);
++}
++
++
+ /***********************************************************************
+  *           set_vprot
+  *
+@@ -2377,7 +2414,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
+        and if alignment is correct */
+     if ((!removable || (flags & MAP_SHARED)) && host_addr == map_addr && host_size == map_size)
+     {
+-        if (mmap( host_addr, host_size, prot, flags, fd, offset ) != MAP_FAILED)
++        if (wine_mmap( host_addr, host_size, prot, flags, fd, offset ) != MAP_FAILED)
+             return STATUS_SUCCESS;
+ 
+         switch (errno)
+@@ -2735,7 +2772,7 @@ static NTSTATUS map_pe_header( void *ptr, size_t size, size_t map_size, int fd,
+ 
+     if (!*removable && map_size)
+     {
+-        if (mmap( ptr, map_size, PROT_READ | PROT_WRITE | PROT_EXEC,
++        if (wine_mmap( ptr, map_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                   MAP_FIXED | MAP_PRIVATE, fd, 0 ) != MAP_FAILED)
+         {
+             if (size > map_size) pread( fd, (char *)ptr + map_size, size - map_size, map_size );
+@@ -4273,7 +4310,7 @@ void virtual_map_user_shared_data(void)
+         exit(1);
+     }
+     if ((res = server_get_unix_fd( section, 0, &fd, &needs_close, NULL, NULL )) ||
+-        (user_shared_data != mmap( user_shared_data, page_size, PROT_READ, MAP_SHARED|MAP_FIXED, fd, 0 )))
++        (user_shared_data != wine_mmap( user_shared_data, page_size, PROT_READ, MAP_SHARED|MAP_FIXED, fd, 0 )))
+     {
+         ERR( "failed to remap the process USD: %d\n", res );
+         exit(1);
+@@ -4422,6 +4459,17 @@ NTSTATUS virtual_handle_fault( EXCEPTION_RECORD *rec, void *stack )
+         WARN( "treating read fault in a readable page as a write fault, addr %p\n", addr );
+         err = EXCEPTION_WRITE_FAULT;
+     }
++
++    /* CW Hack 24945 */
++    if (err == EXCEPTION_WRITE_FAULT &&
++        ((get_unix_prot( vprot ) & (PROT_WRITE | PROT_EXEC)) == (PROT_WRITE | PROT_EXEC)))
++    {
++        FIXME( "HACK: write fault on a w|x page, addr %p\n", addr );
++        mprotect_range( page, page_size, 0, VPROT_EXEC );
++        mprotect_range( page, page_size, VPROT_EXEC, 0 );
++        ret = STATUS_SUCCESS;
++        goto done;
++    }
+ #endif
+ 
+     if (!is_inside_signal_stack( stack ) && (vprot & VPROT_GUARD))
+@@ -4458,6 +4506,8 @@ NTSTATUS virtual_handle_fault( EXCEPTION_RECORD *rec, void *stack )
+                 ret = STATUS_SUCCESS;
+         }
+     }
++
++done:
+     mutex_unlock( &virtual_mutex );
+     rec->ExceptionCode = ret;
+     return ret;
+@@ -6516,6 +6566,56 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
+     return status;
+ }
+ 
++#ifdef __APPLE__
++static int is_apple_silicon(void)
++{
++    static int apple_silicon_status, did_check = 0;
++    if (!did_check)
++    {
++        /* returns 0 for native process or on error, 1 for translated */
++        int ret = 0;
++        size_t size = sizeof(ret);
++        if (sysctlbyname( "sysctl.proc_translated", &ret, &size, NULL, 0 ) == -1)
++            apple_silicon_status = 0;
++        else
++            apple_silicon_status = ret;
++
++        did_check = 1;
++    }
++
++    return apple_silicon_status;
++}
++
++/* CW HACK 18947
++ * If mach_vm_write() is used to modify code cross-process (which is how we implement
++ * NtWriteVirtualMemory), Rosetta won't notice the change and will execute the "old" code.
++ *
++ * To work around this, after the write completes,
++ * toggle the executable bit (from inside the target process) on/off for any executable
++ * pages that were modified, to force Rosetta to re-translate it.
++ */
++static void toggle_executable_pages_for_rosetta( HANDLE process, void *addr, SIZE_T size )
++{
++    MEMORY_BASIC_INFORMATION info;
++    NTSTATUS status;
++    SIZE_T ret;
++
++    if (!is_apple_silicon())
++        return;
++
++    status = NtQueryVirtualMemory( process, addr, MemoryBasicInformation, &info, sizeof(info), &ret );
++
++    if (!status && (info.AllocationProtect & 0xf0))
++    {
++        DWORD origprot, noexec;
++        noexec = info.AllocationProtect & ~0xf0;
++        if (!noexec) noexec = PAGE_NOACCESS;
++
++        NtProtectVirtualMemory( process, &addr, &size, noexec, &origprot );
++        NtProtectVirtualMemory( process, &addr, &size, origprot, &noexec );
++    }
++}
++#endif
+ 
+ /***********************************************************************
+  *             NtWriteVirtualMemory   (NTDLL.@)
+@@ -6536,6 +6636,10 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
+             if ((status = wine_server_call( req ))) size = 0;
+         }
+         SERVER_END_REQ;
++
++#ifdef __APPLE__
++        toggle_executable_pages_for_rosetta( process, addr, size );
++#endif
+     }
+     else
+     {
+diff --git a/dlls/wow64cpu/cpu.c b/dlls/wow64cpu/cpu.c
+index f5900aa36ed..9b1b3fdf454 100644
+--- a/dlls/wow64cpu/cpu.c
++++ b/dlls/wow64cpu/cpu.c
+@@ -40,10 +40,35 @@ struct thunk_32to64
+     DWORD addr;
+     WORD  cs;
+ };
++struct thunk_32to64_rosetta2_workaround
++{
++    BYTE  lcall;  /* call far, absolute indirect */
++    BYTE  modrm;  /* address=disp32, opcode=3 */
++    DWORD op;
++    DWORD addr;
++    WORD  cs;
++
++    BYTE add;
++    BYTE add_modrm;
++    BYTE add_op;
++
++    BYTE jmp;
++    BYTE jmp_modrm;
++    DWORD jmp_op;
++    ULONG64 jmp_addr;
++};
+ struct thunk_opcodes
+ {
+-    struct thunk_32to64 syscall_thunk;
+-    struct thunk_32to64 unix_thunk;
++    union
++    {
++        struct thunk_32to64 syscall_thunk;
++        struct thunk_32to64_rosetta2_workaround syscall_thunk_rosetta;
++    };
++    union
++    {
++        struct thunk_32to64 unix_thunk;
++        struct thunk_32to64_rosetta2_workaround unix_thunk_rosetta;
++    };
+ };
+ #pragma pack(pop)
+ 
+@@ -55,6 +80,19 @@ static USHORT fs32_sel;
+ 
+ void **__wine_unix_call_dispatcher = NULL;
+ 
++BOOL use_rosetta2_workaround;
++
++static BOOL is_rosetta2(void)
++{
++    char buffer[64];
++    NTSTATUS status = NtQuerySystemInformation( SystemProcessorBrandString, buffer, sizeof(buffer), NULL );
++
++    if (status || !strstr( buffer, "VirtualApple" ))
++        return FALSE;
++
++    return TRUE;
++}
++
+ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, void *reserved )
+ {
+     if (reason == DLL_PROCESS_ATTACH) LdrDisableThreadCalloutsForDll( inst );
+@@ -206,7 +244,21 @@ __ASM_GLOBAL_FUNC( syscall_32to64,
+                    "movl %edx,4(%rsp)\n\t"
+                    "movl 0xc4(%r13),%r14d\n\t"  /* context->Esp */
+                    "xchgq %r14,%rsp\n\t"
+-                   "ljmp *(%r14)\n"
++
++                   /* CW HACK 20760:
++                    * When running under Rosetta 2, use lretq instead of ljmp to work around a SIGUSR1 race condition.
++                    */
++                   "cmpl $0, " __ASM_NAME("use_rosetta2_workaround") "\n\t"
++                   "jne syscall_32to64_rosetta2_workaround\n\t"
++                   "ljmp *(%r14)\n\t"
++                   "syscall_32to64_rosetta2_workaround:\n\t"
++                   "subq $0x10,%rsp\n\t"
++                   "movl 4(%r14),%edx\n\t"
++                   "movq %rdx,0x8(%rsp)\n\t"
++                   "movl 0(%r14),%edx\n\t"
++                   "movq %rdx,(%rsp)\n\t"
++                   "lretq\n"
++
+                    ".Lsyscall_32to64_return:\n\t"
+                    "movq %rsp,%r14\n\t"
+                    "movl 0xa8(%r13),%edx\n\t"   /* context->Edx */
+@@ -263,7 +315,20 @@ __ASM_GLOBAL_FUNC( unix_call_32to64,
+                    "movl %edx,4(%rsp)\n\t"
+                    "movl 0xc4(%r13),%r14d\n\t"  /* context->Esp */
+                    "xchgq %r14,%rsp\n\t"
+-                   "ljmp *(%r14)" )
++
++                   /* CW HACK 20760:
++                    * When running under Rosetta 2, use lretq instead of ljmp to work around a SIGUSR1 race condition.
++                    */
++                   "cmpl $0, " __ASM_NAME("use_rosetta2_workaround") "\n\t"
++                   "jne unix_call_32to64_rosetta2_workaround\n\t"
++                   "ljmp *(%r14)\n\t"
++                   "unix_call_32to64_rosetta2_workaround:\n\t"
++                   "subq $0x10,%rsp\n\t"
++                   "movl 4(%r14),%edx\n\t"
++                   "movq %rdx,0x8(%rsp)\n\t"
++                   "movl 0(%r14),%edx\n\t"
++                   "movq %rdx,(%rsp)\n\t"
++                   "lretq" )
+ 
+ 
+ /**********************************************************************
+@@ -309,6 +374,8 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
+ 
+     wow64info->CpuFlags |= WOW64_CPUFLAGS_MSFT64;
+ 
++    use_rosetta2_workaround = is_rosetta2();
++
+     LdrGetDllHandle( NULL, 0, &str, &module );
+     p__wine_unix_call_dispatcher = RtlFindExportedRoutineByName( module, "__wine_unix_call_dispatcher" );
+     __wine_unix_call_dispatcher = *p__wine_unix_call_dispatcher;
+@@ -318,17 +385,65 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
+     ds64_sel = context.SegDs;
+     fs32_sel = context.SegFs;
+ 
+-    thunk->syscall_thunk.ljmp  = 0xff;
+-    thunk->syscall_thunk.modrm = 0x2d;
+-    thunk->syscall_thunk.op    = PtrToUlong( &thunk->syscall_thunk.addr );
+-    thunk->syscall_thunk.addr  = PtrToUlong( syscall_32to64 );
+-    thunk->syscall_thunk.cs    = cs64_sel;
+-
+-    thunk->unix_thunk.ljmp  = 0xff;
+-    thunk->unix_thunk.modrm = 0x2d;
+-    thunk->unix_thunk.op    = PtrToUlong( &thunk->unix_thunk.addr );
+-    thunk->unix_thunk.addr  = PtrToUlong( unix_call_32to64 );
+-    thunk->unix_thunk.cs    = cs64_sel;
++    /* CW HACK 20760 */
++    if (use_rosetta2_workaround)
++    {
++        thunk->syscall_thunk_rosetta.lcall     = 0xff;
++        thunk->syscall_thunk_rosetta.modrm     = 0x1d;
++        thunk->syscall_thunk_rosetta.op        = PtrToUlong( &thunk->syscall_thunk_rosetta.addr );
++        thunk->syscall_thunk_rosetta.addr      = PtrToUlong( &thunk->syscall_thunk_rosetta.add );
++        thunk->syscall_thunk_rosetta.cs        = cs64_sel;
++
++        /* We are now in 64-bit. */
++        /* add $0x08,%esp to remove the addr/segment pushed on the stack by the lcall */
++        thunk->syscall_thunk_rosetta.add       = 0x83;
++        thunk->syscall_thunk_rosetta.add_modrm = 0xc4;
++        thunk->syscall_thunk_rosetta.add_op    = 0x08;
++
++        /* jmp to syscall_32to64 */
++        thunk->syscall_thunk_rosetta.jmp       = 0xff;
++        thunk->syscall_thunk_rosetta.jmp_modrm = 0x25;
++        thunk->syscall_thunk_rosetta.jmp_op    = 0x00;
++        thunk->syscall_thunk_rosetta.jmp_addr  = PtrToUlong( syscall_32to64 );
++    }
++    else
++    {
++        thunk->syscall_thunk.ljmp  = 0xff;
++        thunk->syscall_thunk.modrm = 0x2d;
++        thunk->syscall_thunk.op    = PtrToUlong( &thunk->syscall_thunk.addr );
++        thunk->syscall_thunk.addr  = PtrToUlong( syscall_32to64 );
++        thunk->syscall_thunk.cs    = cs64_sel;
++    }
++
++    /* CW HACK 20760 */
++    if (use_rosetta2_workaround)
++    {
++        thunk->unix_thunk_rosetta.lcall     = 0xff;
++        thunk->unix_thunk_rosetta.modrm     = 0x1d;
++        thunk->unix_thunk_rosetta.op        = PtrToUlong( &thunk->unix_thunk_rosetta.addr );
++        thunk->unix_thunk_rosetta.addr      = PtrToUlong( &thunk->unix_thunk_rosetta.add );
++        thunk->unix_thunk_rosetta.cs        = cs64_sel;
++
++        /* We are now in 64-bit. */
++        /* add $0x08,%esp to remove the addr/segment pushed on the stack by the lcall */
++        thunk->unix_thunk_rosetta.add       = 0x83;
++        thunk->unix_thunk_rosetta.add_modrm = 0xc4;
++        thunk->unix_thunk_rosetta.add_op    = 0x08;
++
++        /* jmp to unix_call_32to64 */
++        thunk->unix_thunk_rosetta.jmp       = 0xff;
++        thunk->unix_thunk_rosetta.jmp_modrm = 0x25;
++        thunk->unix_thunk_rosetta.jmp_op    = 0x00;
++        thunk->unix_thunk_rosetta.jmp_addr  = PtrToUlong( unix_call_32to64 );
++    }
++    else
++    {
++        thunk->unix_thunk.ljmp  = 0xff;
++        thunk->unix_thunk.modrm = 0x2d;
++        thunk->unix_thunk.op    = PtrToUlong( &thunk->unix_thunk.addr );
++        thunk->unix_thunk.addr  = PtrToUlong( unix_call_32to64 );
++        thunk->unix_thunk.cs    = cs64_sel;
++    }
+ 
+     NtProtectVirtualMemory( GetCurrentProcess(), (void **)&thunk, &size, PAGE_EXECUTE_READ, &old_prot );
+     return STATUS_SUCCESS;

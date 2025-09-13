@@ -2,12 +2,11 @@
 
 PortSystem                                       1.0
 PortGroup           select                       1.0
-PortGroup           compiler_blacklist_versions  1.0
 PortGroup           active_variants              1.1
 PortGroup           conflicts_build              1.0
 
 set                 gcc_major_v 14
-epoch               0
+epoch               1
 name                gcc${gcc_major_v}
 
 homepage            https://gcc.gnu.org/
@@ -19,18 +18,18 @@ license             {GPL-3+ Permissive}
 
 description         The GNU compiler collection
 long_description    {*}${description}, including front ends for \
-                    C, C++, Objective-C, Objective-C++ and Fortran.
+                    C, C++, Objective-C, Objective-C++, Modula-2 and Fortran.
 
 # Remember to reset all revision increments below to 0 on new versions
 version             ${gcc_major_v}.2.0
-revision            1
+revision            4
 # Remove OS dependent revision bump on next version update
 if { ${os.platform} eq "darwin" && ${os.major} >= 23 } {
     revision [ expr ${revision} + 2 ]
 }
 
 set libgccname      lib${name}
-subport             ${libgccname} { revision [ expr ${revision} + 0 ] }
+subport             ${libgccname} { revision [ expr ${revision} + 1 ] }
 
 set libcxxname      ${name}-libcxx
 
@@ -65,8 +64,6 @@ depends_lib-append  port:cctools \
                     port:mpfr \
                     port:zlib \
                     port:zstd
-depends_run-append  port:gcc_select \
-                    path:share/doc/libgcc/README:libgcc
 
 platform darwin {
     if {(${configure.build_arch} in [list ppc ppc64]) || ${os.major} < 10} {
@@ -98,7 +95,7 @@ platform darwin {
     configure.pre_args-append --build=${gcc_triple}
 }
 
-set gcc_configure_langs {c c++ objc obj-c++ lto fortran}
+set gcc_configure_langs {c c++ objc obj-c++ lto fortran m2}
 if {${subport} eq ${name} && ${build_arch} ne "i386" && ${os.major} > 8} {
     # jit compiler is not building on i386 systems
     # https://trac.macports.org/ticket/61130
@@ -322,7 +319,6 @@ subport ${libcxxname} {
     extract.rename          no
     use_configure           no
     supported_archs         noarch
-    platforms               any
     # Find clang/llvm version to use from active variant
     proc getClangVersion {} {
         if { [regexp {clang(.*)} [clang_variant_name] -> clang_v] } {
@@ -411,9 +407,6 @@ proc dylib_list {location} {
 
 if {${subport} eq ${libgccname}} {
 
-    # Always provides primary runtime so always in conflict
-    conflicts libgcc-devel
-
     # Activate hack for new libgcc
     # https://trac.macports.org/wiki/PortfileRecipes#deactivatehack
     pre-activate {
@@ -476,6 +469,14 @@ if {${subport} eq ${libgccname}} {
         }
     }
 
+    # Need to deactivate current libgcc before destrooting the new build otherwise
+    # the right libs are not picked up to be included
+    pre-destroot {
+        if {![catch {registry_active ${libgccname}}]} {
+            registry_deactivate_composite ${libgccname} "" [list ports_nodepcheck 1]
+        }
+    }
+
     # http://trac.macports.org/ticket/35770
     # http://trac.macports.org/ticket/38814
     # While there can be multiple versions of these runtimes in a single
@@ -488,10 +489,9 @@ if {${subport} eq ${libgccname}} {
     # version should continue to provide a subport for that and older gcc
     # versions.
 
-    depends_run
-    depends_lib-delete   port:zlib port:libiconv
-    depends_build-append {*}${depends_lib}
-    depends_lib          port:zlib port:libiconv
+    depends_build-append  {*}${depends_lib}
+    depends_lib           port:zlib port:libiconv path:share/doc/libgcc/README:libgcc
+    depends_build-delete  {*}${depends_lib}
 
     configure.args-replace \
         --libdir=${prefix}/lib/${name} \
@@ -517,15 +517,13 @@ if {${subport} eq ${libgccname}} {
                 continue
             }
 
+            # Skip anything provided by a newer libgcc version (i.e. already installed in prefix)
+            if { [file exists ${prefix}/lib/libgcc/${dylib}] } {
+                continue
+            }
+
             # Move dylib to temp area
             move ${destroot}${prefix}/lib/libgcc/${dylib} ${destroot}${prefix}/lib/libgcc.merged
-
-            # If needed create versionless sym link to dylib
-            set dylib_split [split ${dylib} "."]
-            set dylib_nover ${destroot}${prefix}/lib/libgcc.merged/[lindex ${dylib_split} 0].[lindex ${dylib_split} end]
-            if { ![file exists ${dylib_nover}]  } {
-                ln -s ${dylib} ${dylib_nover}
-            }
 
             # Universal support
             if {[variant_exists universal] && [variant_isset universal]} {
@@ -548,21 +546,30 @@ if {${subport} eq ${libgccname}} {
             }
         }
 
+        # Remove stuff not provided by libgccX ports
         file delete -force ${destroot}${prefix}/bin
         file delete -force ${destroot}${prefix}/share
         file delete -force ${destroot}${prefix}/lib/libgcc
         file delete -force ${destroot}${prefix}/libexec
 
+        # Move temporary lib dir back in place
         move ${destroot}${prefix}/lib/libgcc.merged ${destroot}${prefix}/lib/libgcc
 
-        # For binary compatibility with binaries that linked against the old libstdcxx port
-        ln -s libgcc/libstdc++.6.dylib ${destroot}${prefix}/lib/libstdc++.6.dylib
+        # Remove includes. Provided by newer libgcc.
+        file delete -force ${destroot}${prefix}/include
+
+        set doc_dir ${destroot}${prefix}/share/doc/${subport}
+        xinstall -m 755 -d ${doc_dir}
+        system "echo ${subport} provides additional runtime > ${doc_dir}/README"
 
     }
 
 }
 
 if {${subport} eq ${name}} {
+
+    depends_run-append    port:gcc_select
+    depends_lib-append    port:${libgccname}
 
     post-destroot {
 

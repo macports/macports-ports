@@ -36,6 +36,8 @@
 # fortran_compiler_name {arg}:  converts gfortran into the actual Fortran compiler name; otherwise returns arg
 # clang_variant_isset {}: is a clang variant set
 # clang_variant_name {}: which clang variant is set
+# flang_variant_isset {}: is a flang variant set
+# flang_variant_name {}: which flang variant is set
 # gcc_variant_isset {}: is a GCC variant set
 # gcc_variant_name {}: which GCC variant is set
 # avx_compiler_isset {}: is a C compiler supporting AVX set
@@ -64,6 +66,7 @@ default compilers.my_fortran_variants {}
 default compilers.all_fortran_variants {}
 default compilers.gcc_variants {}
 default compilers.clang_variants {}
+default compilers.flang_variants {}
 default compilers.require_fortran 0
 default compilers.default_fortran 0
 default compilers.setup_done 0
@@ -80,8 +83,11 @@ default compilers.allow_arguments_mismatch no
 options compilers.add_gcc_rpath_support
 default compilers.add_gcc_rpath_support yes
 
+options compilers.add_flang_variants
+default compilers.add_flang_variants no
+
 # Set a default gcc version
-set compilers.gcc_default gcc14
+set compilers.gcc_default gcc15
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
@@ -92,7 +98,7 @@ if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
     if { [vercmp ${xcodeversion} < 16.0] && [vercmp ${xcodecltversion} < 16.0] } {
         lappend gcc_versions 10 11 12 13
     }
-    lappend gcc_versions 14 devel
+    lappend gcc_versions 14 15 devel
 } else {
     set gcc_versions [list]
     if { ${os.major} < 15 } {
@@ -103,12 +109,12 @@ if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
             lappend gcc_versions 10 11 12 13
         }
     }
-    lappend gcc_versions 14 devel
+    lappend gcc_versions 14 15 devel
 }
 
 # GCC version providing the primary runtime
 # Note settings here *must* match those in the lang/libgcc port.
-set gcc_main_version 14
+set gcc_main_version 15
 
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
@@ -167,34 +173,29 @@ foreach ver ${gcc_versions} {
 set clang_versions [list]
 if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
     if {${os.major} < 16} {
-        if {${os.major} < 9} {
-            lappend clang_versions 3.3
-        }
-        lappend clang_versions 3.4
-        if {${os.major} >= 9} {
-            lappend clang_versions 3.7
-        }
+        lappend clang_versions 3.4 3.7
     }
-    if { ${os.major} >= 9 && ${os.major} < 20 } {
+    if { ${os.major} < 20 } {
         lappend clang_versions 5.0 6.0 7.0 8.0
     }
-    if { ${os.major} >= 9 && ${os.major} < 23 } {
+    if { ${os.major} < 23 } {
         lappend clang_versions 9.0 10
     }
 }
-if { ${os.major} >= 9 || ${os.platform} ne "darwin" } {
-    if { ${os.major} <= 23 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 11
-        if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
-            lappend clang_versions 12
-        }
-    }
+if { ${os.major} <= 23 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 11
     if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 13 14 15 16 17 18
+        lappend clang_versions 12
     }
-    if { ${os.major} >= 15 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 19 20 devel
-    }
+}
+if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 13 14 15 16 17 18
+}
+if { ${os.major} >= 15 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 19 20
+}
+if { ${os.major} >= 16 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 21 devel
 }
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
 foreach ver ${clang_versions} {
@@ -220,43 +221,94 @@ foreach ver ${clang_versions} {
     set cdb(clang$ver_nodot,cxx_stdlib) ""
 }
 
-# and lastly we add a gfortran and g95 variant for use with clang*; note that
+# add a gfortran and g95 variant for use with clang*; note that
 # we don't need gfortran when we are in an "only-fortran" mode
-set cdb(gfortran,variant)  gfortran
-set cdb(gfortran,compiler) gfortran
-set cdb(gfortran,descrip)  "$cdb(${compilers.gcc_default},descrip) Fortran"
-set cdb(gfortran,depends)  $cdb(${compilers.gcc_default},depends)
-set cdb(gfortran,dependsl) $cdb(${compilers.gcc_default},dependsl)
+
+set cdb(gfortran,variant)    gfortran
+set cdb(gfortran,compiler)   gfortran
+set cdb(gfortran,descrip)    "$cdb(${compilers.gcc_default},descrip) Fortran"
+set cdb(gfortran,depends)    $cdb(${compilers.gcc_default},depends)
+set cdb(gfortran,dependsl)   $cdb(${compilers.gcc_default},dependsl)
 set cdb(gfortran,libfortran) $cdb(${compilers.gcc_default},libfortran)
-set cdb(gfortran,dependsd) $cdb(${compilers.gcc_default},dependsd)
-set cdb(gfortran,dependsa) $cdb(${compilers.gcc_default},dependsa)
-set cdb(gfortran,conflict) g95
-set cdb(gfortran,cc)       ""
-set cdb(gfortran,cxx)      ""
-set cdb(gfortran,cpp)      ""
-set cdb(gfortran,objc)     ""
-set cdb(gfortran,fc)       $cdb(${compilers.gcc_default},fc)
-set cdb(gfortran,f77)      $cdb(${compilers.gcc_default},f77)
-set cdb(gfortran,f90)      $cdb(${compilers.gcc_default},f90)
+set cdb(gfortran,dependsd)   $cdb(${compilers.gcc_default},dependsd)
+set cdb(gfortran,dependsa)   $cdb(${compilers.gcc_default},dependsa)
+set cdb(gfortran,conflict)   "g95"
+set cdb(gfortran,cc)         ""
+set cdb(gfortran,cxx)        ""
+set cdb(gfortran,cpp)        ""
+set cdb(gfortran,objc)       ""
+set cdb(gfortran,fc)         $cdb(${compilers.gcc_default},fc)
+set cdb(gfortran,f77)        $cdb(${compilers.gcc_default},f77)
+set cdb(gfortran,f90)        $cdb(${compilers.gcc_default},f90)
 set cdb(gfortran,cxx_stdlib) ""
 
-set cdb(g95,variant)  g95
-set cdb(g95,compiler) g95
-set cdb(g95,descrip)  "g95 Fortran"
-set cdb(g95,depends)  port:g95
-set cdb(g95,dependsl) ""
-set cdb(g95,libfortran) ${prefix}/lib/g95/x86_64-apple-darwin14/4.2.4/libf95.a
-set cdb(g95,dependsd) ""
-set cdb(g95,dependsa) g95
-set cdb(g95,conflict) ""
-set cdb(g95,cc)       ""
-set cdb(g95,cxx)      ""
-set cdb(g95,cpp)      ""
-set cdb(g95,objc)     ""
-set cdb(g95,fc)       ${prefix}/bin/g95
-set cdb(g95,f77)      ${prefix}/bin/g95
-set cdb(g95,f90)      ${prefix}/bin/g95
-set cdb(g95,cxx_stdlib) ""
+set cdb(g95,variant)         g95
+set cdb(g95,compiler)        g95
+set cdb(g95,descrip)         "g95 Fortran"
+set cdb(g95,depends)         port:g95
+set cdb(g95,dependsl)        ""
+set cdb(g95,libfortran)      ${prefix}/lib/g95/x86_64-apple-darwin14/4.2.4/libf95.a
+set cdb(g95,dependsd)        ""
+set cdb(g95,dependsa)        g95
+set cdb(g95,conflict)        ""
+set cdb(g95,cc)              ""
+set cdb(g95,cxx)             ""
+set cdb(g95,cpp)             ""
+set cdb(g95,objc)            ""
+set cdb(g95,fc)              ${prefix}/bin/g95
+set cdb(g95,f77)             ${prefix}/bin/g95
+set cdb(g95,f90)             ${prefix}/bin/g95
+set cdb(g95,cxx_stdlib)      ""
+
+# Set a default flang version
+set compilers.flang_default flang21
+
+# Add flang variants if enabled
+if {${compilers.add_flang_variants}} {
+    # Flang compilers. start with flang-20, enable only on newer systems where supported
+    set flang_versions [list]
+    if { ${os.major} >= 21 || ${os.platform} ne "darwin"} {
+        lappend flang_versions 20 21 devel
+    }
+    ui_debug "Flang versions for Darwin ${os.major} ${os.arch} - ${flang_versions}"
+    foreach ver ${flang_versions} {
+        lappend compilers.flang_variants flang$ver
+        set cdb(flang$ver,variant)       flang$ver
+        set cdb(flang$ver,compiler)      macports-flang-$ver
+        set cdb(flang$ver,descrip)       "MacPorts flang $ver (EXPERIMENTAL)"
+        set cdb(flang$ver,depends)       port:flang-$ver
+        set cdb(flang$ver,dependsl)      ""
+        set cdb(flang$ver,libfortran)    ""
+        set cdb(flang$ver,dependsd)      ""
+        set cdb(flang$ver,dependsa)      flang-$ver
+        set cdb(flang$ver,conflict)      ""
+        set cdb(flang$ver,cc)            ""
+        set cdb(flang$ver,cxx)           ""
+        set cdb(flang$ver,cpp)           ""
+        set cdb(flang$ver,objc)          ""
+        set cdb(flang$ver,fc)            ${prefix}/bin/flang-mp-$ver
+        set cdb(flang$ver,f77)           ${prefix}/bin/flang-mp-$ver
+        set cdb(flang$ver,f90)           ${prefix}/bin/flang-mp-$ver
+        set cdb(flang$ver,cxx_stdlib)    ""
+    }
+    set cdb(flang,variant)       flang
+    set cdb(flang,compiler)      macports-flang
+    set cdb(flang,descrip)       "$cdb(${compilers.flang_default},descrip) Fortran"
+    set cdb(flang,depends)       $cdb(${compilers.flang_default},depends)
+    set cdb(flang,dependsl)      $cdb(${compilers.flang_default},dependsl)
+    set cdb(flang,libfortran)    $cdb(${compilers.flang_default},libfortran)
+    set cdb(flang,dependsd)      $cdb(${compilers.flang_default},dependsd)
+    set cdb(flang,dependsa)      $cdb(${compilers.flang_default},dependsa)
+    set cdb(flang,conflict)      $cdb(${compilers.flang_default},conflict)
+    set cdb(flang,cc)            $cdb(${compilers.flang_default},cc)
+    set cdb(flang,cxx)           $cdb(${compilers.flang_default},cxx)
+    set cdb(flang,cpp)           $cdb(${compilers.flang_default},cpp)
+    set cdb(flang,objc)          $cdb(${compilers.flang_default},objc)
+    set cdb(flang,fc)            $cdb(${compilers.flang_default},fc)
+    set cdb(flang,f77)           $cdb(${compilers.flang_default},f77)
+    set cdb(flang,f90)           $cdb(${compilers.flang_default},f90)
+    set cdb(flang,cxx_stdlib)    $cdb(${compilers.flang_default},cxx_stdlib)
+}
 
 foreach cname [array names cdb *,variant] {
     lappend compilers.variants $cdb($cname)
@@ -276,7 +328,7 @@ proc compilers.set_variants_conflict {args} {
 }
 
 proc compilers.setup_variants {variants} {
-    global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
+    global cdb compilers.variants compilers.clang_variants compilers.flang_variants compilers.gcc_variants
     global compilers.my_fortran_variants compilers.list
     global compilers.variants_conflict
     global compilers.clear_archflags
@@ -295,8 +347,8 @@ proc compilers.setup_variants {variants} {
             set c [lreplace ${compilers.variants} $i $i]
 
             # Fortran compilers do not conflict with C compilers.
-            # thus clang does not conflict with g95 and gfortran
-            if {$variant eq "gfortran" || $variant eq "g95"} {
+            # thus clang does not conflict with flang, g95 and gfortran
+            if {$variant eq "gfortran" || $variant eq "g95" || [string first "flang" $variant] != -1} {
                 foreach clangcomp ${compilers.clang_variants} {
                     set i [lsearch -exact $c $clangcomp]
                     set c [lreplace $c $i $i]
@@ -500,6 +552,23 @@ proc clang_variant_isset {} {
     return [expr {[clang_variant_name] ne ""}]
 }
 
+proc flang_variant_name {} {
+    global compilers.flang_variants variations
+
+    foreach c ${compilers.flang_variants} {
+        # we need to check the default_variants so we can't use variant_isset
+        if {[info exists variations($c)] && $variations($c) eq "+"} {
+            return $c
+        }
+    }
+
+    return ""
+}
+
+proc flang_variant_isset {} {
+    return [expr {[flang_variant_name] ne ""}]
+}
+
 proc gcc_variant_name {} {
     global compilers.gcc_variants variations
 
@@ -663,10 +732,10 @@ proc compilers.action_enforce_some_f {ports} {
 }
 
 proc compilers.setup {args} {
-    global cdb compilers.variants compilers.clang_variants compilers.gcc_variants \
-        compilers.my_fortran_variants compilers.require_fortran compilers.default_fortran \
-        compilers.setup_done compilers.list compilers.gcc_default compiler.blacklist \
-        os.major os.arch
+    global cdb compilers.variants compilers.clang_variants compilers.flang_variants \
+        compilers.gcc_variants compilers.my_fortran_variants compilers.require_fortran \
+        compilers.default_fortran compilers.setup_done compilers.list compilers.gcc_default \
+        compiler.blacklist os.major os.arch
 
     if {!${compilers.setup_done}} {
         set add_list [list]
@@ -708,6 +777,9 @@ proc compilers.setup {args} {
                 }
                 clang {
                     set ${mode}_list [${mode}_from_list [set ${mode}_list] ${compilers.clang_variants}]
+                }
+                flang {
+                    set ${mode}_list [${mode}_from_list [set ${mode}_list] ${compilers.flang_variants}]
                 }
                 require_fortran {
                     # this signals that fortran is required and not optional
@@ -851,7 +923,7 @@ proc compilers::add_gcc_rpath_support {} {
     global prefix os.platform os.major
     set gcc_v [compilers::get_current_gcc_version]
     if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
-        if {${os.platform} eq "darwin" && ${os.major} > 8} {
+        if {${os.platform} eq "darwin"} {
             ui_debug "compilers PG: RPATH added to ldflags as GCC version is ${gcc_v}"
             configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
             configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc

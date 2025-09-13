@@ -167,14 +167,7 @@ proc cmake::handle_generator {option action args} {
                 depends_build-append \
                                 port:ninja
                 build.cmd       ninja
-                # force Ninja to use the exact number of requested build jobs
-                # Need to check use_parallel_build here, as build.jobs is still > 1
-                # even if use_parallel_build=no ....
-                set njobs ${build.jobs}
-                if { ![option use_parallel_build] } {
-                    set njobs 1
-                }
-                build.post_args -j${njobs} -v
+                build.post_args -v
                 destroot.target install
                 # ninja needs the DESTDIR argument in the environment
                 destroot.destdir
