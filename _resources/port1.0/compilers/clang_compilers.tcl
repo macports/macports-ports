@@ -36,13 +36,15 @@ if {${os.major} >= 17 || ${os.platform} ne "darwin"} {
 if { ${os.major} >= 10 || ${os.platform} ne "darwin"} {
     # On Darwin10 only use selection here if c++20+ required
     if { ${os.platform} ne "darwin" || ${os.major} >= 11 || ${compiler.cxx_standard} >= 2020 } {
-        lappend compilers macports-clang-16 macports-clang-15 macports-clang-14 macports-clang-13
-        if {${os.major} < 23 || ${os.platform} ne "darwin"} {
-            # https://trac.macports.org/ticket/68257
-            # Versions of clang older than clang-13 probably have build issues on
-            # macOS14+. Until resolved do not append to fallback list.
-            # Unlikely they will ever really be needed here though.
-            lappend compilers macports-clang-12
+        if {${os.major} < 25 || ${os.platform} ne "darwin"} {
+            lappend compilers macports-clang-16 macports-clang-15 macports-clang-14 macports-clang-13
+            if {${os.major} < 23 || ${os.platform} ne "darwin"} {
+                # https://trac.macports.org/ticket/68257
+                # Versions of clang older than clang-13 probably have build issues on
+                # macOS14+. Until resolved do not append to fallback list.
+                # Unlikely they will ever really be needed here though.
+                lappend compilers macports-clang-12
+            }
         }
     }
 }
