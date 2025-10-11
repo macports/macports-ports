@@ -1,0 +1,282 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem 1.0
+
+name                python314
+
+# Remember to keep py314-tkinter and py314-gdbm's versions sync'd with this
+version             3.14.0
+
+set branch          [join [lrange [split ${version} .] 0 1] .]
+categories          lang
+license             PSF
+maintainers         {jmr @jmroot}
+
+description         An interpreted, object-oriented programming language
+long_description    Python is an interpreted, interactive, object-oriented \
+                    programming language.
+
+homepage            https://www.python.org/
+master_sites        ${homepage}ftp/python/${version}/
+
+distname            Python-${version}
+use_xz              yes
+checksums           md5 41389edaf9c643263cbed9b5ed307df8 \
+                    rmd160 cc90edce6f257107b4914e106825537bc9506cde \
+                    sha256 2299dae542d395ce3883aca00d3c910307cd68e0b2f7336098c8e7b7eee9f3e9
+
+patchfiles          patch-configure.diff \
+                    Makefile.pre.in.patch \
+                    patch-Lib-ctypes-macholib-dyld.py.diff \
+                    configure-disable-libuuid.patch \
+                    configure-disable-tkinter.patch \
+                    configure-disable-system-libffi.patch
+
+depends_build       path:bin/pkg-config:pkgconfig
+depends_lib         port:bzip2 \
+                    port:expat \
+                    port:gettext-runtime \
+                    port:libedit \
+                    port:libffi \
+                    port:mpdecimal \
+                    port:ncurses \
+                    path:lib/libssl.dylib:openssl \
+                    port:sqlite3 \
+                    port:xz \
+                    port:zlib \
+                    port:zstd
+
+if {$subport eq $name} {
+set pythonVerNoDot  [string map {. {}} $branch]
+depends_run         port:python_select-${pythonVerNoDot} \
+                    port:python3_select-${pythonVerNoDot}
+notes-append "
+To make this the default Python or Python 3 (i.e., the version run by\
+the 'python' or 'python3' commands), run one or both of:
+
+    sudo port select --set python python$pythonVerNoDot
+    sudo port select --set python3 python$pythonVerNoDot
+"
+}
+
+compiler.c_standard 2011
+
+configure.args      --enable-framework=${frameworks_dir} \
+                    --enable-ipv6 \
+                    --enable-loadable-sqlite-extensions \
+                    --with-computed-gotos \
+                    --with-ensurepip=no \
+                    --with-readline=editline \
+                    --with-system-expat \
+                    --with-dbmliborder=ndbm:bdb
+
+configure.ccache    no
+# pkg-config removes -I flags for paths in CPATH, which confuses python.
+configure.env       PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+
+post-patch {
+    reinplace "s|@@PREFIX@@|${prefix}|g" \
+      ${worksrcpath}/Lib/ctypes/macholib/dyld.py
+
+    # replace /Applications with ${applications_dir}
+    reinplace "s|@@APPLICATIONS_DIR@@|${applications_dir}|" \
+      ${worksrcpath}/configure
+    reinplace "s|@@ABIFLAGS@@|${abiflags}|" \
+      ${worksrcpath}/configure
+}
+
+build.target        all
+
+test.run            yes
+test.target         test
+
+destroot.target     frameworkinstall maninstall
+
+subport python314-freethreading {
+    description-append (free threading)
+    long_description-append This port has the free threading\
+                        feature enabled, i.e. there is no global interpreter\
+                        lock (GIL).
+    notes-append "Python with free threading has a different ABI and is thus\
+            incompatible with extension modules built for the standard ABI."
+    # task_vm_info.phys_footprint
+    platforms   {darwin >= 15}
+    # Needs stdatomic.h
+    compiler.blacklist  {clang < 700}
+    set abiflags t
+    configure.args-append   --disable-gil
+    post-destroot {
+        if {[file exists "${destroot}${applications_dir}/Python ${branch}"]} {
+            move    "${destroot}${applications_dir}/Python ${branch}" \
+                    "${destroot}${applications_dir}/Python ${branch}${abiflags}"
+        }
+        foreach exe [list idle${branch} pydoc${branch} python${branch} python${branch}-config] {
+            delete ${destroot}${prefix}/bin/${exe}
+        }
+    }
+}
+if {$subport eq $name} {
+    set abiflags {}
+}
+
+platform darwin {
+    if {${os.major} < 11} {
+        configure.args-append   --without-mimalloc
+    }
+    if {[vercmp $macosx_deployment_target <= 10.5]} {
+        patchfiles-append  patch-threadid-older-systems.diff
+        configure.cppflags-append -D_DARWIN_USE_64_BIT_INODE
+    }
+
+    post-configure {
+        # poll() misbehaves on 10.8 and older
+        # See https://trac.macports.org/ticket/18376
+        if {${os.major} <= 12} {
+            system -W ${worksrcpath} "ed - pyconfig.h < ${filespath}/pyconfig.ed"
+        }
+    }
+
+    post-destroot {
+        set framewpath  ${frameworks_dir}/Python.framework
+        set framewdir   ${framewpath}/Versions/${branch}${abiflags}
+        set confdir     config-${branch}${abiflags}-darwin
+
+        foreach dir { Headers Resources Python Versions/Current } {
+            file delete ${destroot}${framewpath}/${dir}
+        }
+
+        if {$subport eq $name} {
+            ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
+        }
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}${abiflags}.pc ${destroot}${prefix}/lib/pkgconfig/
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}${abiflags}-embed.pc ${destroot}${prefix}/lib/pkgconfig/
+
+        set libdir ${destroot}${framewdir}/lib/python${branch}${abiflags}
+        # Without this, LINKFORSHARED is set to
+        # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
+        # (this becomes Python.framework/Versions/3.14/Python) which doesn't
+        # work for dependents that incorrectly use this variable to find out
+        # how to link against python (see ticket #15099); instead we mirror
+        # the behavior of `python-config --ldflags` here.
+        set lfs_pattern {^([[:space:]]*'LINKFORSHARED':).*}
+        set lfs_replacement "\\1 '-L${framewdir}/lib/python${branch}${abiflags}/${confdir} -lpython${branch} -ldl -framework CoreFoundation',"
+        reinplace -E s|${lfs_pattern}|${lfs_replacement}| \
+            ${libdir}/_sysconfigdata_${abiflags}_darwin_darwin.py
+
+        # remove -arch flags from the config
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+            ${libdir}/_sysconfigdata_${abiflags}_darwin_darwin.py \
+            ${libdir}/_sysconfig_vars_${abiflags}_darwin_darwin.json \
+            ${libdir}/${confdir}/Makefile
+
+        # also remove gettext overlinking
+        reinplace "s|-lintl||" \
+            ${libdir}/_sysconfigdata_${abiflags}_darwin_darwin.py \
+            ${libdir}/_sysconfig_vars_${abiflags}_darwin_darwin.json \
+            ${libdir}/${confdir}/Makefile
+
+        # recompile the modified file
+        set python_for_build python.exe
+        # executable differs depending on filesystem case sensitivity
+        if {![file exists ${worksrcpath}/${python_for_build}]} {
+            set python_for_build python
+        }
+        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -m compileall -d [shellescape ${framewdir}/lib/python${branch}${abiflags}] -o 0 -o 1 -o 2 [shellescape ${libdir}/_sysconfigdata_${abiflags}_darwin_darwin.py]"
+
+        # Also make the sysconfig changes in the Makefile
+        reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION)$(ABIFLAGS) $(LIBS) $(SYSLIBS)|} \
+            ${libdir}/${confdir}/Makefile
+        # and the .json file
+        set lfs_pattern {^([[:space:]]*"LINKFORSHARED":).*}
+        set lfs_replacement "\\1 \"-L${framewdir}/lib/python${branch}${abiflags}/${confdir} -lpython${branch} -ldl -framework CoreFoundation\","
+        reinplace -E s|${lfs_pattern}|${lfs_replacement}| \
+            ${libdir}/_sysconfig_vars_${abiflags}_darwin_darwin.json
+    }
+}
+
+post-destroot {
+    foreach unversioned {2to3 idle3 pydoc3 python3 python3-config} {
+        delete ${destroot}${prefix}/bin/${unversioned}
+    }
+}
+
+variant universal {
+    post-patch {
+        set universal_arch_flags {}
+        set arch_run_32bit {}
+        set lipo_32bit_flags {}
+        set lipo_intel64_flags {}
+        set any64 no
+        foreach arch ${configure.universal_archs} {
+            lappend universal_arch_flags -arch ${arch}
+            if {${arch} in {i386 ppc}} {
+                lappend arch_run_32bit -${arch}
+                lappend lipo_32bit_flags -extract ${arch}
+            } else {
+                set any64 yes
+            }
+        }
+        if {$any64} {
+            if {$arch_run_32bit eq ""} {
+                set arch_run_32bit true
+                set lipo_32bit_flags ""
+            } else {
+                set arch_run_32bit "/usr/bin/arch $arch_run_32bit"
+                #lipo_32bit_flags already correct
+            }
+            if {"arm64" in ${configure.universal_archs} && "x86_64" in ${configure.universal_archs}} {
+                set lipo_intel64_flags "-extract x86_64"
+            }
+        } else {
+            set arch_run_32bit ""
+            set lipo_32bit_flags ""
+        }
+        reinplace \
+            "s|@@UNIVERSAL_ARCH_FLAGS@@|${universal_arch_flags}|" \
+            ${worksrcpath}/configure
+        reinplace \
+            "s|@@LIPO_32BIT_FLAGS@@|${lipo_32bit_flags}|" \
+            ${worksrcpath}/configure
+        reinplace \
+            "s|@@LIPO_INTEL64_FLAGS@@|${lipo_intel64_flags}|" \
+            ${worksrcpath}/configure
+        reinplace \
+            "s|@@ARCH_RUN_32BIT@@|${arch_run_32bit}|" \
+            ${worksrcpath}/configure
+    }
+    configure.args-append   --enable-universalsdk=${configure.sysroot}
+    post-configure {
+        system -W ${worksrcpath} "ed - pyconfig.h < ${filespath}/pyconfig.h-universal.ed"
+    }
+
+    post-destroot {
+        foreach unversioned {python3-32 python3-intel64} {
+            delete ${destroot}${prefix}/bin/${unversioned}
+        }
+    }
+}
+
+variant optimizations description {enable expensive, stable optimizations (including PGO)} {
+    configure.args-append   --enable-optimizations
+}
+
+variant lto description {enable Link-Time Optimization} {
+    configure.args-append   --with-lto
+}
+
+platform darwin {
+    # Build failures on 10.10 and older
+    if {${os.major} > 14} {
+        default_variants-append +lto +optimizations
+    } elseif {${os.major} == 14 && !($universal_possible && [variant_isset universal])} {
+        default_variants-append +lto
+    }
+}
+
+variant dtrace description {enable DTrace support} {
+    configure.args-append   --with-dtrace
+}
+
+livecheck.type      regex
+livecheck.url       ${homepage}downloads/source/
+livecheck.regex     Python (${branch}\[.0-9\]+) -
