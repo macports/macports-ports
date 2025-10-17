@@ -13,7 +13,7 @@ default sourcehut.homepage {${sourcehut.instance}/~${sourcehut.author}/${sourceh
 
 # Later code assumes that sourcehut.master_sites is a simple string, not a list.
 options sourcehut.master_sites
-default sourcehut.master_sites {${sourcehut.homepage}/archive/}
+default sourcehut.master_sites {${sourcehut.homepage}/archive/${git.branch}${extract.suffix}?dummy=}
 
 options sourcehut.livecheck.branch
 default sourcehut.livecheck.branch master
@@ -40,7 +40,7 @@ proc sourcehut.setup {srht_author srht_project srht_version {srht_tag_prefix ""}
     git.url                 ${sourcehut.homepage}
     git.branch              [join ${sourcehut.tag_prefix}]${sourcehut.version}[join ${sourcehut.tag_suffix}]
     default master_sites    {${sourcehut.master_sites}}
-    default distname        {${git.branch}}
+    default distname        {${sourcehut.project}-${git.branch}}
     default worksrcdir      {${sourcehut.project}-${git.branch}}
 
     # If the version is composed entirely of hex characters, and is at least 7
