@@ -66,12 +66,12 @@ proc qt6::callback {} {
     foreach phase {build lib run test} {
         foreach module [option qt6.depends_${phase}] {
 
-            if { [option qt6.version] < [lindex $qt6::components(${module}) 0] || [lindex $qt6::components(${module}) 1] < [option qt6.version] } {
+            if {[vercmp [option qt6.version] < [lindex $qt6::components(${module}) 0]] || [vercmp [lindex $qt6::components(${module}) 1] < [option qt6.version]]} {
                 known_fail                  yes
-                pre-fetch {
-                    ui_error                "Module ${module} does not exist in Qt version [option qt6.version]"
-                    return -code error      "Module is unavailable"
-                }
+                pre-fetch "
+                    ui_error                \"Module ${module} does not exist in Qt version [option qt6.version]\"
+                    return -code error      {Module is unavailable}
+                "
 
                 # do not add dependency on a non-existent port
                 continue
