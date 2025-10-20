@@ -47,15 +47,14 @@ set qt6::available_versions {
 ####################################################################################################################################
 
 proc qt6::is_blacklisted {qt_version} {
-    set is_bad_qt_version no
     foreach blacklist [option qt6.blacklist] {
         foreach {c v} ${blacklist} {
             if { [vercmp ${qt_version} $c $v] } {
-                set is_bad_qt_version yes
+                return yes
             }
         }
     }
-    return ${is_bad_qt_version}
+    return no
 }
 
 proc qt6::base {} {
