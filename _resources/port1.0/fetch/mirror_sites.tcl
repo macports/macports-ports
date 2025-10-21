@@ -437,7 +437,6 @@ set vie.at      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
 #set ykf.ca      ${letsencrypt_https_or_http}
 set ykf.ca      http
-set ywg.ca      ${letsencrypt_https_or_http}
 set fcix.net    http
 set sjtu.edu.cn ${letsencrypt_https_only}
 
@@ -460,7 +459,6 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${sjtu.edu.cn}://mirror.sjtu.edu.cn/macports/distfiles/:mirror
     ${vie.at}://vie.at.distfiles.macports.org/:mirror
     ${ykf.ca}://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
-    ${ywg.ca}://ywg.ca.distfiles.macports.org/mirror/macports/distfiles/:mirror
 " {:*}]
 
 # MySQL
