@@ -70,7 +70,24 @@
 Example:
 #### Description
 
-<!-- Note: it is best to make pull requests from a branch rather than from master -->
+<!-- Note: it is best to make pull requests from a branch rather than from ---
+
+## 🧾 Linked Issues / References
+<!-- Example: Closes #123 or relates to #456 -->
+Closes #
+
+---
+
+## 🧑‍💻 Reviewer Checklist (Maintainer Use Only)
+- [ ] CI workflow passes on all platforms
+- [ ] Secrets and credentials unchanged / verified
+- [ ] LaunchDaemon validated via plist syntax
+- [ ] No new exposed network endpoints
+- [ ] Documentation updated accordingly
+
+---
+
+🕊️ *Maintained under Ethical Hacker GPT Secure Workflow Standard.*
 
 ###### Type(s)
 <!-- update (title contains ": U(u)pdate to"), submission (new Portfile) and CVE Identifiers are auto-detected, replace [ ] with [x] to select -->
