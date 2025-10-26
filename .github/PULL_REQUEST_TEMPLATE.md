@@ -1,3 +1,73 @@
+# 🧾 Pull Request Summary
+
+### What does this PR do?
+<!-- Short description of what this pull request changes or adds. -->
+
+- [ ] 🔧 MacPorts workflow update
+- [ ] 💾 Bitcoin daemon configuration
+- [ ] 🧰 General maintenance / refactor
+- [ ] 🧱 Documentation or README update
+- [ ] 🐛 Bug fix / security patch
+
+---
+
+## 🔍 Description & Context
+<!-- Explain why this change is needed, what issue it addresses, or what improvement it introduces. -->
+<!-- Example: "Updated mirror.yml to support OIDC authentication and removed static SSH keys." -->
+
+---
+
+## ✅ Verification Steps
+
+**Before submitting this PR:**
+- [ ] Confirmed local syntax/lint passes (`yamllint`, `plistlib` check)
+- [ ] CI runs successfully on fork or test branch
+- [ ] Verified no credentials or tokens appear in the diff
+- [ ] Confirmed `.github/workflows/` still uses **pinned commit SHAs**
+- [ ] Tested LaunchDaemon behavior locally (if modified)
+- [ ] Checked file permissions and ownership in configs (macOS):
+  - `/etc/bitcoin/bitcoin.conf` → `bitcoin:bitcoin 0600`
+  - `/Library/LaunchDaemons/org.bitcoin.bitcoind.plist` → `root:wheel 0644`
+
+---
+
+## 🛡️ Security & Privacy Checklist
+
+### GitHub Workflows
+- [ ] No plain-text secrets or tokens in workflow YAML
+- [ ] All actions pinned to **commit SHAs**
+- [ ] No `echo ${{ secrets.* }}` statements
+- [ ] If SSH is used, verified via **restricted key / command** in authorized_keys
+- [ ] Prefer OIDC for artifact upload (where available)
+
+### Bitcoin Daemon
+- [ ] `bitcoin.conf` does **not** include rpcuser/rpcpassword
+- [ ] Uses **cookie authentication** only
+- [ ] Optional privacy mode (Tor/DNS seed disabled) verified if enabled
+- [ ] Log rotation active via `/etc/newsyslog.d/bitcoind.conf`
+
+### General
+- [ ] No sensitive file paths revealed in logs
+- [ ] No secrets or tokens added to repository history
+- [ ] Configuration changes documented below
+
+---
+
+## 📦 Configuration or Secret Changes
+<!-- Document if new secrets, keys, or environment variables are required -->
+| Type | Name | Required? | Notes |
+|------|------|------------|-------|
+| 🔐 GitHub Secret | MIRROR_DB_URL | Yes | Mirror database endpoint |
+| 🔐 GitHub Secret | MIRROR_DB_CREDENTIALS | Yes | Service credentials or token |
+| 🔐 GitHub Secret | MIRROR_UPLOAD_URL | Optional | Artifact upload target |
+| 🔐 GitHub Secret | GOOGLE_OIDC_TOKEN | Optional | OIDC upload auth |
+| ⚙️ System Config | bitcoin.conf | Yes | Verified secure configuration |
+
+---
+
+## 🧪 Testing Evidence
+<!-- Provide logs, screenshots, or CI run links showing tests passed and service working as expected. -->
+Example:
 #### Description
 
 <!-- Note: it is best to make pull requests from a branch rather than from master -->
