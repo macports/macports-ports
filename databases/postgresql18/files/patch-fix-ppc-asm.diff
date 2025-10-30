@@ -1,0 +1,316 @@
+From 842accd12472f563523ba92ac4fe540ae71c99e9 Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Tue, 29 Aug 2023 22:34:19 +0800
+Subject: [PATCH] Revert "Remove configurability of PPC spinlock assembly
+ code."
+
+Upstream has broken PowerPC build in 8ded65682bee2a1c04392a88e0df0f4fc7552623
+Revert that.
+
+diff --git configure configure
+index 028434b56e..7c10905dfd 100755
+--- configure
++++ configure
+@@ -15336,7 +15336,39 @@ $as_echo "#define HAVE_X86_64_POPCNTQ 1" >>confdefs.h
+     fi
+   ;;
+   ppc*|powerpc*)
+-    # On PPC, check if compiler accepts "i"(x) when __builtin_constant_p(x).
++    # On PPC, check if assembler supports LWARX instruction's mutex hint bit
++    { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether assembler supports lwarx hint bit" >&5
++$as_echo_n "checking whether assembler supports lwarx hint bit... " >&6; }
++if ${pgac_cv_have_ppc_mutex_hint+:} false; then :
++  $as_echo_n "(cached) " >&6
++else
++  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
++/* end confdefs.h.  */
++
++int
++main ()
++{
++int a = 0; int *p = &a; int r;
++	 __asm__ __volatile__ (" lwarx %0,0,%1,1\n" : "=&r"(r) : "r"(p));
++  ;
++  return 0;
++}
++_ACEOF
++if ac_fn_c_try_compile "$LINENO"; then :
++  pgac_cv_have_ppc_mutex_hint=yes
++else
++  pgac_cv_have_ppc_mutex_hint=no
++fi
++rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
++fi
++{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv_have_ppc_mutex_hint" >&5
++$as_echo "$pgac_cv_have_ppc_mutex_hint" >&6; }
++    if test x"$pgac_cv_have_ppc_mutex_hint" = xyes ; then
++
++$as_echo "#define HAVE_PPC_LWARX_MUTEX_HINT 1" >>confdefs.h
++
++    fi
++    # Check if compiler accepts "i"(x) when __builtin_constant_p(x).
+     { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether __builtin_constant_p(x) implies \"i\"(x) acceptance" >&5
+ $as_echo_n "checking whether __builtin_constant_p(x) implies \"i\"(x) acceptance... " >&6; }
+ if ${pgac_cv_have_i_constraint__builtin_constant_p+:} false; then :
+diff --git configure.ac configure.ac
+index f8ab273674..d3e402dfc0 100644
+--- configure.ac
++++ configure.ac
+@@ -1677,7 +1677,18 @@ case $host_cpu in
+     fi
+   ;;
+   ppc*|powerpc*)
+-    # On PPC, check if compiler accepts "i"(x) when __builtin_constant_p(x).
++    # On PPC, check if assembler supports LWARX instruction's mutex hint bit
++    AC_CACHE_CHECK([whether assembler supports lwarx hint bit],
++                   [pgac_cv_have_ppc_mutex_hint],
++    [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([],
++	[int a = 0; int *p = &a; int r;
++	 __asm__ __volatile__ (" lwarx %0,0,%1,1\n" : "=&r"(r) : "r"(p));])],
++	[pgac_cv_have_ppc_mutex_hint=yes],
++	[pgac_cv_have_ppc_mutex_hint=no])])
++    if test x"$pgac_cv_have_ppc_mutex_hint" = xyes ; then
++	AC_DEFINE(HAVE_PPC_LWARX_MUTEX_HINT, 1, [Define to 1 if the assembler supports PPC's LWARX mutex hint bit.])
++    fi
++    # Check if compiler accepts "i"(x) when __builtin_constant_p(x).
+     AC_CACHE_CHECK([whether __builtin_constant_p(x) implies "i"(x) acceptance],
+                    [pgac_cv_have_i_constraint__builtin_constant_p],
+     [AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
+diff --git src/include/pg_config.h.in src/include/pg_config.h.in
+index 85150f90b2..31674bde4e 100644
+--- src/include/pg_config.h.in
++++ src/include/pg_config.h.in
+@@ -349,6 +349,9 @@
+ /* Define to 1 if you have the `posix_fallocate' function. */
+ #undef HAVE_POSIX_FALLOCATE
+ 
++/* Define to 1 if the assembler supports PPC's LWARX mutex hint bit. */
++#undef HAVE_PPC_LWARX_MUTEX_HINT
++
+ /* Define to 1 if you have the `ppoll' function. */
+ #undef HAVE_PPOLL
+ 
+diff --git src/include/pg_config_manual.h src/include/pg_config_manual.h
+index 844c3e0f09..5ee2c46267 100644
+--- src/include/pg_config_manual.h
++++ src/include/pg_config_manual.h
+@@ -227,6 +227,32 @@
+  */
+ #define DEFAULT_EVENT_SOURCE  "PostgreSQL"
+ 
++/*
++ * On PPC machines, decide whether to use the mutex hint bit in LWARX
++ * instructions.  Setting the hint bit will slightly improve spinlock
++ * performance on POWER6 and later machines, but does nothing before that,
++ * and will result in illegal-instruction failures on some pre-POWER4
++ * machines.  By default we use the hint bit when building for 64-bit PPC,
++ * which should be safe in nearly all cases.  You might want to override
++ * this if you are building 32-bit code for a known-recent PPC machine.
++ */
++#ifdef HAVE_PPC_LWARX_MUTEX_HINT	/* must have assembler support in any case */
++#if defined(__ppc64__) || defined(__powerpc64__)
++#define USE_PPC_LWARX_MUTEX_HINT
++#endif
++#endif
++
++/*
++ * On PPC machines, decide whether to use LWSYNC instructions in place of
++ * ISYNC and SYNC.  This provides slightly better performance, but will
++ * result in illegal-instruction failures on some pre-POWER4 machines.
++ * By default we use LWSYNC when building for 64-bit PPC, which should be
++ * safe in nearly all cases.
++ */
++#if defined(__ppc64__) || defined(__powerpc64__)
++#define USE_PPC_LWSYNC
++#endif
++
+ /*
+  * Assumed cache line size. This doesn't affect correctness, but can be used
+  * for low-level optimizations. Currently, this is used to pad some data
+diff --git src/include/port/atomics/arch-ppc.h src/include/port/atomics/arch-ppc.h
+index 35a79042c0..eb64513626 100644
+--- src/include/port/atomics/arch-ppc.h
++++ src/include/port/atomics/arch-ppc.h
+@@ -90,12 +90,12 @@ pg_atomic_compare_exchange_u32_impl(volatile pg_atomic_uint32 *ptr,
+ 		(int32) *expected >= PG_INT16_MIN)
+ 		__asm__ __volatile__(
+ 			"	sync				\n"
+-			"	lwarx   %0,0,%5,1	\n"
++			"	lwarx   %0,0,%5		\n"
+ 			"	cmpwi   %0,%3		\n"
+-			"	bne     $+12		\n"		/* branch to lwsync */
++			"	bne     $+12		\n"		/* branch to isync */
+ 			"	stwcx.  %4,0,%5		\n"
+ 			"	bne     $-16		\n"		/* branch to lwarx */
+-			"	lwsync				\n"
++			"	isync				\n"
+ 			"	mfcr    %1          \n"
+ :			"=&r"(found), "=r"(condition_register), "+m"(ptr->value)
+ :			"i"(*expected), "r"(newval), "r"(&ptr->value)
+@@ -104,12 +104,12 @@ pg_atomic_compare_exchange_u32_impl(volatile pg_atomic_uint32 *ptr,
+ #endif
+ 		__asm__ __volatile__(
+ 			"	sync				\n"
+-			"	lwarx   %0,0,%5,1	\n"
++			"	lwarx   %0,0,%5		\n"
+ 			"	cmpw    %0,%3		\n"
+-			"	bne     $+12		\n"		/* branch to lwsync */
++			"	bne     $+12		\n"		/* branch to isync */
+ 			"	stwcx.  %4,0,%5		\n"
+ 			"	bne     $-16		\n"		/* branch to lwarx */
+-			"	lwsync				\n"
++			"	isync				\n"
+ 			"	mfcr    %1          \n"
+ :			"=&r"(found), "=r"(condition_register), "+m"(ptr->value)
+ :			"r"(*expected), "r"(newval), "r"(&ptr->value)
+@@ -138,11 +138,11 @@ pg_atomic_fetch_add_u32_impl(volatile pg_atomic_uint32 *ptr, int32 add_)
+ 		add_ <= PG_INT16_MAX && add_ >= PG_INT16_MIN)
+ 		__asm__ __volatile__(
+ 			"	sync				\n"
+-			"	lwarx   %1,0,%4,1	\n"
++			"	lwarx   %1,0,%4		\n"
+ 			"	addi    %0,%1,%3	\n"
+ 			"	stwcx.  %0,0,%4		\n"
+ 			"	bne     $-12		\n"		/* branch to lwarx */
+-			"	lwsync				\n"
++			"	isync				\n"
+ :			"=&r"(_t), "=&b"(res), "+m"(ptr->value)
+ :			"i"(add_), "r"(&ptr->value)
+ :			"memory", "cc");
+@@ -150,11 +150,11 @@ pg_atomic_fetch_add_u32_impl(volatile pg_atomic_uint32 *ptr, int32 add_)
+ #endif
+ 		__asm__ __volatile__(
+ 			"	sync				\n"
+-			"	lwarx   %1,0,%4,1	\n"
++			"	lwarx   %1,0,%4		\n"
+ 			"	add     %0,%1,%3	\n"
+ 			"	stwcx.  %0,0,%4		\n"
+ 			"	bne     $-12		\n"		/* branch to lwarx */
+-			"	lwsync				\n"
++			"	isync				\n"
+ :			"=&r"(_t), "=&r"(res), "+m"(ptr->value)
+ :			"r"(add_), "r"(&ptr->value)
+ :			"memory", "cc");
+@@ -180,12 +180,12 @@ pg_atomic_compare_exchange_u64_impl(volatile pg_atomic_uint64 *ptr,
+ 		(int64) *expected >= PG_INT16_MIN)
+ 		__asm__ __volatile__(
+ 			"	sync				\n"
+-			"	ldarx   %0,0,%5,1	\n"
++			"	ldarx   %0,0,%5		\n"
+ 			"	cmpdi   %0,%3		\n"
+-			"	bne     $+12		\n"		/* branch to lwsync */
++			"	bne     $+12		\n"		/* branch to isync */
+ 			"	stdcx.  %4,0,%5		\n"
+ 			"	bne     $-16		\n"		/* branch to ldarx */
+-			"	lwsync				\n"
++			"	isync				\n"
+ 			"	mfcr    %1          \n"
+ :			"=&r"(found), "=r"(condition_register), "+m"(ptr->value)
+ :			"i"(*expected), "r"(newval), "r"(&ptr->value)
+@@ -194,12 +194,12 @@ pg_atomic_compare_exchange_u64_impl(volatile pg_atomic_uint64 *ptr,
+ #endif
+ 		__asm__ __volatile__(
+ 			"	sync				\n"
+-			"	ldarx   %0,0,%5,1	\n"
++			"	ldarx   %0,0,%5		\n"
+ 			"	cmpd    %0,%3		\n"
+-			"	bne     $+12		\n"		/* branch to lwsync */
++			"	bne     $+12		\n"		/* branch to isync */
+ 			"	stdcx.  %4,0,%5		\n"
+ 			"	bne     $-16		\n"		/* branch to ldarx */
+-			"	lwsync				\n"
++			"	isync				\n"
+ 			"	mfcr    %1          \n"
+ :			"=&r"(found), "=r"(condition_register), "+m"(ptr->value)
+ :			"r"(*expected), "r"(newval), "r"(&ptr->value)
+@@ -224,11 +224,11 @@ pg_atomic_fetch_add_u64_impl(volatile pg_atomic_uint64 *ptr, int64 add_)
+ 		add_ <= PG_INT16_MAX && add_ >= PG_INT16_MIN)
+ 		__asm__ __volatile__(
+ 			"	sync				\n"
+-			"	ldarx   %1,0,%4,1	\n"
++			"	ldarx   %1,0,%4		\n"
+ 			"	addi    %0,%1,%3	\n"
+ 			"	stdcx.  %0,0,%4		\n"
+ 			"	bne     $-12		\n"		/* branch to ldarx */
+-			"	lwsync				\n"
++			"	isync				\n"
+ :			"=&r"(_t), "=&b"(res), "+m"(ptr->value)
+ :			"i"(add_), "r"(&ptr->value)
+ :			"memory", "cc");
+@@ -236,11 +236,11 @@ pg_atomic_fetch_add_u64_impl(volatile pg_atomic_uint64 *ptr, int64 add_)
+ #endif
+ 		__asm__ __volatile__(
+ 			"	sync				\n"
+-			"	ldarx   %1,0,%4,1	\n"
++			"	ldarx   %1,0,%4		\n"
+ 			"	add     %0,%1,%3	\n"
+ 			"	stdcx.  %0,0,%4		\n"
+ 			"	bne     $-12		\n"		/* branch to ldarx */
+-			"	lwsync				\n"
++			"	isync				\n"
+ :			"=&r"(_t), "=&r"(res), "+m"(ptr->value)
+ :			"r"(add_), "r"(&ptr->value)
+ :			"memory", "cc");
+diff --git src/include/storage/s_lock.h src/include/storage/s_lock.h
+index cc83d561b2..0877cf65b0 100644
+--- src/include/storage/s_lock.h
++++ src/include/storage/s_lock.h
+@@ -412,8 +412,7 @@
+  *
+  * NOTE: per the Enhanced PowerPC Architecture manual, v1.0 dated 7-May-2002,
+  * an isync is a sufficient synchronization barrier after a lwarx/stwcx loop.
+- * But if the spinlock is in ordinary memory, we can use lwsync instead for
+- * better performance.
++ * On newer machines, we can use lwsync instead for better performance.
+  */
+ static __inline__ int
+ tas(volatile slock_t *lock)
+@@ -422,7 +421,11 @@
+ 	int _res;
+ 
+ 	__asm__ __volatile__(
++#ifdef USE_PPC_LWARX_MUTEX_HINT
+ "	lwarx   %0,0,%3,1	\n"
++#else
++"	lwarx   %0,0,%3		\n"
++#endif
+ "	cmpwi   %0,0		\n"
+ "	bne     1f			\n"
+ "	addi    %0,%0,1		\n"
+@@ -432,7 +435,11 @@
+ "	li      %1,1		\n"
+ "	b       3f			\n"
+ "2: \n"
++#ifdef USE_PPC_LWSYNC
+ "	lwsync				\n"
++#else
++"	isync				\n"
++#endif
+ "	li      %1,0		\n"
+ "3: \n"
+ :	"=&b"(_t), "=r"(_res), "+m"(*lock)
+@@ -443,14 +450,23 @@
+ 
+ /*
+  * PowerPC S_UNLOCK is almost standard but requires a "sync" instruction.
+- * But we can use lwsync instead for better performance.
++ * On newer machines, we can use lwsync instead for better performance.
+  */
++#ifdef USE_PPC_LWSYNC
+ #define S_UNLOCK(lock)	\
+ do \
+ { \
+ 	__asm__ __volatile__ ("	lwsync \n" ::: "memory"); \
+ 	*((volatile slock_t *) (lock)) = 0; \
+ } while (0)
++#else
++#define S_UNLOCK(lock)	\
++do \
++{ \
++	__asm__ __volatile__ ("	sync \n" ::: "memory"); \
++	*((volatile slock_t *) (lock)) = 0; \
++} while (0)
++#endif /* USE_PPC_LWSYNC */
+ 
+ #endif /* powerpc */
+ 

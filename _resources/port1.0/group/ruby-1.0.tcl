@@ -186,7 +186,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
     } else {
         switch ${implementation} {
-            ruby-devel { ruby.branch 3.4 }
+            ruby34 { ruby.branch 3.4 }
             ruby33 { ruby.branch 3.3 }
             ruby32 { ruby.branch 3.2 }
             ruby31 { ruby.branch 3.1 }
@@ -202,7 +202,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             ruby19 { ruby.branch 1.9 }
             ruby   { ruby.branch 1.8 }
             default {
-                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby33, ruby32, ... ruby20, ruby19 or ruby possible)"
+                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby34, ruby33, ... ruby20, ruby19 or ruby possible)"
                 return -code error "ruby.setup failed"
             }
         }

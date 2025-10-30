@@ -34,7 +34,6 @@ set vie.at      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
 #set ykf.ca      ${letsencrypt_https_or_http}
 set ykf.ca      http
-set ywg.ca      ${letsencrypt_https_or_http}
 set fcix.net    http
 set sjtu.edu.cn ${letsencrypt_https_only}
 
@@ -56,7 +55,6 @@ set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inlin
     ${pek.cn}://pek.cn.packages.macports.org/macports/packages/:nosubdir
     ${sjtu.edu.cn}://mirror.sjtu.edu.cn/macports/packages/:nosubdir
     ${vie.at}://vie.at.packages.macports.org/:nosubdir
-    ${ywg.ca}://ywg.ca.packages.macports.org/mirror/macports/packages/:nosubdir
 " {:*}]
 
 set portfetch::mirror_sites::archive_type(macports_archives) tbz2

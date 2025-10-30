@@ -1,0 +1,146 @@
+From 67e06636226282ca6c4c129288059c09770e2889 Mon Sep 17 00:00:00 2001
+From: Mohamed Akram <mohd.akram@outlook.com>
+Date: Fri, 24 Oct 2025 21:27:30 +0400
+Subject: [PATCH] ui/sdl2: Fix using GL display on macOS
+
+SDL_GL_CONTEXT_PROFILE_MASK needs to be set before creating the window
+so that SDL can load the ANGLE library for GL ES support. The shader
+source version also needs to match the library used. Avoid falling back
+to GL ES on macOS since it will not be available if ANGLE was not the
+library loaded initially.
+---
+ ui/sdl2-gl.c                     | 14 ++++++--------
+ ui/sdl2.c                        |  8 ++++++++
+ ui/shader.c                      | 18 ++++++++++++++++--
+ ui/shader/texture-blit-flip.vert |  2 --
+ ui/shader/texture-blit.frag      |  2 --
+ ui/shader/texture-blit.vert      |  2 --
+ 6 files changed, 30 insertions(+), 16 deletions(-)
+
+diff --git ui/sdl2-gl.c ui/sdl2-gl.c
+index 3be17d107..65163a956 100644
+--- ui/sdl2-gl.c
++++ ui/sdl2-gl.c
+@@ -30,6 +30,10 @@
+ #include "ui/input.h"
+ #include "ui/sdl2.h"
+ 
++#ifdef CONFIG_DARWIN
++#include <TargetConditionals.h>
++#endif
++
+ static void sdl2_set_scanout_mode(struct sdl2_console *scon, bool scanout)
+ {
+     if (scon->scanout_mode == scanout) {
+@@ -147,14 +151,6 @@ QEMUGLContext sdl2_gl_create_context(DisplayGLCtx *dgc,
+     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+ 
+     SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+-    if (scon->opts->gl == DISPLAY_GL_MODE_ON ||
+-        scon->opts->gl == DISPLAY_GL_MODE_CORE) {
+-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+-                            SDL_GL_CONTEXT_PROFILE_CORE);
+-    } else if (scon->opts->gl == DISPLAY_GL_MODE_ES) {
+-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+-                            SDL_GL_CONTEXT_PROFILE_ES);
+-    }
+     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, params->major_ver);
+     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, params->minor_ver);
+ 
+@@ -163,11 +159,13 @@ QEMUGLContext sdl2_gl_create_context(DisplayGLCtx *dgc,
+     /* If SDL fail to create a GL context and we use the "on" flag,
+      * then try to fallback to GLES.
+      */
++#if !TARGET_OS_OSX
+     if (!ctx && scon->opts->gl == DISPLAY_GL_MODE_ON) {
+         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                             SDL_GL_CONTEXT_PROFILE_ES);
+         ctx = SDL_GL_CreateContext(scon->real_window);
+     }
++#endif
+     return (QEMUGLContext)ctx;
+ }
+ 
+diff --git ui/sdl2.c ui/sdl2.c
+index b00e421f7..9973fd68e 100644
+--- ui/sdl2.c
++++ ui/sdl2.c
+@@ -96,6 +96,14 @@ void sdl2_window_create(struct sdl2_console *scon)
+ #ifdef CONFIG_OPENGL
+     if (scon->opengl) {
+         flags |= SDL_WINDOW_OPENGL;
++        if (scon->opts->gl == DISPLAY_GL_MODE_ON ||
++            scon->opts->gl == DISPLAY_GL_MODE_CORE) {
++            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
++                                SDL_GL_CONTEXT_PROFILE_CORE);
++        } else if (scon->opts->gl == DISPLAY_GL_MODE_ES) {
++            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
++                                SDL_GL_CONTEXT_PROFILE_ES);
++        }
+     }
+ #endif
+ 
+diff --git ui/shader.c ui/shader.c
+index ab448c41d..445b49e20 100644
+--- ui/shader.c
++++ ui/shader.c
+@@ -153,10 +153,24 @@ QemuGLShader *qemu_gl_init_shader(void)
+ {
+     QemuGLShader *gls = g_new0(QemuGLShader, 1);
+ 
++    const char *fmt = "#version %s\n%s";
++
++    const char *version = epoxy_is_desktop_gl() ? "140" : "300 es";
++
++    g_autofree const char *blit_vert_src = g_strdup_printf(
++        fmt, version, texture_blit_vert_src);
++
++    g_autofree const char *blit_flip_vert_src = g_strdup_printf(
++        fmt, version, texture_blit_flip_vert_src);
++
++    g_autofree const char *blit_frag_src = g_strdup_printf(
++        fmt, version, texture_blit_frag_src);
++
+     gls->texture_blit_prog = qemu_gl_create_compile_link_program
+-        (texture_blit_vert_src, texture_blit_frag_src);
++        (blit_vert_src, blit_frag_src);
+     gls->texture_blit_flip_prog = qemu_gl_create_compile_link_program
+-        (texture_blit_flip_vert_src, texture_blit_frag_src);
++        (blit_flip_vert_src, blit_frag_src);
++
+     if (!gls->texture_blit_prog || !gls->texture_blit_flip_prog) {
+         exit(1);
+     }
+diff --git ui/shader/texture-blit-flip.vert ui/shader/texture-blit-flip.vert
+index f7a448d22..1e4ac4c94 100644
+--- ui/shader/texture-blit-flip.vert
++++ ui/shader/texture-blit-flip.vert
+@@ -1,5 +1,3 @@
+-#version 300 es
+-
+ in vec2  in_position;
+ out vec2 ex_tex_coord;
+ 
+diff --git ui/shader/texture-blit.frag ui/shader/texture-blit.frag
+index 8ed95a46b..bd296a2ff 100644
+--- ui/shader/texture-blit.frag
++++ ui/shader/texture-blit.frag
+@@ -1,5 +1,3 @@
+-#version 300 es
+-
+ uniform sampler2D image;
+ in  mediump vec2 ex_tex_coord;
+ out mediump vec4 out_frag_color;
+diff --git ui/shader/texture-blit.vert ui/shader/texture-blit.vert
+index fb48d7066..ae205f637 100644
+--- ui/shader/texture-blit.vert
++++ ui/shader/texture-blit.vert
+@@ -1,5 +1,3 @@
+-#version 300 es
+-
+ in vec2  in_position;
+ out vec2 ex_tex_coord;
+ 
+-- 
+2.51.0
+
