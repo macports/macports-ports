@@ -1,3 +1,5 @@
+;;  -*- lexical-binding: t; -*-
+;;
 ;; load-path contains ${prefix}/share/emacs/site-lisp and its subdirecotries.
 ;; See #12115, #29232, #32146.
 (setq load-path (cons "__PREFIX__/share/emacs/site-lisp" load-path))

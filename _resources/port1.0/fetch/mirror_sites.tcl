@@ -69,7 +69,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.noris.de/modules/by-module/
     http://cpan.pair.com/modules/by-module/
     http://cpan.panu.it/modules/by-module/
-    https://cpan.perl.pt/modules/by-module/
     http://cpan.pesat.net.id/modules/by-module/
     http://cpan.rinet.ru/modules/by-module/
     http://cpan.saix.net/modules/by-module/
@@ -133,7 +132,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirror.softaculous.com/cpan/modules/by-module/
     http://mirror.sov.uk.goscomb.net/CPAN/modules/by-module/
     http://mirror.team-cymru.org/CPAN/modules/by-module/
-    http://mirror.transip.net/CPAN/modules/by-module/
     http://mirror.truenetwork.ru/CPAN/modules/by-module/
     http://mirror.ucu.ac.ug/cpan/modules/by-module/
     https://mirror.uic.edu/CPAN/modules/by-module/
@@ -422,16 +420,13 @@ set fastly      ${letsencrypt_https_or_http}
 #set aarnet.au   ${letsencrypt_https_or_http}
 set aarnet.au   http
 set atl.us      http
-# bos.us letsencrypt certs not set up yet, update when they are
-# (and also remove separate mirrors.mit.edu entry)
-set bos.us      http
+set bos.us      ${letsencrypt_https_or_http}
 set cph.dk      ${letsencrypt_https_or_http}
 set cjj.kr      http
 # cert doesn't have macports.org SANs; admin notified
 #set fco.it      ${letsencrypt_https_or_http}
 set fco.it      http
 set fra.de      ${letsencrypt_https_or_http}
-set jnb.za      ${letsencrypt_https_only}
 set jog.id      http
 set kmq.jp      ${letsencrypt_https_or_http}
 set lis.pt      ${letsencrypt_https_or_http}
@@ -442,7 +437,6 @@ set vie.at      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
 #set ykf.ca      ${letsencrypt_https_or_http}
 set ykf.ca      http
-set ywg.ca      ${letsencrypt_https_or_http}
 set fcix.net    http
 set sjtu.edu.cn ${letsencrypt_https_only}
 
@@ -452,13 +446,11 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${fcix.net}://mirror.fcix.net/macports/distfiles/:mirror
     ${aarnet.au}://aarnet.au.distfiles.macports.org/pub/macports/distfiles/:mirror
     ${atl.us}://atl.us.distfiles.macports.org/:mirror
-    https://mirrors.mit.edu/macports/distfiles/:mirror
     ${bos.us}://bos.us.distfiles.macports.org/:mirror
     ${cjj.kr}://cjj.kr.distfiles.macports.org/:mirror
     ${cph.dk}://cph.dk.distfiles.macports.org/:mirror
     ${fco.it}://fco.it.distfiles.macports.org/:mirror
     ${fra.de}://fra.de.distfiles.macports.org/:mirror
-    ${jnb.za}://jnb.za.distfiles.macports.org/distfiles/:mirror
     ${jog.id}://jog.id.distfiles.macports.org/macports/distfiles/:mirror
     ${kmq.jp}://kmq.jp.distfiles.macports.org/:mirror
     ${lis.pt}://lis.pt.distfiles.macports.org/:mirror
@@ -467,7 +459,6 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${sjtu.edu.cn}://mirror.sjtu.edu.cn/macports/distfiles/:mirror
     ${vie.at}://vie.at.distfiles.macports.org/:mirror
     ${ykf.ca}://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
-    ${ywg.ca}://ywg.ca.distfiles.macports.org/mirror/macports/distfiles/:mirror
 " {:*}]
 
 # MySQL

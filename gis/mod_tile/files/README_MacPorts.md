@@ -65,17 +65,34 @@ man pages for further information.
 To delete the imported data and start afresh, delete the database and the
 `mod_tile` tile cache.
 
-As a PostgreSQL super user, drop the database (default `gis`):
+1.  As a PostgreSQL super user, drop the database (default `gis`):
 
-	$ dropdb gis
+		$ dropdb gis
 
-Remove the tile cache with:
+2.  Remove the tile cache with:
 
-	$ sudo rm -rf @PREFIX@/var/lib/mod_tile/*
+		$ sudo rm -rf @PREFIX@/var/lib/mod_tile/*
 
-Remove the state files for incremental updates with:
+3.  Remove the state files for incremental updates with:
 
-	$ sudo rm -rf @PREFIX@/var/lib/mod_tile/.osmosis
+		$ sudo rm -rf @PREFIX@/var/lib/mod_tile/.osmosis
+
+Optionally, re-create the `mapnik.xml` file in order to use the latest
+stylesheets from the `openstreetmap-carto` port.  e.g.
+
+1.  Rename the current `mapnik.xml`
+
+		$ cd @PREFIX@/etc/renderd/
+		$ sudo mv mapnik.xml mapnik.xml~
+
+2.  If necessary, install the `carto` port:
+
+		$ sudo port install carto
+
+3.  Use `carto` to create an updated version of `mapnik.xml`:
+
+		$ carto @PREFIX@/share/openstreetmap-carto/project.mml | \
+		sudo tee @PREFIX@/etc/renderd/mapnik.xml
 
 ## Noto Fonts
 
@@ -84,7 +101,8 @@ are available under `@PREFIX@/lib/mapnik/fonts`.  Download the fonts and
 create a symbolic to their installed location:
 
 1.	Download a zip containing the fonts from
-    <https://www.google.com/get/noto/help/install/>
+    <https://github.com/google/fonts> - there is a link under `Download All
+    Google Fonts` - or from <https://github.com/notofonts/notofonts.github.io/releases>.
 
 		$ sudo mkdir -p /usr/local/share/fonts/noto
 		$ sudo chown $USER /usr/local/share/fonts/noto
@@ -97,6 +115,26 @@ The debug information written to `@PREFIX@/var/lib/renderd/renderd.log`
 during the daemon startup reports whether fonts are loaded successfully or
 not.  The configuration is fundamentally a priority preference for normal,
 bold and oblique fonts.  It is expected some font varieties will not be found.
+
+**Note:** sorting out the fonts you want from the downloads is cumbersome.
+Installing the `findutils` package and using `gfind` (needed for using
+extended regular expresssions) can ease the process.
+
+E.g. list how many files the release from
+[notofonts releases](https://github.com/notofonts/notofonts.github.io/releases)
+contain:
+
+	$ gfind ~/Downloads/notofonts.github.io-noto-monthly-release-2025.02.01/ \
+	-type f -regextype posix-extended \
+	-regex '.*/googlefonts/ttf/Noto(Sans|Serif).*\.ttf' | \
+	wc -l
+
+and copying those files to the font folder:
+
+	$ gfind ~/Downloads/notofonts.github.io-noto-monthly-release-2025.02.01/
+	-type f -regextype posix-extended -regex
+	'.*/googlefonts/ttf/Noto(Sans|Serif).*\.ttf' \
+	-exec cp '{}' /usr/local/share/fonts/noto/ \;
 
 ## Changing the Default Database name
 
@@ -114,7 +152,7 @@ its original source file as follows:
 1.  Make a copy of `@PREFIX@/share/openstreetmap-carto/project.mml` and edit
     the `dbname` attribute appropriately in the copy.
 
-1.  Use `carto` to re-create `mapnik.xml` using the copy of the `project.mml`
+2.  Use `carto` to re-create `mapnik.xml` using the copy of the `project.mml`
     source file:
 
 		$ sudo port install carto

@@ -18,40 +18,45 @@ default github.raw {https://raw.githubusercontent.com/${github.author}/${github.
 
 # Later code assumes that github.master_sites is a simple string, not a list.
 options github.master_sites
-default github.master_sites {https://codeload.github.com/${github.author}/${github.project}/legacy.tar.gz/${git.branch}?dummy=}
+default github.master_sites {[github.get_master_sites]}
+
+proc github.get_master_sites {} {
+    global github.tarball_from github.homepage git.branch
+    switch -- ${github.tarball_from} {
+        archive {
+            # FIXME: Generate a more specific URL. When a branch and tag
+            # share the same name, this will fail to resolve correctly.
+            #
+            # See:
+            # https://trac.macports.org/ticket/70652
+            # https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives#source-code-archive-urls
+            return ${github.homepage}/archive/${git.branch}
+        }
+        downloads {
+            # GitHub no longer hosts downloads on their servers.
+            return macports_distfiles
+        }
+        tarball {
+            global github.author github.project
+            return https://codeload.github.com/${github.author}/${github.project}/legacy.tar.gz/${git.branch}?dummy=
+        }
+        default {
+            # default to 'releases'
+            return ${github.homepage}/releases/download/${git.branch}
+        }
+    }
+}
 
 options github.tarball_from
-default github.tarball_from tarball
-option_proc github.tarball_from handle_tarball_from
-proc handle_tarball_from {option action args} {
-    global extract.suffix git.branch github.author github.homepage github.master_sites github.project
-
+default github.tarball_from releases
+option_proc github.tarball_from github.handle_tarball_from
+proc github.handle_tarball_from {option action args} {
     if {${action} eq "set"} {
-        github.tarball_from ${args}
         switch ${args} {
-            downloads {
-                # GitHub no longer hosts downloads on their servers.
-                github.master_sites macports_distfiles
-                default extract.rename no
-            }
-            releases {
-                github.master_sites ${github.homepage}/releases/download/${git.branch}
-                default extract.rename no
-            }
-            archive {
-                # FIXME: Generate a more specific URL. When a branch and tag
-                # share the same name, this will fail to resolve correctly.
-                #
-                # See:
-                # https://trac.macports.org/ticket/70652
-                # https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives#source-code-archive-urls
-                github.master_sites ${github.homepage}/archive/${git.branch}
-                default extract.rename {[expr {[llength ${extract.only}] == 1}]}
-            }
-            tarball {
-                github.master_sites https://codeload.github.com/${github.author}/${github.project}/legacy.tar.gz/${git.branch}?dummy=
-                default extract.rename {[expr {[llength ${extract.only}] == 1}]}
-            }
+            archive -
+            downloads -
+            releases -
+            tarball {}
             tags {
                 return -code error "the value \"tags\" is deprecated for github.tarball_from. Please use \"tarball\" instead."
             }
@@ -69,7 +74,7 @@ options github.livecheck.regex
 default github.livecheck.regex {(\[^"]+)}
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_suffix ""}} {
-    global extract.suffix github.author github.project github.version github.tag_prefix github.tag_suffix \
+    global github.author github.project github.version github.tag_prefix github.tag_suffix \
            github.homepage github.master_sites github.livecheck.branch PortInfo
 
     github.author           ${gh_author}
@@ -89,7 +94,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
     default master_sites    {${github.master_sites}}
     distname                ${github.project}-${github.version}
 
-    default extract.rename  {[expr {[llength ${extract.only}] == 1}]}
+    default extract.rename  {[expr {${github.tarball_from} in {archive tarball} && [llength ${extract.only}] == 1}]}
 
     # If the version is composed entirely of hex characters, and is at least 7
     # characters long, and is not exactly 8 decimal digits (which might be a
@@ -103,6 +108,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
         livecheck.type          regexm
         default livecheck.url   {${github.homepage}/commits/${github.livecheck.branch}.atom}
         default livecheck.regex {<id>tag:github.com,2008:Grit::Commit/(\[0-9a-f\]{[string length ${github.version}]})\[0-9a-f\]*</id>}
+        default github.tarball_from archive
     } else {
         livecheck.type          regex
         default livecheck.url   {${github.homepage}/tags}

@@ -5,7 +5,6 @@
 # Usage:
 # PortGroup         fortran 1.0
 
-PortGroup           compiler_blacklist_versions 1.0
 PortGroup           compilers 1.0
 PortGroup           github 1.0
 
@@ -19,15 +18,6 @@ if {${os.major} < 14} {
 	# FPM uses Git to fetch modules. Put it here so that we do not keep getting failures.
 	depends_build-append    path:bin/git:git
 	git.cmd                 ${prefix}/bin/git
-}
-
-# https://github.com/fortran-lang/fpm/issues/1059
-# Drop this upon the next release of FPM:
-compiler.blacklist-append \
-                    macports-gcc-14
-if {${os.platform} ne "darwin" || ${os.major} > 9} {
-    default_variants-append \
-                    +gcc13
 }
 
 # Clang of 10.7 fails with multiple packages: error: invalid instruction mnemonic 'cvtsi2sdl'

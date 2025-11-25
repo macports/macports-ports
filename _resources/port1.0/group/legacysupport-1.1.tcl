@@ -91,13 +91,6 @@ proc legacysupport::get_newest_darwin_with_missing_symbols {} {
     return ${ls_max_darwin_support}
 }
 
-# please remove when a86f95c has been in a released MacPorts version for at least two weeks
-# see https://github.com/macports/macports-base/commit/a86f95c5ab86ee52c8fec2271e005591179731de
-if {![info exists compiler.limit_flags]} {
-    options compiler.limit_flags
-    default compiler.limit_flags        no
-}
-
 proc legacysupport::get_depends_type {} {
     if {[option legacysupport.use_static]} {
         return depends_build

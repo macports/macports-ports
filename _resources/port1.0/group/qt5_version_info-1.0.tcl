@@ -32,14 +32,7 @@ proc qt5.get_default_name {} {
 
     # see https://doc.qt.io/qt-5/supported-platforms-and-configurations.html
     # for older versions, see https://web.archive.org/web/*/http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
-    if { ${os.major} <= 7 } {
-        #
-        # Qt 5 does not support ppc
-        # see http://doc.qt.io/qt-5/osx-requirements.html
-        #
-        return qt55
-        #
-    } elseif { ${os.major} <= 9 } {
+    if { ${os.major} <= 9 } {
         #
         # Mac OS X Tiger (10.4)
         # Mac OS X Leopard (10.5)

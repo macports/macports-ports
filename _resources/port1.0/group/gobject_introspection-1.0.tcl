@@ -43,15 +43,6 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
         }
     } else {
         depends_lib-append          path:lib/pkgconfig/gobject-introspection-1.0.pc:gobject-introspection
-        if {![string match *meson* [option configure.cmd]]} {
-            platform darwin 8 {
-                global prefix_frozen
-                # The rules enabled by gobject-introspection require GNU make 3.81+
-                depends_build-append    port:gmake
-                configure.env-append    MAKE=${prefix_frozen}/bin/gmake
-                build.cmd-replace       [portbuild::build_getmaketype] ${prefix_frozen}/bin/gmake
-            }
-        }
 
         if { [string match *cmake* [option configure.cmd] ] } {
             configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=ON
@@ -109,7 +100,11 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
             foreach arch [option muniversal.architectures] {
                 foreach tool {cc ld} {
                     set env_var [gobject_introspection_pg::map_tool_to_environment_variable $tool]
-                    build.args.${arch}-append ${env_var}+="[muniversal::get_archflag ${tool} ${arch}]"
+                    if {[string match *meson* [option configure.cmd]]} {
+                        build.env.${arch}-append ${env_var}=[muniversal::get_archflag ${tool} ${arch}]
+                    } else {
+                        build.args.${arch}-append ${env_var}+="[muniversal::get_archflag ${tool} ${arch}]"
+                    }
                 }
             }
         } else {

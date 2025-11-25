@@ -5,19 +5,20 @@ PortGroup               meson 1.0
 PortGroup               conflicts_build 1.0
 PortGroup               muniversal 1.1
 PortGroup               legacysupport 1.0
-PortGroup               compiler_blacklist_versions 1.0
 
 # timespec_get() and others
 legacysupport.newest_darwin_requires_legacy 17
 
+epoch                   1
+
 name                    mesa
 conflicts               gl-headers
-epoch                   1
-version                 24.3.2
+version                 25.2.6
 revision                0
-checksums               rmd160  37e3482c994b41959837267f02a522dabe21bd2d \
-                        sha256  ad9f5f3a6d2169e4786254ee6eb5062f746d11b826739291205d360f1f3ff716 \
-                        size    30640276
+
+checksums               rmd160  67e6ba5f07c21172a10305be57c42f401408e761 \
+                        sha256  361c97e8afa5fe20141c5362c5b489040751e12861c186a16c621a2fb182fc42 \
+                        size    43752752
 
 categories              x11 graphics
 maintainers             {jeremyhu @jeremyhu} openmaintainer
@@ -33,7 +34,7 @@ use_xz                  yes
 # Disable unexpected download of subprojects
 meson.wrap_mode         nodownload
 
-set py_ver              3.12
+set py_ver              3.13
 set py_ver_nodot        [string map {. {}} ${py_ver}]
 
 depends_build-append    path:bin/pkg-config:pkgconfig \
@@ -41,6 +42,7 @@ depends_build-append    path:bin/pkg-config:pkgconfig \
                         port:bison \
                         port:python${py_ver_nodot} \
                         port:py${py_ver_nodot}-mako \
+                        port:py${py_ver_nodot}-packaging \
                         port:py${py_ver_nodot}-yaml \
                         port:xorg-xorgproto
 
@@ -55,11 +57,14 @@ depends_lib-append      port:expat \
 
 patchfiles              patch-meson-spec-python.diff \
                         patch-pre-10.8-scandir.diff \
-                        patch-fix-build.diff \
-                        patch-fix-linking.diff
+                        patch-fix-linking.diff \
+                        patch-fix-zink.diff
 
 # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/32658
 patchfiles-append       patch-fix-32-bit.diff
+
+# https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/34718
+patchfiles-append       patch-missing-mach-init-include.patch
 
 # MP ticket 66269
 # the sizes of int and GLint are different on 10.4 PPC, at least
@@ -80,8 +85,11 @@ compiler.cxx_standard   2017
 # #elif HAS_CLANG_FALLTHROUGH
 compiler.blacklist-append  {clang < 800}
 
-configure.args          -Dosmesa=true \
-                        -Dgallium-drivers=softpipe
+configure.args          -Degl=disabled \
+                        -Dgles1=disabled \
+                        -Dgles2=disabled
+
+set drivers             [list softpipe]
 
 platform darwin {
     if {${os.major} < 9} {
@@ -115,22 +123,52 @@ if {[string match *gcc* ${configure.compiler}]} {
 }
 
 variant llvm description "enable the llvmpipe driver" {
-    set llvm_ver            19
+    set llvm_ver            21
     depends_lib-append      port:llvm-${llvm_ver}
     # for llvm-config
     configure.env-append    PATH=${prefix}/libexec/llvm-${llvm_ver}/bin:$env(PATH)
     # for llvm-ar
     build.env-append        PATH=${prefix}/libexec/llvm-${llvm_ver}/bin:$env(PATH)
-    configure.args-replace  -Dgallium-drivers=softpipe \
-                            -Dgallium-drivers=softpipe,llvmpipe
+    lappend drivers         llvmpipe
 }
 
-if {${os.platform} ne "darwin" || ${os.major} > 10} {
+# Does not work currently
+# https://github.com/KhronosGroup/MoltenVK/issues/2650
+variant zink description "enable the zink driver" {
+    platform darwin {
+        depends_build-append    port:MoltenVK
+        configure.args-append   -Dmoltenvk-dir=${prefix}
+    }
+    depends_run-append      port:vulkan-loader
+    lappend drivers         zink
+}
+
+# Avoid enabling on macOS as it disables hardware acceleration
+if {${os.platform} ne "darwin"} {
     default_variants        +llvm
 }
 
+post-patch {
+    reinplace "s|\"libvulkan\\.1\\.dylib\"|\"${prefix}/lib/libvulkan.1.dylib\"|g" \
+        src/gallium/drivers/zink/zink_screen.c \
+        src/gfxstream/guest/vulkan-mapper/GfxStreamVulkanMapper.cpp
+}
+
+pre-configure {
+    configure.args-append   -Dgallium-drivers=[join $drivers ,]
+}
+
+post-destroot {
+    # avoid conflict with ANGLE
+    move ${destroot}${prefix}/include/KHR/khrplatform.h \
+        ${destroot}${prefix}/include/KHR/khrplatform_mesa.h
+    reinplace "s|khrplatform\\.h|khrplatform_mesa.h|" \
+        ${destroot}${prefix}/include/GL/glcorearb.h \
+        ${destroot}${prefix}/include/GL/glext.h
+}
+
 variant tests description "build tests" {
-    # mesa uses it's own internal gtest version and fails with newer
+    # mesa uses its own internal gtest version and fails with newer
     conflicts_build-append gtest
     configure.args-replace -Dbuild-tests=false -Dbuild-tests=true
 }

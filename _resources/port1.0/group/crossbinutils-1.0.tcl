@@ -106,6 +106,16 @@ array set crossbinutils.versions_info {
         sha256  13f74202a3c4c51118b797a39ea4200d3f6cfbe224da6d1d95bb938480132dfd \
         size    28174300
     }}
+    2.44 {xz {
+        rmd160  44386f5741ed548a4648f0b71192a301efa4e351 \
+        sha256  ce2017e059d63e67ddb9240e9d4ec49c2893605035cd60e92ad53177f4377237 \
+        size    27285788
+    }}
+    2.45 {xz {
+        rmd160  04407793ec050b946eb982f1572e2806c63a3fb2 \
+        sha256  c50c0e7f9cb188980e2cc97e4537626b1672441815587f1eab69d2a1bfbef5d2 \
+        size    27868232
+    }}
 }
 
 proc crossbinutils.setup {target version} {
@@ -182,11 +192,18 @@ proc crossbinutils.setup {target version} {
         --enable-install-libiberty=${prefix}/${crossbinutils.target}/host \
         --infodir=${prefix}/share/info/${target} \
         --mandir=${prefix}/share/man \
-        --datarootdir=${prefix}/share/${crossbinutils.target}
+        --datarootdir=${prefix}/share/${crossbinutils.target} \
+        --with-system-zlib
 
     # Opportunistic links zstd for compression
     if {[vercmp ${version} >= "2.40"]} {
         depends_lib-append  port:zstd
+    }
+
+    # fatal error: error in backend: Cannot select: intrinsic %llvm.x86.sha1rnds4
+    # https://github.com/macports/macports-ports/pull/27345#issuecomment-2601373548
+    if {[vercmp ${version} >= "2.41"]} {
+        compiler.blacklist-append {clang < 1001}
     }
 
     build.dir ${workpath}/build

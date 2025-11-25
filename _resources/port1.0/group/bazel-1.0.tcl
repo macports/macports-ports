@@ -4,7 +4,6 @@
 # PortGroup     bazel 1.0
 
 PortGroup java 1.0
-PortGroup compiler_blacklist_versions 1.0
 PortGroup legacysupport 1.1
 PortGroup compiler_wrapper 1.0
 

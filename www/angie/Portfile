@@ -1,0 +1,230 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                angie
+version             1.8.1
+revision            0
+categories          www mail
+license             BSD
+maintainers         {l2dy @l2dy} openmaintainer
+
+description         drop-in replacement for Nginx
+long_description    Angie is an efficient, powerful, and scalable web server \
+                    that was forked from nginx to act as a drop-in replacement, \
+                    so you can use existing setups without major changes to \
+                    module layout or configuration.
+
+homepage            https://en.angie.software/
+master_sites        https://download.angie.software/files/
+
+checksums           rmd160  4e89e2e04ac80cdf1f7abe82d6388b2767febdbb \
+                    sha256  db30b69045cf9a40f144911814414d9e1b4d4370f6693d008f4017dcb4370b4c \
+                    size    1672621
+
+depends_lib         port:pcre \
+                    port:zlib
+
+patchfiles          patch-auto__install.diff \
+                    patch-conf__angie.conf.diff
+
+set angie_share     ${prefix}/share/${name}
+set angie_examples  ${angie_share}/examples
+set angie_confdir   ${prefix}/etc/${name}
+set angie_logdir    ${prefix}/var/log/${name}
+set angie_rundir    ${prefix}/var/run/${name}
+set angie_pidfile   ${angie_rundir}/${name}.pid
+set angie_all_confs {fastcgi.conf fastcgi_params mime.types angie.conf scgi_params uwsgi_params}
+set auto_activate_confs {angie.conf mime.types fastcgi.conf}
+
+# portfile-scoped vars for variant routines to re-def and use in port-stages (post-extract, pre-patch, etc)
+set angie_lua_mod_dirname      ""
+set angie_upload_mod_dirname   ""
+
+# for aforementioned re-defs of portfile-scoped vars in variant routines
+proc angie_set_portfile_var {var_name new_value} {
+    upvar   $var_name   portfile_var
+    set portfile_var   $new_value
+}
+
+
+configure.args-append \
+                    --with-cc-opt=\"${configure.cppflags} ${configure.cflags}\" \
+                    --with-ld-opt=\"${configure.ldflags}\" \
+                    --conf-path=${angie_confdir}/${name}.conf \
+                    --error-log-path=${angie_logdir}/error.log \
+                    --http-log-path=${angie_logdir}/access.log \
+                    --pid-path=${angie_pidfile} \
+                    --lock-path=${angie_rundir}/${name}.lock \
+                    --http-client-body-temp-path=${angie_rundir}/client_body_temp \
+                    --http-proxy-temp-path=${angie_rundir}/proxy_temp \
+                    --http-fastcgi-temp-path=${angie_rundir}/fastcgi_temp \
+                    --http-uwsgi-temp-path=${angie_rundir}/uwsgi_temp \
+                    --with-compat
+
+# pcre2 breaks the lua module (https://trac.macports.org/ticket/65150)
+configure.args-append \
+                    --without-pcre2
+
+# remove --disable-dependency-tracking
+configure.universal_args-delete   --disable-dependency-tracking
+
+build.target        build
+destroot.keepdirs   ${destroot}${angie_logdir} \
+                    ${destroot}${angie_rundir}
+
+post-destroot {
+    xinstall -d -m 755 ${destroot}${angie_share}
+    xinstall -d -m 755 ${destroot}${angie_examples}
+
+    foreach conf ${angie_all_confs} {
+        set conf_path "${destroot}${angie_confdir}/${conf}"
+        if {[file exists ${conf_path}]} {
+            file delete ${conf_path}
+        }
+        if {[file exists ${conf_path}.default]} {
+            move ${conf_path}.default ${destroot}${angie_examples}
+        }
+    }
+
+    file rename ${destroot}${prefix}/html ${destroot}${angie_share}
+
+    # Install the manpage
+    set man_path "${destroot}${prefix}/share/man/man8"
+    xinstall -d -m 0755 ${man_path}
+    xinstall    -m 0644 ${worksrcpath}/man/${name}.8 ${man_path}
+    reinplace -q "s|/var/run/myangie.pid|${angie_pidfile}/|g" ${man_path}/${name}.8
+}
+
+post-activate {
+    foreach conf ${auto_activate_confs} {
+        if {![file exists ${angie_confdir}/${conf}]} {
+            xinstall -m 644 ${angie_examples}/${conf}.default ${angie_confdir}/${conf}
+        }
+    }
+}
+
+startupitem.create      yes
+startupitem.pidfile     auto ${angie_pidfile}
+startupitem.executable  ${prefix}/sbin/angie -g "daemon off;"
+
+notes "\
+    A set of sample configuration files has been installed in ${angie_examples}.\n\n\
+    Additionally, the files [join ${auto_activate_confs} ", "] have been copied to ${angie_confdir} if they didn't exist yet.\n\
+    Adjust these files to your needs before starting angie."
+
+default_variants +mp4 +flv +secure_link +ssl +http2 +stream
+
+variant auth_request description {Add client authorization based on the result of a subrequest} {
+    configure.args-append   --with-http_auth_request_module
+}
+
+variant addition description {Append text to pages} {
+    configure.args-append   --with-http_addition_module
+}
+
+variant dav description {Add WebDAV support to server} {
+    configure.args-append   --with-http_dav_module
+}
+
+variant threads description {Add threads support (https://en.angie.software/angie/docs/configuration/modules/core/#thread-pool)} {
+    configure.args-append   --with-threads
+}
+
+variant debug description {Enable debug mode} {
+    configure.args-append   --with-debug
+}
+
+variant degradation description {Allow to return 204 or 444 code for some locations on low memory condition} {
+    configure.args-append   --with-http_degradation_module
+}
+
+variant flv description {Add FLV (Flash Video) streaming support to server} {
+    configure.args-append   --with-http_flv_module
+}
+
+variant gperftools description {Enable Google Performance Tools profiling for workers} {
+    configure.args-append   --with-google_perftools_module
+    depends_lib-append      port:gperftools
+
+    # If 'google_perftools' port doesn't find headers needed for the profiler lib, it just quietly skips it.
+    # Check if "-lprofiler" will fail -- if so, pre-empt configure-stage error with a more useful error msg.
+    pre-configure {
+        if {![file exists "${prefix}/lib/libprofiler.dylib"] && ![file exists "${prefix}/lib/libprofiler.a"]} {
+            ui_error "\
+                The 'gperftools' port did not install a libprofiler library (libprofiler.dylib or\
+                libprofiler.a) on your version of OS X, but the +google_perftools variant will not work\
+                without this library. Disable the +google_perftools variant to continue installing ${name}"
+            error "Required libprofiler library missing from gperftools port."
+        }
+    }
+}
+
+variant gzip_static description {Avoids compressing the same file each time it is requested} {
+    configure.args-append   --with-http_gzip_static_module
+}
+
+variant http2 requires ssl description {Add HTTP/2 support to the server} {
+    configure.args-append   --with-http_v2_module
+}
+
+variant image_filter description {Transform images with libgd} {
+    configure.args-append   --with-http_image_filter_module
+    depends_lib-append      port:gd2
+}
+
+variant mail description {Add IMAP4/POP3 mail proxy support} {
+    configure.args-append   --with-mail
+    if {[variant_isset ssl]} {
+        configure.args-append   --with-mail_ssl_module
+    }
+}
+
+variant mp4 description {Enables mp4 streaming with seeking ability} {
+    configure.args-append   --with-http_mp4_module
+}
+
+variant perl5 description {Add perl support to the server directly within angie and call perl via SSI} {
+    depends_lib-append      port:perl5.30
+    configure.args-append   --with-http_perl_module \
+                            --with-perl=${prefix}/bin/perl5.30
+}
+
+variant random_index description {Randomize directory indexes} {
+    configure.args-append   --with-http_random_index_module
+}
+
+variant realip description {For using angie as backend} {
+    configure.args-append   --with-http_realip_module
+}
+
+variant secure_link description {Protect pages with a secret key} {
+    configure.args-append   --with-http_secure_link_module
+}
+
+variant ssl description {Add SSL (HTTPS) support to the server, and also to the mail proxy if that is enabled} {
+    configure.args-append   --with-http_ssl_module
+    depends_lib-append      path:lib/libssl.dylib:openssl
+}
+
+variant status description {Add /angie_status support to the server} {
+    configure.args-append   --with-http_stub_status_module
+}
+
+variant substitution description {Replace text in pages} {
+    configure.args-append   --with-http_sub_module
+}
+
+variant stream description {Enable ngx_stream_core_module for generic TCP proxying and load balancing (install with +ssl to enable ngx_stream_ssl_module)} {
+    configure.args-append   --with-stream
+    if {[variant_isset ssl]} {
+        configure.args-append \
+            --with-stream_ssl_module --with-stream_ssl_preread_module
+    }
+}
+
+variant xslt description {Post-process pages with XSLT} {
+    configure.args-append   --with-http_xslt_module
+
+    depends_lib-append      port:libxslt
+}

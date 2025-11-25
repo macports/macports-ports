@@ -1,73 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-#
-# Including this PortGroup in a Portfile enhances the compiler.blacklist option
-# to support blacklisting only specific build numbers of the given compiler.
-# This PortGroup only knows about the build numbering scheme used by Apple's
-# versions of gcc, llvm-gcc and clang provided with Xcode and the command line
-# tools. As such, on platforms other than Darwin, any blacklist entries
-# specifying a compiler build number will just be removed without being checked.
-#
-# Examples:
-#
-# Blacklist only clang build numbers less than 318.0.61:
-# compiler.blacklist-append {clang < 318.0.61}
-#
-# Blacklist only clang build numbers greater than or equal to 421.11.66:
-# compiler.blacklist-append {clang >= 421.11.66}
-#
-# Blacklist only clang build numbers greater than or equal to 421.11.66 but less than 444:
-# compiler.blacklist-append {clang >= 421.11.66 < 444}
-#
-# Blacklist all versions of clang (same as without this PortGroup):
-# compiler.blacklist-append clang
-#
-# Known limitations:
-#
-# Trying to remove an enhanced compiler.blacklist specification will not work
-# (it will silently do nothing):
-# compiler.blacklist-delete {clang >= 421.11.66}
-# Workaround:
-# compiler.blacklist-delete clang
-#
-# This PortGroup was created following this discussion:
-# https://lists.macports.org/pipermail/macports-dev/2012-November/021103.html
 
-option_proc compiler.blacklist compiler_blacklist_versions._set_compiler_blacklist
-
-proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
-    if {${action} ne "set"} return
-    global os.platform compiler.blacklist
-    foreach blacklist ${compiler.blacklist} {
-        if {[llength ${blacklist}] > 1} {
-            compiler.blacklist-delete ${blacklist}
-            if {${os.platform} ne "darwin"} {
-                continue
-            }
-            set compiler [lindex ${blacklist} 0]
-            set comparisons [lrange ${blacklist} 1 end]
-            set compiler_version [compiler.command_line_tools_version ${compiler}]
-            if {${compiler_version} eq "" || [compiler_blacklist_versions._matches_all_versions ${compiler_version} ${comparisons}]} {
-                if {${compiler_version} eq ""} {
-                    ui_debug "compiler ${compiler} blacklisted because it's not installed or it doesn't work"
-                } else {
-                    ui_debug "compiler ${compiler} ${compiler_version} blacklisted because it matches {${blacklist}}"
-                }
-                compiler.blacklist-append ${compiler}
-            } else {
-                ui_debug "compiler ${compiler} ${compiler_version} not blacklisted because it doesn't match {${blacklist}}"
-            }
-        }
-    }
+pre-fetch {
+    ui_warn "Port maintainers: the compiler_blacklist_versions PortGroup is obsolete and should be removed from Portfiles."
 }
 
-proc compiler_blacklist_versions._matches_all_versions {compiler_version comparisons} {
-    if {[llength ${comparisons}] % 2} {
-        return -code error "invalid/incomplete comparison specification \"${comparisons}\""
-    }
-    foreach {comparison_operator test_version} ${comparisons} {
-        if {![vercmp ${compiler_version} ${comparison_operator} ${test_version}]} {
-            return 0
-        }
-    }
-    return 1
-}
+# This PortGroup is scheduled for deletion after: 2026-08-12

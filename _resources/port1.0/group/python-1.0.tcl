@@ -80,7 +80,7 @@ proc python_get_version {} {
 
 proc python_get_default_version {} {
     global python.versions
-    set def_v 312
+    set def_v 313
     if {[info exists python.versions]} {
         if {${def_v} in ${python.versions}} {
             return ${def_v}
@@ -138,6 +138,10 @@ proc python_set_versions {option action args} {
         set addcode 1
     }
     if {[info exists addcode] && ![info exists python._addedcode]} {
+        if {[option python.version] >= 313 && [option supported_archs] ne "noarch"} {
+            # Headers need working __atomic_* builtins
+            compiler.blacklist-append   {*gcc-4.[0-7]} {clang < 500}
+        }
         pre-build {
             foreach var {pycflags pycxxflags pyf77flags pyf90flags pyfcflags pyobjcflags pyldflags} {
                 set $var [list]
@@ -352,6 +356,7 @@ default python.pkgd     {${python.prefix}/lib/python${python.branch}/site-packag
 default python.libdir   {${python.prefix}/lib/python${python.branch}}
 default python.include  {[python_get_defaults include]}
 default build.cmd       {[python_get_defaults build_cmd]}
+default build.args      {[python_get_defaults build_args]}
 default build.target    {[python_get_defaults build_target]}
 default destroot.cmd    {[python_get_defaults destroot_cmd]}
 default destroot.destdir {[python_get_defaults destroot_destdir]}
@@ -376,13 +381,6 @@ proc python_add_dependencies {} {
         } else {
             depends_lib-delete port:python${python.version}
             depends_lib-append port:python${python.version}
-            if {${python.version} >= 313} {
-                # Python 3.13 uses atomics, which is not supported in old Xcode compilers.
-                # Python.framework/Versions/3.13/include/python3.13/cpython/pyatomic.h:543:4:
-                # error: #error "no available pyatomic implementation for this platform/compiler"
-                # error: command '/usr/bin/gcc-4.2' failed with exit code 1
-                compiler.c_standard 2011
-            }
             if {[option python.pep517]} {
                 depends_build-delete    port:py${python.version}-build
                 depends_build-append    port:py${python.version}-build
@@ -395,10 +393,15 @@ proc python_add_dependencies {} {
                 }
                 switch -- [option python.pep517_backend] {
                     setuptools {
-                        depends_build-delete    port:py${python.version}-setuptools \
-                                                port:py${python.version}-wheel
-                        depends_build-append    port:py${python.version}-setuptools \
-                                                port:py${python.version}-wheel
+                        depends_build-delete    port:py${python.version}-setuptools
+                        depends_build-append    port:py${python.version}-setuptools
+                        # setuptools >= 70.1 provides bdist_wheel
+                        # ... but it breaks without wheel.macosx_libfile
+                        # https://trac.macports.org/ticket/72342
+                        if {1 || ${python.version} <= 37} {
+                            depends_build-delete    port:py${python.version}-wheel
+                            depends_build-append    port:py${python.version}-wheel
+                        }
                     }
                     flit {
                         depends_build-delete    port:py${python.version}-flit_core
@@ -432,14 +435,16 @@ proc python_add_dependencies {} {
             if {[tbool test.run]} {
                 switch -- [option python.test_framework] {
                     pytest {
-                        depends_test-delete    port:py${python.version}-pytest
-                        depends_test-append    port:py${python.version}-pytest
+                        depends_test-delete     port:py${python.version}-pytest
+                        depends_test-append     port:py${python.version}-pytest
                     }
                     nose {
-                        depends_test-delete    port:py${python.version}-nose
+                        depends_test-delete     port:py${python.version}-nose \
+                                                port:py${python.version}-pynose
                         if {${python.version} < 312} {
-                            depends_test-append \
-                                                port:py${python.version}-nose
+                            depends_test-append port:py${python.version}-nose
+                        } else {
+                            depends_test-append port:py${python.version}-pynose
                         }
                     }
                     default {}
@@ -452,7 +457,7 @@ port::register_callback python_add_dependencies
 
 
 proc python_get_defaults {var} {
-    global python.version python.branch python.prefix python.bin python.pep517 workpath python.test_framework
+    global python.version python.branch python.prefix python.bin python.pep517 python.pep517_backend workpath python.test_framework
     switch -- $var {
         binary_suffix {
             if {[string match py-* [option name]]} {
@@ -466,6 +471,13 @@ proc python_get_defaults {var} {
                 return "${python.bin} -m build --no-isolation"
             } else {
                 return "${python.bin} setup.py --no-user-cfg"
+            }
+        }
+        build_args {
+            if {${python.pep517_backend} eq "meson"} {
+                return "-Cbuild-dir=build"
+            } else {
+                return ""
             }
         }
         build_target {
@@ -564,8 +576,9 @@ options python.add_archflags python.add_cflags python.add_cxxflags \
         python.move_binaries python.move_binaries_suffix
 
 default python.add_archflags yes
-default python.add_cflags no
-default python.add_cxxflags no
+# Setuptool 75.7.0 (supporting Python 3.9+) changed how CFLAGS is handled.
+default python.add_cflags {[expr {$supported_archs ne "noarch" && [info exists python.version] && ${python.version} >= 39}]}
+default python.add_cxxflags {${python.add_cflags}}
 default python.add_fflags no
 default python.add_ldflags no
 default python.set_compiler yes
