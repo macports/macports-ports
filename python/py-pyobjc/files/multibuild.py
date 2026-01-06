@@ -15,7 +15,7 @@ import _install_tool
 
 jobs = int(sys.argv[1])
 cmd = sys.argv[2:]
-dirs = ["pyobjc-core"] + _install_tool.sorted_framework_wrappers()
+dirs = ["pyobjc-core"] + _install_tool.sort_framework_wrappers()
 
 failed = []
 
