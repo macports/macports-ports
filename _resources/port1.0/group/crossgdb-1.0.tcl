@@ -36,6 +36,11 @@ array set crossgdb.version_info {
         sha256  bcfcd095528a987917acf9fff3f1672181694926cc18d609c99d0042c00224c5 \
         size    24434444
     }}
+    17.1 {xz {
+        rmd160  589efefc5e5c3e117fbb3e2dd938d416564f4a3a \
+        sha256  14996f5f74c9f68f5a543fdc45bca7800207f91f92aeea6c2e791822c7c6d876 \
+        size    24663896
+    }}
 }
 
 proc crossgdb.setup {target version} {
