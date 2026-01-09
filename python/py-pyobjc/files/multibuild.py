@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-#
+
 # This is a small script that intercepts the build command, and
 # applies it to multiple directories, in parallel.
-#
+
 
 import multiprocessing.dummy
-import pathlib
 import subprocess
 import sys
 
@@ -19,20 +18,20 @@ dirs = ["pyobjc-core"] + _install_tool.sort_framework_wrappers()
 
 failed = []
 
+
 def build(dirpath):
-    r = subprocess.run(
-        cmd,
-        cwd=dirpath,
-        check=dirpath == "pyobjc-core",
-    )
+    try:
+        r = subprocess.run(
+            cmd,
+            cwd=dirpath,
+            check=dirpath == "pyobjc-core",
+        )
 
-    if not r:
+    except:
         failed.append(dirpath)
-
 
 
 with multiprocessing.dummy.Pool(jobs) as p:
     p.map(build, dirs)
-
 
 print("FAILED:", *failed)
