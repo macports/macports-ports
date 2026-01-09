@@ -3,7 +3,7 @@
 PortSystem              1.0
 
 name                    gpsd
-version                 3.25
+version                 3.27.3
 revision                0
 categories              net
 license                 BSD
@@ -23,20 +23,20 @@ long_description        GPSD is a service daemon that handles GPSes and other \
 homepage                https://gpsd.io
 
 master_sites            savannah
-checksums               rmd160  9e2f36c5eb7fd888241da57a69765dd80493d064 \
-                        sha256  b368b6a305e3f7a6382d23a0cbfc1d78923060b6b7f54cf7987a73c7b4a9afc2 \
-                        size    5225194
+checksums               rmd160  cd0df7bb535790d38ca5ebc93711bd6dbad469f2 \
+                        sha256  a4d85b67797522ae8611958b5fda0bb67e4921afe26bd53e1d2ff0a4158daccb \
+                        size    5994172
 
 livecheck.type          regex
 livecheck.url           https://download.savannah.gnu.org/releases/gpsd/
 livecheck.regex         "${name}-(\\d+(?:\\.\\d+)*)${extract.suffix}"
 
 
-# GPSD requires Python 2.6, 2.7, or 3.2+.
-# We skip 2.6, 3.2, and 3.3, but keep 2.7 and 3.4+.
+# GPSD requires Python 2.7 or 3.3+ (3.4+ for ubxtool and zerk).
+# We skip 3.3, but keep 2.7 and 3.4+.
 # Some variants may force a more restricted list.
 #
-set pythons_suffixes {27 34 35 36 37 38 39 310 311 312}
+set pythons_suffixes {27 34 35 36 37 38 39 310 311 312 313 314}
 
 set pythons_ports {}
 foreach s ${pythons_suffixes} {
@@ -55,7 +55,10 @@ foreach s ${pythons_suffixes} {
     variant ${p} description "Build ${name} to use Python ${v}" conflicts {*}${c} ""
 }
 
-# default to +python312
+# Default to +python312
+#
+# Don't be in a rush to make this the latest Python, since new Python versions
+# often have teething problems (even when nominally tested with this port).
 set pyver_no_dot "312"
 foreach s ${pythons_suffixes} {
     if {[variant_isset python${s}]} {
@@ -99,13 +102,6 @@ depends_build-append    port:scons \
                         port:docbook-xml-4.1.2 \
                         port:asciidoctor
 
-# Python 3.12+ has deprecated distutils, which is needed by the build.
-# It remains available via setuptools, so we add the dependency.
-# This requirement has not yet been fixed upstream.
-if {${pyver_no_dot} >= 312} {
-    depends_build-append port:py${pyver_no_dot}-setuptools
-}
-
 use_configure           no
 use_xcode               yes
 
@@ -119,7 +115,7 @@ build.target
 build.args              prefix=${prefix} \
                         target_python=${configure.python} \
                         python_shebang=${configure.python} \
-                        qt=no \
+                        qt=no qt_versioned=4 \
                         usb=no \
                         strip=no \
                         dbus_export=no \
@@ -134,40 +130,42 @@ build.env-append        "CC=${configure.cc} [get_canonical_archflags cc]" \
 #
 # The speed of the daemon tests is highly dependent on the WRITE_PAD value,
 # but values that are too low may cause spurious test failures. Due to some
-# recent improvements, 1ms is now believed to be adequate on the Mac, and is
-# the current upstream default.  If needed, this value can be overridden with
-# WRITE_PAD=XXX on the command line, but only if WRITE_PAD is included in
-# extra_env in macports.conf.  In all cases, the WRITE_PAD value in use is
-# reported by the test framework and is visible with -v.
+# recent improvements, 1ms is now believed to be adequate on the Mac in most
+# cases, and is the current upstream default.  But some test flakiness has
+# been observed on some systems with this value, so we increase it here to
+# 10ms.
 #
-# UPDATE: The default 1ms WRITE_PAD currently seems to be marginal, so we
-# default it to 3ms.
+# The WRITE_PAD value is obtained from test.write_pad, which can be overridden
+# on the command line if needed.  This replaces the older approach of specifying
+# the WRITE_PAD environment variable directly, not only avoiding the need
+# to whitelist WRITE_PAD in extra_env, but also to avoid trouble with older
+# versions of sudo that don't support -E.
 #
 # The test phase duplicates the arguments and environment (except WRITE_PAD)
 # from the build phase, mainly to avoid gratuitous rebuilds between the phases.
 #
 # The GPSD build procedure supports parallel tests, but there's no built-in
-# MacPorts support for parallel tests, nor is there a test.jobs variable, so
-# we just augment test.cmd with build.jobs.
+# MacPorts support for parallel tests, nor is there a standard test.jobs
+# variable, so we derive test.jobs from build.jobs.  If test parallelism
+# is suspected of causing trouble, test.jobs can be overridden on the
+# command line.
 #
 test.run                yes
-test.cmd                ${build.cmd} -j${build.jobs}
+default test.jobs       ${build.jobs}
+test.cmd                ${build.cmd} -j${test.jobs}
 test.target             testregress
 test.args               {*}${build.args}
-test.env-append         {*}${build.env}
-if { [info exists ::env(WRITE_PAD)] } {
-    test.env-append     WRITE_PAD=$::env(WRITE_PAD)
-} else {
-    test.env-append     WRITE_PAD=0.003
-}
+test.env                {*}${build.env}
+default test.write_pad  0.01
+test.env-append         WRITE_PAD=${test.write_pad}
 
 destroot.args           {*}${build.args}
 destroot.post_args
 destroot.env-append     {*}${build.env} DESTDIR=${destroot}
 
-# Although GPSD has successfully been built with Qt5 at one time, that build
-# is currently broken.  Until the build issue is sorted out, Qt support is
-# limited to Qt4.
+# This version of GPSD nominally supports Qt4, Qt5, and Qt6, but additional
+# build issues need to be sorted out for Qt5 and Qt6, so for now we still
+# limit it to Qt4 (see the 'qt_versioned' option in build.args).
 #
 variant qt description {Build Qt4 bindings} {
     PortGroup               qt4 1.0
@@ -194,7 +192,7 @@ variant dbus description {Include support for DBUS} {
     destroot.args-replace   dbus_export=no  dbus_export=yes
 }
 
-# The xgps programs recusively require a massive set of dependencies,
+# The xgps programs recursively require a massive set of dependencies,
 # so we make them optional.
 #
 variant xgps \
@@ -222,7 +220,7 @@ if {![variant_isset xgps]} {
     }
 }
 
-# The gpsplot program recusively requires a massive set of dependencies,
+# The gpsplot program recursively requires a massive set of dependencies,
 # so we make it optional.  This currently has no upstream equivalent.
 if {${pyver_no_dot} == 27 || ${pyver_no_dot} > 38} {
     variant plot \

@@ -25,8 +25,8 @@ if {[string first "37" $subport] > 1} {
     default gnuradio.default_python_variant +python27
 } else {
     # the following versions use all the same python
-    default gnuradio.python_versions { 3.8 3.9 3.10 }
-    default gnuradio.default_python_variant +python39
+    default gnuradio.python_versions {3.9 3.10}
+    default gnuradio.default_python_variant +python310
 }
 
 # use C/C++11

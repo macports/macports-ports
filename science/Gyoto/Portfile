@@ -6,12 +6,14 @@ PortGroup           boost 1.0
 PortGroup           compilers 1.0
 PortGroup           github 1.0
 
-github.setup        gyoto Gyoto 74a1bd863b5f2855044b656314297d85e346ef41
-version             2.0.2+20241208
+github.setup        gyoto Gyoto 25968c285d78393b3bf91494b0f89f9f75453dff
+set version_base        2.0.2
+set version_date        20251105
+version             ${version_base}-${version_date}
 revision            0
-checksums           rmd160  48d5c661f4b0a957cd3b404a098b3ca2df999545 \
-                    sha256  ab91835e15f7e800c9fe013c27c430ee81fbd147ad36b915cc112bba2276d98c \
-                    size    2304295
+checksums           rmd160  4c6e5d42f9ae603e7b98a1610225e458ae704a03 \
+                    sha256  5a5b11964e455490d34f56ad9cc7ee23f12f87cd5891541cfbbad53ea61a990a \
+                    size    2346138
 
 license             GPL-3+
 categories          science
@@ -38,18 +40,32 @@ depends_lib         port:cfitsio \
 # xercesc3 requires C++11; notice that eigen3-devel needs C++14.
 compiler.cxx_standard   2011
 
+# About the configuration arguments:
+# --without-yorick: Yorick support is deprecated, let's not build it
+# --with-lorene=${prefix}/lib/lorene: required for some numerical metrics
+# --with-xerces: xerces-c is required for XML input, autodetection succeeds
+# --with-cfitsio: cfitsio is required for FITS i/o, autodetection succeeds
+# --with-udunits-*: udunits is required for unit support, autodetection fails
+# --with-flint --without-arblib --without-aeae: Astrobj::Jet requires one of
+#   flint, arblib or AEAE
+# --without-mpi: see variants openmpi and mpich for MPI support
+# --without-python: see py31x-gyoto subports for Python support
+# --disable-doc: don't build the documentation
+# --enable-release: remove "unreleased" from library name
+# --with-sosuffix=-mp-${version}: add custom suffix to library name
 configure.args      --without-yorick \
                     --with-lorene=${prefix}/lib/lorene \
                     --with-xerces \
-                    --disable-doc \
                     --with-cfitsio \
                     --with-udunits-headers=-I${prefix}/include/udunits2/ \
                     --with-udunits-libs=-L${prefix}/lib/ \
-                    --enable-release \
+                    --with-flint \
+                    --without-arblib \
+                    --without-aeae \
                     --without-mpi \
                     --without-python \
-                    --without-arblit \
-                    --without-aeae \
+                    --disable-doc \
+                    --enable-release \
                     --with-sosuffix=-mp-${version}
 
 if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} ne ""} {
@@ -80,27 +96,46 @@ if {![catch {set result [active_variants [boost::depends_portname] openmpi {}]}]
   }
 }
 
-foreach nodot [list 39 310 311 312 313] wdot [list 3.9 3.10 3.11 3.12 3.13] {
+foreach nodot [list 310 311 312 313 314] wdot [list 3.10 3.11 3.12 3.13 3.14] {
     subport py${nodot}-gyoto {
         depends_build-append path:bin/doxygen:doxygen port:swig-python \
-                             port:py${nodot}-setuptools
-        depends_lib-append   port:python${nodot} port:py${nodot}-numpy
-        depends_run-append   port:Gyoto
-        compilers.enforce_c  Gyoto
-        categories-append    python
+            port:py${nodot}-setuptools port:py${nodot}-build \
+            port:py${nodot}-pip
+        depends_lib-append    port:python${nodot} port:py${nodot}-numpy \
+            port:Gyoto
+        depends_test          port:py${nodot}-matplotlib
+        compilers.enforce_c   Gyoto
+        categories-append     python
+        # check that Gyoto is has the right version before attempting to
+        # install py??-gyoto. Else, prompt the user for upgrade.
+        pre-fetch {
+            # Gyoto is in depends_lib, so it is guaranteed to be installed at this stage
+            set gyoto_version [lindex [lindex [registry_active gyoto] 0] 1]
+            if {[vercmp ${gyoto_version} ${version}] != 0} {
+                ui_error "${subport} requires Gyoto ${version} but version ${gyoto_version} is installed."
+                ui_error "Please upgrade Gyoto:"
+                ui_error "    sudo port upgrade Gyoto"
+                return -code error "incompatible Gyoto version"
+            }
+        }
         configure.args-delete --without-python
         configure.args-append PYTHON=${prefix}/bin/python${wdot}
-        # When building from a git commit, reflect the version number that we chose in gyoto --version etc
+        # When building from a git commit, reflect the version number that we
+        # chose in gyoto --version etc
         post-configure {
             reinplace -W ${worksrcpath} "s|PACKAGE_STRING = Gyoto.*|PACKAGE_STRING = Gyoto ${version}|g" \
-                Makefile bin/Makefile lib/Makefile python/Makefile
-            reinplace -W ${worksrcpath} "s|PACKAGE_VERSION = .*|PACKAGE_VERSION = ${version}|g" \
-                Makefile bin/Makefile lib/Makefile python/Makefile
+                python/Makefile
+            # We put a slighlty different version here as this is the name that pip will use for the wheel file
+            reinplace -W ${worksrcpath} "s|PACKAGE_VERSION = .*|PACKAGE_VERSION = ${version_base}.post${version_date}|g" \
+                python/Makefile
+            reinplace -W ${worksrcpath} "s|version = \".*\"|version = \"${version}\"|g" python/pyproject.toml
         }
-        use_parallel_build no
-        build.target  python plugins/python
-        destroot.cmd  PYTHONPATH=${frameworks_dir}/Python.framework/Versions/${wdot}:\$PYHTONPATH make
-        destroot.args -C python INSTALL_DATA=true prefix=${frameworks_dir}/Python.framework/Versions/${wdot}
+        use_parallel_build    no
+        build.target          python plugins/python
+        test.args             -C python
+        test.target           check
+        destroot.target       install-python
+        destroot.args         -C python
         post-destroot {
             system -W ${worksrcpath}/plugins/python "${build.cmd} install DESTDIR=${destroot}"
             xinstall -d ${destroot}${prefix}/share/doc/${subport}/examples
@@ -110,7 +145,6 @@ foreach nodot [list 39 310 311 312 313] wdot [list 3.9 3.10 3.11 3.12 3.13] {
                 ${destroot}${prefix}/share/doc/${subport}/examples/
             file delete -force ${destroot}${prefix}/include/
         }
-        test.run no
     }
 }
 
@@ -118,7 +152,7 @@ subport Gyoto {
 #    PortGroup conflicts_build 1.0
 #    conflicts_build ${name}
     post-destroot {
-        xinstall -W ${worksrcpath}/python \
+        xinstall -W ${worksrcpath}/python/include \
             gyoto.i gyoto_std.i gyoto_lorene.i numpy.i \
             ${destroot}${prefix}/include/Gyoto/
         xinstall ${worksrcpath}/plugins/python/include/GyotoPython.h \

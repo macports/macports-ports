@@ -69,7 +69,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.noris.de/modules/by-module/
     http://cpan.pair.com/modules/by-module/
     http://cpan.panu.it/modules/by-module/
-    https://cpan.perl.pt/modules/by-module/
     http://cpan.pesat.net.id/modules/by-module/
     http://cpan.rinet.ru/modules/by-module/
     http://cpan.saix.net/modules/by-module/
@@ -428,10 +427,8 @@ set cjj.kr      http
 #set fco.it      ${letsencrypt_https_or_http}
 set fco.it      http
 set fra.de      ${letsencrypt_https_or_http}
-set jnb.za      ${letsencrypt_https_only}
 set jog.id      http
 set kmq.jp      ${letsencrypt_https_or_http}
-set lis.pt      ${letsencrypt_https_or_http}
 set mse.uk      ${letsencrypt_https_or_http}
 set nue.de      ${letsencrypt_https_or_http}
 set pek.cn      ${letsencrypt_https_or_http}
@@ -439,7 +436,6 @@ set vie.at      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
 #set ykf.ca      ${letsencrypt_https_or_http}
 set ykf.ca      http
-set ywg.ca      ${letsencrypt_https_or_http}
 set fcix.net    http
 set sjtu.edu.cn ${letsencrypt_https_only}
 
@@ -454,16 +450,13 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${cph.dk}://cph.dk.distfiles.macports.org/:mirror
     ${fco.it}://fco.it.distfiles.macports.org/:mirror
     ${fra.de}://fra.de.distfiles.macports.org/:mirror
-    ${jnb.za}://jnb.za.distfiles.macports.org/distfiles/:mirror
     ${jog.id}://jog.id.distfiles.macports.org/macports/distfiles/:mirror
     ${kmq.jp}://kmq.jp.distfiles.macports.org/:mirror
-    ${lis.pt}://lis.pt.distfiles.macports.org/:mirror
     ${mse.uk}://mse.uk.distfiles.macports.org/:mirror
     ${pek.cn}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
     ${sjtu.edu.cn}://mirror.sjtu.edu.cn/macports/distfiles/:mirror
     ${vie.at}://vie.at.distfiles.macports.org/:mirror
     ${ykf.ca}://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
-    ${ywg.ca}://ywg.ca.distfiles.macports.org/mirror/macports/distfiles/:mirror
 " {:*}]
 
 # MySQL

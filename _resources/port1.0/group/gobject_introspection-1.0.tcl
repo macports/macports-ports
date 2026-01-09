@@ -100,7 +100,11 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
             foreach arch [option muniversal.architectures] {
                 foreach tool {cc ld} {
                     set env_var [gobject_introspection_pg::map_tool_to_environment_variable $tool]
-                    build.args.${arch}-append ${env_var}+="[muniversal::get_archflag ${tool} ${arch}]"
+                    if {[string match *meson* [option configure.cmd]]} {
+                        build.env.${arch}-append ${env_var}=[muniversal::get_archflag ${tool} ${arch}]
+                    } else {
+                        build.args.${arch}-append ${env_var}+="[muniversal::get_archflag ${tool} ${arch}]"
+                    }
                 }
             }
         } else {

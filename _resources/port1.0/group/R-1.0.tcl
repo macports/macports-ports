@@ -178,7 +178,7 @@ if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
 
 global prefix frameworks_dir
 # Please update R version here:
-set Rversion        4.5.1
+set Rversion        4.5.2
 set branch          [join [lrange [split ${Rversion} .] 0 1] .]
 set packages        ${frameworks_dir}/R.framework/Versions/${branch}/Resources/library
 set suffix          .tar.gz
