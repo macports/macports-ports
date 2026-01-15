@@ -20,14 +20,13 @@ failed = []
 
 
 def build(dirpath):
-    try:
-        r = subprocess.run(
-            cmd,
-            cwd=dirpath,
-            check=dirpath == "pyobjc-core",
-        )
+    r = subprocess.run(
+        cmd,
+        cwd=dirpath,
+        check=dirpath == "pyobjc-core",
+    )
 
-    except:
+    if not r:
         failed.append(dirpath)
 
 
