@@ -24,7 +24,7 @@ options     rust_build.stage0_versions
 
 if {${os.platform} eq "darwin" && ${os.major} > 16} {
     # (CURRENT) macOS 10.13 and later
-    default     rust_build.stage0_versions  {1.87.0 1.86.0}
+    default     rust_build.stage0_versions  {1.91.0 1.90.0}
 } else {
     # macOS 10.12 and earlier
     default     rust_build.stage0_versions  {1.77.0 1.76.0}
@@ -82,31 +82,57 @@ proc rust_build::callback {} {
                                 https://github.com/MarcusCalhoun-Lopez/rust/releases/download/${rust_version_current}:macports_vendor \
                                 file://[option prefix]/libexec/rust-bootstrap:transition_vendor
 
-    # 1.87.0
-    checksums-append            rust-std-1.87.0-aarch64-apple-darwin${extract.suffix} \
-                                rmd160  9ed84d7ceee2fdcd71007c85e38258217213e3ab \
-                                sha256  293694e0df34210ad76ea69c1e4dcec5e8ca433e46ca8c716b65d5f4967af659 \
-                                size    43760053 \
-                                rust-std-1.87.0-x86_64-apple-darwin${extract.suffix} \
-                                rmd160  68ea9cbe6629653407b091e6cd45764d1782e6d5 \
-                                sha256  a5e1e1ebcad4cd1363d71686059017322ca967069099f1a345425ff44a0d5209 \
-                                size    46159992 \
-                                rustc-1.87.0-aarch64-apple-darwin${extract.suffix} \
-                                rmd160  a0f7feedca3407b53d650b9012663787353e7b62 \
-                                sha256  5b4a2b9baedcc6ff00635b5daa61d976d4339fbc6b6fe3cabb9ca97d1076cff7 \
-                                size    108009742 \
-                                rustc-1.87.0-x86_64-apple-darwin${extract.suffix} \
-                                rmd160  fdca3c653df114c1cf243cdaaeeb005588e13f75 \
-                                sha256  2623a7b0977a7d032ae58ba527e3431d230afaa3c64ab25ee19f0f7a056fd22b \
-                                size    113054154 \
-                                cargo-1.87.0-aarch64-apple-darwin${extract.suffix} \
-                                rmd160  c8e867629e3b05398512368d8e26c6ad0706bd88 \
-                                sha256  285d1bf6dd1a5572103e21dfc6e677b297609a20aaf01e00c11a3e571e1a585b \
-                                size    11245060 \
-                                cargo-1.87.0-x86_64-apple-darwin${extract.suffix} \
-                                rmd160  7e699346b5b1df8027f9a3cb2eeb9bbbf5f00b2c \
-                                sha256  1d34287cfda8b1d1383f710b4d9fab88720dd3380347bb39093733a19425b4cf \
-                                size    11481102
+    # 1.91.0
+    checksums-append            rust-std-1.91.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  a70b3b26e5ba5b009587250e6757be7ba48896b0 \
+                                sha256  7e3bd5919e40bd678bb327952c16376f655bc5525215cf423a77fdbab080c42e \
+                                size    45607459 \
+                                rust-std-1.91.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  0153195e6286e967ff3b26984d8a9fc7f709d247 \
+                                sha256  d74fb33f5c874ab353bd2732a26391bf239956c7b8e951f9eed8a92554cc9919 \
+                                size    48013737 \
+                                rustc-1.91.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  7d4dc47825c01950f15589466ec63e9cc6201f0e \
+                                sha256  a1e5ec1e45191b7dc33cfd7f30d0127108be1be1f7e581f8267ba74eb1f521eb \
+                                size    111613524 \
+                                rustc-1.91.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  86b277876ab4a5921e97b611c30ac1faa6430468 \
+                                sha256  b6c7a82006eeabc6805014a216ef3ba556389fecd2b99a7c9487f6e46ce484d3 \
+                                size    134090624 \
+                                cargo-1.91.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  72f81152706eb3e12690f67f7d67f25ec1560c0f \
+                                sha256  29f05b2e7a5a0b180d77ba94c5fb4043e875040ed7147b82f4df1ae7da90a414 \
+                                size    12544776 \
+                                cargo-1.91.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  1c86f271de07f57dba161b66975fd03a8e19fa74 \
+                                sha256  204a387c5aade98e9b503a41830b619a06d5bd37d9ed6a24c8ed5a2afa93c7a6 \
+                                size    12903513
+
+    # 1.90.0
+    checksums-append            rust-std-1.90.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  d75057b6aa8e71ab40e5d61803afc8ebff214e6f \
+                                sha256  30d6e3008a288f779c90c92d867dcd4f05fd5107d7f3e69d4d37a5945878110a \
+                                size    44872106 \
+                                rust-std-1.90.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  56c9589466184f4d9948a8f1e6661ff9ec662a3b \
+                                sha256  73535b1a8f40133d789d9897f2fff4d441bd8a629a5c079bc0e94984267602f1 \
+                                size    47252675 \
+                                rustc-1.90.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  667aac2374d7a6e43ade458d1b55110ccc13d325 \
+                                sha256  77e8d4c354aab89b2abcd4608d2cb7612a99000d8064491aeafbc325c757943a \
+                                size    108857954 \
+                                rustc-1.90.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  e03c389b0d9f0aa091fd7ac236c12e78ed618a80 \
+                                sha256  50d1f94bd8c2815008041d077bfb2713bf830d9e72ecb15aa4ed67d637f41ac1 \
+                                size    129773489 \
+                                cargo-1.90.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  0a92f25d540679f8c7b8d79075605912dbb838a8 \
+                                sha256  a242bb8d88d4d1b621f33742d0c718ebb5a551b07d21240e8b8c31152dc29737 \
+                                size    12592387 \
+                                cargo-1.90.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  d9821f3e9fb95a479a63966663732b1eaa56464e \
+                                sha256  0352cd2b1812363228948a310cc49d590b1ca9fc00e2cf3b00ae88c93f1e148c \
+                                size    12948727
 
     # 1.86.0
     checksums-append            rust-std-1.86.0-aarch64-apple-darwin${extract.suffix} \

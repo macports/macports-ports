@@ -19,7 +19,7 @@ if {${os.major} >= 17 || ${os.platform} ne "darwin"} {
     # https://trac.macports.org/ticket/68640
     if {${os.major} >= 22 || ${os.platform} ne "darwin"} {
         # Expose clang-21 to ports needing the newest standards
-        if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2023 } {
+        if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2020 } {
             lappend compilers macports-clang-21
         }
         if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2014 } {
@@ -60,13 +60,10 @@ if {${os.platform} eq "darwin"} {
         }
     }
     if {${os.major} < 20} {
-        lappend compilers macports-clang-7.0 \
-            macports-clang-6.0 \
-            macports-clang-5.0
+        lappend compilers macports-clang-7.0 macports-clang-6.0 macports-clang-5.0
     }
     if {${os.major} < 16} {
         # The Sierra SDK requires a toolchain that supports class properties
-        lappend compilers macports-clang-3.7 \
-                          macports-clang-3.4
+        lappend compilers macports-clang-3.7 macports-clang-3.4
     }
 }

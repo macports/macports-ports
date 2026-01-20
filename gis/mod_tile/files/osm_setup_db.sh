@@ -83,7 +83,7 @@ GIS_DB_USER="${GIS_DB_USER:-$GIS_USER}"
 PG_SUPER_USER="${PG_SUPER_USER:-postgres}"
 CURL_BIN="$PREFIX/bin/curl"
 MD5SUM_BIN="$PREFIX/bin/gmd5sum"
-OSM2PGSQL_BIN="$PREFIX/bin/osm2pgsql-lua"
+OSM2PGSQL_BIN="$PREFIX/bin/osm2pgsql"
 PBF_DOWNLOAD_BASE_URL="${PBF_DOWNLOAD_BASE_URL:-https://download.geofabrik.de}"
 PBF_FILENAME="${PBF_FILENAME:-europe/monaco-latest.osm.pbf}"
 POLY_FILENAME="${POLY_FILENAME:-europe/monaco.poly}"
@@ -98,6 +98,11 @@ GREP_BIN=/usr/bin/grep
 if [ $(id -u) -ne 0 ]; then
     sudo $0
     exit 0
+fi
+
+if [ ! -x "$OSM2PGSQL_BIN" ]; then
+    >&2 echo "$OSM2PGSQL_BIN not found.  Please install the osm2pgsql port."
+    exit 1
 fi
 
 initializeDatabase()
