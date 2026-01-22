@@ -99,7 +99,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirror.datapipe.net/CPAN/modules/by-module/
     http://mirror.de.leaseweb.net/CPAN/modules/by-module/
     http://mirror.dkm.cz/cpan/modules/by-module/
-    http://mirror.downloadvn.com/cpan/modules/by-module/
     http://mirror.easyname.at/cpan/modules/by-module/
     http://mirror.funkfreundelandshut.de/cpan/modules/by-module/
     http://mirror.host.ag/CPAN/modules/by-module/
@@ -502,7 +501,6 @@ set portfetch::mirror_sites::sites(nongnu) {
     http://ftp.cc.uoc.gr/mirrors/nongnu.org/
     https://mirror.cedia.org.ec/nongnu/
     http://mirror.csclub.uwaterloo.ca/nongnu/
-    http://mirror.downloadvn.com/nongnu/
     http://mirror.easyname.at/nongnu/
     https://mirror.freedif.org/GNU-Sa/
     http://mirror.kumi.systems/nongnu/
