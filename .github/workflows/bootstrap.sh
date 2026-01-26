@@ -42,9 +42,9 @@ echo "Fetching getopt..."
 /usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
 curl_getopt_pid=$!
 if [ -n "$MPBB" ] ; then
-PORTINDEX_URL="https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex"
+PORTINDEX_URL="https://ftp.fau.de/macports/release/tarballs/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex"
 echo "Fetching PortIndex from $PORTINDEX_URL ..."
-/usr/bin/curl -fsSLo ports/PortIndex "$PORTINDEX_URL" &
+/usr/bin/curl -fsSL --compressed -o ports/PortIndex "$PORTINDEX_URL" &
 curl_portindex_pid=$!
 fi
 endgroup

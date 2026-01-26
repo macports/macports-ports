@@ -99,7 +99,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirror.datapipe.net/CPAN/modules/by-module/
     http://mirror.de.leaseweb.net/CPAN/modules/by-module/
     http://mirror.dkm.cz/cpan/modules/by-module/
-    http://mirror.downloadvn.com/cpan/modules/by-module/
     http://mirror.easyname.at/cpan/modules/by-module/
     http://mirror.funkfreundelandshut.de/cpan/modules/by-module/
     http://mirror.host.ag/CPAN/modules/by-module/
@@ -429,7 +428,6 @@ set fco.it      http
 set fra.de      ${letsencrypt_https_or_http}
 set jog.id      http
 set kmq.jp      ${letsencrypt_https_or_http}
-set lis.pt      ${letsencrypt_https_or_http}
 set mse.uk      ${letsencrypt_https_or_http}
 set nue.de      ${letsencrypt_https_or_http}
 set pek.cn      ${letsencrypt_https_or_http}
@@ -453,7 +451,6 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${fra.de}://fra.de.distfiles.macports.org/:mirror
     ${jog.id}://jog.id.distfiles.macports.org/macports/distfiles/:mirror
     ${kmq.jp}://kmq.jp.distfiles.macports.org/:mirror
-    ${lis.pt}://lis.pt.distfiles.macports.org/:mirror
     ${mse.uk}://mse.uk.distfiles.macports.org/:mirror
     ${pek.cn}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
     ${sjtu.edu.cn}://mirror.sjtu.edu.cn/macports/distfiles/:mirror
@@ -504,7 +501,6 @@ set portfetch::mirror_sites::sites(nongnu) {
     http://ftp.cc.uoc.gr/mirrors/nongnu.org/
     https://mirror.cedia.org.ec/nongnu/
     http://mirror.csclub.uwaterloo.ca/nongnu/
-    http://mirror.downloadvn.com/nongnu/
     http://mirror.easyname.at/nongnu/
     https://mirror.freedif.org/GNU-Sa/
     http://mirror.kumi.systems/nongnu/
