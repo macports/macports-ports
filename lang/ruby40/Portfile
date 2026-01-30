@@ -1,0 +1,236 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           select 1.0
+PortGroup           openssl 1.0
+PortGroup           legacysupport 1.1
+
+# clock_gettime()
+legacysupport.newest_darwin_requires_legacy 15
+
+# Version updates should start by updating the fork noted below
+# (or equivalent), verifying the propriety of the patches for the new version,
+# and rederiving the patchfile from there.
+#
+# Also note that this port runs on all OS/CPU combinations.
+# This property should be preserved.
+
+set ruby_ver        4.0
+set ruby_patch      1
+set ruby_ver_nodot  [string map {. {}} ${ruby_ver}]
+name                ruby${ruby_ver_nodot}
+version             ${ruby_ver}.${ruby_patch}
+revision            0
+
+categories          lang ruby
+maintainers         {kimuraw @kimuraw} \
+                    {fwright.net:fw @fhgwright} \
+                    openmaintainer
+
+description         Powerful and clean object-oriented scripting language
+long_description    Ruby is the interpreted scripting language for quick \
+                    and easy object-oriented programming. It has many \
+                    features to process text files and to do system \
+                    management tasks (as in Perl). It is simple, \
+                    straightforward, extensible, and portable.
+
+homepage            https://www.ruby-lang.org/
+license             {Ruby BSD}
+
+master_sites        ruby:${ruby_ver}
+distname            ruby-${version}
+dist_subdir         ruby${ruby_ver_nodot}
+
+checksums           rmd160  7a8e142189c5cfcc8cdb8d4acfa01a71aff401b2 \
+                    sha256  3924be2d05db30f4e35f859bf028be85f4b7dd01714142fd823e4af5de2faf9d \
+                    size    23807304
+
+# Universal builds don't currently work, including via the approach used
+# in ruby30.
+universal_variant   no
+
+# ruby/openssl since ruby-3.2 supports openssl-3
+openssl.branch      3
+
+depends_lib         port:zlib \
+                    port:libyaml \
+                    port:libffi \
+                    port:gdbm
+depends_run         port:ruby_select
+depends_build       port:pkgconfig port:cctools
+depends_skip_archcheck pkgconfig
+
+select.group        ruby
+select.file         ${filespath}/ruby${ruby_ver_nodot}
+
+# Patches derived from MacPorts-enhanced GitHub fork at
+# github.com/fhgwright/ruby
+
+# patch-sources.diff: fixes for various issues.
+#
+# This diff is from v4.0.0 vs. macports-4_0_0.
+#
+patchfiles-append   patch-sources.diff
+
+# patch-generated.diff: additional patches to generated files, which don't
+# exist in the upstream git sources, and which must be patched after the
+# source patches so that make doesn't regard them as outdated.
+# At present, the only patched generated file is 'configure', to avoid
+# the need to rerun autoconf, whose output has reproducibility issues.
+#
+# This diff is from tarball-4_0_0 vs. macports-tarball-4_0_0.
+#
+patchfiles-append   patch-generated.diff
+
+#-------------------------------------------------------------------------------
+# Fix compilation on 10.12.
+# Issue: 62183: error: use of undeclared identifier 'fmt'; did you mean 'fma'?
+#
+# This issue only appears in Xcode clang 9 (clang 900), not MacPorts clang 9
+# (clang 901), so the blacklisting can be narrow.
+#-------------------------------------------------------------------------------
+compiler.blacklist-append { clang >= 900 < 901 }
+
+# Ruby3.2+ doesn't build with Xcode clang 425 on 10.7
+compiler.blacklist-append { clang < 500 }
+
+# Ensure that the correct dsymutil is used.
+if { [string match macports-clang-* ${configure.compiler}] } {
+    # clang-mp-14 => dsymutil-mp-14; fix POSTLINK
+    configure.env-append dsymutil=[string map {clang dsymutil} ${configure.cc}]
+}
+
+compiler.thread_local_storage yes
+
+configure.args      --enable-shared \
+                    --enable-install-static-library \
+                    --disable-install-doc \
+                    --mandir="${prefix}/share/man" \
+                    --enable-pthread \
+                    --disable-yjit \
+                    --disable-zjit \
+                    --without-gmp \
+                    --without-jemalloc \
+                    --enable-mkmf-verbose \
+                    --with-opt-dir="${prefix}" \
+                    --program-suffix=${ruby_ver} \
+                    --with-rubyhdrdir=${prefix}/include/ruby-${version} \
+                    --with-rubylibprefix="${prefix}/lib/ruby${ruby_ver}" \
+                    --with-openssl-dir=[openssl::install_area] \
+                    --without-baseruby \
+                    --with-arch="${build_arch}"
+# prefer Apple cctools to GNU binutils, build with binutils may fail.
+configure.args-append   AR=${prefix}/bin/ar RANLIB=${prefix}/bin/ranlib
+
+post-patch {
+    # Ensure that generated files have clearly later mtimes than sources,
+    # to avoid gratuitous rebuilds by make.
+    # This is already nominally true based on the patching order, but
+    # one-second resolution on timestamps may cover it up.
+    #
+    # The list of files here should match the list of files patched by
+    # patch-generated.diff.
+    #
+    # Increment the mtime(s) by one second.
+    foreach genfile [list configure] {
+        set genfull ${worksrcpath}/${genfile}
+        file mtime ${genfull} [expr [file mtime ${genfull}] + 1]
+    }
+}
+
+post-destroot {
+    foreach type {site vendor} {
+        set libdir ${destroot}${prefix}/lib/ruby${ruby_ver}/${type}_ruby/${version}
+        xinstall -m 0755 -d ${libdir}
+        foreach subdir [exec find ${libdir} -type d -empty] {
+            destroot.keepdirs-append ${subdir}
+        }
+    }
+
+    # install destination of commands from port:ruby40
+    xinstall -m 0755 -d ${destroot}${prefix}/libexec/ruby${ruby_ver}
+    destroot.keepdirs-append ${destroot}${prefix}/libexec/ruby${ruby_ver}
+}
+
+notes-append "
+To make this the default Ruby (i.e., the version run by\
+the 'ruby', 'gem' or 'bundle' commands), run:
+    sudo port select --set ruby $name
+"
+
+variant doc description "Install rdoc indexes and C API documents" {
+        configure.args-delete   --disable-install-doc
+}
+
+variant gmp description "use gmp" {
+        configure.args-delete   --without-gmp
+        depends_lib-append      port:gmp
+}
+
+variant jemalloc description "use jemalloc" {
+        configure.args-replace  --without-jemalloc --with-jemalloc
+        depends_lib-append      port:jemalloc
+}
+
+variant yjit description "enable YJIT (requires rust)" {
+        configure.args-replace  --disable-yjit --enable-yjit
+        depends_build-append    port:rust
+}
+# yjit supports x86_64 or arm64
+if {${os.platform} eq "darwin" && ${os.major} >= 19 \
+   && [info exists build_arch]} {
+    if {$build_arch in [list x86_64 arm64]} {
+        default_variants-append +yjit
+    }
+}
+
+# ZJIT is experimental new JIT
+variant zjit description "enable ZJIT (requires rust)" {
+        configure.args-replace  --disable-zjit --enable-zjit
+        depends_build-append    port:rust
+}
+
+variant relative description "Enable relative loading of libraries to allow for relocation of binaries." {
+        #enable relative loading
+        configure.args-append  --enable-load-relative
+}
+
+# legacy systems support
+platform darwin {
+    if {${os.major} < 10} {
+        # Disable broken compiler
+        compiler.blacklist-append macports-gcc-15
+        # libdtrace lacks a 64-bit slice
+        if { [string match *64 ${build_arch}] } {
+            configure.args-append   --disable-dtrace
+        }
+    }
+
+    if {${os.major} == 8} {
+        configure.cppflags-append -DCPU_SUBTYPE_MASK=0xff000000
+        depends_build-append    port:gmake
+        build.cmd               ${prefix}/bin/gmake
+        compiler.blacklist-append macports-clang-*
+    }
+}
+
+# Tests don't fully pass on any platform, though the details are platform-
+# dependent.  We allow them for investigative purposes, along with a warning
+# and a workaround for a pair of Makefile bugs that conspire to cause a
+# permissions failure in the initial test setup.
+
+test.run        yes
+test.target     check
+
+pre-test {
+    ui_warn "Tests are not expected to fully pass."
+
+    # Remove a file erroneously owned by root and superfluously rebuilt.
+    # One of the following two names is used, depending on the platform.
+    file delete ${worksrcpath}/${build_arch}-${os.platform}${os.major}-fake.rb
+    file delete ${worksrcpath}/${build_arch}-${os.platform}${os.major}.0-fake.rb
+}
+
+livecheck.type  regex
+livecheck.url   https://cache.ruby-lang.org/pub/ruby/${ruby_ver}/
+livecheck.regex ruby-(4\\.0\\.\\d+)[quotemeta ${extract.suffix}]
