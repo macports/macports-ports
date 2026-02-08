@@ -425,6 +425,10 @@ proc python_add_dependencies {} {
                         depends_build-delete    port:py${python.version}-pdm-backend
                         depends_build-append    port:py${python.version}-pdm-backend
                     }
+                    uv {
+                        depends_build-delete    port:py${python.version}-uv-build
+                        depends_build-append    port:py${python.version}-uv-build
+                    }
                     default {}
                 }
             }
