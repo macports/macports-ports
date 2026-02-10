@@ -2,7 +2,6 @@
 
 PortSystem                  1.0
 PortGroup                   clang_dependency 1.0
-PortGroup                   conflicts_build 1.0
 PortGroup                   debug 1.0
 PortGroup                   legacysupport 1.1
 PortGroup                   meson 1.0
@@ -13,13 +12,13 @@ PortGroup                   muniversal 1.0
 name                        glib2-devel
 conflicts                   glib2
 set my_name                 glib
-version                     2.78.4
-revision                    2
+version                     2.86.4
+revision                    0
 epoch                       1
 
-checksums                   rmd160  7941be85af18c428d86f4a00e52f41542b061aa9 \
-                            sha256  24b8e0672dca120cc32d394bccb85844e732e04fe75d18bb0573b2dbc7548f63 \
-                            size    5331892
+checksums                   rmd160  f800daedbbeae802a38e718f4e10e4c6a977335b \
+                            sha256  d4e2b5d791d5015ffd8c6971ad8e975a0a55c1a14926cdb25cf843ff00682260 \
+                            size    5692304
 
 set branch                  [join [lrange [split ${version} .] 0 1] .]
 categories                  devel
@@ -29,7 +28,6 @@ homepage                    https://wiki.gnome.org/Projects/GLib
 dist_subdir                 glib2
 distname                    ${my_name}-${version}
 use_xz                      yes
-use_parallel_build          yes
 
 description                 Library with data structure functions and other constructs
 long_description            Glib is a library which includes support routines \
@@ -47,9 +45,7 @@ legacysupport.newest_darwin_requires_legacy 15
 patchfiles-append           libintl.patch
 patchfiles-append           patch-gio-tests-meson.build.diff
 patchfiles-append           patch-glib_gmem.c.diff
-patchfiles-append           patch-glib_gspawn.c.diff
 patchfiles-append           patch-glib_gunicollate.c.diff
-patchfiles-append           patch-gio_xdgmime_xdgmime.c.diff
 patchfiles-append           patch-get-launchd-dbus-session-address.diff
 patchfiles-append           patch-gmodule-gmodule-dl.c.diff
 patchfiles-append           patch-meson_build-meson_options-appinfo.diff
@@ -58,7 +54,7 @@ patchfiles-append           patch-meson_build-atomic-test-older-clang-versions.d
 patchfiles-append           universal.patch
 patchfiles-append           patch-glib2-findfolders-before-SL.diff
 patchfiles-append           patch-declarations.diff
-patchfiles-append           no-distutils.patch
+patchfiles-append           patch-hardcoded-paths.diff
 
 platform darwin {
     if {${os.major} < 11} {
@@ -74,12 +70,12 @@ platform darwin {
     }
 }
 
-depends_build-append        port:gettext \
-                            bin:xmllint:libxml2 \
-                            path:bin/pkg-config:pkgconfig
-
-set py_ver                  3.13
+set py_ver                  3.14
 set py_ver_nodot            [string map {. {}} ${py_ver}]
+
+depends_build-append        port:gettext \
+                            path:bin/pkg-config:pkgconfig \
+                            path:lib/pkgconfig/gobject-introspection-1.0.pc:gobject-introspection-devel
 
 depends_lib-append          port:gettext-runtime \
                             port:libelf \
@@ -124,11 +120,15 @@ configure.cflags-append     -fstrict-aliasing
 configure.cflags-append     -Wno-deprecated-declarations
 configure.objcflags-append  -Wno-deprecated-declarations
 
-configure.args-append \
-                            -Ddefault_library=both \
+configure.args-append       -Ddefault_library=both \
                             -Dlibelf=enabled \
                             -Dlibmount=disabled \
-                            -Dwarning_level=0
+                            -Dwarning_level=0 \
+                            -Dintrospection=enabled \
+                            --localstatedir=${prefix}/var \
+                            -Druntime_dir=${prefix}/run \
+                            -Dgio_module_dir=${prefix}/lib/gio/modules \
+                            -Dbsymbolic_functions=false
 
 configure.perl              /usr/bin/perl
 configure.python            ${prefix}/bin/python${py_ver}
@@ -149,14 +149,9 @@ post-patch {
         gio/xdgmime/xdgmime.c \
         glib/gi18n-lib.h \
         glib/gi18n.h \
-        gio/gdbusaddress.c
-
-    reinplace -W ${worksrcpath} "s|data_dirs = \"/usr|data_dirs = \"${prefix}/share:/usr|g" \
+        gio/gdbusaddress.c \
+        girepository/girepository.c \
         glib/gutils.c
-
-    reinplace -W ${worksrcpath} "s|path = \"/bin|path = \"${prefix}/bin:/bin|g" \
-        glib/gutils.c \
-        glib/gspawn.c
 
     # Upstream mixes three variations of Python shebangs, so account for all
     fs-traverse f ${worksrcpath} {
@@ -168,13 +163,6 @@ post-patch {
         }
     }
 }
-
-# this edit does not, for some reason, apply against the build-arm64 config.h
-# and should not be needed if we're using the muniversal PortGroup
-# needs testing on 32 bit systems to be certain of this
-#post-configure {
-#    system "ed - ${build.dir}/config.h < ${filespath}/config.h.ed"
-#}
 
 build.args-append           --verbose
 
@@ -207,8 +195,8 @@ post-destroot {
 }
 
 platform darwin {
-    configure.args-append   -Ddtrace=false
-    
+    configure.args-append   -Ddtrace=disabled
+
     # some tests fail to build on 10.6.8 Rosetta: https://trac.macports.org/ticket/65517
     if {${os.major} == 10 && ${build_arch} eq "ppc"} {
         configure.args-append   -Dtests=false
@@ -247,42 +235,6 @@ if {![variant_isset quartz] && ![variant_isset x11]} {
         return -code error "Either +x11 or +quartz is required"
     }
 }
-
-proc port_conflict_check {p_port_name p_conflict_ver_min p_conflict_ver_max} {
-    ui_debug "port_conflict_check: Checking for conflict against port: ${p_port_name}"
-
-    if { ![catch {set port_conflict_ver_info [lindex [registry_active ${p_port_name}] 0]}] } {
-        set port_conflict_ver [lindex ${port_conflict_ver_info} 1]_[lindex ${port_conflict_ver_info} 2]
-        ui_debug "port_conflict_check: ${p_port_name} active version: ${port_conflict_ver}"
-
-        if { [vercmp ${port_conflict_ver} ${p_conflict_ver_min}] >= 0
-            && [vercmp ${port_conflict_ver} ${p_conflict_ver_max}] <= 0 } {
-
-            ui_debug "port_conflict_check: ${p_port_name} conflicts; declare build conflict"
-            conflicts_build-append \
-                ${p_port_name}
-        } else {
-            ui_debug "port_conflict_check: ${p_port_name} does not conflict"
-        }
-    }
-}
-
-# If the user happens to have `gobject-introspection` 1.80.x installed, force them to
-# deactivate it first. Otherwise, the newer version can cause other unexpected failures
-# if still active on downgrade.
-# Logic added 2024-04-17; keep in place for at least 12 months.
-proc gobj_conflict_check {} {
-    set gobj_port_name "gobject-introspection"
-    set gobj_port_names [list ${gobj_port_name} "${gobj_port_name}-devel"]
-    set gobj_ver_min "1.80.1_0"
-    set gobj_ver_max "1.80.1_0"
-
-    foreach p ${gobj_port_names} {
-        port_conflict_check ${p} ${gobj_ver_min} ${gobj_ver_max}
-    }
-}
-
-gobj_conflict_check
 
 livecheck.type              gnome
 livecheck.name              ${my_name}
