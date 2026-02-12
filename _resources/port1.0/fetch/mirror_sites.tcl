@@ -346,6 +346,11 @@ set portfetch::mirror_sites::sites(gnu) {
     https://artfiles.org/gnu.org/
     https://ftp.gnu.org/gnu/
     https://www.mirrorservice.org/sites/ftp.gnu.org/gnu/
+    https://mirrors.dotsrc.org/gnu/
+    https://mirrors.nav.ro/gnu/
+    https://mirror.bahnhof.net/pub/gnu/
+    https://mirror.ihost.md/gnu/
+    https://ftp.cc.uoc.gr/mirrors/gnu/
     http://mirror.cc.columbia.edu/pub/software/gnu/
     http://mirror.facebook.net/gnu/
     http://mirror.internode.on.net/pub/gnu/
