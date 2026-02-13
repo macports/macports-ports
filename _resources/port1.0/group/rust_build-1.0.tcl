@@ -69,7 +69,7 @@ namespace eval rust_build {}
 # TODO: move the MacPorts stage0 compilers to a better location
 if {${os.platform} eq "darwin" && ${os.major} > 16} {
     # (CURRENT) macOS 10.13 and later
-    set rust_version_current 1.93.0
+    set rust_version_current 1.93.1
 } else {
     # macOS 10.12 and earlier
     set rust_version_current 1.78.0
