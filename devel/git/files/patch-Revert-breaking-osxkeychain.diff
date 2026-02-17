@@ -1,3 +1,299 @@
+From dbcd285d181d50cc43b41a488ead68c9970b1966 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <vital.had@gmail.com>
+Date: Sat, 14 Feb 2026 02:43:31 +0800
+Subject: [PATCH] Revert "osxkeychain: avoid incorrectly skipping store
+ operation"
+
+This reverts commit 4580bcd2354aab9369164d936f7ccaa21fc98c98.
+---
+ contrib/credential/osxkeychain/Makefile       |  41 +-----
+ .../osxkeychain/git-credential-osxkeychain.c  | 120 ++++--------------
+ contrib/credential/osxkeychain/meson.build    |   1 -
+ 3 files changed, 30 insertions(+), 132 deletions(-)
+
+diff --git a/contrib/credential/osxkeychain/Makefile b/contrib/credential/osxkeychain/Makefile
+index c68445b82d..9680717abe 100644
+--- a/contrib/credential/osxkeychain/Makefile
++++ b/contrib/credential/osxkeychain/Makefile
+@@ -1,55 +1,21 @@
+ # The default target of this Makefile is...
+ all:: git-credential-osxkeychain
+ 
+-include ../../../config.mak.uname
+ -include ../../../config.mak.autogen
+ -include ../../../config.mak
+ 
+-ifdef ZLIB_NG
+-	BASIC_CFLAGS += -DHAVE_ZLIB_NG
+-        ifdef ZLIB_NG_PATH
+-		BASIC_CFLAGS += -I$(ZLIB_NG_PATH)/include
+-		EXTLIBS += $(call libpath_template,$(ZLIB_NG_PATH)/$(lib))
+-        endif
+-	EXTLIBS += -lz-ng
+-else
+-        ifdef ZLIB_PATH
+-		BASIC_CFLAGS += -I$(ZLIB_PATH)/include
+-		EXTLIBS += $(call libpath_template,$(ZLIB_PATH)/$(lib))
+-        endif
+-	EXTLIBS += -lz
+-endif
+-ifndef NO_ICONV
+-        ifdef NEEDS_LIBICONV
+-                ifdef ICONVDIR
+-			BASIC_CFLAGS += -I$(ICONVDIR)/include
+-			ICONV_LINK = $(call libpath_template,$(ICONVDIR)/$(lib))
+-                else
+-			ICONV_LINK =
+-                endif
+-                ifdef NEEDS_LIBINTL_BEFORE_LIBICONV
+-			ICONV_LINK += -lintl
+-                endif
+-		EXTLIBS += $(ICONV_LINK) -liconv
+-        endif
+-endif
+-ifndef LIBC_CONTAINS_LIBINTL
+-	EXTLIBS += -lintl
+-endif
+-
+ prefix ?= /usr/local
+ gitexecdir ?= $(prefix)/libexec/git-core
+ 
+ CC ?= gcc
+-CFLAGS ?= -g -O2 -Wall -I../../.. $(BASIC_CFLAGS)
+-LDFLAGS ?= $(BASIC_LDFLAGS) $(EXTLIBS)
++CFLAGS ?= -g -O2 -Wall
+ INSTALL ?= install
+ RM ?= rm -f
+ 
+ %.o: %.c
+ 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ -c $<
+ 
+-git-credential-osxkeychain: git-credential-osxkeychain.o ../../../libgit.a
++git-credential-osxkeychain: git-credential-osxkeychain.o
+ 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) \
+ 		-framework Security -framework CoreFoundation
+ 
+@@ -57,9 +23,6 @@ install: git-credential-osxkeychain
+ 	$(INSTALL) -d -m 755 $(DESTDIR)$(gitexecdir)
+ 	$(INSTALL) -m 755 $< $(DESTDIR)$(gitexecdir)
+ 
+-../../../libgit.a:
+-	cd ../../..; make libgit.a
+-
+ clean:
+ 	$(RM) git-credential-osxkeychain git-credential-osxkeychain.o
+ 
+diff --git a/contrib/credential/osxkeychain/git-credential-osxkeychain.c b/contrib/credential/osxkeychain/git-credential-osxkeychain.c
+index b180267034..611c9798b3 100644
+--- a/contrib/credential/osxkeychain/git-credential-osxkeychain.c
++++ b/contrib/credential/osxkeychain/git-credential-osxkeychain.c
+@@ -2,9 +2,6 @@
+ #include <string.h>
+ #include <stdlib.h>
+ #include <Security/Security.h>
+-#include "git-compat-util.h"
+-#include "strbuf.h"
+-#include "wrapper.h"
+ 
+ #define ENCODING kCFStringEncodingUTF8
+ static CFStringRef protocol; /* Stores constant strings - not memory managed */
+@@ -15,7 +12,7 @@ static CFStringRef username;
+ static CFDataRef password;
+ static CFDataRef password_expiry_utc;
+ static CFDataRef oauth_refresh_token;
+-static char *state_seen;
++static int state_seen;
+ 
+ static void clear_credential(void)
+ {
+@@ -51,6 +48,27 @@ static void clear_credential(void)
+ 
+ #define STRING_WITH_LENGTH(s) s, sizeof(s) - 1
+ 
++__attribute__((format (printf, 1, 2), __noreturn__))
++static void die(const char *err, ...)
++{
++	char msg[4096];
++	va_list params;
++	va_start(params, err);
++	vsnprintf(msg, sizeof(msg), err, params);
++	fprintf(stderr, "%s\n", msg);
++	va_end(params);
++	clear_credential();
++	exit(1);
++}
++
++static void *xmalloc(size_t len)
++{
++	void *ret = malloc(len);
++	if (!ret)
++		die("Out of memory");
++	return ret;
++}
++
+ static CFDictionaryRef create_dictionary(CFAllocatorRef allocator, ...)
+ {
+ 	va_list args;
+@@ -94,66 +112,6 @@ static void write_item(const char *what, const char *buf, size_t len)
+ 	putchar('\n');
+ }
+ 
+-static void write_item_strbuf(struct strbuf *sb, const char *what, const char *buf, int n)
+-{
+-	char s[32];
+-
+-	xsnprintf(s, sizeof(s), "__%s=", what);
+-	strbuf_add(sb, s, strlen(s));
+-	strbuf_add(sb, buf, n);
+-}
+-
+-static void write_item_strbuf_cfstring(struct strbuf *sb, const char *what, CFStringRef ref)
+-{
+-	char *buf;
+-	int len;
+-
+-	if (!ref)
+-		return;
+-	len = CFStringGetMaximumSizeForEncoding(CFStringGetLength(ref), ENCODING) + 1;
+-	buf = xmalloc(len);
+-	if (CFStringGetCString(ref, buf, len, ENCODING))
+-		write_item_strbuf(sb, what, buf, strlen(buf));
+-	free(buf);
+-}
+-
+-static void write_item_strbuf_cfnumber(struct strbuf *sb, const char *what, CFNumberRef ref)
+-{
+-	short n;
+-	char buf[32];
+-
+-	if (!ref)
+-		return;
+-	if (!CFNumberGetValue(ref, kCFNumberShortType, &n))
+-		return;
+-	xsnprintf(buf, sizeof(buf), "%d", n);
+-	write_item_strbuf(sb, what, buf, strlen(buf));
+-}
+-
+-static void write_item_strbuf_cfdata(struct strbuf *sb, const char *what, CFDataRef ref)
+-{
+-	char *buf;
+-	int len;
+-
+-	if (!ref)
+-		return;
+-	buf = (char *)CFDataGetBytePtr(ref);
+-	if (!buf || strlen(buf) == 0)
+-		return;
+-	len = CFDataGetLength(ref);
+-	write_item_strbuf(sb, what, buf, len);
+-}
+-
+-static void encode_state_seen(struct strbuf *sb)
+-{
+-	strbuf_add(sb, "osxkeychain:seen=", strlen("osxkeychain:seen="));
+-	write_item_strbuf_cfstring(sb, "host", host);
+-	write_item_strbuf_cfnumber(sb, "port", port);
+-	write_item_strbuf_cfstring(sb, "path", path);
+-	write_item_strbuf_cfstring(sb, "username", username);
+-	write_item_strbuf_cfdata(sb, "password", password);
+-}
+-
+ static void find_username_in_item(CFDictionaryRef item)
+ {
+ 	CFStringRef account_ref;
+@@ -166,7 +124,6 @@ static void find_username_in_item(CFDictionaryRef item)
+ 		write_item("username", "", 0);
+ 		return;
+ 	}
+-	username = CFStringCreateCopy(kCFAllocatorDefault, account_ref);
+ 
+ 	username_buf = (char *)CFStringGetCStringPtr(account_ref, ENCODING);
+ 	if (username_buf)
+@@ -206,7 +163,6 @@ static OSStatus find_internet_password(void)
+ 	}
+ 
+ 	data = CFDictionaryGetValue(item, kSecValueData);
+-	password = CFDataCreateCopy(kCFAllocatorDefault, data);
+ 
+ 	write_item("password",
+ 		   (const char *)CFDataGetBytePtr(data),
+@@ -217,14 +173,7 @@ static OSStatus find_internet_password(void)
+ 	CFRelease(item);
+ 
+ 	write_item("capability[]", "state", strlen("state"));
+-	{
+-		struct strbuf sb;
+-
+-		strbuf_init(&sb, 1024);
+-		encode_state_seen(&sb);
+-		write_item("state[]", sb.buf, strlen(sb.buf));
+-		strbuf_release(&sb);
+-	}
++	write_item("state[]", "osxkeychain:seen=1", strlen("osxkeychain:seen=1"));
+ 
+ out:
+ 	CFRelease(attrs);
+@@ -339,22 +288,13 @@ static OSStatus add_internet_password(void)
+ 	CFDictionaryRef attrs;
+ 	OSStatus result;
+ 
++	if (state_seen)
++		return errSecSuccess;
++
+ 	/* Only store complete credentials */
+ 	if (!protocol || !host || !username || !password)
+ 		return -1;
+ 
+-	if (state_seen) {
+-		struct strbuf sb;
+-
+-		strbuf_init(&sb, 1024);
+-		encode_state_seen(&sb);
+-		if (!strcmp(state_seen, sb.buf)) {
+-			strbuf_release(&sb);
+-			return errSecSuccess;
+-		}
+-		strbuf_release(&sb);
+-	}
+-
+ 	data = CFDataCreateMutableCopy(kCFAllocatorDefault, 0, password);
+ 	if (password_expiry_utc) {
+ 		CFDataAppendBytes(data,
+@@ -463,9 +403,8 @@ static void read_credential(void)
+ 							   (UInt8 *)v,
+ 							   strlen(v));
+ 		else if (!strcmp(buf, "state[]")) {
+-			int len = strlen("osxkeychain:seen=");
+-			if (!strncmp(v, "osxkeychain:seen=", len))
+-				state_seen = xstrdup(v);
++			if (!strcmp(v, "osxkeychain:seen=1"))
++				state_seen = 1;
+ 		}
+ 		/*
+ 		 * Ignore other lines; we don't know what they mean, but
+@@ -504,8 +443,5 @@ int main(int argc, const char **argv)
+ 
+ 	clear_credential();
+ 
+-	if (state_seen)
+-		free(state_seen);
+-
+ 	return 0;
+ }
+diff --git a/contrib/credential/osxkeychain/meson.build b/contrib/credential/osxkeychain/meson.build
+index ec91d0c14b..3c7677f736 100644
+--- a/contrib/credential/osxkeychain/meson.build
++++ b/contrib/credential/osxkeychain/meson.build
+@@ -1,7 +1,6 @@
+ executable('git-credential-osxkeychain',
+   sources: 'git-credential-osxkeychain.c',
+   dependencies: [
+-    libgit,
+     dependency('CoreFoundation'),
+     dependency('Security'),
+   ],
+
+
 From ac042352b4910134c4c4d74b68f30061bde145b1 Mon Sep 17 00:00:00 2001
 From: Sergey Fedorov <barracuda@macos-powerpc.org>
 Date: Sun, 15 Sep 2024 15:44:12 +0800
