@@ -18,7 +18,7 @@
 #   (e.g. communications)
 
 # package_version has to be kept in sync with the octave Portfile
-set package_version 10.x.x
+set package_version 11.x.x
 
 options octave.author octave.module octave.config_h
 
