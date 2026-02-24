@@ -380,7 +380,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${fastly}://distfiles.macports.org/:mirror
     ${nue.de}://nue.de.distfiles.macports.org/:mirror
     ${fcix.net}://mirror.fcix.net/macports/distfiles/:mirror
-    ${aarnet.au}://aarnet.au.distfiles.macports.org/pub/macports/distfiles/:mirror
+    ${aarnet.au}://aarnet.au.distfiles.macports.org/macports-distfiles/:mirror
     ${atl.us}://atl.us.distfiles.macports.org/:mirror
     ${bos.us}://bos.us.distfiles.macports.org/:mirror
     ${cjj.kr}://cjj.kr.distfiles.macports.org/:mirror
