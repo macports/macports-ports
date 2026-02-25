@@ -19,7 +19,7 @@
 #
 # python.pep517: build using PEP517 (default is "yes" for Python 3.7+)
 # python.pep517_backend: specify the backend to use; one of "setuptools" (default),
-#   "flit", "hatch", "poetry", "maturin", "meson", or "pdm"
+#   "flit", "hatch", "poetry", "maturin", "meson", "pdm", "uv", or "scikit"
 #
 # python.test_framework: specify the test framework to use; one of "pytest" (default),
 #   "nose", "unittest", or <empty string>
@@ -428,6 +428,12 @@ proc python_add_dependencies {} {
                     uv {
                         depends_build-delete    port:py${python.version}-uv-build
                         depends_build-append    port:py${python.version}-uv-build
+                    }
+                    scikit {
+                        depends_build-delete    port:py${python.version}-scikit-build-core \
+                                                port:ninja
+                        depends_build-append    port:py${python.version}-scikit-build-core \
+                                                port:ninja
                     }
                     default {}
                 }
