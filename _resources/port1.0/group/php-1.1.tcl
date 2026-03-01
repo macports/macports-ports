@@ -4,14 +4,14 @@
 # standalone port, then set php.branches and optionally any other php options,
 # described in more detail below.
 
-default categories              php
+categories              php lang
 
 
 # php.branches: the list of PHP branches for which the extension(s) will be
 # built. For unified extension ports (name begins with "php-") setting
 # php.branches is mandatory; there is no default. Example:
 #
-#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2 8.3 8.4
+#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2 8.3 8.4 8.5
 #
 # For unified ports, setting php.branches will create the subports.
 #
@@ -103,7 +103,7 @@ proc php._set_name {option action args} {
 # when the php port is updated.
 
 options php.latest_stable_branch
-default php.latest_stable_branch 8.3
+default php.latest_stable_branch 8.5
 
 
 # php.default_branch: the branch of PHP for which the port should be installed
