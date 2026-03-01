@@ -114,11 +114,9 @@ jobs:
           path: tarball
           key: portindex-${{ steps.portlist.outputs.last_commit }}
 
-      - name: Update PortIndex files
-        id: update-portindex
+      - name: Prepare ports tree
+        id: prep-ports
         env:
-          OLDEST_DARWIN: 9
-          NEWEST_DARWIN: 25
           MIRROR_UPLOAD_URL: ${{ secrets.MIRROR_UPLOAD_URL }}
           MIRROR_UPLOAD_CREDENTIALS: ${{ secrets.MIRROR_UPLOAD_CREDENTIALS }}
           LAST_COMMIT: ${{ steps.portlist.outputs.last_commit }}
@@ -157,29 +155,21 @@ jobs:
           mkdir -p tarball/ports
           rsync -rltC --exclude=".git" --delete ports/ tarball/ports
 
-          OS_MAJOR_LIST="$(seq "$OLDEST_DARWIN" "$NEWEST_DARWIN")"
-          for CUR_MAJOR in $OS_MAJOR_LIST; do
-              ARCHS="i386"
-              if [ "$CUR_MAJOR" -ge 20 ]; then
-                ARCHS="arm $ARCHS"
-              elif [ "$CUR_MAJOR" -le 9 ]; then
-                ARCHS="$ARCHS powerpc"
-              fi
-              for CUR_ARCH in $ARCHS; do
-                INDEXDIR="tarball/PortIndex_darwin_${CUR_MAJOR}_${CUR_ARCH}"
-                mkdir -p "$INDEXDIR"
-                platform_arg="macosx_${CUR_MAJOR}_${CUR_ARCH}"
-                if [ -f "mpbb/index_vars/${platform_arg}" ]; then
-                    platform_arg="file:mpbb/index_vars/${platform_arg}"
-                fi
-                portindex -p "$platform_arg" -o "$INDEXDIR" ports
-                port-tclsh contrib/portindex2json/portindex2json.tcl "${INDEXDIR}/PortIndex" --info commit="${CURRENT_COMMIT}" > "${INDEXDIR}/PortIndex.json"
-              done
-          done
-          find tarball -maxdepth 1 -type d -name 'PortIndex_darwin_*_*' -mtime +24h -exec rm -rfv {} \;
-          chmod -R a+rX tarball
+          # update PortIndex for current platform so port mirror can run
+          OS_MAJOR="$(uname -r | cut -f 1 -d .)"
+          OS_ARCH="$(uname -p)"
+          INDEXDIR="tarball/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}"
+          mkdir -p "$INDEXDIR"
+          platform_arg="macosx_${OS_MAJOR}_${OS_ARCH}"
+          if [ -f "mpbb/index_vars/${platform_arg}" ]; then
+              platform_arg="file:mpbb/index_vars/${platform_arg}"
+          fi
+          portindex -p "$platform_arg" -o "$INDEXDIR" ports
+          cp -c "${INDEXDIR}/PortIndex" "${INDEXDIR}/PortIndex.quick" ports
 
           echo "current_commit=$CURRENT_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "os_major=$OS_MAJOR" >> "$GITHUB_OUTPUT"
+          echo "os_arch=$OS_ARCH" >> "$GITHUB_OUTPUT"
 
       - name: Mirror all changed ports
         env:
@@ -193,15 +183,6 @@ jobs:
           portlist: ${{ steps.portlist.outputs.portlist }}
         run: |
           set -eu
-
-          OS_MAJOR="$(uname -r | cut -f 1 -d .)"
-          OS_ARCH="$(uname -p)"
-          if [ -f "tarball/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" ]; then
-            cp -c "tarball/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" ports
-          else
-            echo "Warning: no PortIndex found for darwin_${OS_MAJOR}_${OS_ARCH}"
-            cp -c "tarball/PortIndex_darwin_${NEWEST_DARWIN}_${OS_ARCH}/PortIndex" ports
-          fi
 
           sudo mv /opt/local/var/macports .
           sudo chown -R "$(id -un)" ./macports
@@ -225,18 +206,46 @@ jobs:
           echo "Updating mirrored status of ports"
           port-tclsh mpbb/tools/update-mirrordb.tcl "$MIRROR_DB_URL" "$MIRROR_DB_CREDENTIALS" mirror_done portfile_hash_cache portname_portfile_map
 
-      - name: Save PortIndex
-        id: save-portindex
-        uses: actions/cache/save@v5
-        with:
-          path: tarball
-          key: portindex-${{ steps.update-portindex.outputs.current_commit }}
+      - name: Update PortIndex files
+        id: update-portindex
+        env:
+          OLDEST_DARWIN: 9
+          NEWEST_DARWIN: 25
+          CURRENT_COMMIT: ${{ steps.prep-ports.outputs.current_commit }}
+          OS_MAJOR: ${{ steps.prep-ports.outputs.os_major }}
+          OS_ARCH: ${{ steps.prep-ports.outputs.os_arch }}
+        run: |
+          set -eu
+
+          OS_MAJOR_LIST="$(seq "$OLDEST_DARWIN" "$NEWEST_DARWIN")"
+          for CUR_MAJOR in $OS_MAJOR_LIST; do
+              ARCHS="i386"
+              if [ "$CUR_MAJOR" -ge 20 ]; then
+                ARCHS="arm $ARCHS"
+              elif [ "$CUR_MAJOR" -le 9 ]; then
+                ARCHS="$ARCHS powerpc"
+              fi
+              for CUR_ARCH in $ARCHS; do
+                INDEXDIR="tarball/PortIndex_darwin_${CUR_MAJOR}_${CUR_ARCH}"
+                if [ "$CUR_MAJOR" -ne "$OS_MAJOR" -o "$CUR_ARCH" != "$OS_ARCH" ]; then
+                    mkdir -p "$INDEXDIR"
+                    platform_arg="macosx_${CUR_MAJOR}_${CUR_ARCH}"
+                    if [ -f "mpbb/index_vars/${platform_arg}" ]; then
+                        platform_arg="file:mpbb/index_vars/${platform_arg}"
+                    fi
+                    portindex -p "$platform_arg" -o "$INDEXDIR" ports
+                fi
+                port-tclsh contrib/portindex2json/portindex2json.tcl "${INDEXDIR}/PortIndex" --info commit="${CURRENT_COMMIT}" > "${INDEXDIR}/PortIndex.json"
+              done
+          done
+          find tarball -maxdepth 1 -type d -name 'PortIndex_darwin_*_*' -mtime +24h -exec rm -rfv {} \;
+          chmod -R a+rX tarball
 
       - name: Deploy PortIndex
         env:
           MIRROR_UPLOAD_URL: ${{ secrets.MIRROR_UPLOAD_URL }}
           MIRROR_UPLOAD_CREDENTIALS: ${{ secrets.MIRROR_UPLOAD_CREDENTIALS }}
-          CURRENT_COMMIT: ${{ steps.update-portindex.outputs.current_commit }}
+          CURRENT_COMMIT: ${{ steps.prep-ports.outputs.current_commit }}
         run: |
           set -eu
 
@@ -250,9 +259,16 @@ jobs:
         env:
           MIRROR_DB_URL: ${{ secrets.MIRROR_DB_URL }}
           MIRROR_DB_CREDENTIALS: ${{ secrets.MIRROR_DB_CREDENTIALS }}
-          CURRENT_COMMIT: ${{ steps.update-portindex.outputs.current_commit }}
+          CURRENT_COMMIT: ${{ steps.prep-ports.outputs.current_commit }}
         run: |
           set -eu
 
           echo "Updating mirror.last_commit to: $CURRENT_COMMIT"
           curl -fL -u "$MIRROR_DB_CREDENTIALS" "${MIRROR_DB_URL}SET/mirror.last_commit/${CURRENT_COMMIT}"
+
+      - name: Save PortIndex
+        id: save-portindex
+        uses: actions/cache/save@v5
+        with:
+          path: tarball
+          key: portindex-${{ steps.prep-ports.outputs.current_commit }}
