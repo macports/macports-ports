@@ -112,13 +112,11 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: tarball
-          key: portindex-${{ steps.portlist.outputs.last_commit }}
+          key: portindex-${{ runner.os }}-${{ steps.portlist.outputs.last_commit }}
 
-      - name: Update PortIndex files
-        id: update-portindex
+      - name: Prepare ports tree
+        id: prep-ports
         env:
-          OLDEST_DARWIN: 9
-          NEWEST_DARWIN: 25
           MIRROR_UPLOAD_URL: ${{ secrets.MIRROR_UPLOAD_URL }}
           MIRROR_UPLOAD_CREDENTIALS: ${{ secrets.MIRROR_UPLOAD_CREDENTIALS }}
           LAST_COMMIT: ${{ steps.portlist.outputs.last_commit }}
@@ -131,13 +129,21 @@ jobs:
           # samba.org rsync's, in particular not excluding .git.
 
           if [ -n "$LAST_COMMIT" ]; then
-              if [ -e tarball ]; then
+              if [ -e tarball/ports/.git_commit -a "$(cat tarball/ports/.git_commit)" = "$LAST_COMMIT" ]; then
                   echo "Cached tarball restored for commit $LAST_COMMIT"
               else
+                  rm -rf tarball
                   echo "Fetching tarball for commit $LAST_COMMIT"
                   if curl -fL -O -u "$MIRROR_UPLOAD_CREDENTIALS" "${MIRROR_UPLOAD_URL}portindex-${LAST_COMMIT}.tar.bz2"; then
                       mkdir -p tarball
-                      tar -C tarball -xjf "portindex-${LAST_COMMIT}.tar.bz2"
+                      BZIP2=/usr/bin/bzip2
+                      if sudo port -b install --no-rev-upgrade lbzip2; then
+                        if [ -x /opt/local/bin/lbzip2 ]; then
+                            BZIP2=/opt/local/bin/lbzip2
+                        fi
+                      fi
+                      tar -C tarball -xf "portindex-${LAST_COMMIT}.tar.bz2" \
+                        --use-compress-program "$BZIP2"
                       rm -f "portindex-${LAST_COMMIT}.tar.bz2"
                   else
                       echo "Fetch failed, starting from scratch."
@@ -146,7 +152,7 @@ jobs:
               if [ -e tarball ]; then
                   git -C ports checkout "$LAST_COMMIT"
                   # Restore timestamps
-                  rsync -rltC --exclude=".git" --existing tarball/ports/ ports
+                  rsync -rltC --exclude=".*" --existing tarball/ports/ ports
                   # Will update timestamps on only the files changed between LAST_COMMIT and CURRENT_COMMIT.
                   git -C ports checkout "$CURRENT_COMMIT"
               fi
@@ -156,30 +162,30 @@ jobs:
           fi
           mkdir -p tarball/ports
           rsync -rltC --exclude=".git" --delete ports/ tarball/ports
+          echo "$CURRENT_COMMIT" > tarball/ports/.git_commit
 
-          OS_MAJOR_LIST="$(seq "$OLDEST_DARWIN" "$NEWEST_DARWIN")"
-          for CUR_MAJOR in $OS_MAJOR_LIST; do
-              ARCHS="i386"
-              if [ "$CUR_MAJOR" -ge 20 ]; then
-                ARCHS="arm $ARCHS"
-              elif [ "$CUR_MAJOR" -le 9 ]; then
-                ARCHS="$ARCHS powerpc"
-              fi
-              for CUR_ARCH in $ARCHS; do
-                INDEXDIR="tarball/PortIndex_darwin_${CUR_MAJOR}_${CUR_ARCH}"
-                mkdir -p "$INDEXDIR"
-                platform_arg="macosx_${CUR_MAJOR}_${CUR_ARCH}"
-                if [ -f "mpbb/index_vars/${platform_arg}" ]; then
-                    platform_arg="file:mpbb/index_vars/${platform_arg}"
-                fi
-                portindex -p "$platform_arg" -o "$INDEXDIR" ports
-                port-tclsh contrib/portindex2json/portindex2json.tcl "${INDEXDIR}/PortIndex" --info commit="${CURRENT_COMMIT}" > "${INDEXDIR}/PortIndex.json"
-              done
+          # update PortIndex for current platform so port mirror can run
+          OS_MAJOR="$(uname -r | cut -f 1 -d .)"
+          OS_ARCH="$(uname -p)"
+          INDEXDIR="tarball/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}"
+          mkdir -p "$INDEXDIR"
+          platform_arg="macosx_${OS_MAJOR}_${OS_ARCH}"
+          if [ -f "mpbb/index_vars/${platform_arg}" ]; then
+              platform_arg="file:mpbb/index_vars/${platform_arg}"
+          fi
+          portindex -p "$platform_arg" -o "$INDEXDIR" ports
+          cp -c "${INDEXDIR}/PortIndex" "${INDEXDIR}/PortIndex.quick" ports
+
+          chmod -R a+rX ports
+          CUR_DIR="$(dirname "$(realpath ports)")"
+          while [ -n "$CUR_DIR" -a "$CUR_DIR" != "/" ]; do
+            sudo chmod a+rx "$CUR_DIR"
+            CUR_DIR="$(dirname "$CUR_DIR")"
           done
-          find tarball -maxdepth 1 -type d -name 'PortIndex_darwin_*_*' -mtime +24h -exec rm -rfv {} \;
-          chmod -R a+rX tarball
 
           echo "current_commit=$CURRENT_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "os_major=$OS_MAJOR" >> "$GITHUB_OUTPUT"
+          echo "os_arch=$OS_ARCH" >> "$GITHUB_OUTPUT"
 
       - name: Mirror all changed ports
         env:
@@ -193,15 +199,6 @@ jobs:
           portlist: ${{ steps.portlist.outputs.portlist }}
         run: |
           set -eu
-
-          OS_MAJOR="$(uname -r | cut -f 1 -d .)"
-          OS_ARCH="$(uname -p)"
-          if [ -f "tarball/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" ]; then
-            cp -c "tarball/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" ports
-          else
-            echo "Warning: no PortIndex found for darwin_${OS_MAJOR}_${OS_ARCH}"
-            cp -c "tarball/PortIndex_darwin_${NEWEST_DARWIN}_${OS_ARCH}/PortIndex" ports
-          fi
 
           sudo mv /opt/local/var/macports .
           sudo chown -R "$(id -un)" ./macports
@@ -225,23 +222,62 @@ jobs:
           echo "Updating mirrored status of ports"
           port-tclsh mpbb/tools/update-mirrordb.tcl "$MIRROR_DB_URL" "$MIRROR_DB_CREDENTIALS" mirror_done portfile_hash_cache portname_portfile_map
 
-      - name: Save PortIndex
-        id: save-portindex
-        uses: actions/cache/save@v5
-        with:
-          path: tarball
-          key: portindex-${{ steps.update-portindex.outputs.current_commit }}
+      - name: Update PortIndex files
+        id: update-portindex
+        env:
+          OLDEST_DARWIN: 9
+          NEWEST_DARWIN: 25
+          CURRENT_COMMIT: ${{ steps.prep-ports.outputs.current_commit }}
+          OS_MAJOR: ${{ steps.prep-ports.outputs.os_major }}
+          OS_ARCH: ${{ steps.prep-ports.outputs.os_arch }}
+        run: |
+          set -eu
+
+          OS_MAJOR_LIST="$(seq "$OLDEST_DARWIN" "$NEWEST_DARWIN")"
+          for CUR_MAJOR in $OS_MAJOR_LIST; do
+              ARCHS="i386"
+              if [ "$CUR_MAJOR" -ge 20 ]; then
+                ARCHS="arm $ARCHS"
+              elif [ "$CUR_MAJOR" -le 9 ]; then
+                ARCHS="$ARCHS powerpc"
+              fi
+              for CUR_ARCH in $ARCHS; do
+                INDEXDIR="tarball/PortIndex_darwin_${CUR_MAJOR}_${CUR_ARCH}"
+                if [ "$CUR_MAJOR" -ne "$OS_MAJOR" -o "$CUR_ARCH" != "$OS_ARCH" ]; then
+                    mkdir -p "$INDEXDIR"
+                    platform_arg="macosx_${CUR_MAJOR}_${CUR_ARCH}"
+                    if [ -f "mpbb/index_vars/${platform_arg}" ]; then
+                        platform_arg="file:mpbb/index_vars/${platform_arg}"
+                    fi
+                    portindex -p "$platform_arg" -o "$INDEXDIR" ports
+                fi
+                port-tclsh contrib/portindex2json/portindex2json.tcl "${INDEXDIR}/PortIndex" --info commit="${CURRENT_COMMIT}" > "${INDEXDIR}/PortIndex.json"
+              done
+          done
+          find tarball -maxdepth 1 -type d -name 'PortIndex_darwin_*_*' -mtime +24h -exec rm -rfv {} \;
+          chmod -R a+rX tarball
 
       - name: Deploy PortIndex
         env:
           MIRROR_UPLOAD_URL: ${{ secrets.MIRROR_UPLOAD_URL }}
           MIRROR_UPLOAD_CREDENTIALS: ${{ secrets.MIRROR_UPLOAD_CREDENTIALS }}
-          CURRENT_COMMIT: ${{ steps.update-portindex.outputs.current_commit }}
+          CURRENT_COMMIT: ${{ steps.prep-ports.outputs.current_commit }}
         run: |
           set -eu
 
           echo "Creating tarball for commit ${CURRENT_COMMIT}"
-          tar -C tarball -cj --gid 0 --uid 0 --numeric-owner -f "portindex-${CURRENT_COMMIT}.tar.bz2" .
+          if [ -x /opt/local/bin/lbzip2 ]; then
+              BZIP2=/opt/local/bin/lbzip2
+          else
+              BZIP2=/usr/bin/bzip2
+              if sudo port -b install --no-rev-upgrade lbzip2; then
+                if [ -x /opt/local/bin/lbzip2 ]; then
+                    BZIP2=/opt/local/bin/lbzip2
+                fi
+              fi
+          fi
+          tar -C tarball -c --use-compress-program "$BZIP2" --gid 0 --uid 0 --numeric-owner \
+            -f "portindex-${CURRENT_COMMIT}.tar.bz2" .
 
           echo "Uploading tarball for commit ${CURRENT_COMMIT}"
           curl -fL -u "$MIRROR_UPLOAD_CREDENTIALS" --upload-file "portindex-${CURRENT_COMMIT}.tar.bz2" "$MIRROR_UPLOAD_URL" > /dev/null
@@ -250,9 +286,16 @@ jobs:
         env:
           MIRROR_DB_URL: ${{ secrets.MIRROR_DB_URL }}
           MIRROR_DB_CREDENTIALS: ${{ secrets.MIRROR_DB_CREDENTIALS }}
-          CURRENT_COMMIT: ${{ steps.update-portindex.outputs.current_commit }}
+          CURRENT_COMMIT: ${{ steps.prep-ports.outputs.current_commit }}
         run: |
           set -eu
 
           echo "Updating mirror.last_commit to: $CURRENT_COMMIT"
           curl -fL -u "$MIRROR_DB_CREDENTIALS" "${MIRROR_DB_URL}SET/mirror.last_commit/${CURRENT_COMMIT}"
+
+      - name: Save PortIndex
+        id: save-portindex
+        uses: actions/cache/save@v5
+        with:
+          path: tarball
+          key: portindex-${{ runner.os }}-${{ steps.prep-ports.outputs.current_commit }}
