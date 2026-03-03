@@ -432,14 +432,14 @@ post-extract {
                 continue
             }
             foreach candidate $candidates {
-                set gomod "${candidate}/go.mod"
+                set gomod "$candidate/go.mod"
 
                 if {[file exists $gomod]} {
                     set fh [open $gomod r]
                     set content [read $fh]
                     close $fh
 
-                    if {[regexp -lineanchor {^\s*module\s+(\S+)} $content -> module]} {
+                    if {[regexp -line {^\s*module\s+(\S+)} $content -> module]} {
                         if {$module eq ${vpackage}} {
                             ui_debug "Choosing $candidate for ${vpackage}"
                             move $candidate ${gopath}/src/${vpackage}
