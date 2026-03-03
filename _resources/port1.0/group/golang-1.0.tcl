@@ -424,16 +424,34 @@ post-extract {
         } else {
             # In some cases, this can match multiple folders, e.g.,
             # gopkg.in/src-d/go-git.v4 and gopkg.in/src-d/go-git-fixtures.v3.
-            # We want the one that does not have any dashes in the wildcard of
-            # our glob expression, so use regex to identify that.
+            # We want the one that matches the module name in go.mod.
             set candidates [glob ${workpath}/${vauthor}-${vproject}-*]
+            if {[llength $candidates] == 1} {
+                set candidate [lindex $candidates 0]
+                move $candidate ${gopath}/src/${vpackage}
+                continue
+            }
             foreach candidate $candidates {
-                if {[regexp -nocase "^[quotemeta $workpath]/[quotemeta $vauthor]-[quotemeta $vproject]-\[^-\]*$" $candidate]} {
-                    ui_debug "Choosing $candidate for ${workpath}/${vauthor}-${vproject}-*"
-                    move $candidate ${gopath}/src/${vpackage}
-                    break
+                set gomod "${candidate}/go.mod"
+
+                if {[file exists $gomod]} {
+                    set fh [open $gomod r]
+                    set content [read $fh]
+                    close $fh
+
+                    if {[regexp -lineanchor {^\s*module\s+(\S+)} $content -> module]} {
+                        if {$module eq ${vpackage}} {
+                            ui_debug "Choosing $candidate for ${vpackage}"
+                            move $candidate ${gopath}/src/${vpackage}
+                            break
+                        } else {
+                            ui_debug "Rejecting $candidate for ${vpackage} because the module name does not match"
+                        }
+                    } else {
+                        ui_error "Module line missing in $gomod"
+                    }
                 } else {
-                    ui_debug "Rejecting $candidate for ${workpath}/${vauthor}-${vproject}-* because it contains dashes in the wildcard match"
+                    ui_debug "Rejecting $candidate for ${vpackage} because it does not have a go.mod file"
                 }
             }
         }
