@@ -70,12 +70,7 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
     # It is assumed in this portgroup that go.{domain,author,project} will
     # remain consistent with the distfile; this is needed when moving the source
     # into the GOPATH in the post-extract block later on.
-    lassign [go._translate_package_id ${go_package}] go.domain go.author go.project subproject
-
-    if {${subproject} ne ""} {
-        ui_error "go.setup cannot handle subprojects yet"
-        error "unhandled subproject"
-    }
+    lassign [go._translate_package_id ${go_package}] go.domain go.author go.project
 
     switch ${go.domain} {
         github.com {
@@ -114,8 +109,7 @@ proc go._translate_package_id {package_id} {
     set domain [lindex ${parts} 0]
     set author [lindex ${parts} 1]
     set project [lindex ${parts} 2]
-    # possibly empty
-    set subproject [lindex ${parts} 3]
+    set subdir [join [lrange ${parts} 3 end] "/"]
 
     switch ${domain} {
         golang.org {
@@ -140,7 +134,7 @@ proc go._translate_package_id {package_id} {
             set author [string trim ${author} ~]
         }
     }
-    return [list ${domain} ${author} ${project} ${subproject}]
+    return [list ${domain} ${author} ${project} ${subdir}]
 }
 
 proc go._strip_gopkg_version {str} {
@@ -259,6 +253,14 @@ proc handle_set_go_vendors {vendors_str} {
     if {$num_tokens > 0} {
         # portgroups like github may set this - can't be used with multiple distfiles
         extract.rename  no
+        # Hack so we can map the extracted dir to the package
+        global extract.cmd extract.suffix extract.pre_args extract.post_args
+        extract.cmd     "sh -c 'd=\$(basename \"\$1\" ${extract.suffix}) && \
+            mkdir \"\$d.tmp\" && ${extract.cmd} ${extract.pre_args} \"\$1\" \
+            ${extract.post_args} -C \"\$d.tmp\" && mv \"\$d.tmp\"/* \"\$d\" \
+            && rmdir \"\$d.tmp\"' ."
+        extract.pre_args
+        extract.post_args
     }
     for {set ix 0} {${ix} < ${num_tokens}} {incr ix} {
         # Get the Go package ID
@@ -284,69 +286,53 @@ proc handle_set_go_vendors {vendors_str} {
                 set vversion [lindex ${vendors_str} ${ix}]
                 incr ix
 
-                # Split up the package ID
-                lassign [go._translate_package_id ${vresolved}] vdomain vauthor vproject vsubproject
-
-                if {[string match v* ${vversion}]} {
-                    set sha1_short {}
+                # If the package is a subdirectory in a repo
+                if {[string range ${vpackage} 0 [string length ${vresolved}]] eq "${vresolved}/"} {
+                    set vresolved ${vpackage}
+                } elseif {[string match google.golang.org/* ${vpackage}]} {
+                    set vresolved ${vresolved}/[join [lrange [split ${vpackage} "/"] 2 end] "/"]
                 } else {
-                    # The vauthor may be wrong (the project has been renamed/changed
-                    # ownership) so we need to use the SHA-1 suffix later to identify
-                    # the package when moving into the GOPATH. GitHub uses 7 digits;
-                    # Bitbucket uses 12. We take 7 and use globbing.
-                    set sha1_short [string range ${vversion} 0 6]
+                    # The subdirectory might be encoded in the version
+                    set subdir [join [lrange [split ${vversion} "/"] 0 end-1] "/"]
+                    if {$subdir ne ""} {
+                        set vresolved ${vresolved}/$subdir
+                    }
                 }
-                lappend go.vendors_internal [list ${sha1_short} ${vpackage} ${vresolved} ${vversion}]
+
+                # Split up the package ID
+                lassign [go._translate_package_id ${vresolved}] vdomain vauthor vproject vsubdir
+
+                set distversion [regsub -all {/} ${vversion} -]
 
                 switch ${vdomain} {
                     github.com {
-                        # TODO: At some point this should be migrated to use the GitHub "archive" tarball
-                        if {${vsubproject} eq ""} {
-                            set distfile ${vauthor}-${vproject}-${vversion}.tar.gz
-                            set master_site https://codeload.github.com/${vauthor}/${vproject}/legacy.tar.gz/${vversion}?dummy=
-                        } else {
-                            set distfile ${vauthor}-${vproject}-${vsubproject}-${vversion}.tar.gz
-                            set master_site https://codeload.github.com/${vauthor}/${vproject}/legacy.tar.gz/${vsubproject}/${vversion}?dummy=
-                        }
+                        set vdistname ${vauthor}-${vproject}-${distversion}
+                        set distfile ${vdistname}.tar.gz
+                        set master_site https://codeload.github.com/${vauthor}/${vproject}/legacy.tar.gz/${vversion}?dummy=
                     }
                     bitbucket.org {
-                        if {${vsubproject} ne ""} {
-                            ui_error "go.vendors can't handle subprojects from ${vdomain} yet"
-                            error "unsupported dependency domain"
-                        }
-                        set distfile ${vversion}.tar.gz
+                        set vdistname ${distversion}
+                        set distfile ${vdistname}.tar.gz
                         set master_site https://bitbucket.org/${vauthor}/${vproject}/get
                     }
                     gitlab.com -
                     salsa.debian.org {
-                        if {${vsubproject} ne ""} {
-                            ui_error "go.vendors can't handle subprojects from ${vdomain} yet"
-                            error "unsupported dependency domain"
-                        }
-                        set distfile ${vproject}-${vversion}.tar.gz
+                        set vdistname ${vproject}-${distversion}
+                        set distfile ${vdistname}.tar.gz
                         set master_site https://${vdomain}/${vauthor}/${vproject}/-/archive/${vversion}
                     }
                     git.sr.ht {
-                        if {${vsubproject} ne ""} {
-                            ui_error "go.vendors can't handle subprojects from ${vdomain} yet"
-                            error "unsupported dependency domain"
-                        }
-                        set distfile ${vversion}.tar.gz
+                        set vdistname ${distversion}
+                        set distfile ${vdistname}.tar.gz
                         set master_site https://${vdomain}/~${vauthor}/${vproject}/archive
-                    }
-                    go.googlesource.com {
-                        if {${vsubproject} ne ""} {
-                            ui_error "go.vendors can't handle subprojects from ${vdomain} yet"
-                            error "unsupported dependency domain"
-                        }
-                        set distfile ${vversion}.tar.gz
-                        set master_site https://${vdomain}/${vauthor}/+archive/refs/tags
                     }
                     default {
                         ui_error "go.vendors can't handle dependencies from ${vdomain}"
                         error "unsupported dependency domain"
                     }
                 }
+                lappend go.vendors_internal [list ${vdistname} ${vpackage} ${vresolved} ${vversion} ${vsubdir}]
+
                 set tag [regsub -all {[^[:alpha:][:digit:]]} ${vpackage}-${vversion} -]
                 master_sites-append ${master_site}:${tag}
                 distfiles-append    ${distfile}:${tag}
@@ -404,56 +390,20 @@ post-extract {
         # If the above fails then something went wrong and we should error out.
     }
 
-    foreach vlist ${go.vendors_internal} {
-        lassign ${vlist} sha1_short vpackage vresolved vversion
-        ui_debug "Processing vendored dependency (sha1_short: ${sha1_short}, vpackage: ${vpackage}, vresolved: ${vresolved}, vversion: ${vversion})"
-
-        file mkdir ${gopath}/src/[file dirname ${vpackage}]
-
-        # Next is a big bag of heuristics to try to move the extracted
-        # dependencies into the gopath. We have to try to accommodate all naming
-        # schemes used by the various "forges" (GitHub, Gitlab, etc.).
-
-        lassign [go._translate_package_id ${vresolved}] _ vauthor vproject
-        set gitlab_workdir ${vproject}-${vversion}
-
-        if {[file exists ${workpath}/${gitlab_workdir}]} {
-            move ${workpath}/${gitlab_workdir} ${gopath}/src/${vpackage}
-        } elseif {${sha1_short} ne ""} {
-            move [glob ${workpath}/*-${sha1_short}*] ${gopath}/src/${vpackage}
+    # Sort so parent modules are handled before nested ones
+    foreach vlist [lsort -index 1 ${go.vendors_internal}] {
+        lassign ${vlist} vdistname vpackage vresolved vversion vsubdir
+        ui_debug "Processing vendored dependency (vdistname: ${vdistname}, vpackage: ${vpackage}, vresolved: ${vresolved}, vversion: ${vversion}, vsubdir: ${vsubdir})"
+        set dir ${gopath}/src/${vpackage}
+        file mkdir [file dirname $dir]
+        # If this a nested module, it might already exist, so delete first
+        delete $dir
+        # In some cases a eg. v2 might be a nested module
+        # eg. github.com/googleapis/gax-go/v2
+        if {[file exists ${workpath}/${vdistname}/${vsubdir}]} {
+            move ${workpath}/${vdistname}/${vsubdir} $dir
         } else {
-            # In some cases, this can match multiple folders, e.g.,
-            # gopkg.in/src-d/go-git.v4 and gopkg.in/src-d/go-git-fixtures.v3.
-            # We want the one that matches the module name in go.mod.
-            set candidates [glob ${workpath}/${vauthor}-${vproject}-*]
-            if {[llength $candidates] == 1} {
-                set candidate [lindex $candidates 0]
-                move $candidate ${gopath}/src/${vpackage}
-                continue
-            }
-            foreach candidate $candidates {
-                set gomod "$candidate/go.mod"
-
-                if {[file exists $gomod]} {
-                    set fh [open $gomod r]
-                    set content [read $fh]
-                    close $fh
-
-                    if {[regexp -line {^\s*module\s+(\S+)} $content -> module]} {
-                        if {$module eq ${vpackage}} {
-                            ui_debug "Choosing $candidate for ${vpackage}"
-                            move $candidate ${gopath}/src/${vpackage}
-                            break
-                        } else {
-                            ui_debug "Rejecting $candidate for ${vpackage} because the module name does not match"
-                        }
-                    } else {
-                        ui_error "Module line missing in $gomod"
-                    }
-                } else {
-                    ui_debug "Rejecting $candidate for ${vpackage} because it does not have a go.mod file"
-                }
-            }
+            move ${workpath}/${vdistname} $dir
         }
     }
 }
