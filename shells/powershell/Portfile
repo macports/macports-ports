@@ -1,0 +1,162 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; truncate-lines: t; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+
+PortSystem          1.0
+PortGroup           github 1.0
+
+github.setup        PowerShell PowerShell 7.5.5 v
+github.tarball_from archive
+name                [string tolower ${github.project}]
+revision            0
+
+categories          shells dotnet
+supported_archs     arm64 x86_64
+license             MIT
+maintainers         {i0ntempest @i0ntempest} openmaintainer}
+
+description         Cross-platform automation and configuration tool/framework
+long_description    ${github.project} is a cross-platform task automation solution \
+                    made up of a command-line shell, a scripting language, \
+                    and a configuration management framework.
+
+homepage            https://microsoft.com/PowerShell
+
+checksums           rmd160  56254f7b7c1efd9634de83d8c80e487f8281e807 \
+                    sha256  02121a160ca6688ea11a60f0970ebd37ded5ba30695b8b09bb5d67c7c9a96a84 \
+                    size    11444809
+
+universal_variant   no
+
+set dotnet_sdk_ver_maj \
+                    9
+depends_build       port:dotnet-sdk-${dotnet_sdk_ver_maj} \
+                    path:bin/dotnet:dotnet-cli
+depends_lib         port:dotnet-runtime-${dotnet_sdk_ver_maj}
+
+set dotnet_root_env DOTNET_ROOT=${prefix}/share/dotnet
+set shared_env "
+    ${dotnet_root_env} \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_CLI_HOME=${workpath} \
+    NUGET_PACKAGES=${workpath}/.nuget/packages \
+    DOTNET_CLI_USE_MSBUILD_SERVER=0 \
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+"
+
+configure.env-append \
+                    {*}$shared_env
+build.env-append    {*}$shared_env
+destroot.env-append {*}$shared_env
+
+if {${build_arch} eq "x86_64"} {
+    # file name is "x64" for x86_64
+    set arch_filename \
+                    x64
+} else {
+    # arm64
+    set arch_filename \
+                    ${build_arch}
+}
+set target_framework \
+                    "net${dotnet_sdk_ver_maj}.0"
+set inc_file        "powershell.inc"
+set publish_path    ${worksrcpath}/src/powershell-unix/bin/Release/${target_framework}/osx-${arch_filename}/publish
+set dotnet_cmd      ${prefix}/bin/dotnet
+
+post-extract {
+    # _GetDependencies target, see https://github.com/PowerShell/PowerShell/blob/v7.5.4/build.psm1#L2572-L2589
+    set target_file "${worksrcpath}/src/Microsoft.PowerShell.SDK/obj/Microsoft.PowerShell.SDK.csproj.TypeCatalog.targets"
+    file mkdir [file dirname ${target_file}]
+    copy ${filespath}/_GetDependencies.xml ${target_file}
+
+    # install PsGallery modules (PackageManagement, PowerShellGet), see https://github.com/PowerShell/PowerShell/blob/v7.5.4/build.psm1#L2830
+    copy ${filespath}/copy-psgallery-modules.ps1 ${worksrcpath}
+}
+
+post-patch {
+    reinplace "s|git describe --abbrev=60 --long|echo ${github.tag_prefix}${version}|" ${worksrcpath}/PowerShell.Common.props
+
+    set dotnet_sdks [split [exec env ${dotnet_root_env} ${dotnet_cmd} --list-sdks] "\n"]
+    foreach line $dotnet_sdks {
+        if {[regexp "^${dotnet_sdk_ver_maj}\\\.\[0-9\]+\\\.\[0-9\]+" $line match]} {
+            set dotnet_sdk_ver $match
+        }
+    }
+    ui_debug "dotnet SDK version ${dotnet_sdk_ver}"
+    reinplace "s|\"version\": \"\.\*\"|\"version\": \"${dotnet_sdk_ver}\"|" ${worksrcpath}/global.json
+    
+    reinplace "s|%%WORKSRCPATH%%|${worksrcpath}|g" ${worksrcpath}/copy-psgallery-modules.ps1
+    reinplace "s|%%PUBLISHPATH%%|${publish_path}|g" ${worksrcpath}/copy-psgallery-modules.ps1
+}
+
+configure {
+    ui_debug "configure - restore project"
+    system -W ${worksrcpath} \
+        "${configure.env} ${dotnet_cmd} restore PowerShell.sln \
+         --disable-build-servers \
+         --use-current-runtime \
+         --nologo \
+         --source https://api.nuget.org/v3/index.json"
+}
+
+pre-build {
+    ui_debug "pre-build step 1 - ResGen"
+    system -W ${worksrcpath}/src/ResGen \
+        "${build.env} ${dotnet_cmd} run \
+         --framework ${target_framework} \
+         -c Release \
+         -property:UseSharedCompilation=false"
+    ui_debug "pre-build step 2 - _GetDependencies target"
+    system -W ${worksrcpath} \
+        "${build.env} ${dotnet_cmd} msbuild \
+         src/Microsoft.PowerShell.SDK/Microsoft.PowerShell.SDK.csproj \
+         -t:_GetDependencies \
+         -property:DesignTimeBuild=true \
+         -property:_DependencyFile=${worksrcpath}/src/TypeCatalogGen/${inc_file} \
+         -nologo \
+         -nodeReuse:false \
+         -property:UseSharedCompilation=false"
+    ui_debug "pre-build step 3 - TypeCatalogGen"
+    system -W ${worksrcpath}/src/TypeCatalogGen \
+        "${build.env} ${dotnet_cmd} run \
+         --framework ${target_framework} \
+         -c Release \
+         ../System.Management.Automation/CoreCLR/CorePsTypeCatalog.cs \
+         ${inc_file} \
+         -property:UseSharedCompilation=false"
+    ui_debug "pre-build steps done"
+}
+
+build.cmd           ${dotnet_cmd} publish
+build.target        src/powershell-unix/powershell-unix.csproj
+build.args          --disable-build-servers \
+                    --nologo \
+                    --framework ${target_framework} \
+                    -c Release \
+                    --no-self-contained \
+                    --use-current-runtime \
+                    -property:PublishReadyToRun=false \
+                    -property:GenerateFullPaths=true \
+                    -property:ErrorOnDuplicatePublishOutputFiles=false \
+                    -property:IsWindows=false \
+                    -property:ReleaseTag=${version} \
+                    -nodeReuse:false \
+                    -property:UseSharedCompilation=false
+
+destroot {
+    # install PsGallery modules (PackageManagement, PowerShellGet)
+    system -W ${worksrcpath} \
+        "${destroot.env} ${publish_path}/pwsh -NoLogo -NoProfile -File ${worksrcpath}/copy-psgallery-modules.ps1"
+
+    copy ${publish_path} ${destroot}${prefix}/libexec/${name}
+
+    # install wrapper script setting DOTNET_ROOT
+    set wrapper ${destroot}${prefix}/bin/pwsh
+    set fh [open ${wrapper} w]
+    puts ${fh} "#!/bin/sh"
+    puts ${fh} "export ${dotnet_root_env}"
+    puts ${fh} "exec ${prefix}/libexec/${name}/pwsh \"\$@\""
+    close ${fh}
+    file attributes ${wrapper} -permissions 0755
+
+    xinstall -m 0644 ${worksrcpath}/assets/manpage/pwsh.1 ${destroot}${prefix}/share/man/man1/
+}
