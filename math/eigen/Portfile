@@ -1,42 +1,138 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           cmake 1.0
+PortGroup           compilers 1.0
+PortGroup           cmake 1.1
+PortGroup           gitlab 1.0
+PortGroup           muniversal 1.1
 
 name                eigen
-version             2.0.17
-license             GPL-2+ LGPL-3+
+gitlab.setup        libeigen eigen 5.0.1
+revision            0
+
+conflicts           eigen3
+
 categories          math science
-maintainers         {nicos @NicosPavlov} openmaintainer
-description         A C++ template library for linear algebra: vectors, matrices, and related algorithms.
-long_description    ${description}
-homepage            http://eigen.tuxfamily.org/
-platforms           darwin
+license             {MPL-2 Apache-2 BSD Minpack}
+maintainers         {eborisch @eborisch} {@barracuda156 gmail.com:vital.had} \
+                    openmaintainer
 
-master_sites        http://bitbucket.org/eigen/eigen/get/
-distname            ${version}
-# 2.0.16 was stealth updated; see #31240 and #32987
-#dist_subdir         ${name}/${version}_3
-use_bzip2           yes
+description         A C++ template library for linear algebra: vectors, \
+                    matrices, and related algorithms.
+long_description    {*}${description}
 
-checksums           rmd160  183c8f7ee3c85ccb447fdcefa3a366f06cca351b \
-                    sha256  7255e856ed367ce6e6e2d4153b0e4e753c8b8d36918bf440dd34ad56aff09960
-#worksrcdir          ${name}-${name}-${version}
-worksrcdir          ${name}-${name}-b23437e61a07
+homepage            https://libeigen.gitlab.io
 
-cmake.out_of_source yes
+checksums           rmd160  c20b8890dd0b4cdd20083fc85e8538c8402a4216 \
+                    sha256  e4de6b08f33fd8b8985d2f204381408c660bffa6170ac65b68ae1bd3cd575c0a \
+                    size    2335713
 
-configure.args-append   -DEIGEN_BUILD_LIB=ON
+compiler.cxx_standard   2014
 
-patchfiles          patch-QrInstantiations.diff
+# Eigen's source code specifically checks the version of Apple Clang.
+compiler.blacklist-append   {clang < 900}
 
-post-destroot {
-    set docdir ${prefix}/share/doc/${name}
-    xinstall -d ${destroot}${docdir}
-    xinstall -m 644 -W ${worksrcpath} COPYING COPYING.LESSER \
-        ${destroot}${docdir}
+depends_build-append \
+                    path:bin/pkg-config:pkgconfig
+
+configure.args-append \
+                    -DEIGEN_BUILD_BLAS=OFF \
+                    -DEIGEN_BUILD_LAPACK=OFF \
+                    -DEIGEN_BUILD_DOC_DEFAULT=OFF
+
+build.env-append    EIGEN_MAKE_ARGS=-j{build.jobs}
+
+variant doc description {Place local documentation into <prefix>/share/doc/eigen3/html} {
+    compilers.choose    cc cxx cpp
+    compilers.setup
+
+    depends_build-append    path:bin/doxygen:doxygen \
+                            port:texlive-latex \
+                            path:bin/dot:graphviz
+
+    configure.args-replace  -DEIGEN_BUILD_DOC_DEFAULT=OFF \
+                            -DEIGEN_BUILD_DOC_DEFAULT=ON
 }
 
-livecheck.type      regex
-livecheck.url       ${homepage}index.php?title=ChangeLog
-livecheck.regex     {Eigen (2(?:\.\d+)+)}
+variant blas description {Build eigen's blas (libeigen_blas*)} {
+    compilers.choose    cc cxx cpp fc f77 f90
+    compilers.setup     require_fortran
+
+    universal_variant       yes
+    configure.universal_args ""
+
+    configure.args-replace \
+                    -DEIGEN_BUILD_BLAS=OFF -DEIGEN_BUILD_BLAS=ON \
+                    -DEIGEN_BUILD_LAPACK=OFF -DEIGEN_BUILD_LAPACK=ON
+}
+
+
+if {![variant_isset blas] && ![variant_isset doc]} {
+    supported_archs     noarch
+    platforms           any
+    compilers.setup
+}
+
+
+test.run            yes
+test.target         check
+test.env-append     EIGEN_MAKE_ARGS=-j{build.jobs} \
+                    EIGEN_CTEST_ARGS=-j{build.jobs}
+
+pre-destroot {
+    set build_suffix {}
+    if {![info exists universal_archs_to_use]} {
+        lappend build_suffix ""
+    } else {
+        set dash "-"
+        foreach arch ${universal_archs_to_use} {
+            lappend build_suffix ${dash}${arch}
+        }
+    }
+
+    foreach sfx ${build_suffix} {
+        # Install documentation if requested
+        if {[variant_isset doc] && [string equal ${sfx} [lindex ${build_suffix} 0]]} {
+                set docdir ${destroot}${prefix}/share/doc/eigen3
+                xinstall -d ${docdir}
+                # The documentation created is slightly different for each arch
+                # which makes muniversal hiccup. Just copy one set of docs
+                # into destroot directories.
+                file copy ${cmake.build_dir}${sfx}/doc/html ${docdir}
+        }
+
+        if {[variant_isset blas]} {
+            set libdir ${destroot}${sfx}${prefix}/lib
+            xinstall -d ${libdir}
+            file copy \
+                {*}[glob ${cmake.build_dir}${sfx}/blas/libeigen_blas*] ${libdir}
+        }
+    }
+}
+
+post-destroot {
+    # Install license information
+    set docdir ${destroot}${prefix}/share/doc/eigen3
+    xinstall -d ${docdir}
+    xinstall -m 0644 {*}[glob ${worksrcpath}/COPYING.*] ${docdir}
+
+    # Grab extra items install doesn't out of unsupported
+    foreach n {README.txt bench} {
+        file copy ${worksrcpath}/unsupported/${n} \
+            ${destroot}${prefix}/include/eigen3/unsupported
+    }
+
+    # Install FindEigen3.cmake file, if it is provided.
+    xinstall -d ${destroot}${cmake_share_module_dir}
+    if {[file exists ${worksrcpath}/cmake/FindEigen3.cmake]} {
+        xinstall -m 0444 ${worksrcpath}/cmake/FindEigen3.cmake \
+            ${destroot}${cmake_share_module_dir}
+    }
+}
+
+gitlab.livecheck.regex {([0-9.]+)}
+
+notes "
+This product includes software developed by the University of Chicago, as\
+Operator of Argonne National Laboratory.
+"
