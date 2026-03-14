@@ -1,0 +1,216 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           github 1.0
+
+github.setup        microsoft onnxruntime 1.24.3 v
+github.tarball_from archive
+revision            1
+categories          math devel science
+license             MIT
+maintainers         nomaintainer
+description         Cross-platform, high performance scoring engine for ML models
+long_description    ONNX Runtime is a performance-focused inference engine for \
+                    ONNX (Open Neural Network Exchange) models. It enables \
+                    hardware-accelerated machine learning inferencing across \
+                    a variety of platforms.
+
+homepage            https://github.com/microsoft/onnxruntime
+
+# pytorch/cpuinfo is a required FetchContent dependency.  Pre-populate it as a
+# separate distfile so the CMake build can run offline after `port fetch`.
+set cpuinfo_commit      403d652dca4c1046e8145950b1c0997a9f748b57
+set coremltools_version 7.1
+
+master_sites-append https://github.com/pytorch/cpuinfo/archive/${cpuinfo_commit}.tar.gz?dummy=:cpuinfo
+master_sites-append https://github.com/apple/coremltools/archive/refs/tags/${coremltools_version}.zip?dummy=:coremltools
+distfiles-append    cpuinfo-${cpuinfo_commit}.tar.gz:cpuinfo
+distfiles-append    coremltools-${coremltools_version}.zip:coremltools
+
+checksums           ${distname}${extract.suffix} \
+                        rmd160  c5e9e95540f1307287d2ad16f951281d89aee7d5 \
+                        sha256  70364aa2cddfe535974bd160261c25743aca0ec3708770578813b0f9404bd064 \
+                        size    283631211 \
+                    cpuinfo-${cpuinfo_commit}.tar.gz \
+                        rmd160  819e3ba551a25d6436933d2684675fa96ef8bd6b \
+                        sha256  c33bcad94ccbdd4966cc21291f0dcacd40d1dd04eb4c2a6ef1c8da669c01e024 \
+                        size    3548079 \
+                    coremltools-${coremltools_version}.zip \
+                        rmd160  46fa0f3cf56cbbb0d9b42fa99722b6791afe734e \
+                        sha256  a9a95d3b3d1cbf9b9e00c145bcae4050f89042dc5b777635421dcdaf85010890 \
+                        size    20043908
+
+# -----------------------------------------------------------------------
+# Build dependencies
+# -----------------------------------------------------------------------
+depends_build-append \
+                    port:cmake \
+                    port:python313
+
+# -----------------------------------------------------------------------
+# Runtime dependencies – mapped from the Homebrew formula
+#
+# Homebrew name          MacPorts name            Notes
+# -----------------------------------------------------------------------
+# abseil                 abseil                   direct match
+# onnx (C++ lib)         (bundled via FetchContent) must NOT use system onnx;
+# abseil                 abseil                   direct match
+# protobuf               protobuf3-cpp            provides protoc
+# re2                    re2                      direct match
+# boost (Mp11 headers)   boost                    header-only use
+# eigen                  eigen3                   direct match
+# flatbuffers            flatbuffers              build + runtime
+# nlohmann-json          nlohmann-json            header-only
+# cpp-gsl (MS-GSL)       (via FetchContent)       not packaged in MacPorts
+# howard-hinnant-date    (via FetchContent)        not packaged in MacPorts
+# safeint                (via FetchContent)        not packaged in MacPorts
+# -----------------------------------------------------------------------
+
+# With FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER, onnxruntime bundles its own
+# copies of abseil, re2, flatbuffers, eigen, nlohmann-json etc. via FetchContent.
+# Only protobuf3-cpp is kept as a MacPorts dep because we supply protoc via
+# ONNX_CUSTOM_PROTOC_EXECUTABLE to avoid a cross-compilation bootstrap issue.
+depends_lib-append  port:protobuf3-cpp
+
+# -----------------------------------------------------------------------
+# CoreML variant
+#
+# CoreML requires macOS 14.4+ (MLOptimizationHints API) so it is enabled by
+# default only on arm64.  x86_64 Macs are limited to macOS 13 Ventura, making
+# a 14.4 deployment target impractical there.  Users on x86_64 who are running
+# macOS 14+ can explicitly request +coreml.
+# -----------------------------------------------------------------------
+variant coreml description {Build with CoreML execution provider} {}
+
+# Enable CoreML by default on arm64, disable on x86_64.
+if {${build_arch} eq "arm64" && ![variant_isset coreml] && ![variant_isset no_coreml]} {
+    default_variants +coreml
+}
+
+# onnxruntime and bundled onnx use std::filesystem throughout, which requires
+# macOS 10.15+.  Raise the floor unconditionally.
+macosx_deployment_target 10.15
+
+# CoreML additionally requires macOS 14.4+ (MLOptimizationHints API).
+if {[variant_isset coreml]} {
+    macosx_deployment_target 14.4
+}
+
+# -----------------------------------------------------------------------
+# Compiler flag tuning
+#
+# -Wno-shorten-64-to-32 is arm64-specific: onnxruntime's CMake injects
+#   -Wshorten-64-to-32 -Werror only for Apple clang on arm64 targets.
+#
+# -Wno-deprecated-declarations / -Wno-unguarded-availability-new are only
+#   needed with the macOS 26 SDK (darwin 25+) whose libc++ headers became
+#   stricter, turning these into hard errors via onnxruntime's -Werror.
+# -----------------------------------------------------------------------
+set ort_cxx_flags ""
+set ort_objcxx_flags ""
+
+if {${build_arch} eq "arm64"} {
+    set ort_cxx_flags    "${ort_cxx_flags} -Wno-shorten-64-to-32"
+    set ort_objcxx_flags "${ort_objcxx_flags} -Wno-shorten-64-to-32"
+}
+
+if {${os.major} >= 25} {
+    set ort_cxx_flags    "${ort_cxx_flags} -Wno-deprecated-declarations -Wno-unguarded-availability-new"
+    set ort_objcxx_flags "${ort_objcxx_flags} -Wno-deprecated-declarations -Wno-unguarded-availability-new"
+}
+
+# -----------------------------------------------------------------------
+# Configure
+# -----------------------------------------------------------------------
+if {[variant_isset coreml]} {
+    configure.args-append -Donnxruntime_USE_COREML=ON
+    configure.args-append \
+        -DFETCHCONTENT_SOURCE_DIR_COREMLTOOLS=${workpath}/build/_deps/coremltools-src
+} else {
+    configure.args-append -Donnxruntime_USE_COREML=OFF
+}
+
+cmake.source_dir    ${worksrcpath}/cmake
+configure.dir       ${workpath}/build
+build.dir           ${workpath}/build
+
+# Pre-populate the FetchContent source dir for cpuinfo.
+post-extract {
+    # cpuinfo
+    file mkdir ${workpath}/build/_deps/pytorch_cpuinfo-src
+    system "tar -xzf ${distpath}/cpuinfo-${cpuinfo_commit}.tar.gz \
+        --strip-components=1 \
+        -C ${workpath}/build/_deps/pytorch_cpuinfo-src"
+
+    # coremltools — provides mlmodel/format/*.proto for the CoreML EP (arm64 only)
+    if {[variant_isset coreml]} {
+        file mkdir ${workpath}/build/_deps/coremltools-src
+        system "unzip -q ${distpath}/coremltools-${coremltools_version}.zip \
+            -d ${workpath}/build/_deps/coremltools-src.tmp"
+        system "mv ${workpath}/build/_deps/coremltools-src.tmp/coremltools-${coremltools_version}/* \
+            ${workpath}/build/_deps/coremltools-src"
+        file delete -force ${workpath}/build/_deps/coremltools-src.tmp
+    }
+}
+
+configure.args-append \
+    -DCMAKE_CXX_FLAGS="${ort_cxx_flags}" \
+    -DCMAKE_OBJCXX_FLAGS="${ort_objcxx_flags}" \
+    -DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER \
+    -DFETCHCONTENT_SOURCE_DIR_PYTORCH_CPUINFO=${workpath}/build/_deps/pytorch_cpuinfo-src \
+    -DPython_EXECUTABLE=${prefix}/bin/python3.13 \
+    -DONNX_CUSTOM_PROTOC_EXECUTABLE=${prefix}/bin/protoc \
+    -Donnxruntime_BUILD_SHARED_LIB=ON \
+    -Donnxruntime_BUILD_UNIT_TESTS=OFF \
+    -Donnxruntime_GENERATE_TEST_REPORTS=OFF \
+    -Donnxruntime_RUN_ONNX_TESTS=OFF \
+    -Donnxruntime_USE_FULL_PROTOBUF=OFF \
+    -Donnxruntime_USE_PREINSTALLED_ONNX=OFF \
+    -DCMAKE_CXX_STANDARD=17
+
+# -----------------------------------------------------------------------
+# Fix install name
+#
+# onnxruntime's CMakeLists.txt explicitly sets INSTALL_RPATH to "@rpath",
+# overriding CMAKE_INSTALL_NAME_DIR.  Fix the dylib install name and all
+# binaries that link against it in the destroot after installation.
+# -----------------------------------------------------------------------
+post-destroot {
+    set dylib ${destroot}${prefix}/lib/libonnxruntime.${version}.dylib
+    set final_name ${prefix}/lib/libonnxruntime.${version}.dylib
+
+    # Fix the dylib's own install name
+    system "install_name_tool -id ${final_name} ${dylib}"
+
+    # Fix the symlink target libonnxruntime.dylib if present
+    foreach link [glob -nocomplain ${destroot}${prefix}/lib/libonnxruntime*.dylib] {
+        if {${link} ne ${dylib}} {
+            catch {system "install_name_tool -id ${final_name} ${link}"}
+        }
+    }
+}
+
+# -----------------------------------------------------------------------
+# Test
+# -----------------------------------------------------------------------
+test.run            yes
+test.cmd            ${prefix}/bin/ctest
+test.target         --test-dir ${workpath}/build --output-on-failure -R onnxruntime_test_all
+
+# -----------------------------------------------------------------------
+# Notes for porters
+# -----------------------------------------------------------------------
+# 1. Several header-only libraries (MS-GSL, Howard Hinnant date, SafeInt,
+#    and the C++ onnx library) are not packaged in MacPorts yet.  They will
+#    be downloaded by CMake FetchContent at configure time.  For a fully
+#    reproducible offline build, pin their commits from cmake/deps.txt and
+#    add them as additional distfiles entries (same pattern as cpuinfo above).
+#
+# 2. The rmd160/size checksums for both distfiles are left as placeholders.
+#    Fill them in by running:
+#      port fetch onnxruntime
+#      openssl dgst -rmd160 ${DISTPATH}/${distname}-1.24.3.tar.gz
+#      openssl dgst -rmd160 ${DISTPATH}/cpuinfo-403d...tar.gz
+#
+# 3. GPU execution providers are not enabled by default.
