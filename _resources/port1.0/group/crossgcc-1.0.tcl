@@ -366,6 +366,10 @@ proc crossgcc.setup {target version} {
         post-destroot {
             # FSF propaganda (should already be there or would conflict)
             file delete -force "${destroot}/${prefix}/share/man/man7"
+
+            # porting.info is not target-prefixed and conflicts between
+            # cross-gcc ports
+            file delete -force "${destroot}/${prefix}/share/info/porting.info"
         }
 
         livecheck.type  regex
