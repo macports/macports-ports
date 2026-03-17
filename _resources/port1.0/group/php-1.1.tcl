@@ -372,6 +372,12 @@ proc php.add_port_code {} {
     global destroot name subport version xcodeversion
     global phpknownfails
 
+    if {[vercmp ${php.branch} >= 8.5]} {
+        PortGroup       legacysupport 1.1
+        # clock_gettime
+        legacysupport.newest_darwin_requires_legacy 15
+    }
+
     # Set up distfiles default for non-bundled extensions.
     default distname        {${php.rootname}-${version}}
 
