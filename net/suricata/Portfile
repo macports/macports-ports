@@ -1,0 +1,275 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           conflicts_build 1.0
+
+name                suricata
+version             8.0.4
+revision            0
+
+categories          net security
+license             BSD
+maintainers         {mps @Schamschula} openmaintainer
+description         Open Source IDS / IPS / NSM engine
+long_description    Suricata is a high performance Network IDS, IPS \
+                    and Network Security Monitoring engine. Open Source \
+                    and owned by a community run non-profit foundation, \
+                    the Open Information Security Foundation (OISF). \
+                    Suricata is developed by the OISF and its supporting \
+                    vendors.
+homepage            https://suricata.io
+master_sites        https://www.openinfosecfoundation.org/download/
+
+checksums           rmd160  7de1a81bd7285dfea250b3ab2419f32c82cc1ed7 \
+                    sha256  81cee7bae69848a9751b2ce0867620eefa52b192e79c20b5eac897600b28b191 \
+                    size    44353651
+
+# https://redmine.openinfosecfoundation.org/issues/7804
+conflicts_build     lua
+
+destroot.target     install-full
+
+## Got both strlcpy/strlcat errors and "error: unknown type name 'json_t'"
+patchfiles          patch-Makefile.am.diff \
+                    patch-src-output-json.h-4.0.diff
+
+## https://redmine.openinfosecfoundation.org/projects/suricata/wiki/Mac_OS_X_106x
+depends_build       port:autoconf \
+                    port:automake
+
+depends_lib         port:cargo \
+                    port:jansson \
+                    port:libhtp \
+                    port:libiconv \
+                    port:libnet \
+                    port:libpcap \
+                    port:libmagic \
+                    port:libmaxminddb \
+                    port:libtool \
+                    port:libyaml \
+                    port:lz4 \
+                    port:nspr \
+                    port:nss \
+                    port:pcre \
+                    port:pkgconfig
+
+depends_run         port:Oinkmaster
+
+configure.env       AC_PROG_LIBTOOL=${prefix}/bin/glibtool \
+                    LDFLAGS=-L${prefix}/lib \
+                    LIBS=-liconv
+
+configure.args      --enable-ipfw \
+                    --enable-gccprotect \
+                    --enable-non-bundled-htp \
+                    --enable-unittests \
+                    --disable-geoip --disable-prelude --disable-unix-socket \
+                    --disable-nss --disable-nspr \
+                    --disable-silent-rules \
+                    --with-libhtp-includes=${prefix}/include \
+                    --with-libhtp-libraries=${prefix}/lib \
+                    --with-libjansson-includes=${prefix}/include \
+                    --with-libjansson-libraries=${prefix}/lib
+
+## Note: only linux support option for non-root user
+##    https://redmine.openinfosecfoundation.org/issues/240
+##    but http://pablo-secdev.blogspot.ca/2010/07/howto-setup-suricata-100-on-mac-os-x.html
+add_users suricata group=suricata home=${prefix}/var/db/suricata shell=/sbin/nologin realname=suricata\ user
+
+use_autoreconf      yes
+
+#compiler.blacklist   clang llvm-gcc-4.2 macports-llvm-gcc-4.2 apple-gcc-4.2 macports-clang macports-clang-3.3
+
+## FIXME! fails on "util-affinity.h:70:5: error: unknown type name 'cpu_set_t'" if enable build.args
+variant universal {}
+#build.args          CFLAGS="${configure.cflags} [get_canonical_archflags cc]"
+configure.cflags-append "${configure.cflags} [get_canonical_archflags cc]"
+
+## Bug report: https://redmine.openinfosecfoundation.org/projects/suricata/search?utf8=%E2%9C%93&issues=1&q=darwin#
+
+test.run            yes
+test.cmd            suricata
+test.args           -u -l /tmp
+
+notes "
+
+To finish install
+https://redmine.openinfosecfoundation.org/projects/suricata/wiki/Basic_Setup
+
+1) Customize config in ${prefix}/etc/${name} like HOME_NET and host-os-policy
+
+You need add extra rules, eventually using oinkmaster:
+https://redmine.openinfosecfoundation.org/projects/suricata/wiki/Rule_Management_with_Oinkmaster
+ex: $ sudo -u oinkmaster ${prefix}/bin/oinkmaster.pl -o ${prefix}/etc/${name}/rules -C ${prefix}/etc/oinkmaster-${name}.conf
+The corresponding oinkmaster config is in the examples directory and
+have been copied to ${prefix}/etc if not existing.
+Note: ${prefix}/etc/${name}/rules is not writable by oinkmaster, see (4)
+
+or suricata-update:
+$ sudo ${prefix}/bin/suricata-update --suricata ${prefix}/bin/suricata \
+--suricata-conf ${prefix}/etc/suricata/suricata.yaml --no-test --no-reload
+
+2) Test your config with
+    # suricata -c ${prefix}/etc/suricata/suricata.yaml -T
+
+3) Standard execution
+    # suricata -c ${prefix}/etc/suricata/suricata.yaml -i en1 -D
+    plist launchd file is configured by default with this configuration
+
+Alternative, you can have an ipfw rule set for the engine to see the packets from ipfw. For example:
+    # ipfw add 100 divert 8000 ip from any to any
+Rememember to delete this rule if you are not using it as it will redirect all traffic to this port
+and locked you if nothing handles this.
+The 8000 above should be the same number you pass on the command line of Suricata with the option -d:
+    # suricata -c ${prefix}/etc/suricata/suricata.yaml -i en1 -d 8000
+
+Note: Dropping privileges options are for now not supported outside of libpcap-ng on Linux.
+
+4) Scheduled task to update rules with oinkmaster: a default file has been created as
+      ${prefix}/Library/LaunchDaemons/org.macports.oinkmaster-suricata.plist
+   Check if it fit you and start it like
+      # chown -R oinkmaster ${prefix}/etc/suricata/rules
+      # install -d -o oinkmaster -m 755 ${prefix}/etc/suricata/backup
+      # ln -s ${prefix}/Library/LaunchDaemons/org.macports.oinkmaster-suricata.plist /Library/LaunchDaemons/
+      # launchctl load -w /Library/LaunchDaemons/org.macports.oinkmaster-suricata.plist
+   Test command with
+      # sudo -u oinkmaster ${prefix}/bin/oinkmaster.pl -o ${prefix}/etc/suricata/rules/ -b ${prefix}/etc/suricata/backup/ -C ${prefix}/etc/oinkmaster-suricata.conf
+
+5) Check alert types on usage. For example:
+      $ sed ...
+   And, if necessary, disable false-positive rules
+   (eg SURICATA STREAM ones)
+
+6) To rotate logs, an example config with system newsyslog is included (1/week)
+      ${prefix}/share/examples/${name}/mp-suricata.conf
+   You can install it with
+      # cp ${prefix}/share/examples/${name}/mp-suricata.conf /private/etc/newsyslog.d/
+   And restart newsyslog
+      # launchctl unload -w /System/Library/LaunchDaemons/com.apple.newsyslog.plist
+      # launchctl load -w /System/Library/LaunchDaemons/com.apple.newsyslog.plist
+
+FIXME! recommendation to rotate/handle unified2 log files
+"
+
+post-patch {
+    ## disabling rules which seems to have disappeared from emergingthreats set and may block start
+    reinplace "s|magic-file: /usr/share/file/magic|magic-file: ${prefix}/share/misc/magic|g" ${worksrcpath}/suricata.yaml.in
+}
+
+destroot.keepdirs ${destroot}${prefix}/etc/${name} \
+    ${destroot}${prefix}/var/log/${name} \
+    ${destroot}${prefix}/etc/${name}/rules
+
+post-destroot {
+    xinstall -d ${destroot}${prefix}/share/examples/${name}
+    xinstall ${worksrcpath}/suricata.yaml ${destroot}${prefix}/share/examples/${name}/
+
+    xinstall ${filespath}/oinkmaster-${name}.conf ${destroot}${prefix}/share/examples/${name}/
+    reinplace "s|%%PREFIX%%|${prefix}|g" ${destroot}${prefix}/share/examples/${name}/oinkmaster-${name}.conf
+#    copy ${filespath}/mp-suricata.conf ${destroot}${prefix}/share/examples/${name}/
+#    reinplace "s|%%PREFIX%%|${prefix}|g" ${destroot}${prefix}/share/examples/${name}/mp-suricata.conf
+
+    xinstall -d ${destroot}${prefix}/etc/${name}
+    xinstall -d ${destroot}${prefix}/var/log/${name}
+    xinstall -d ${destroot}${prefix}/etc/${name}/rules
+    ## putting in the rules, emergingthreat set has them
+    foreach f { decoder-events.rules dns-events.rules http-events.rules stream-events.rules files.rules smtp-events.rules } {
+        xinstall ${worksrcpath}/rules/${f} ${destroot}${prefix}/etc/suricata/rules/
+    }
+    xinstall ${worksrcpath}/threshold.config ${destroot}${prefix}/etc/suricata/threshold.config
+
+    xinstall -d ${destroot}${prefix}/Library/LaunchDaemons/
+    copy ${filespath}/org.macports.oinkmaster-suricata.plist ${destroot}${prefix}/Library/LaunchDaemons/
+    reinplace "s|%%PREFIX%%|${prefix}|g" ${destroot}${prefix}/Library/LaunchDaemons/org.macports.oinkmaster-suricata.plist
+}
+
+post-activate {
+    foreach f { classification.config reference.config suricata.yaml } {
+        if {![file exists ${prefix}/etc/${name}/${f}]} {
+            xinstall ${prefix}/share/examples/${name}/${f} ${prefix}/etc/${name}/
+        }
+    }
+    if {![file exists ${prefix}/etc/oinkmaster-suricata.conf]} {
+        xinstall ${prefix}/share/examples/${name}/oinkmaster-suricata.conf ${prefix}/etc/
+    }
+}
+
+## https://redmine.openinfosecfoundation.org/projects/suricata/wiki/Debugging
+variant debug description { enable debug, processing will be slower } {
+    ## Note: --enable-debug-validation is incompatible with --unittests
+    ##       https://redmine.openinfosecfoundation.org/projects/suricata/wiki/Unit_Tests
+    configure.args-append    --enable-debug --enable-profiling
+}
+
+variant python310 description { Python 3.10 bindings } conflicts python311 python312 python313 python314 {
+    depends_build-append     port:python310  \
+                             port:py310-yaml
+    configure.python         ${prefix}/bin/python3.10
+}
+
+variant python311 description { Python 3.11 bindings } conflicts python310 python312 python313 python314 {
+    depends_build-append     port:python311  \
+                             port:py311-yaml
+    configure.python         ${prefix}/bin/python3.11
+}
+
+variant python312 description { Python 3.12 bindings } conflicts python310 python311 python313 python314 {
+    depends_build-append     port:python312  \
+                             port:py312-yaml
+    configure.python         ${prefix}/bin/python3.12
+}
+
+variant python313 description { Python 3.13 bindings } conflicts python310 python311 python312 python314 {
+    depends_build-append     port:python313  \
+                             port:py313-yaml
+    configure.python         ${prefix}/bin/python3.13
+}
+
+variant python314 description { Python 3.14 bindings } conflicts python310 python311 python312 python313 {
+    depends_build-append     port:python314  \
+                             port:py314-yaml
+    configure.python         ${prefix}/bin/python3.14
+}
+
+variant prelude description { libprelude support } {
+    depends_lib-append       port:libprelude
+    configure.args-delete    --disable-prelude
+    configure.args-append    --enable-prelude --with-libprelude-prefix=${prefix}
+}
+
+variant geoip description { libgeoip support } {
+    depends_lib-append       port:libgeoip
+    configure.args-delete    --disable-geoip
+    configure.args-append    --enable-geoip --with-libgeoip-includes=${prefix}/include \
+                             --with-libgeoip-libraries=${prefix}/lib
+}
+
+variant unixsocket description { unix-socket support } {
+    depends_lib-append       port:jansson
+    configure.args-delete    --disable-unix-socket
+    configure.args-append    --enable-unix-socket
+}
+
+## https://redmine.openinfosecfoundation.org/projects/suricata/wiki/MD5
+variant nss description { nss/md5 checksums support } {
+    depends_lib-append       port:nss port:nspr
+    configure.args-delete    --disable-nss --disable-nspr
+    configure.args-append    --enable-nss \
+                             --with-libnss-libraries=${prefix}/lib \
+                             --with-libnss-includes=${prefix}/include/nss/ \
+                             --with-libnspr-libraries=${prefix}/lib \
+                             --with-libnspr-includes=${prefix}/include/nspr
+}
+
+default_variants       +debug +geoip
+if {![variant_isset python310] && ![variant_isset python311] && ![variant_isset python312] && ![variant_isset python313]} {
+    default_variants   +python314
+}
+
+startupitem.create      yes
+startupitem.executable  ${prefix}/bin/suricata -c ${prefix}/etc/suricata/suricata.yaml -i en1
+startupitem.netchange   yes
+
+livecheck.type      regex
+livecheck.url       ${master_sites}
+livecheck.regex     ${name}-(\[0-9.\]+)${extract.suffix}
