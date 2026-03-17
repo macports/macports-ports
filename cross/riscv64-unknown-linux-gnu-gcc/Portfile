@@ -1,0 +1,513 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                riscv64-unknown-linux-gnu-gcc
+
+# ── versions ──────────────────────────────────────────────────────────
+set gcc_version     15.2.0
+set musl_version    1.2.5
+set glibc_version   2.41
+set uclibc_version  1.0.56
+
+# ── subport declarations ──────────────────────────────────────────────
+subport riscv64-linux-gcc-bootstrap {}
+subport riscv64-unknown-linux-gnu-libc {}
+subport riscv64-unknown-linux-musl-libc {}
+subport riscv64-unknown-linux-uclibc-libc {}
+subport riscv64-unknown-linux-musl-gcc {}
+subport riscv64-unknown-linux-uclibc-gcc {}
+
+# ── classify subport ──────────────────────────────────────────────────
+set binutils_target riscv64-unknown-linux-gnu
+set bootstrap_prefix ${prefix}/libexec/riscv64-linux-gcc-bootstrap
+
+if {${subport} eq "riscv64-linux-gcc-bootstrap"} {
+    set port_type       bootstrap
+    set target          ${binutils_target}
+} elseif {[string match "*-libc" ${subport}]} {
+    set port_type       libc
+    if {${subport} eq "riscv64-unknown-linux-gnu-libc"} {
+        set target      riscv64-unknown-linux-gnu
+        set libc        glibc
+        set libc_version ${glibc_version}
+    } elseif {${subport} eq "riscv64-unknown-linux-musl-libc"} {
+        set target      riscv64-unknown-linux-musl
+        set libc        musl
+        set libc_version ${musl_version}
+    } elseif {${subport} eq "riscv64-unknown-linux-uclibc-libc"} {
+        set target      riscv64-unknown-linux-uclibc
+        set libc        uclibc
+        set libc_version ${uclibc_version}
+    }
+} else {
+    set port_type       gcc
+    if {${subport} eq "riscv64-unknown-linux-musl-gcc"} {
+        set target      riscv64-unknown-linux-musl
+        set libc        musl
+    } elseif {${subport} eq "riscv64-unknown-linux-uclibc-gcc"} {
+        set target      riscv64-unknown-linux-uclibc
+        set libc        uclibc
+    } else {
+        set target      riscv64-unknown-linux-gnu
+        set libc        glibc
+    }
+}
+
+# ── common metadata ───────────────────────────────────────────────────
+version             ${gcc_version}
+revision            0
+categories          cross devel
+license             GPL-3+
+maintainers         {pguyot @pguyot} openmaintainer
+homepage            https://gcc.gnu.org/
+
+universal_variant   no
+destroot.violate_mtree yes
+
+# ── GCC source (shared by bootstrap and gcc subports) ─────────────────
+set gcc_distfile    gcc-${gcc_version}.tar.xz
+set gcc_checksums   "rmd160  b16e24d6caab2f7be54edc500b99ef08d436d300 \
+                     sha256  438fd996826b0c82485a29da03a72d71d6e3541a83ec702df4271f6fe025d24e \
+                     size    101056276"
+
+# ======================================================================
+#  riscv64-linux-gcc-bootstrap
+# ======================================================================
+if {${port_type} eq "bootstrap"} {
+    description     Bootstrap GCC cross compiler for RISC-V 64-bit Linux
+    long_description \
+        Stage 1 (bootstrap) GCC cross compiler for RISC-V 64-bit Linux. \
+        This is a C-only freestanding compiler used to build the C \
+        library. It is not intended for direct use.
+
+    master_sites    gnu:gcc/gcc-${gcc_version}/:gcc
+    distfiles       ${gcc_distfile}:gcc
+    dist_subdir     gcc15
+
+    checksums       ${gcc_distfile} {*}${gcc_checksums}
+
+    use_xz          yes
+    worksrcdir      gcc-${gcc_version}
+
+    depends_build   port:gettext \
+                    port:texinfo
+
+    depends_lib     port:riscv64-unknown-linux-gnu-binutils \
+                    port:gmp \
+                    port:mpfr \
+                    port:libmpc \
+                    path:lib/pkgconfig/isl.pc:isl \
+                    port:libiconv \
+                    port:zlib \
+                    port:zstd
+
+    compiler.cpath
+    use_configure   no
+
+    post-extract {
+        file mkdir ${workpath}/build
+    }
+
+    build {
+        set njobs [option build.jobs]
+        set build_env "PATH=${prefix}/bin:$env(PATH) LDFLAGS=-L${prefix}/lib"
+
+        system -W ${workpath}/build \
+            "env ${build_env} \
+            ${worksrcpath}/configure \
+                --target=${target} \
+                --prefix=${bootstrap_prefix} \
+                --with-gmp=${prefix} \
+                --with-mpfr=${prefix} \
+                --with-mpc=${prefix} \
+                --with-system-zlib \
+                --with-arch=rv64gc \
+                --with-abi=lp64d \
+                --enable-languages=c \
+                --with-newlib \
+                --without-headers \
+                --disable-shared \
+                --disable-threads \
+                --disable-libatomic \
+                --disable-libgomp \
+                --disable-libquadmath \
+                --disable-libssp \
+                --disable-libstdcxx \
+                --disable-libvtv \
+                --disable-libcc1 \
+                --disable-nls \
+                --disable-multilib"
+
+        system -W ${workpath}/build \
+            "env ${build_env} make -j${njobs} all-gcc all-target-libgcc"
+    }
+
+    destroot {
+        set build_env "PATH=${prefix}/bin:$env(PATH) LDFLAGS=-L${prefix}/lib"
+
+        system -W ${workpath}/build \
+            "env ${build_env} make install-gcc install-target-libgcc \
+                DESTDIR=${destroot}"
+
+        # Create binutils symlinks so the bootstrap compiler can find them
+        file mkdir ${destroot}${bootstrap_prefix}/${target}/bin
+        foreach tool {ar as ld ld.bfd nm objcopy objdump ranlib readelf size strings strip} {
+            file link -symbolic \
+                ${destroot}${bootstrap_prefix}/${target}/bin/${tool} \
+                ${prefix}/bin/${binutils_target}-${tool}
+        }
+    }
+
+    livecheck.type  regex
+    livecheck.url   https://ftp.gnu.org/gnu/gcc/
+    livecheck.regex gcc-(\[0-9\]+\\.\[0-9.\]+)/
+
+# ======================================================================
+#  *-libc subports
+# ======================================================================
+} elseif {${port_type} eq "libc"} {
+
+    supported_archs     noarch
+
+    if {${libc} eq "glibc"} {
+        description     GNU C Library for ${target} cross compilation
+        long_description \
+            Cross-compiled glibc ${glibc_version} for ${target}. \
+            Installs a sysroot with C library and kernel headers.
+
+        master_sites    gnu:glibc/
+        distfiles       glibc-${glibc_version}.tar.xz
+        dist_subdir     glibc
+
+        checksums       glibc-${glibc_version}.tar.xz \
+                            rmd160  f555b909f8d803971f643aac1e7f2f9225a2eb1c \
+                            sha256  a5a26b22f545d6b7d7b3dd828e11e428f24f4fac43c934fb071b6a7d0828e901 \
+                            size    19344868
+
+        use_xz          yes
+        worksrcdir      glibc-${glibc_version}
+
+    } elseif {${libc} eq "musl"} {
+        description     musl C Library for ${target} cross compilation
+        long_description \
+            Cross-compiled musl ${musl_version} for ${target}. \
+            Installs a sysroot with C library and kernel headers.
+
+        master_sites    https://musl.libc.org/releases/
+        distfiles       musl-${musl_version}.tar.gz
+        dist_subdir     musl
+
+        checksums       musl-${musl_version}.tar.gz \
+                            rmd160  0b60d307dc2c4be3a2c2758923137ebe5e1f6ebb \
+                            sha256  a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4 \
+                            size    1080786
+
+        worksrcdir      musl-${musl_version}
+
+    } elseif {${libc} eq "uclibc"} {
+        description     uClibc-ng for ${target} cross compilation
+        long_description \
+            Cross-compiled uClibc-ng ${uclibc_version} for ${target}. \
+            Installs a sysroot with C library and kernel headers.
+
+        master_sites    https://downloads.uclibc-ng.org/releases/${uclibc_version}/
+        distfiles       uClibc-ng-${uclibc_version}.tar.xz
+        dist_subdir     uclibc-ng
+
+        checksums       uClibc-ng-${uclibc_version}.tar.xz \
+                            rmd160  b6a1e80bb71a4ddd6f80774bc489a098ba37b9e4 \
+                            sha256  23c9cab54c113e020fb20b9dc06be4a49560df791b78fcbc2ca899a6e8f213dd \
+                            size    1988256
+
+        use_xz          yes
+        worksrcdir      uClibc-ng-${uclibc_version}
+    }
+
+    depends_build   port:riscv64-linux-gcc-bootstrap \
+                    port:gmake \
+                    port:gsed
+
+    depends_lib     port:riscv-linux-kernel-headers-5.10
+
+    if {${libc} eq "glibc"} {
+        depends_build-append port:gawk port:bison
+    }
+
+    use_configure   no
+
+    set sysroot ${workpath}/sysroot
+
+    post-extract {
+        file mkdir ${sysroot}/usr
+    }
+
+    build {
+        set njobs [option build.jobs]
+
+        # Copy kernel headers into build sysroot
+        system "cp -R ${prefix}/share/riscv-linux-kernel-headers-5.10/include ${sysroot}/usr/"
+
+        # Create symlinks for target-prefixed tools in a temp bin dir
+        # so the bootstrap compiler and binutils are found
+        set toolsbin ${workpath}/toolsbin
+        file mkdir ${toolsbin}
+        if {${target} ne ${binutils_target}} {
+            foreach tool {ar as ld ld.bfd nm objcopy objdump ranlib readelf size strings strip} {
+                file link -symbolic ${toolsbin}/${target}-${tool} \
+                    ${prefix}/bin/${binutils_target}-${tool}
+            }
+            # Symlink the bootstrap gcc under the target name
+            file link -symbolic ${toolsbin}/${target}-gcc \
+                ${bootstrap_prefix}/bin/${binutils_target}-gcc
+        }
+
+        set gnubin ${workpath}/gnubin
+        file mkdir ${gnubin}
+        file link -symbolic ${gnubin}/make ${prefix}/bin/gmake
+        file link -symbolic ${gnubin}/sed ${prefix}/bin/gsed
+
+        set libc_path ${gnubin}:${toolsbin}:${bootstrap_prefix}/bin:$env(PATH)
+
+        if {${libc} eq "musl"} {
+            file mkdir ${workpath}/build-musl
+            system -W ${workpath}/build-musl \
+                "env PATH=${libc_path} \
+                CC=${target}-gcc \
+                ${worksrcpath}/configure \
+                    --host=${target} \
+                    --prefix=/usr \
+                    --syslibdir=/lib"
+            system -W ${workpath}/build-musl \
+                "env PATH=${libc_path} make -j${njobs}"
+            system -W ${workpath}/build-musl \
+                "env PATH=${libc_path} make install DESTDIR=${sysroot}"
+
+        } elseif {${libc} eq "glibc"} {
+            # glibc uses both .os (PIC/shared) and .oS (static PIE) suffixes
+            # which collide on macOS's case-insensitive filesystem
+            foreach f [list \
+                Makeconfig Makerules extra-lib.mk csu/Makefile \
+                support/Makefile sysdeps/ieee754/ldbl-opt/Makefile \
+                sysdeps/loongarch/Makefile sysdeps/sparc/sparc32/sparcv9/Makefile \
+                sysdeps/sparc/sparc64/Makefile sysdeps/unix/sysv/linux/mips/Makefile \
+                sysdeps/x86_64/Makefile \
+            ] {
+                set fp ${worksrcpath}/${f}
+                if {[file exists ${fp}]} {
+                    reinplace -q "s|\\.oS|\\.oSp|g" ${fp}
+                }
+            }
+
+            file mkdir ${workpath}/build-glibc
+            set build_triplet [exec sh ${worksrcpath}/scripts/config.guess]
+            system -W ${workpath}/build-glibc \
+                "env PATH=${libc_path} MAKE=${prefix}/bin/gmake \
+                ${worksrcpath}/configure \
+                    --host=${target} \
+                    --build=${build_triplet} \
+                    --prefix=/usr \
+                    --with-headers=${sysroot}/usr/include \
+                    --disable-nscd \
+                    --enable-kernel=5.10 \
+                    libc_cv_slibdir=/usr/lib"
+            system -W ${workpath}/build-glibc \
+                "env PATH=${libc_path} ${prefix}/bin/gmake -j${njobs} install DESTDIR=${sysroot}"
+
+        } elseif {${libc} eq "uclibc"} {
+            # Fix .oS/.os case collision on macOS (same issue as glibc)
+            system "find ${worksrcpath} \\( -name 'Makefile*' -o -name 'Makerules' -o -name 'Rules*' -o -name '*.mk' -o -name '*.mak' \\) \
+                -exec ${prefix}/bin/gsed -i 's/\\.oS\\b/.oSp/g' {} +"
+
+            # No shipped defconfig for riscv64; create a minimal .config
+            set fd [open ${worksrcpath}/.config w]
+            puts ${fd} "TARGET_riscv64=y"
+            puts ${fd} "CROSS_COMPILER_PREFIX=\"${binutils_target}-\""
+            puts ${fd} "KERNEL_HEADERS=\"${sysroot}/usr/include\""
+            puts ${fd} "RUNTIME_PREFIX=\"/\""
+            puts ${fd} "DEVEL_PREFIX=\"/usr/\""
+            puts ${fd} "UCLIBC_HAS_THREADS=y"
+            puts ${fd} "UCLIBC_HAS_THREADS_NATIVE=y"
+            puts ${fd} "HAS_NO_THREADS=n"
+            close ${fd}
+            system -W ${worksrcpath} \
+                "env PATH=${libc_path} make ARCH=riscv64 olddefconfig"
+            system -W ${worksrcpath} \
+                "env PATH=${libc_path} make -j${njobs}"
+            system -W ${worksrcpath} \
+                "env PATH=${libc_path} make install DESTDIR=${sysroot}"
+
+            # uClibc-ng includes math functions in libc; create libm
+            # symlinks so that -lm works (expected by libstdc++ etc.)
+            file link -symbolic ${sysroot}/usr/lib/libm.a libc.a
+            file link -symbolic ${sysroot}/usr/lib/libm.so libc.so
+        }
+    }
+
+    destroot {
+        set dest_sysroot ${destroot}${prefix}/${target}/sysroot
+        file mkdir ${dest_sysroot}
+        system "cp -R ${sysroot}/usr ${dest_sysroot}/"
+        if {[file exists ${sysroot}/lib]} {
+            system "cp -R ${sysroot}/lib ${dest_sysroot}/"
+        }
+    }
+
+    livecheck.type  none
+
+# ======================================================================
+#  *-gcc subports (stage 2)
+# ======================================================================
+} else {
+    # port_type eq "gcc"
+    description     GCC cross compiler for ${target} with ${libc}
+    long_description \
+        The GNU compiler collection for ${target} cross development, \
+        including C and C++ compilers, built with ${libc} C library \
+        support.
+
+    master_sites    gnu:gcc/gcc-${gcc_version}/:gcc
+    distfiles       ${gcc_distfile}:gcc
+    dist_subdir     gcc15
+
+    checksums       ${gcc_distfile} {*}${gcc_checksums}
+
+    use_xz          yes
+    worksrcdir      gcc-${gcc_version}
+
+    depends_build   port:gettext \
+                    port:texinfo
+
+    depends_lib     port:riscv64-unknown-linux-gnu-binutils \
+                    port:${target}-libc \
+                    port:gmp \
+                    port:mpfr \
+                    port:libmpc \
+                    path:lib/pkgconfig/isl.pc:isl \
+                    port:libiconv \
+                    port:zlib \
+                    port:zstd
+
+    compiler.cpath
+    use_configure   no
+
+    post-extract {
+        file mkdir ${workpath}/build
+    }
+
+    post-patch {
+        # Fix info pages to avoid conflicts with other gcc ports
+        # (adapted from crossgcc portgroup)
+        set infopages {
+            gcc/doc     gcc/Makefile.in          cpp          texi
+            gcc/doc     gcc/Makefile.in          cppinternals texi
+            gcc/doc     gcc/Makefile.in          gcc          texi
+            gcc/doc     gcc/Makefile.in          gccint       texi
+            gcc/doc     gcc/Makefile.in          gccinstall   info
+            gcc/fortran gcc/fortran/Make-lang.in gfortran     texi
+            libquadmath libquadmath/Makefile.in  libquadmath  info
+            libgomp     libgomp/Makefile.in      libgomp      info
+        }
+
+        foreach { path makefile name suffix } $infopages {
+            set src ${worksrcpath}/${path}/${name}.${suffix}
+            set mf  ${worksrcpath}/${makefile}
+            if {![file exists ${mf}]} { continue }
+
+            reinplace -q "s|setfilename ${name}.info|setfilename ${target}-${name}.info|g" ${src}
+            reinplace -q "s|(${name})|(${target}-${name})|g" ${src}
+            reinplace -q "s|@file{${name}}|@file{${target}-${name}}|g" ${src}
+
+            file rename ${worksrcpath}/${path}/${name}.${suffix} \
+                        ${worksrcpath}/${path}/${target}-${name}.${suffix}
+
+            reinplace -q -E "s:\[\[:<:\]\]${name}\\.(info|pod|${suffix}):${target}-&:g" ${mf}
+            reinplace -q "s|--info-dir=\$(DESTDIR)\$(infodir)|--dir-file=\$(DESTDIR)\$(infodir)/${target}-gcc-dir|g" ${mf}
+        }
+
+        # Do not install libiberty
+        reinplace -q {/^install:/s/ .*//} ${worksrcpath}/libiberty/Makefile.in
+    }
+
+    build {
+        set njobs [option build.jobs]
+
+        # Create binutils symlinks for non-gnu targets
+        set toolsbin ${workpath}/toolsbin
+        if {${target} ne ${binutils_target}} {
+            file mkdir ${toolsbin}
+            foreach tool {ar as ld ld.bfd nm objcopy objdump ranlib readelf size strings strip} {
+                file link -symbolic ${toolsbin}/${target}-${tool} \
+                    ${prefix}/bin/${binutils_target}-${tool}
+            }
+        }
+
+        set build_path ${toolsbin}:${prefix}/bin:$env(PATH)
+        set gcc_env "PATH=${build_path} LDFLAGS=-L${prefix}/lib"
+
+        system -W ${workpath}/build \
+            "env ${gcc_env} \
+            LDFLAGS_FOR_TARGET='-Wl,--undefined-version' \
+            ${worksrcpath}/configure \
+                --target=${target} \
+                --prefix=${prefix} \
+                --with-sysroot=${prefix}/${target}/sysroot \
+                --with-build-sysroot=${prefix}/${target}/sysroot \
+                --with-gmp=${prefix} \
+                --with-mpfr=${prefix} \
+                --with-mpc=${prefix} \
+                --with-system-zlib \
+                --with-arch=rv64gc \
+                --with-abi=lp64d \
+                --enable-languages=c,c++ \
+                --enable-shared \
+                --enable-threads=posix \
+                --enable-default-pie \
+                --enable-default-ssp \
+                --disable-libsanitizer \
+                --disable-libcc1 \
+                --disable-nls \
+                --disable-multilib \
+                --disable-werror \
+                --datarootdir=${prefix}/share/${subport} \
+                --infodir=${prefix}/share/info/${target} \
+                --mandir=${prefix}/share/man"
+
+        system -W ${workpath}/build \
+            "env ${gcc_env} make -j${njobs}"
+    }
+
+    pre-destroot {
+        file mkdir "${destroot}${prefix}/${target}/bin"
+        file mkdir "${destroot}${prefix}/${target}/lib"
+    }
+
+    destroot {
+        set toolsbin ${workpath}/toolsbin
+        set build_path ${toolsbin}:${prefix}/bin:$env(PATH)
+        set gcc_env "PATH=${build_path} LDFLAGS=-L${prefix}/lib"
+
+        system -W ${workpath}/build \
+            "env ${gcc_env} make install DESTDIR=${destroot}"
+
+        # Create binutils symlinks so the installed cross compiler can
+        # find binutils under target-prefixed names
+        if {${target} ne ${binutils_target}} {
+            file mkdir ${destroot}${prefix}/${target}/bin
+            foreach tool {ar as ld ld.bfd nm objcopy objdump ranlib readelf size strings strip} {
+                ln -sf ${prefix}/bin/${binutils_target}-${tool} \
+                    ${destroot}${prefix}/${target}/bin/${tool}
+            }
+        }
+
+        # Clean up files that would conflict with other ports
+        file delete -force "${destroot}${prefix}/share/man/man7"
+        file delete -force "${destroot}${prefix}/share/info/porting.info"
+        # Remove texinfo dir index (conflicts with binutils)
+        file delete -force "${destroot}${prefix}/share/info/${target}/dir"
+    }
+
+    livecheck.type  regex
+    livecheck.url   https://ftp.gnu.org/gnu/gcc/
+    livecheck.regex gcc-(\[0-9\]+\\.\[0-9.\]+)/
+}
