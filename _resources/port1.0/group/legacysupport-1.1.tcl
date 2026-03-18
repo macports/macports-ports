@@ -18,13 +18,16 @@
 #   legacysupport.use_mp_libcxx: Use an update libcxx runtime from a recent macports clang build
 
 namespace eval legacysupport {
+    # Newest Darwin version that requires legacy support.
+    # Currently OS X 10.14 ( Mojave, Darwin 18) due to timespec_get
+    variable ls_max_darwin_support 18
+    variable ls_cache_incpath  [list]
+    variable ls_cache_ldflags  [list]
+    variable ls_cache_cppflags [list]
 }
 
-# Newest Darwin version that requires legacy support.
-# Currently OS X 10.14 ( Mojave, Darwin 18) due to timespec_get
-set ls_max_darwin_support 18
 options legacysupport.newest_darwin_requires_legacy
-default legacysupport.newest_darwin_requires_legacy ${ls_max_darwin_support}
+default legacysupport.newest_darwin_requires_legacy ${legacysupport::ls_max_darwin_support}
 
 options legacysupport.use_static
 default legacysupport.use_static        no
@@ -38,7 +41,7 @@ default legacysupport.use_mp_libcxx     no
 options legacysupport.disable_function_wrap
 default legacysupport.disable_function_wrap no
 
-if {[info exists makefile.override]} {
+if {[exists makefile.override]} {
     pre-configure {
         ui_error "The legacysupport PG must be included *before* the makefile PG"
         ui_error "otherwise the latter fails to pick up the updated compiler flags."
@@ -87,7 +90,7 @@ proc legacysupport::get_library_link_flags {} {
 # https://github.com/macports/macports-legacy-support
 # Current Darwin 16 for utimensat, fsgetpath, setattrlistat
 proc legacysupport::get_newest_darwin_with_missing_symbols {} {
-    global   ls_max_darwin_support
+    variable ls_max_darwin_support
     return ${ls_max_darwin_support}
 }
 
@@ -140,14 +143,11 @@ proc legacysupport::relink_libSystem { exe } {
     }
 }
 
-set ls_cache_incpath  [list]
-set ls_cache_ldflags  [list]
-set ls_cache_cppflags [list]
-
 proc legacysupport::add_legacysupport {} {
-    global prefix os.platform os.major
-    global ls_cache_incpath ls_cache_ldflags ls_cache_cppflags
-    global configure.cxx_stdlib
+    global prefix os.platform os.major configure.cxx_stdlib
+    variable ls_cache_incpath
+    variable ls_cache_ldflags
+    variable ls_cache_cppflags
 
     if { ${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
 
