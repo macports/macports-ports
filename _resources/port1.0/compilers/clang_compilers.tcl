@@ -20,7 +20,7 @@ if {${os.major} >= 17 || ${os.platform} ne "darwin"} {
     if {${os.major} >= 22 || ${os.platform} ne "darwin"} {
         # Expose clang-21 to ports needing the newest standards
         if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2020 } {
-            lappend compilers macports-clang-21
+            lappend compilers macports-clang-22 macports-clang-21
         }
         if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2014 } {
             lappend compilers macports-clang-20 macports-clang-19

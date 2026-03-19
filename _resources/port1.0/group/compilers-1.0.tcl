@@ -189,13 +189,10 @@ if { ${os.major} <= 23 || ${os.platform} ne "darwin"} {
     }
 }
 if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
-    lappend clang_versions 13 14 15 16 17 18
+    lappend clang_versions 13 14 15 16 17
 }
-if { ${os.major} >= 15 || ${os.platform} ne "darwin"} {
-    lappend clang_versions 19 20
-}
-if { ${os.major} >= 16 || ${os.platform} ne "darwin"} {
-    lappend clang_versions 21 devel
+if { ${os.major} >= 22 || ${os.platform} ne "darwin"} {
+    lappend clang_versions 18 19 20 21 22 devel
 }
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
 foreach ver ${clang_versions} {
