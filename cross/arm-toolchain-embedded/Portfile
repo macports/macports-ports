@@ -1,0 +1,107 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               github 1.0
+PortGroup               cmake 1.1
+
+github.setup            arm arm-toolchain 22.1.0 release- -ATfE
+name                    arm-toolchain-embedded
+revision                0
+categories              cross lang
+maintainers             {pguyot @pguyot} openmaintainer
+license                 Apache-2
+description             Arm Toolchain for Embedded (ATfE) based on LLVM
+long_description        Arm Toolchain for Embedded is a baremetal toolchain \
+                        targeting Arm based on LLVM. It supports Cortex-M, \
+                        Cortex-R and Cortex-A (AArch32 and AArch64) targets \
+                        with picolibc as the default C library.
+
+homepage                https://github.com/arm/arm-toolchain
+
+checksums               rmd160  c6369eca5931c8114c27093fc8d09fcc8353712c \
+                        sha256  572edf6a2d001485a871093807858b4e3ae18390ff3de06faad28dd8cb51087f \
+                        size    258364643
+
+set sub_prefix          ${prefix}/libexec/${name}
+
+# hand-tweaked, approximately c++ standard 2017
+compiler.blacklist      *gcc* {clang < 1001} macports-clang-3.*
+compiler.blacklist-append {clang < 1204} {macports-clang-[5-9].0} {macports-clang-1[0-3]}
+compiler.fallback       clang macports-clang-14 macports-clang-15
+
+worksrcdir              arm-toolchain-release-${version}-ATfE/arm-software/embedded
+
+patchfiles-append       cmake-generate_version_txt.cmake.patch \
+                        patch-CMakeLists.txt
+
+configure.args-append   -DFETCHCONTENT_QUIET=OFF \
+                        -DENABLE_QEMU_TESTING=OFF \
+                        -DCMAKE_OSX_ARCHITECTURES=${configure.build_arch}
+
+github.tarball_from archive
+
+# ccache cannot create temp files inside the sandbox
+build.env-append        CCACHE_DISABLE=1
+configure.args-append   -DCMAKE_C_COMPILER_LAUNCHER= \
+                        -DCMAKE_CXX_COMPILER_LAUNCHER=
+
+depends_lib-append      port:zlib
+depends_build-append    path:bin/git:git \
+                        port:meson
+
+# Install everything under libexec
+cmake.install_prefix    ${sub_prefix}
+cmake.install_rpath
+cmake.generator         Ninja
+cmake.build_type        Release
+
+configure.pre_args-delete \
+    -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib"
+
+configure.pre_args-replace \
+    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+configure.pre_args-replace \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr"
+
+build.target            llvm-toolchain
+destroot.target         install-llvm-toolchain
+
+variant universal {
+    configure.args-replace \
+        -DCMAKE_OSX_ARCHITECTURES=${configure.build_arch} \
+        -DCMAKE_OSX_ARCHITECTURES="arm64\;x86_64"
+}
+
+post-destroot {
+    # compiler-rt install may leak build-dir paths into the destroot
+    delete      ${destroot}${prefix}/var
+
+    # remove the clang symlink and replace it with the actual binary
+    set clang_exe_version [glob -tails -directory ${destroot}${sub_prefix}/bin clang-*]
+    set clang_exe_version [lindex ${clang_exe_version} 0]
+    if {[file type ${destroot}${sub_prefix}/bin/clang] eq "link"} {
+        delete      ${destroot}${sub_prefix}/bin/clang
+        file rename ${destroot}${sub_prefix}/bin/${clang_exe_version} \
+                    ${destroot}${sub_prefix}/bin/clang
+    }
+
+    # generate a versioned wrapper script for each file in the bin directory
+    foreach bin [glob ${destroot}${sub_prefix}/bin/*] {
+        set bin_filename [string map "${sub_prefix} ${prefix}" ${bin}]-mp-arm
+        set exec_path    [string map "${destroot}${sub_prefix} ${sub_prefix}" ${bin}]
+
+        # see https://trac.macports.org/ticket/54985
+        if {${os.platform} eq "darwin" && [vercmp ${xcodeversion} 4.6] < 0} {
+             xinstall -m 755 "${filespath}/llvm-bin-compat" "${bin_filename}"
+        } else {
+             xinstall -m 755 "${filespath}/llvm-bin" "${bin_filename}"
+        }
+
+        reinplace "s:EXEC_PATH:${exec_path}:" "${bin_filename}"
+    }
+}
+
+github.livecheck.regex  {release-([0-9.]+)-ATfE}
