@@ -291,7 +291,7 @@ proc handle_set_go_vendors {vendors_str} {
                     set vresolved ${vpackage}
                 } elseif {[string match google.golang.org/* ${vpackage}]} {
                     set vresolved ${vresolved}/[join [lrange [split ${vpackage} "/"] 2 end] "/"]
-                } else {
+                } elseif {${vresolved} ne ${vpackage}} {
                     # The subdirectory might be encoded in the version
                     set subdir [join [lrange [split ${vversion} "/"] 0 end-1] "/"]
                     if {$subdir ne ""} {
@@ -398,13 +398,11 @@ post-extract {
         file mkdir [file dirname $dir]
         # If this a nested module, it might already exist, so delete first
         delete $dir
-        # In some cases a eg. v2 might be a nested module
-        # eg. github.com/googleapis/gax-go/v2
-        if {[file exists ${workpath}/${vdistname}/${vsubdir}]} {
-            move ${workpath}/${vdistname}/${vsubdir} $dir
-        } else {
-            move ${workpath}/${vdistname} $dir
+        # Drop a potential version specifier which might not be a directory
+        if {![file exists ${workpath}/${vdistname}/${vsubdir}]} {
+            set vsubdir [join [lrange [split ${vsubdir} "/"] 0 end-1] "/"]
         }
+        move ${workpath}/${vdistname}/${vsubdir} $dir
     }
 }
 
