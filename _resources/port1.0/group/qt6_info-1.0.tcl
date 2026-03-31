@@ -35,7 +35,7 @@ namespace eval  qt6             {}
 # please keep in order with the most recent Qt and OS versions with the lowest indices
 #
 set qt6::available_versions {
-    qt6     {6.10  {25 24 23}}
+    qt6     {6.11  {26 25 24 23}}
     qt610   {6.10  {25 24 23}}
     qt69    {6.9   {25 24 23}}
     qt68    {6.8   {24 23}}
@@ -332,13 +332,25 @@ array set qt6::components {
     qtquickeffectmaker {
         6.5
         7.0
-        /opt/local/libexec/qt6/qml/QtQuickEffectMaker/defaultnodes/basic/brightness_contrast.qen
+        libexec/qt6/qml/QtQuickEffectMaker/defaultnodes/basic/brightness_contrast.qen
         ""
     }
     qtgraphs {
         6.6
         7.0
         libexec/qt6/lib/QtGraphs.framework/QtGraphs
+        ""
+    }
+    qttaskfree {
+        6.11
+        7.0
+        libexec/qt6/lib/QtTaskTree.framework/QtTaskTree
+        ""
+    }
+    qtcanvaspainter {
+        6.11
+        7.0
+        libexec/qt6/lib/QtCanvasPainter.framework/Versions/A/QtCanvasPainter
         ""
     }
     sqlite-plugin {
