@@ -36,6 +36,7 @@ namespace eval  qt6             {}
 #
 set qt6::available_versions {
     qt6     {6.10  {25 24 23}}
+    qt610   {6.10  {25 24 23}}
     qt69    {6.9   {25 24 23}}
     qt68    {6.8   {24 23}}
     qt67    {6.7   {24 23 22 21}}
