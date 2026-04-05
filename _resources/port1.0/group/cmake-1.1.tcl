@@ -47,7 +47,7 @@ default cmake.build_type            MacPorts
 default cmake.install_prefix        {${prefix}}
 
 # minimal/initial value for the install rpath:
-default cmake.install_rpath         {${prefix}/lib}
+default cmake.install_rpath         {}
 
 # standard place to install extra CMake modules
 default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
@@ -96,11 +96,6 @@ depends_build-append                path:bin/cmake:cmake
 proc cmake::rpath_flags {} {
     global prefix
     if {[llength [option cmake.install_rpath]]} {
-        # make sure a single ${cmake.install_prefix} is included in the rpath
-        # careful, we are likely to be called more than once.
-        if {"[option cmake.install_prefix]/lib" ni [option cmake.install_rpath]} {
-            cmake.install_rpath-append [option cmake.install_prefix]/lib
-        }
         return [list \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
             -DCMAKE_INSTALL_RPATH="[join [option cmake.install_rpath] \;]"
