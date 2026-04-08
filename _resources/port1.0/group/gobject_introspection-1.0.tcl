@@ -1,13 +1,17 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
 # This PortGroup adds dependencies and arguments for building with gobject
-# introspection. There is just one option to set:
+# introspection. There are two options to set:
 #
 # gobject_introspection: whether to use gobject introspection. The default
 # is no. Possible values are yes and no.
+# gobject_introspection.use_devel_port: whether to use the "-devel" port.
+# The default is no. Possible values are yes and no.
 
 options gobject_introspection
 default gobject_introspection   no
+options gobject_introspection.use_devel_port
+default gobject_introspection.use_devel_port    no
 
 namespace eval gobject_introspection_pg {
 }
@@ -42,7 +46,11 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
             configure.args-append   --disable-introspection
         }
     } else {
-        depends_lib-append          path:lib/pkgconfig/gobject-introspection-1.0.pc:gobject-introspection
+        if {![option gobject_introspection.use_devel_port]} {
+            depends_lib-append      path:lib/pkgconfig/gobject-introspection-1.0.pc:gobject-introspection
+        } else {
+            depends_lib-append      path:lib/pkgconfig/gobject-introspection-1.0.pc:gobject-introspection-devel
+        }
 
         if { [string match *cmake* [option configure.cmd] ] } {
             configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=ON
