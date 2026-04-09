@@ -3,9 +3,7 @@
 PortSystem          1.0
 
 name                rsync
-conflicts           rsync-hfscomp
 version             3.4.1
-revision            0
 checksums           rmd160  b0f3e9ba2bb2c370a7c08587856e43e163f08d5e \
                     sha256  2924bcb3a1ed8b551fc101f740b9f0fe0a202b115027647cf69850d65fd88c52 \
                     size    1172739
@@ -16,74 +14,115 @@ installs_libs       no
 platforms           darwin freebsd sunos
 maintainers         {ryandesign @ryandesign} openmaintainer
 
-description         Fast incremental file transfer
-
-long_description    rsync is an open source utility that provides fast \
-                    incremental file transfer. It works both locally and remote \
-                    with either the custom rsyncd protocol or a remote shell \
-                    like ssh.
-
 homepage            https://rsync.samba.org
 master_sites        https://download.samba.org/pub/rsync/src/
 
-depends_build       port:autoconf
-
-depends_lib         port:popt \
-                    port:libiconv \
-                    port:xxhashlib \
-                    port:lz4 \
-                    port:zstd \
-                    path:lib/libssl.dylib:openssl
-
 patch.pre_args-replace  -p0 -p1
 
-# This patch comes from
-# https://download.samba.org/pub/rsync/src/rsync-patches-3.4.1.tar.gz
-# and needs to be updated with each release.
-# We used to use hfs-compression.diff but it has been deliberately
-# disabled by its developers as of 3.1.3 because it needs to be reworked
-# to account for changes that occurred in rsync's rsync_xal_get function:
-# https://trac.macports.org/ticket/60792#comment:2
-patchfiles          fileflags.diff
+if {${subport} eq ${name}} {
+    revision            0
 
-pre-configure {
-    # fileflags.diff patches aclocal.m4 so the configure script needs
-    # to be regenerated, which is one of the things this script does.
-    system -W ${worksrcpath} "./prepare-source"
+    conflicts           rsync-hfscomp
+
+    description         Fast incremental file transfer
+
+    long_description    rsync is an open source utility that provides fast \
+                        incremental file transfer. It works both locally and remote \
+                        with either the custom rsyncd protocol or a remote shell \
+                        like ssh.
+
+    depends_build       port:autoconf
+
+    depends_lib         port:popt \
+                        port:libiconv \
+                        port:xxhashlib \
+                        port:lz4 \
+                        port:zstd \
+                        path:lib/libssl.dylib:openssl
+
+    # This patch comes from
+    # https://download.samba.org/pub/rsync/src/rsync-patches-3.4.1.tar.gz
+    # and needs to be updated with each release.
+    # We used to use hfs-compression.diff but it has been deliberately
+    # disabled by its developers as of 3.1.3 because it needs to be reworked
+    # to account for changes that occurred in rsync's rsync_xal_get function:
+    # https://trac.macports.org/ticket/60792#comment:2
+    patchfiles          fileflags.diff
+
+    pre-configure {
+        # fileflags.diff patches aclocal.m4 so the configure script needs
+        # to be regenerated, which is one of the things this script does.
+        system -W ${worksrcpath} "./prepare-source"
+    }
+
+    compiler.blacklist  {clang >= 1100 < 1103}
+
+    configure.args      --with-rsyncd-conf=${prefix}/etc/rsyncd.conf
+
+    test.run            yes
+    test.target         check
+
+    post-destroot {
+        xinstall -d ${destroot}${prefix}/share/doc/${name}
+        xinstall -m 0644 -W ${worksrcpath} \
+                        COPYING INSTALL.md NEWS.md TODO README.md doc/README-SGML \
+                        doc/profile.txt doc/rsync.sgml \
+                        ${destroot}${prefix}/share/doc/${name}
+        xinstall -m 0644 ${filespath}/rsyncd.conf.example \
+                        ${destroot}${prefix}/etc/rsyncd.conf.example
+        reinplace "s|__PREFIX__|${prefix}|g" \
+                        ${destroot}${prefix}/etc/rsyncd.conf.example
+    }
+
+    startupitem.create  yes
+    startupitem.name    rsyncd
+    startupitem.logfile ${prefix}/var/log/rsyncd.log
+    startupitem.start   "${prefix}/bin/rsync --daemon --config=${prefix}/etc/rsyncd.conf"
+    startupitem.stop    "kill `cat ${prefix}/var/run/rsyncd.pid`"
+    startupitem.pidfile auto ${prefix}/var/run/rsyncd.pid
+
+    notes "
+    To use the rsyncd server you must copy ${prefix}/etc/rsyncd.conf.example\
+    to rsyncd.conf and add your modules there. See 'man rsyncd.conf' for more\
+    information.
+    "
+
+    livecheck.type      regex
+    livecheck.regex     "Rsync version (\\d+(?:\\.\\d+)*) released"
+} else {
+    livecheck.type      none
 }
 
-compiler.blacklist  {clang >= 1100 < 1103}
+subport rrsync {
+    revision            0
 
-configure.args      --with-rsyncd-conf=${prefix}/etc/rsyncd.conf
+    description         a script to set up restricted rsync users via ssh logins
 
-test.run           yes
-test.target        check
+    long_description    ${subport} is {*}${description}.
 
-post-destroot {
-    xinstall -d ${destroot}${prefix}/share/doc/${name}
-    xinstall -m 0644 -W ${worksrcpath} \
-                    COPYING INSTALL.md NEWS.md TODO README.md doc/README-SGML \
-                    doc/profile.txt doc/rsync.sgml \
-                    ${destroot}${prefix}/share/doc/${name}
-    xinstall -m 0644 ${filespath}/rsyncd.conf.example \
-                    ${destroot}${prefix}/etc/rsyncd.conf.example
-    reinplace "s|__PREFIX__|${prefix}|g" \
-        ${destroot}${prefix}/etc/rsyncd.conf.example
+    supported_archs     noarch
+
+    depends_run         port:rsync
+
+    if {${os.platform} eq "darwin" && ${os.major} < 19} {
+        set py_vers         3.14
+        configure.python    ${$prefix}/bin/python${py_vers}
+        depends_run-append  port:python[string map {. {}} ${py_vers}]
+    } else {
+        configure.python    /usr/bin/python3
+    }
+
+    post-patch {
+        reinplace -E "s|/usr/bin|${prefix}/bin|g;1s|^#!.*|#!${configure.python}|" \
+                        ${worksrcpath}/support/rrsync
+    }
+
+    use_configure       no
+
+    build {}
+
+    destroot {
+        xinstall ${worksrcpath}/support/rrsync ${destroot}${prefix}/bin
+        xinstall -m 0644 ${worksrcpath}/rrsync.1 ${destroot}${prefix}/share/man/man1
+    }
 }
-
-livecheck.type      regex
-livecheck.regex     "Rsync version (\\d+(?:\\.\\d+)*) released"
-
-startupitem.create  yes
-startupitem.name    rsyncd
-startupitem.logfile ${prefix}/var/log/rsyncd.log
-startupitem.start   "${prefix}/bin/rsync --daemon --config=${prefix}/etc/rsyncd.conf"
-startupitem.stop    "kill `cat ${prefix}/var/run/rsyncd.pid`"
-startupitem.pidfile auto ${prefix}/var/run/rsyncd.pid
-
-notes "
-To use the rsyncd server you must copy\
-${prefix}/etc/rsyncd.conf.example to rsyncd.conf and add\
-your modules there. See 'man rsyncd.conf' for more\
-information.
-"
