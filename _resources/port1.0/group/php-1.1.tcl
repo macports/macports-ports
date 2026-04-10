@@ -6,7 +6,7 @@
 
 default categories              {php lang}
 
-default phpknownfails           {5.2 5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0}
+set phpknownfails           {5.2 5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0}
 
 # php.branches: the list of PHP branches for which the extension(s) will be
 # built. For unified extension ports (name begins with "php-") setting
