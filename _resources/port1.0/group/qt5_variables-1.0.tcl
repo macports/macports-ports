@@ -108,6 +108,7 @@ global qt_pkg_config_dir
 set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
 
 namespace eval qt5pg {
+    variable qt5_component_lib
     ############################################################################### Component Format
     #
     # "Qt Component Name" {
