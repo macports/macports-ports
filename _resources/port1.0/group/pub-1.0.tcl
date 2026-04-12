@@ -88,7 +88,7 @@ port::register_callback pub::handle_packages
 proc pub::extract_package {pname pversion pubfile} {
     set targetdir "[option pub.home]/hosted/pub.dev/${pname}-${pversion}"
     file mkdir ${targetdir}
-    set tar [findBinary tar ${portutil::autoconf::tar_path}]
+    set tar [findBinary tar ${::portutil::autoconf::tar_path}]
     system -W ${targetdir} "${tar} -xf [shellescape [option distpath]/${pubfile}]"
 }
 

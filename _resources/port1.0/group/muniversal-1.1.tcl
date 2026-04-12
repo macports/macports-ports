@@ -836,9 +836,9 @@ proc portpatch::patch_main {args} {
         return -code error [msgcat::mc "Patch files missing"]
     }
 
-    set gzcat "[findBinary gzip $portutil::autoconf::gzip_path] -dc"
-    set bzcat "[findBinary bzip2 $portutil::autoconf::bzip2_path] -dc"
-    catch {set xzcat "[findBinary xz $portutil::autoconf::xz_path] -dc"}
+    set gzcat "[findBinary gzip $::portutil::autoconf::gzip_path] -dc"
+    set bzcat "[findBinary bzip2 $::portutil::autoconf::bzip2_path] -dc"
+    catch {set xzcat "[findBinary xz $::portutil::autoconf::xz_path] -dc"}
 
     foreach patch $patchlist {
         ui_info "$UI_PREFIX [format [msgcat::mc "Applying %s"] [file tail $patch]]"

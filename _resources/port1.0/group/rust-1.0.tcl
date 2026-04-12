@@ -264,7 +264,7 @@ proc rust::handle_crates {} {
 port::register_callback rust::handle_crates
 
 proc rust::extract_crate {cratefile} {
-    set tar [findBinary tar ${portutil::autoconf::tar_path}]
+    set tar [findBinary tar ${::portutil::autoconf::tar_path}]
     system -W "[option cargo.home]/macports" "$tar -xf [shellescape [option distpath]/${cratefile}]"
 }
 
