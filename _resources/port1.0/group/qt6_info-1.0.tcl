@@ -60,8 +60,9 @@ proc qt6::is_blacklisted {qt_version} {
 
 proc qt6::base {} {
     global os.major
+    variable available_versions
 
-    foreach {qt_base qt_info} ${qt6::available_versions} {
+    foreach {qt_base qt_info} ${available_versions} {
         if { ${os.major} ni [lindex ${qt_info} 1] } {
             # Qt does not support this OS
             continue
@@ -78,19 +79,20 @@ proc qt6::base {} {
 
     # no working Qt version has been found
 
-    set last_known_os       [lindex [lindex [lindex ${qt6::available_versions} 1] 1] 0]
-    set latest_qt_version   [lindex [lindex ${qt6::available_versions} 1] 0]
+    set last_known_os       [lindex [lindex [lindex ${available_versions} 1] 1] 0]
+    set latest_qt_version   [lindex [lindex ${available_versions} 1] 0]
     if { ${os.major} > ${last_known_os} && ![qt6::is_blacklisted ${latest_qt_version}] } {
         # the OS is newer than the one supported by the most recent version of Qt, and
         #     the latest Qt version has not been blacklisted
         # assume that a new OS has been released and the PG has not yet been updated
-        return [lindex ${qt6::available_versions} 0]
+        return [lindex ${available_versions} 0]
     }
     return ""
 }
 
 proc qt6::version {} {
-    array set qt_info [list {*}${qt6::available_versions}]
+    variable available_versions
+    array set qt_info ${available_versions}
     if {[info exists qt_info([option qt6.base])]} {
         return [lindex $qt_info([option qt6.base]) 0]
     } else {

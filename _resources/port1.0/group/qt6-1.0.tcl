@@ -63,10 +63,11 @@ proc qt6::callback {} {
         supported_archs-delete              i386 ppc ppc64
     }
 
+    variable components
     foreach phase {build lib run test} {
         foreach module [option qt6.depends_${phase}] {
 
-            if {[vercmp [option qt6.version] < [lindex $qt6::components(${module}) 0]] || [vercmp [lindex $qt6::components(${module}) 1] < [option qt6.version]]} {
+            if {[vercmp [option qt6.version] < [lindex $components(${module}) 0]] || [vercmp [lindex $components(${module}) 1] < [option qt6.version]]} {
                 known_fail                  yes
                 pre-fetch "
                     ui_error                \"Module ${module} does not exist in Qt version [option qt6.version]\"
@@ -77,8 +78,8 @@ proc qt6::callback {} {
                 continue
             }
 
-            depends_${phase}-delete         path:[lindex $qt6::components(${module}) 2]:[option qt6.base]-${module}
-            depends_${phase}-append         path:[lindex $qt6::components(${module}) 2]:[option qt6.base]-${module}
+            depends_${phase}-delete         path:[lindex $components(${module}) 2]:[option qt6.base]-${module}
+            depends_${phase}-append         path:[lindex $components(${module}) 2]:[option qt6.base]-${module}
         }
     }
 
