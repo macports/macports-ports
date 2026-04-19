@@ -460,7 +460,8 @@ proc python_callback {} {
         }
     }
     # if a subport of a py-* port has not changed the version, disable livecheck.
-    if {[string match py-* $name] && ${name} ne ${subport} && ${version} eq ${python._first_version}} {
+    if {[info exists python._first_version] && [string match py-* $name]
+        && ${name} ne ${subport} && ${version} eq ${python._first_version}} {
         livecheck.type  none
     }
 }
