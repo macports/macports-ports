@@ -105,7 +105,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
         [join ${github.tag_suffix}] eq "" && \
         [regexp "^\[0-9a-f\]{7,}\$" ${github.version}] && \
         ![regexp "^\[0-9\]{8}\$" ${github.version}]} {
-        default livecheck.type  {git}
+        default livecheck.type  git
         default livecheck.url   {${git.url}}
         default github.tarball_from archive
     } else {
