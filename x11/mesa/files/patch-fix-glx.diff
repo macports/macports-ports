@@ -1,0 +1,112 @@
+From b95a51bf0be205869d815d5578978214808da373 Mon Sep 17 00:00:00 2001
+From: Lucas Fryzek <lfryzek@igalia.com>
+Date: Mon, 13 Apr 2026 08:17:10 -0400
+Subject: [PATCH] Modify x11_xcb_display_supports_xshm to get xshm opcode
+
+Previously this helper function would not capture the xshm opcode from
+the server's shm reply and drisw_glx requires the value to work
+properly.
+
+Fixes: 5f4eccf1 ("glx: Check that xshm can be attached")
+---
+ src/egl/drivers/dri2/platform_x11.c | 2 +-
+ src/glx/drisw_glx.c                 | 2 +-
+ src/vulkan/wsi/wsi_common_x11.c     | 2 +-
+ src/x11/x11_display.c               | 9 ++++++++-
+ src/x11/x11_display.h               | 2 +-
+ 5 files changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/src/egl/drivers/dri2/platform_x11.c b/src/egl/drivers/dri2/platform_x11.c
+index 96c38aacd939..b0e8a9d8fa70 100644
+--- src/egl/drivers/dri2/platform_x11.c
++++ src/egl/drivers/dri2/platform_x11.c
+@@ -1189,7 +1189,7 @@ dri2_initialize_x11_swrast(_EGLDisplay *disp)
+ {
+    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
+ 
+-   if (x11_xcb_display_supports_xshm(dri2_dpy->conn)) {
++   if (x11_xcb_display_supports_xshm(dri2_dpy->conn, NULL)) {
+       dri2_dpy->loader_extensions = swrast_loader_shm_extensions;
+    } else {
+       dri2_dpy->loader_extensions = swrast_loader_extensions;
+diff --git a/src/glx/drisw_glx.c b/src/glx/drisw_glx.c
+index 2a3b630fa206..d80000919232 100644
+--- src/glx/drisw_glx.c
++++ src/glx/drisw_glx.c
+@@ -642,7 +642,7 @@ driswCreateScreen(int screen, struct glx_display *priv, enum glx_driver glx_driv
+    if (glx_driver)
+       loader_extensions_local = kopper_extensions_noshm;
+ #ifdef HAVE_SYS_SHM_H
+-   else if (!x11_xcb_display_supports_xshm(XGetXCBConnection(priv->dpy)))
++   else if (!x11_xcb_display_supports_xshm(XGetXCBConnection(priv->dpy), &xshm_opcode))
+       loader_extensions_local = loader_extensions_noshm;
+ #endif
+    else
+diff --git a/src/vulkan/wsi/wsi_common_x11.c b/src/vulkan/wsi/wsi_common_x11.c
+index bc9fb94e583c..facfb3466d8e 100644
+--- src/vulkan/wsi/wsi_common_x11.c
++++ src/vulkan/wsi/wsi_common_x11.c
+@@ -354,7 +354,7 @@ wsi_x11_connection_create(struct wsi_device *wsi_dev,
+    wsi_conn->has_mit_shm = false;
+ #if defined(HAVE_X11_DRM) && defined(HAVE_SYS_SHM_H)
+    if (wsi_conn->has_dri3 && wsi_conn->has_present && wants_shm) {
+-      wsi_conn->has_mit_shm = x11_xcb_display_supports_xshm(conn);
++      wsi_conn->has_mit_shm = x11_xcb_display_supports_xshm(conn, NULL);
+    }
+ #endif
+ 
+diff --git a/src/x11/x11_display.c b/src/x11/x11_display.c
+index 7312111d5c89..9ec881dccd0c 100644
+--- src/x11/x11_display.c
++++ src/x11/x11_display.c
+@@ -56,7 +56,7 @@ x11_xlib_display_is_thread_safe(Display *dpy)
+ 
+ #ifdef HAVE_SYS_SHM_H
+ bool
+-x11_xcb_display_supports_xshm(xcb_connection_t *con)
++x11_xcb_display_supports_xshm(xcb_connection_t *con, int *xshm_opcode)
+ {
+    xcb_generic_error_t *error;
+    xcb_query_extension_cookie_t shm_cookie;
+@@ -66,11 +66,14 @@ x11_xcb_display_supports_xshm(xcb_connection_t *con)
+    void *shm_addr = (void *) -1;
+    xcb_shm_seg_t shm_seg;
+    bool ret = true;
++   int xshm_opcode_val = -1;
+ 
+    shm_cookie = xcb_query_extension(con, 7, "MIT-SHM");
+    shm_reply = xcb_query_extension_reply(con, shm_cookie, NULL);
+ 
+    has_mit_shm = shm_reply && shm_reply->present;
++   if (has_mit_shm)
++      xshm_opcode_val = shm_reply->major_opcode;
+    free(shm_reply);
+    if (!has_mit_shm)
+       return false;
+@@ -118,6 +121,10 @@ x11_xcb_display_supports_xshm(xcb_connection_t *con)
+    /* Only detach if it was attached successfully */
+    xcb_shm_detach(con, shm_seg);
+ 
++   /* Only set xshm_opcode if attach was successful */
++   if (xshm_opcode)
++      *xshm_opcode = xshm_opcode_val;
++
+ check_xshm_cleanup:
+    if (shm_addr != (void *) -1)
+       shmdt(shm_addr);
+diff --git a/src/x11/x11_display.h b/src/x11/x11_display.h
+index 2286aefa5e29..ae98c0797490 100644
+--- src/x11/x11_display.h
++++ src/x11/x11_display.h
+@@ -37,7 +37,7 @@ extern "C" {
+ bool x11_xlib_display_is_thread_safe(Display *dpy);
+ 
+ #ifdef HAVE_SYS_SHM_H
+-bool x11_xcb_display_supports_xshm(xcb_connection_t *con);
++bool x11_xcb_display_supports_xshm(xcb_connection_t *con, int *xshm_opcode);
+ #endif
+ 
+ #ifdef __cplusplus
+-- 
+GitLab
+
