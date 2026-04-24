@@ -32,6 +32,12 @@ esac
 
 MACPORTS_FILENAME=MacPorts-${MACPORTS_VERSION}-${OS_MAJOR}.tar.bz2
 
+
+begingroup "Metal Toolchain status:"
+xcrun metal -v
+endgroup
+
+
 begingroup "Fetching files"
 # Download resources in background ASAP but use later.
 # Use /usr/bin/curl so that we don't use Homebrew curl.
