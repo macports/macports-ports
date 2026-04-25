@@ -51,6 +51,12 @@ esac
 
 MACPORTS_FILENAME=MacPorts-${MACPORTS_VERSION}-${macosvers}-${macosname}.pkg
 
+
+begingroup "Metal Toolchain status on bootstrap entry:"
+xcrun metal -v
+endgroup
+
+
 begingroup "Fetching files"
 # Download resources in background ASAP but use later.
 # Use /usr/bin/curl so that we don't use Homebrew curl.
@@ -164,3 +170,8 @@ git -C ports/ checkout -qf -
 (cd ports/ && portindex -e)
 endgroup
 fi
+
+
+begingroup "Metal Toolchain status on bootstrap exit:"
+xcrun metal -v
+endgroup
