@@ -52,7 +52,7 @@ esac
 MACPORTS_FILENAME=MacPorts-${MACPORTS_VERSION}-${macosvers}-${macosname}.pkg
 
 
-begingroup "Metal Toolchain status:"
+begingroup "Metal Toolchain status on bootstrap entry:"
 xcrun metal -v
 endgroup
 
@@ -170,3 +170,8 @@ git -C ports/ checkout -qf -
 (cd ports/ && portindex -e)
 endgroup
 fi
+
+
+begingroup "Metal Toolchain status on bootstrap exit:"
+xcrun metal -v
+endgroup
