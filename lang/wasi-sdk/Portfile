@@ -1,0 +1,167 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           github 1.0
+
+github.setup        WebAssembly wasi-sdk 32 wasi-sdk-
+github.tarball_from archive
+# GitHub archives extract as ${project}-${tag}/ when there are multiple distfiles
+worksrcdir          ${github.project}-${github.tag_prefix}${github.version}
+
+categories          lang devel
+license             Apache-2 {LLVM Exception}
+maintainers         {pguyot @pguyot} openmaintainer
+homepage            https://wasi.dev/
+
+description         WebAssembly System Interface (WASI) SDK
+
+subport wasi-clang {}
+subport wasi-libc {}
+
+# =============================================================================
+# wasi-sdk: umbrella port - installs compiler toolchain and sysroot
+# =============================================================================
+
+if {${subport} eq ${name}} {
+    long_description \
+                    ${description}. Meta-port that installs port:wasi-clang \
+                    (the LLVM/Clang toolchain targeting wasm32-wasi) and \
+                    port:wasi-libc (the WASI sysroot: libc, compiler-rt, \
+                    libc++ and libc++abi).
+
+    depends_lib     port:wasi-clang \
+                    port:wasi-libc
+    distfiles
+    supported_archs noarch
+    platforms       any
+    use_configure   no
+    build           {}
+    destroot {
+        xinstall -d ${destroot}${prefix}/share/doc/${name}
+        system "echo '${long_description}' > ${destroot}${prefix}/share/doc/${name}/README.txt"
+    }
+}
+
+# =============================================================================
+# Settings common to wasi-clang and wasi-libc subports
+# =============================================================================
+
+if {${subport} ne ${name}} {
+    set py_ver          3.14
+    set py_ver_nodot    [string map {. {}} ${py_ver}]
+    set llvm_version    22.1.4
+
+    # wasi-sdk source (primary distfile, needed by both subports)
+    checksums           ${distname}${extract.suffix} \
+                        rmd160  d60ca8427ef9c7036494df9c6a8d1afc3c262381 \
+                        sha256  b1fc272ae8856a943b85736bf36c2364dddf8fdf0e3de6c262ea3ad13dcbd0d6 \
+                        size    47218
+
+    # llvm-project source (needed by both subports: compiler by wasi-clang,
+    # runtimes by wasi-libc for libcxx/libcxxabi/libunwind/compiler-rt)
+    master_sites-append https://github.com/llvm/llvm-project/releases/download/llvmorg-${llvm_version}:llvm_src
+    distfiles-append    llvm-project-${llvm_version}.src.tar.xz:llvm_src
+    checksums-append    llvm-project-${llvm_version}.src.tar.xz \
+                        rmd160  29e66a77de344e18fb7b8bf69557a1947bacf374 \
+                        sha256  3e68c90dda630c27d41d201e37b8bbf5222e39b273dec5ca880709c69e0a07d4 \
+                        size    167028880
+
+    depends_build-append \
+                        port:python${py_ver_nodot}
+
+    cmake.generator     Ninja
+    cmake.build_type    Release
+    cmake.install_prefix \
+                        ${prefix}/libexec/wasi-sdk
+
+    # version.py calls git describe and git rev-parse; replace with static
+    # values for release builds from source archives
+    patchfiles          patch-version-py.diff \
+                        patch-cmake-wasi-sdk-toolchain.diff \
+                        patch-cmake-wasi-sdk-sysroot.diff
+
+    configure.args-append \
+                        -DPython3_EXECUTABLE=${prefix}/bin/python${py_ver} \
+                        -DWASI_SDK_DISABLE_CCACHE=ON
+
+    post-extract {
+        # wasi-sdk archive has empty src/llvm-project/ (git submodule
+        # placeholder); delete it before moving in the full LLVM source tarball
+        delete ${worksrcpath}/src/llvm-project
+        move ${workpath}/llvm-project-${llvm_version}.src \
+            ${worksrcpath}/src/llvm-project
+    }
+}
+
+# =============================================================================
+# wasi-clang subport: LLVM/Clang toolchain with WebAssembly targets
+# =============================================================================
+
+if {${subport} eq "wasi-clang"} {
+    long_description \
+                    ${description}. Provides a clang compiler, wasm-ld linker, \
+                    llvm-ar, and other tools configured to target wasm32-wasi \
+                    by default, along with the WASI cmake toolchain files. \
+                    Install port:wasi-libc to get the WASI sysroot required \
+                    for compiling programs, or install port:wasi-sdk to get both.
+
+    configure.args-append \
+                    -DWASI_SDK_BUILD_TOOLCHAIN=ON \
+                    -DWASI_SDK_LLDB=OFF
+
+    depends_lib-append \
+                    port:wasm-component-ld
+}
+
+# =============================================================================
+# wasi-libc subport: WASI sysroot (wasi-libc, compiler-rt, libcxx)
+# =============================================================================
+
+if {${subport} eq "wasi-libc"} {
+    long_description \
+                    ${description}. Provides the WASI sysroot: wasi-libc, \
+                    compiler-rt builtins for wasm32, and libc++/libc++abi for \
+                    use with the wasi-clang compiler toolchain.
+
+    set wasi_libc_commit \
+                    2fc32bc81b9f07f8d9525edea59bfbaf760c06d6
+
+    master_sites-append \
+                    https://github.com/WebAssembly/wasi-libc/archive/:wasi_libc_src
+    distfiles-append \
+                    ${wasi_libc_commit}.tar.gz:wasi_libc_src
+    checksums-append \
+                    ${wasi_libc_commit}.tar.gz \
+                    rmd160  feba62db942d779f050e9a46f32052348dfa3819 \
+                    sha256  d12a1568d9394e693e6b189277ba70446f96b81a4790c515427865a0d5412372 \
+                    size    1636483
+
+    depends_lib-append \
+                    port:wasi-clang
+
+    # Cross-compilation: remove host compiler flags injected by cmake portgroup
+    # so the WASI toolchain file from wasi-clang controls the compiler settings
+    configure.pre_args-delete \
+                    {-DCMAKE_C_COMPILER="$CC"}
+    configure.pre_args-delete \
+                    {-DCMAKE_CXX_COMPILER="$CXX"}
+    configure.pre_args-delete \
+                    {-DCMAKE_OBJC_COMPILER="$CC"}
+    configure.pre_args-delete \
+                    {-DCMAKE_OBJCXX_COMPILER="$CXX"}
+
+    configure.args-append \
+                    -DCMAKE_TOOLCHAIN_FILE=${prefix}/libexec/wasi-sdk/share/cmake/wasi-sdk.cmake \
+                    -DCMAKE_C_COMPILER_WORKS=ON \
+                    -DCMAKE_CXX_COMPILER_WORKS=ON \
+                    -DWASI_SDK_INSTALL_TO_CLANG_RESOURCE_DIR=ON
+
+    post-extract {
+        # wasi-sdk archive has empty src/wasi-libc/ (git submodule placeholder);
+        # delete it before moving in the actual wasi-libc source tarball
+        delete ${worksrcpath}/src/wasi-libc
+        move ${workpath}/wasi-libc-${wasi_libc_commit} \
+            ${worksrcpath}/src/wasi-libc
+    }
+}
