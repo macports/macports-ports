@@ -1,0 +1,223 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           mpi 1.0
+PortGroup           python 1.0
+
+github.setup        pytorch pytorch 2.11.0 v
+revision            0
+name                py-${github.project}
+license             BSD
+maintainers         nomaintainer
+supported_archs     arm64 x86_64
+github.tarball_from releases
+
+description         Tensors and dynamic neural networks in Python \
+                    with strong GPU acceleration
+
+long_description    PyTorch is a Python package that provides two \
+                    high-level features: Tensor computation (like \
+                    NumPy) with strong GPU acceleration\; Deep neural \
+                    networks built on a tape-based autograd \
+                    system. You can reuse your favorite Python \
+                    packages such as NumPy, SciPy and Cython to extend \
+                    PyTorch when needed.
+
+homepage            https://pytorch.org/
+
+distname            ${github.project}-${github.tag_prefix}${version}
+
+checksums           rmd160  a011c570a84ea581f50b81db6e8d07cbce4e17f9 \
+                    sha256  ab3fde9e7e382f45ac942be6ea2c2ef362c5ccd6f55ed6d5f35e6ea81d3ab88e \
+                    size    421160531
+
+python.versions     310 311 312 313 314
+
+# third_party/pthreadpool needs DISPATCH_APPLY_AUTO (as of torch 2.0.0), requiring 10.12+
+# But builds fail for 10.12 - 10.14, so exclude those too
+platforms           {darwin >= 19}
+
+mpi.setup
+
+# Compiler selection
+compiler.cxx_standard 2017
+
+compiler.blacklist-append *gcc*
+compiler.blacklist-append {clang < 1700}
+
+variant mkl description {Enable Intel Math Kernel Library support} { }
+
+# py-mkl supports x86_64 and 10.12 and later only
+if {${configure.build_arch} eq "x86_64" && !($universal_possible && [variant_isset universal])
+        && !(${os.platform} eq "darwin" && ${os.major} <= 15)} {
+    default_variants-append +mkl
+}
+
+platform darwin {
+    if {${os.major} >= 18} {
+        variant mps description {Enable Apple Metal Performance Shaders (MPS) support} {
+            use_xcode       yes
+
+            build.env-append \
+                APPLE=ON \
+                USE_MPS=ON \
+                USE_PYTORCH_METAL=ON \
+                USE_PYTORCH_METAL_EXPORT=ON
+
+            notes-append \
+"
+The port ${subport} is built with Apple Metal Performance Shaders (MPS)\
+support for GPU hardware acceleration. To enable Apple GPU devices,\
+use device \"mps\". Matrix multiplication example:
+
+    import torch
+
+    mpsDevice = torch.device(\"mps\" if\
+        torch.backends.mps.is_available() else \"cpu\")
+    x = torch.randn((10_000, 1_000), device=mpsDevice)
+    cov = (x.T @ x)/x.shape\[0]
+"
+        }
+
+        default_variants-append +mps
+    }
+}
+
+if {${name} ne ${subport}} {
+    depends_build-append \
+        port:git \
+        path:bin/doxygen:doxygen \
+        port:cctools \
+        path:bin/cmake:cmake \
+        path:bin/ninja:ninja \
+        port:py${python.version}-requests
+
+    depends_lib-append \
+        path:share/pkgconfig/eigen3.pc:eigen3 \
+        port:gflags \
+        port:google-glog \
+        port:libomp \
+        port:protobuf3-cpp \
+        port:py${python.version}-click \
+        port:py${python.version}-future \
+        port:py${python.version}-numpy \
+        port:py${python.version}-pybind11 \
+        port:py${python.version}-six \
+        port:py${python.version}-sympy \
+        port:py${python.version}-typing_extensions \
+        port:py${python.version}-yaml \
+        port:zstd
+
+    depends_run-append \
+        port:py${python.version}-onnx \
+        port:py${python.version}-packaging \
+        port:py${python.version}-zstd
+
+    # Please remove patch at next upgrade
+    # Incorporate fix https://github.com/pytorch/pytorch/issues/178079
+    # See: https://github.com/pytorch/pytorch/issues/178079#issuecomment-4229264282
+    patchfiles-prepend      patch-issue-178079.diff
+
+    # remove unnecessary dependencies and version pinning 
+    patchfiles-append       patch-pyproject_toml.diff
+
+    # Patch to fix init issue with google-glog 0.5.0, caused by breaking API change.
+    # Refer to patch comments for detailed background.
+    # Upstream PyTorch issue: https://github.com/pytorch/pytorch/issues/58054
+    # diff -NaurdwB ./py-pytorch-orig/c10/util/Logging.cpp ./py-pytorch-new/c10/util/Logging.cpp | sed -E -e 's/\.\/py-pytorch-(orig|new)/\./g' | sed -E -e 's|/opt/local|@@PREFIX@@|g' > ~/Downloads/patch-glog-init-check.diff
+    patchfiles-append       patch-glog-init-check.diff
+
+    # Use Intel Math kernel Library
+    if {[variant_isset mkl]} {
+        patchfiles-append FindMKL-OMP.patch
+        pre-build {
+            # Hacks to get search paths into builds
+            reinplace "s|/opt/intel/mkl|${python.prefix}|g" \
+                cmake/Modules/FindMKL.cmake
+            reinplace "s|mklvers \"intel64\"|mklvers \"\"|g" \
+                cmake/Modules/FindMKL.cmake
+            reinplace "s|MACPORTS_PREFIX|${prefix}|g" \
+                cmake/Modules/FindMKL.cmake
+        }
+        depends_lib-append      port:py${python.version}-mkl
+        depends_build-append    port:py${python.version}-mkl-include
+
+        build.env-append \
+                    BLAS_SET_BY_USER=ON
+    }
+
+    compiler.cpath-append \
+                    ${prefix}/include/libomp
+
+    compiler.library_path-append \
+                    ${prefix}/lib/libomp
+
+    configure.cppflags-append \
+                    -I${prefix}/include/libomp
+
+    # ccache configuration
+    configure.ccache    yes
+
+    if {[option configure.ccache]} {
+        depends_build-append \
+                    path:bin/ccache:ccache
+
+        build.env-append \
+                    CCACHE_DIR=${ccache_dir} \
+                    USE_CCACHE=ON
+    } else {
+        # commands to disable ccache
+        configure.ccache    no
+        build.env-append \
+                    CCACHE_DISABLE=1 \
+                    USE_CCACHE=OFF
+
+        # Limit cores for parallel builds
+        # Note: parallel builds observed to fail on 8, 24 cores without ccache
+        use_parallel_build  yes
+        set max_build_jobs  4
+        if {[option build.jobs] < ${max_build_jobs}} {
+            set max_build_jobs  [option build.jobs]
+        }
+        build.env-append \
+                    CMAKE_BUILD_PARALLEL_LEVEL=${max_build_jobs}
+    }
+
+    build.env-append \
+                    BUILD_CUSTOM_PROTOBUF=OFF \
+                    USE_CUDA=OFF \
+                    USE_EIGEN_SPARSE=ON \
+                    USE_SYSTEM_EIGEN_INSTALL=ON \
+                    USE_GFLAGS=ON \
+                    USE_GLOG=ON \
+                    USE_LITE_PROTO=ON \
+                    USE_NCCL=OFF \
+                    USE_OPENMP=ON \
+                    USE_SYSTEM_PYBIND11=ON \
+                    USE_RCCL=OFF \
+                    USE_ROCM=OFF \
+                    USE_XPU=OFF
+
+    post-destroot {
+        set py_torch_root ${python.pkgd}/torch
+        foreach slib [glob -directory ${destroot}${py_torch_root} *.so] {
+            system "install_name_tool -add_rpath ${py_torch_root}/lib ${slib}"
+        }
+
+        set docdir ${prefix}/share/doc/${subport}
+        xinstall -d ${destroot}${docdir}
+        xinstall -m 0644 -W ${worksrcpath} LICENSE README.md \
+            ${destroot}${docdir}
+    }
+
+    # pytorch's tests all use GPU compilation
+    if { [lsearch ${build.env} {USE_CUDA=OFF}] != -1 } {
+        test.run    yes
+    }
+} else {
+    # overload the github livecheck regex to look for versions that
+    # are just numbers and '.', no letters (e.g., "3.7.3_rc2").
+    livecheck.url   https://github.com/pytorch/pytorch/releases
+    livecheck.regex {/tree/v(([[:digit:]]+\.)+[[:digit:]]+)}
+}

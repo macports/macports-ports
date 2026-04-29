@@ -1,0 +1,49 @@
+Description: Fix reading files in read-only filesystems
+
+ chntpw fails to read files from read-only filesystems, despite having some
+ logic to handle this:
+
+# chntpw -e /c/Windows/System32/config/SOFTWARE
+chntpw version 1.00 140201, (c) Petter N Hagen
+openHive(/c/Windows/System32/config/SOFTWARE) failed: Read-only file system, trying read-only
+openHive(): read error: : Read-only file system
+chntpw: Unable to open/read a hive, exiting..
+#
+
+   This is due to using errno as an error checking mechanism; it should only be
+   used when one knows a function has failed. This patch fixes this problem. It
+   also adds support for the non-fatal EINTR error, and fixes yet another bug
+   where the last read size is used in a check instead of the whole file size.
+
+Author: Sam Hocevar <sam@hocevar.net>
+Bug-Debian: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=762508
+
+Index: chntpw-1.0/ntreg.c
+===================================================================
+--- chntpw-1.0.orig/ntreg.c
++++ chntpw-1.0/ntreg.c
+@@ -4241,9 +4241,9 @@ struct hive *openHive(char *filename, in
+   do {  /* On some platforms read may not block, and read in chunks. handle that */
+     r = read(hdesc->filedesc, hdesc->buffer + rt, hdesc->size - rt);
+     rt += r;
+-  } while ( !errno && (rt < hdesc->size) );
++  } while ( (r > 0 || (r < 0 && errno == EINTR)) && (rt < hdesc->size) );
+ 
+-  if (errno) { 
++  if (r < 0) {
+     perror("openHive(): read error: ");
+     closeHive(hdesc);
+     return(NULL);
+@@ -4255,10 +4255,10 @@ struct hive *openHive(char *filename, in
+     return(NULL);
+   }
+ 
+-  if (r < sizeof (*hdesc)) {
++  if (rt < sizeof (*hdesc)) {
+     fprintf(stderr,
+ 	    "file is too small; got %d bytes while expecting %d or more\n",
+-	    r, sizeof (*hdesc));
++	    rt, sizeof (*hdesc));
+     closeHive(hdesc);
+     return(NULL);
+   }

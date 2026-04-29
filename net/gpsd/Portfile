@@ -1,0 +1,244 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+
+name                    gpsd
+version                 3.27.5
+revision                1
+categories              net
+license                 BSD
+maintainers             {michaelld @michaelld} \
+                        {fwright.net:fw @fhgwright} \
+                        openmaintainer
+
+description             GPS service daemon
+
+long_description        GPSD is a service daemon that handles GPSes and other \
+                        navigation-related sensors reporting over USB, serial, \
+                        TCP/IP, or UDP connections and presents reports in \
+                        a well-documented JSON format.  The package also \
+                        includes a number of clients which can be run against \
+                        a local GPSD or a GPSD on another machine.
+
+homepage                https://gpsd.io
+
+master_sites            savannah
+checksums               rmd160  53a2e185c061fe515ce8049cd217e64c76b300ea \
+                        sha256  409873f5048462ef1ac413a51ab35caa8b50b31be62b3347bee1cc2994e7c649 \
+                        size    5995999
+
+livecheck.type          regex
+livecheck.url           https://download.savannah.gnu.org/releases/gpsd/
+livecheck.regex         "${name}-(\\d+(?:\\.\\d+)*)${extract.suffix}"
+
+
+# GPSD requires Python 2.7 or 3.3+ (3.4+ for ubxtool and zerk).
+# We skip 3.3, but keep 2.7 and 3.4+.
+# Some variants may force a more restricted list.
+#
+set pythons_suffixes {27 34 35 36 37 38 39 310 311 312 313 314}
+
+set pythons_ports {}
+foreach s ${pythons_suffixes} {
+    lappend pythons_ports python${s}
+}
+
+proc dotted_ver {nodot} {
+    return [string index ${nodot} 0].[string range ${nodot} 1 99]
+}
+
+foreach s ${pythons_suffixes} {
+    set p python${s}
+    set v [dotted_ver ${s}]
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    variant ${p} description "Build ${name} to use Python ${v}" conflicts {*}${c} ""
+}
+
+# Default to +python312
+#
+# Don't be in a rush to make this the latest Python, since new Python versions
+# often have teething problems (even when nominally tested with this port).
+set pyver_no_dot "312"
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+default_variants +python${pyver_no_dot}
+
+# make sure some python variant is selected
+set pyver_no_dot ""
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+pre-fetch {
+    if {${pyver_no_dot} eq ""} {
+        ui_error "\n\nYou must select one of the Python variants (+pythonXY).\n"
+    return -code error "Invalid Python variant selection"
+    }
+}
+
+# Avoid building webpages that we won't install, anyway.
+# Aside from saving time, this avoids a mysterious new problem
+# with the 'dia' program and compressed input.
+patchfiles-append       patch-no-www.diff
+
+set pyver_dotted [dotted_ver ${pyver_no_dot}]
+
+# NOTE:  All Python dependencies which are conceptually depends_run actually
+# need to be depends_lib, since the build procedure references them, usually
+# just to verify their existence.
+#
+# The py-serial dependency is a "soft" dependency in that the programs that
+# use it can still operate with reduced functionality without it, but it's
+# a sufficiently lightweight dependency that it's not worth making optional.
+
+depends_lib-append      port:python${pyver_no_dot} \
+                        port:py${pyver_no_dot}-serial
+
+configure.python        ${prefix}/bin/python${pyver_dotted}
+
+depends_lib-append      port:ncurses
+depends_build-append    port:scons \
+                        port:pkgconfig \
+                        port:docbook-xml-4.1.2 \
+                        port:asciidoctor
+
+use_configure           no
+use_xcode               yes
+
+set cxx_stdlibflags {}
+if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} ne ""} {
+    set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
+}
+
+build.cmd               ${prefix}/bin/scons
+build.target
+build.args              prefix=${prefix} \
+                        target_python=${configure.python} \
+                        python_shebang=${configure.python} \
+                        qt=no qt_versioned=4 \
+                        usb=no \
+                        strip=no \
+                        dbus_export=no \
+                        xgps=no
+build.env-append        "CC=${configure.cc} [get_canonical_archflags cc]" \
+                        CFLAGS=${configure.cflags} \
+                        "CXX=${configure.cxx} [get_canonical_archflags cxx] ${cxx_stdlibflags}" \
+                        CXXFLAGS=${configure.cxxflags} \
+                        LDFLAGS=${configure.ldflags}
+
+# Allow the regression tests to be run via "port test gpsd".
+#
+# The speed of the daemon tests is highly dependent on the WRITE_PAD value,
+# but values that are too low may cause spurious test failures. Due to some
+# recent improvements, 1ms is now believed to be adequate on the Mac in most
+# cases, and is the current upstream default.  But some test flakiness has
+# been observed on some systems with this value, so we increase it here to
+# 10ms.
+#
+# The WRITE_PAD value is obtained from test.write_pad, which can be overridden
+# on the command line if needed.  This replaces the older approach of specifying
+# the WRITE_PAD environment variable directly, not only avoiding the need
+# to whitelist WRITE_PAD in extra_env, but also to avoid trouble with older
+# versions of sudo that don't support -E.
+#
+# The test phase duplicates the arguments and environment (except WRITE_PAD)
+# from the build phase, mainly to avoid gratuitous rebuilds between the phases.
+#
+# The GPSD build procedure supports parallel tests, but there's no built-in
+# MacPorts support for parallel tests, nor is there a standard test.jobs
+# variable, so we derive test.jobs from build.jobs.  If test parallelism
+# is suspected of causing trouble, test.jobs can be overridden on the
+# command line.
+#
+test.run                yes
+default test.jobs       ${build.jobs}
+test.cmd                ${build.cmd} -j${test.jobs}
+test.target             testregress
+test.args               {*}${build.args}
+test.env                {*}${build.env}
+default test.write_pad  0.01
+test.env-append         WRITE_PAD=${test.write_pad}
+
+destroot.args           {*}${build.args}
+destroot.post_args
+destroot.env-append     {*}${build.env} DESTDIR=${destroot}
+
+# This version of GPSD nominally supports Qt4, Qt5, and Qt6, but additional
+# build issues need to be sorted out for Qt5 and Qt6, so for now we still
+# limit it to Qt4 (see the 'qt_versioned' option in build.args).
+#
+variant qt description {Build Qt4 bindings} {
+    PortGroup               qt4 1.0
+
+    build.args-replace      qt=no           qt=yes
+    test.args-replace       qt=no           qt=yes
+    destroot.args-replace   qt=no           qt=yes
+}
+
+variant libusb \
+description {Include support for better USB device discovery} {
+    depends_lib-append      path:lib/pkgconfig/libusb-1.0.pc:libusb
+
+    build.args-replace      usb=no          usb=yes
+    test.args-replace       usb=no          usb=yes
+    destroot.args-replace   usb=no          usb=yes
+}
+
+variant dbus description {Include support for DBUS} {
+    depends_lib-append      port:dbus
+
+    build.args-replace      dbus_export=no  dbus_export=yes
+    test.args-replace       dbus_export=no  dbus_export=yes
+    destroot.args-replace   dbus_export=no  dbus_export=yes
+}
+
+# The xgps programs recursively require a massive set of dependencies,
+# so we make them optional.
+#
+variant xgps \
+description {Include xgps/xgpsspeed X11 clients (dependency-intensive)} {
+    depends_lib-append      port:py${pyver_no_dot}-cairo \
+                            port:py${pyver_no_dot}-gobject3 \
+                            path:lib/pkgconfig/gtk+-3.0.pc:gtk3
+
+    build.args-replace      xgps=no         xgps=yes
+    test.args-replace       xgps=no         xgps=yes
+    destroot.args-replace   xgps=no         xgps=yes
+}
+
+# The upstream build script installs xgps* even with xgps=no.
+# Although the files aren't large, installing programs which either fail
+# or opportunistically work is undesirable, so we remove them.
+# Similarly, we exclude the manpages for the nonexistent programs.
+#
+if {![variant_isset xgps]} {
+    post-destroot {
+        delete "${destroot}${prefix}/bin/xgps"
+        delete "${destroot}${prefix}/bin/xgpsspeed"
+        delete "${destroot}${prefix}/share/man/man1/xgps.1"
+        delete "${destroot}${prefix}/share/man/man1/xgpsspeed.1"
+    }
+}
+
+# The gpsplot program recursively requires a massive set of dependencies,
+# so we make it optional.  This currently has no upstream equivalent.
+if {${pyver_no_dot} == 27 || ${pyver_no_dot} > 38} {
+    variant plot \
+    description {Include gpsplot client (dependency-intensive)} {
+        depends_lib-append      port:py${pyver_no_dot}-matplotlib
+    }
+}
+
+# In the absence of the 'plot' variant, we remove the program and manpage.
+#
+if {![variant_isset plot]} {
+    post-destroot {
+        delete "${destroot}${prefix}/bin/gpsplot"
+        delete "${destroot}${prefix}/share/man/man1/gpsplot.1"
+    }
+}

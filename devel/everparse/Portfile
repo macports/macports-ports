@@ -1,0 +1,150 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup github    1.0
+
+name                everparse
+github.setup        project-everest everparse e7227152dfade6cb4f0adf7dc03816273c0ef4e0
+# Change github.tarball_from to 'releases' or 'archive' next update
+github.tarball_from tarball
+version             20220602-[string range ${github.version} 0 6]
+revision            0
+
+categories          devel
+maintainers         {landonf @landonf} openmaintainer
+license             Apache-2
+description         A verified secure parser framework for F*.
+long_description    EverParse provides LowParse, verified-secure F*/Low* parser combinator library, and \
+                    QuackyDucky, an untrusted compiler for generating verified secure parsers from a \
+                    message format specification.
+
+checksums           rmd160  914ba6a092a8507d8c8678a469c22a5e4963d0e2 \
+                    sha256  708a744e0740d594859e989522de14b71bec153f3d34612b55751cf33a5f10ab \
+                    size    903279
+
+depends_lib         port:fstar \
+                    port:kremlin \
+                    port:ocaml-hacl-star
+
+depends_build       port:ocaml \
+                    port:ocaml-ocamlbuild \
+                    port:ocaml-batteries \
+                    port:ocaml-hex \
+                    port:ocaml-re
+
+patchfiles          patch-add_FStar_Getopt.ml \
+                    patch-fix-tests-mkdir \
+                    patch-batch-driver-toolchain-paths
+
+options             lowparse.home \
+                    fstar.home \
+                    kremlin.home
+
+default fstar.home      {${prefix}/libexec/fstar}
+default kremlin.home    {${prefix}/libexec/kremlin}
+default lowparse.home   {${prefix}/libexec/${subport}}
+
+pre-patch {
+    # Fix CRLF newlines before trying to patch
+    reinplace "s|\r||g" src/3d/ocaml/Makefile
+}
+
+post-patch {
+    foreach {key path_var subdir} {
+        @FSTAR_HOME@        fstar.home      "/home"
+        @KRML_HOME@         kremlin.home    "/home"
+        @EVERPARSE_HOME@    lowparse.home   ""
+    } {
+        reinplace "s|${key}|[set ${path_var}]${subdir}|g" \
+            src/3d/ocaml/Batch.ml
+    }
+}
+
+# z3 hints significantly decrease build time; can be updated after a successful build+test run via:
+#   tar -Jcf files/everparse-hints.tar.xz -C work lowparse.hints
+distfiles-append    everparse-hints.tar.xz
+
+use_configure       no
+
+set fstar.hint_flags {--hint_dir .hints --record_hints --use_hints}
+
+build.type          gnu
+build.env-append    OTHERFLAGS=${fstar.hint_flags} \
+                    EVERPARSE_FSTAR_OPTIONS=${fstar.hint_flags}
+build.args          FSTAR_HOME=${fstar.home}/home \
+                    KRML_HOME=${kremlin.home}/home
+
+post-patch {
+    # Link lowparse's .hint directories to the top-level ${workpath} directory
+    # we actually package up in everparse-hints.tar.xz
+    set eph_hints ${workpath}/lowparse.hints
+    file mkdir ${eph_hints}
+    fs-traverse -tails {eph_src} ${worksrcpath} {
+        set d ${worksrcpath}/${eph_src}
+        set f [file tail ${eph_src}]
+
+        # Skip non-directories, and directories with a leading `.` (but not ".")
+        if {![file isdirectory ${d}] || [string match ".?*" $f]} {
+            continue
+        }
+
+        file mkdir ${eph_hints}/${eph_src}
+        ln -sfh ${eph_hints}/${eph_src} ${d}/.hints
+    }
+}
+
+destroot {
+    # Create EVERPARSE_HOME layout compatible with src/package/package.sh
+    set everparse_root      ${prefix}/libexec/everparse
+    set everparse_bin       ${everparse_root}/bin
+    set everparse_lib       ${everparse_root}/lib
+    set everparse_lib_3d    ${everparse_root}/lib/3d
+    set everparse_src       ${everparse_root}/src
+
+    xinstall -d \
+        ${destroot}${everparse_lib}    \
+        ${destroot}${everparse_lib_3d} \
+        ${destroot}${everparse_bin}
+
+    xinstall \
+        ${worksrcpath}/bin/qd.exe \
+        ${destroot}${everparse_bin}/qd.exe
+
+    xinstall \
+        ${worksrcpath}/bin/3d.exe \
+        ${destroot}${everparse_bin}/3d.exe
+
+    foreach {ep_src ep_dst} [list \
+        lowparse                    ${everparse_lib}    \
+        3d/prelude                  ${everparse_lib_3d} \
+        3d/.clang-format            ${everparse_lib_3d} \
+        3d/copyright.txt            ${everparse_lib_3d} \
+        3d/EverParseEndianness.h    ${everparse_lib_3d} \
+        3d/noheader.txt             ${everparse_lib_3d} \
+    ] {
+        copy ${worksrcpath}/src/${ep_src} ${destroot}${ep_dst}
+    }
+
+    fs-traverse {f} ${destroot}${everparse_lib} {
+        switch -glob -- "[file tail $f] [file type $f]" {
+            {.hints link}       -
+            {.gitignore file}   -
+            {.depend file}      -
+            {Makefile file}     { delete $f }
+        }
+    }
+
+    # src/package/package.sh expects a 'src' directory
+    ln -sf lib                  ${destroot}/${everparse_src}
+
+    # Symlink the binaries into ${prefix}/bin
+    ln -sf ${everparse_bin}/qd.exe  ${destroot}${prefix}/bin/quackyducky
+    ln -sf quackyducky              ${destroot}${prefix}/bin/qd
+    ln -sf ${everparse_bin}/3d.exe  ${destroot}${prefix}/bin/quackyducky-3d
+    ln -sf quackyducky-3d           ${destroot}${prefix}/bin/qd-3d
+}
+
+test.run            yes
+test.env            {*}${build.env}
+test.args           -j${build.jobs} \
+                    {*}${build.args}

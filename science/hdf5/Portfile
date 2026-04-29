@@ -1,0 +1,219 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           muniversal 1.0
+PortGroup           mpi 1.0
+PortGroup           legacysupport 1.1
+PortGroup           github 1.0
+
+github.setup        HDFGroup hdf5 1.14.6 hdf5_
+set distversion     $version
+revision            0
+
+#set mainversion     [lindex [split ${distversion} -] 0]
+#set shortversion    [join [lrange [split ${mainversion} .] 0 1] .]
+
+categories          science
+maintainers         {eborisch @eborisch} openmaintainer
+
+description         HDF5 general purpose library and file format for storing\
+                    scientific data
+
+long_description    HDF5 is a data model, library, and file format for storing\
+                    and managing data. It supports an unlimited variety of\
+                    datatypes, and is designed for flexible and efficient I/O\
+                    and for high volume and complex data. HDF5 is portable and\
+                    is extensible, allowing applications to evolve in their use\
+                    of HDF5. The HDF5 Technology suite includes tools and\
+                    applications for managing, manipulating, viewing, and\
+                    analyzing data in the HDF5 format.
+
+homepage            https://www.hdfgroup.org/solutions/hdf5/
+github.tarball_from releases
+distname            ${name}-${distversion}
+
+checksums \
+    rmd160  25870c7e455e7f83bd043ed60ed6662c94ac90d5 \
+    sha256  e4defbac30f50d64e1556374aa49e574417c9e72c6b1de7a4ff88c4b1bea6e9b \
+    size    39289609
+
+mpi.setup           -gcc44 -gcc45
+
+depends_lib         port:zlib port:libaec
+use_parallel_build  yes
+
+patchfiles          patch-tools-src-misc-h5cc.in.diff
+
+# llvm-gcc-4.2 produced code fails type conversion tests
+# Upstream suggestion is use -O0. Clang-produced code passes all tests.
+compiler.blacklist-append \
+                    llvm-gcc-4.2
+
+# #pragma pack() results in "too many #pragma options align=reset"
+compiler.blacklist-append \
+                    gcc-3.3 gcc-4.0 gcc-4.2 apple-gcc-4.2
+
+# <stdin>:2115:2: error: invalid instruction mnemonic 'cvtsi2ssl'
+compiler.blacklist-append \
+                    {clang < 500}
+
+compiler.c_standard 1999
+
+# Avoid duplicate LC_RPATH's in dylibs, satisfy Xcode 15 linker.
+compilers.add_gcc_rpath_support no
+
+# Use lib/hdf5 rather than hdf5/lib plugin directory
+configure.args \
+                    --disable-cxx \
+                    --disable-fortran \
+                    --disable-hl \
+                    --disable-parallel \
+                    --disable-silent-rules \
+                    --disable-threadsafe \
+                    --enable-build-mode=production \
+                    --enable-shared \
+                    --enable-static \
+                    --with-default-plugindir=${prefix}/lib/hdf5 \
+                    --with-szlib=${prefix}/lib/libaec \
+                    --with-zlib=yes
+
+# Actively checks how to get clang to warn on implicit functions with this.
+configure.checks.implicit_function_declaration.whitelist-append strchr
+
+# http://mail.hdfgroup.org/pipermail/hdf-forum_hdfgroup.org/2010-March/002682.html
+license             NCSA
+
+default_variants    +cxx +hl +fortran
+
+post-configure {
+    if {[variant_exists universal] && [variant_isset universal]} {
+        set dirs {}
+        foreach arch ${universal_archs_to_use} {
+            lappend dirs ${worksrcpath}-${arch}
+        }
+    } else {
+        set dirs ${worksrcpath}
+    }
+    foreach dir ${dirs} {
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+            ${dir}/bin/h5cc \
+            ${dir}/c++/src/h5c++ \
+            ${dir}/src/libhdf5.settings \
+            ${dir}/fortran/src/h5fc
+        if {${configure.ccache}} {
+            reinplace -W ${dir} {s|ccache ||} bin/h5cc c++/src/h5c++
+        }
+    }
+}
+
+post-destroot {
+    xinstall -d ${destroot}${prefix}/share/hdf5/
+    xinstall -m 444 ${worksrcpath}/COPYING\
+      ${destroot}${prefix}/share/hdf5/
+
+    # remove paths to libraries used to build HDF5 when packaging HDF5
+    system -W ${destroot}${prefix}/bin "${worksrcpath}/bin/pkgscrpts/h5rmflags -prefix=${prefix}"
+
+    # ensure libraries are found and that they are from MacPorts
+    # see https://trac.macports.org/ticket/67507
+    # Depending on build config, a number of different files need to be patched
+    # just let the system find which ones need it for this build.
+    system -W ${destroot}${prefix}/bin \
+        "grep -Il --null -- '-lsz -lz' * | xargs -0 sed -i '' \
+          -e 's^-lsz^${prefix}/lib/libaec/lib/libsz.dylib^' \
+          -e 's^-lz^${prefix}/lib/libz.dylib^'"
+}
+
+test.run            yes
+test.target         check
+
+variant hl description {
+    Enable High Level interface.
+  +hl is EXPERIMENTAL with +threadsafe
+} {
+    configure.args-delete       --disable-hl
+    configure.args-append       --enable-hl
+}
+
+variant cxx description {
+    Enable c++ interface.
+  +cxx is EXPERIMENTAL with +threadsafe or any mpi variant
+} {
+    configure.args-delete       --disable-cxx
+    configure.args-append       --enable-cxx
+
+    # See: https://github.com/ubarsc/kealib/issues/42
+    compiler.cxx_standard       2011
+}
+
+variant fortran description {
+    Enable Fortran bindings.
+  +fortran is EXPERIMENTAL with +threadsafe
+} {
+    configure.args-delete       --disable-fortran
+    configure.args-append       --enable-fortran
+}
+
+if {[variant_isset fortran] && ![fortran_variant_isset]} {
+    default_variants +gfortran
+    if {![fortran_variant_isset]} {
+        error "+fortran requires a fortran compiler to be selected"
+    }
+}
+
+if {([ variant_isset gfortran ] || [ variant_isset g95 ]) && ![ variant_isset fortran ]} {
+    default_variants +fortran
+}
+
+variant threadsafe description {
+    Enable threadsafety.
+  +threadsafe is EXPERIMENTAL with +cxx, +fortran, or any mpi variant
+} {
+    configure.args-delete       --disable-threadsafe
+    configure.args-append       --enable-threadsafe --with-pthread
+}
+
+if {[ variant_isset threadsafe ] && ([ variant_isset cxx ] ||
+                                     [ variant_isset hl ] ||
+                                     [ variant_isset fortran ]) ||
+    ([ mpi_variant_isset ])  &&
+    ([ variant_isset cxx ]   || [ variant_isset threadsafe ])  } {
+
+    # Tell hdf5 to configure in this experimental configuration
+    configure.args-append       --enable-unsupported
+
+    notes-append {
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+hdf5 has been installed in an unsupported "Experimental" mode due to\
+selected variants. See "port variants hdf5 | grep EXPERIMENTAL" for more\
+information.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    }
+
+    pre-configure {
+        ui_warn {
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+hdf5 will been configured in an unsupported "Experimental" mode due to\
+selected variants. See "port variants hdf5 | grep EXPERIMENTAL" for more\
+information.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    }
+    }
+}
+
+if {[ mpi_variant_isset ]} {
+    configure.args-delete       --disable-parallel
+    configure.args-append       --enable-parallel
+}
+
+notes-append {
+Mac users may need to set the environment variable "HDF5_USE_FILE_LOCKING"\
+to the five-character string "FALSE" when accessing network mounted files.\
+This is an application run-time setting, not a configure or build setting.\
+Otherwise errors such as "unable to open file" or "HDF5 error" may be\
+encountered.
+}
+
+# Livecheck on GitHub release tags only.  Exclude non-release tags.
+# Accept matches both with and without "hdf5_" or "hdf5-" prefix.
+livecheck.regex     releases/tag/\[hdf5_-\]*(\[0-9.-\]+)

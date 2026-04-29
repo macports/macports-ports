@@ -1,0 +1,157 @@
+Patch to allow compiling against CUPS 1.1 (Tiger)
+
+CUPS 1.2 introduced the cups_page_header2_t structure, which adds some fields
+to the older cups_page_header_t structure. The previous field names are
+unchanged, so we can swap in one for the other in the code with macros in
+src/compat.h.
+
+Three fields in particular (cupsInteger, cupsNumColors, and cupsPageSizeName)
+are not present in the 1.1 structure. So provide some workarounds in src/main.cc
+to store data and use fields that are present on 1.1.
+
+One hack worth noting is that because 1.1 lacks custom integer fields, the
+"Toner save mode" is stored in the "compression" field with this patch. The
+"compression" field isn't used elsewhere in the driver, so this should be safe.
+
+If this patch breaks, it might be easier to provide a libcups port (the cups-ppdc
+port already compiles libcups for its own use) and just compile against that.
+However, this will require verifying that filters compiled with a newer libcups
+will properly function when speaking to an older, system-provided cupsd.
+
+--- brlaser.drv.in.orig
++++ brlaser.drv.in
+@@ -75,8 +75,8 @@ MediaType 7 "ENV-THICK/Thick envelopes"
+ MediaType 8 "ENV-THIN/Thin envelopes"
+ 
+ Option "brlaserEconomode/Toner save mode" Boolean AnySetup 10
+-  *Choice False/Off "<</cupsInteger10 0>>setpagedevice"
+-  Choice True/On "<</cupsInteger10 1>>setpagedevice"
++  *Choice False/Off "<</cupsCompression 0>>setpagedevice"
++  Choice True/On "<</cupsCompression 1>>setpagedevice"
+ 
+ 
+ {
+--- /dev/null
++++ src/compat.h
+@@ -0,0 +1,29 @@
++// This file is part of the brlaser printer driver.
++//
++// Copyright 2021 Evan Miller
++//
++// brlaser is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 2 of the License, or
++// (at your option) any later version.
++//
++// brlaser is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with brlaser.  If not, see <http://www.gnu.org/licenses/>.
++
++#ifndef COMPAT_H
++#define COMPAT_H
++
++#include <cups/cups.h>
++
++#if CUPS_VERSION_MAJOR == 1 && CUPS_VERSION_MINOR < 2
++#define _BRLASER_CUPS_COMPAT_OLD
++#define cups_page_header2_t cups_page_header_t
++#define cupsRasterReadHeader2(r, h) cupsRasterReadHeader(r, h)
++#endif
++
++#endif
+--- src/debug.cc.orig
++++ src/debug.cc
+@@ -93,6 +93,7 @@ void dump_page_header(const cups_page_header2_t &h) {
+   d(cupsRowCount);
+   d(cupsRowFeed);
+   d(cupsRowStep);
++#ifndef _BRLASER_CUPS_COMPAT_OLD
+   d(cupsNumColors);
+   d(cupsBorderlessScalingFactor);
+   d(cupsPageSize);
+@@ -103,5 +104,6 @@ void dump_page_header(const cups_page_header2_t &h) {
+   d(cupsMarkerType);
+   d(cupsRenderingIntent);
+   d(cupsPageSizeName);
++#endif
+ #undef d
+ }
+--- src/debug.h.orig
++++ src/debug.h
+@@ -18,6 +18,7 @@
+ #ifndef DEBUG_H
+ #define DEBUG_H
+ 
++#include "compat.h"
+ #include <cups/raster.h>
+ 
+ void dump_page_header(const cups_page_header2_t &h);
+--- src/main.cc.orig
++++ src/main.cc
+@@ -90,25 +90,26 @@ page_params build_page_params(const cups_page_header2_t &header) {
+   static const std::array<std::string, 6> sources = {{
+     "AUTO", "T1", "T2", "T3", "MP", "MANUAL"
+   }};
+-  static const std::map<std::string, std::string> sizes = {
+-    { "A4", "A4" },
+-    { "A5", "A5" },
+-    { "A6", "A6" },
+-    { "B5", "B5" },
+-    { "B6", "B6" },
+-    { "EnvC5", "C5" },
+-    { "EnvMonarch", "MONARCH" },
+-    { "EnvPRC5", "DL" },
+-    { "EnvDL", "DL" },
+-    { "Executive", "EXECUTIVE" },
+-    { "Legal", "LEGAL" },
+-    { "Letter", "LETTER" }
++
++  static const std::map<std::tuple<int, int>, std::string> sizes = {
++      { {595, 842}, "A4" },
++      { {420, 595}, "A5" },
++      { {298, 420}, "A6" },
++      { {499, 709}, "B5" },
++      { {354, 499}, "B6" },
++      { {649, 459}, "C5" },
++      { {312, 624}, "DL" },
++      { {279, 540}, "MONARCH" },
++      { {522, 756}, "EXECUTIVE" },
++      { {612, 792}, "LETTER" },
++      { {612, 1008}, "LEGAL" },
+   };
+ 
+   page_params p = { };
++  p.papersize = "A4";
+   p.num_copies = header.NumCopies;
+   p.resolution = header.HWResolution[0];
+-  p.economode = header.cupsInteger[10];
++  p.economode = header.cupsCompression;
+   p.mediatype = header.MediaType;
+   p.duplex = header.Duplex;
+ 
+@@ -117,11 +118,9 @@ page_params build_page_params(const cups_page_header2_t &header) {
+   else
+     p.sourcetray = sources[0];
+ 
+-  auto size_it = sizes.find(header.cupsPageSizeName);
++  auto size_it = sizes.find(std::make_tuple(header.PageSize[0], header.PageSize[1]));
+   if (size_it != sizes.end())
+     p.papersize = size_it->second;
+-  else
+-    p.papersize = "A4";
+ 
+   return p;
+ }
+@@ -176,7 +175,7 @@ int main(int argc, char *argv[]) {
+     while (!interrupted && cupsRasterReadHeader2(ras, &header)) {
+       if (header.cupsBitsPerPixel != 1
+           || header.cupsBitsPerColor != 1
+-          || header.cupsNumColors != 1
++          || header.cupsColorSpace != 3
+           || header.cupsBytesPerLine > 10000) {
+         fprintf(stderr, "ERROR: " PACKAGE ": Page %d: Bogus raster data.\n", job.pages() + 1);
+         dump_page_header(header);

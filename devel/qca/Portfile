@@ -1,0 +1,223 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+
+name                    qca
+
+# Qt version handling logic
+global Qt_Major
+subport ${name}-qt5     {}
+subport ${name}-qt6     {}
+
+if {[string match "${name}-qt6*" ${subport}]} {
+    PortGroup           qt6 1.0
+
+    set Qt_Major        qt6
+    version             2.3.10
+    checksums           rmd160  bf26dcacbb5629a60ceffbeb168f1560b4cb1e5e \
+                        sha256  1c5b722da93d559365719226bb121c726ec3c0dc4c67dea34f1e50e4e0d14a02 \
+                        size    764844
+} elseif {[string match "${name}-qt5*" ${subport}]} {
+    PortGroup           qt5 1.0
+
+    set Qt_Major        qt5
+    version             2.3.10
+    checksums           rmd160  bf26dcacbb5629a60ceffbeb168f1560b4cb1e5e \
+                        sha256  1c5b722da93d559365719226bb121c726ec3c0dc4c67dea34f1e50e4e0d14a02 \
+                        size    764844
+} else {
+    PortGroup           qt4 1.0
+
+    set Qt_Major        qt4
+    # last release with Qt4 support:
+    version             2.2.1
+    # set the epoch because we've had to downgrade
+    epoch               202111
+    checksums           rmd160  dddc3cf240dc5424b9df13fc1bf41c8e04f3b814 \
+                        sha256  d716d2d8e3ed8d95bbdb061f03081d7d032206f746a30a4d29d72196f50e7b02 \
+                        size    691676
+}
+# best included after the required Qt PG
+PortGroup               cmake 1.1
+
+categories              devel crypto security
+maintainers             {gmail.com:rjvbertin @RJVB} openmaintainer
+license                 LGPL-2.1
+description             Qt Cryptographic Architecture
+long_description        Qt Cryptographic Architecture provides an easy API for the following \
+                        features: SSL/TLS, X509, SASL, RSA, Hashing (SHA1, MD5), Ciphers \
+                        (BlowFish, 3DES, AES).  Functionality is supplied via plugins.
+
+homepage                https://userbase.kde.org/QCA
+master_sites            kde:stable/qca/${version}
+use_xz                  yes
+
+patch.pre_args-append   -N
+patch.pre_args-replace  -p0 -p1
+
+switch ${Qt_Major} {
+    qt4 {
+        patchfiles-append \
+                        patch-qca221-ossl.diff \
+                        qt4/patch-installname.diff \
+                        qt4/patch-cmakeminver.diff
+        if {${os.platform} eq "darwin" && ${os.major} < 11} {
+            patchfiles-append \
+                        patch-unbreak-qca_systemstore.diff
+        }
+        configure.args-append \
+                        -DQT4_BUILD:BOOL=ON
+    }
+    qt5 {
+        if {${os.platform} eq "darwin" && ${os.major} < 10 } {
+            ui_warn "This port currently requires Qt 5.3 or up, so OS X 10.6 or newer"
+            known_fail yes
+        }
+        patchfiles-append \
+                        qt5/patch-qca210-qt550.diff \
+                        qt5/patch-support-older-qt5.diff
+        configure.args-append \
+                        -DQCA_SUFFIX:STRING="qt5"
+        build.post_args-append -wk
+    }
+    qt6 {
+        maintainers           nomaintainer
+        
+        set qt_dir            ${qt6.dir}
+        set qt_plugins_dir    ${qt6.dir}/plugins
+        set qt_libs_dir       ${qt6.dir}/lib
+        set qt_bins_dir       ${qt6.dir}/bin
+        set qt_mkspecs_dir    ${qt6.dir}/mkspecs
+        set qt_includes_dir   ${qt6.dir}/include
+        set qt_docs_dir       ${qt6.dir}/doc
+        set qt_pkg_config_dir ${qt_libs_dir}/pkgconfig
+        
+        depends_build-append  path:bin/pkg-config:pkgconfig
+        qt6.depends_lib       qt5compat
+        configure.args-append \
+                              -DBUILD_WITH_QT6=ON
+    }
+    default {
+        ui_error "unsupported Qt version \"${Qt_Major}\""
+        return -code error "Unsupported Qt version"
+    }
+}
+
+# the QCA plugins have been rolled into the main source tarball and are built by default
+# when their dependencies are available. Allow this for all plugins that were not already
+# available through an individual port; no reason to impose new dependencies on our dependents.
+# This is mostly of interest for Qt5-based dependents, evidently.
+configure.args-append   -DCMAKE_INSTALL_PREFIX:PATH=${qt_dir} \
+                        -DQCA_PLUGINS_INSTALL_DIR:PATH=${qt_plugins_dir} \
+                        -DQCA_LIBRARY_INSTALL_DIR:PATH=${qt_libs_dir} \
+                        -DQCA_BINARY_INSTALL_DIR:PATH=${qt_bins_dir} \
+                        -DQCA_FEATURE_INSTALL_DIR:PATH=${qt_mkspecs_dir}/features \
+                        -DQCA_INCLUDE_INSTALL_DIR:PATH=${qt_includes_dir} \
+                        -DQCA_PRIVATE_INCLUDE_INSTALL_DIR:PATH=${qt_includes_dir} \
+                        -DQCA_DOC_INSTALL_DIR:PATH=${qt_docs_dir} \
+                        -DQCA_MAN_INSTALL_DIR:PATH=${prefix}/share/man \
+                        -DPKGCONFIG_INSTALL_PREFIX:PATH=${qt_pkg_config_dir} \
+                        -DOSX_FRAMEWORK:BOOL=OFF
+
+if {${Qt_Major} eq "qt6"} {
+    compiler.cxx_standard   2017
+} else {
+    # botan requires C++11
+    compiler.cxx_standard   2011
+    configure.cxxflags-append \
+                            -std=c++11
+}
+
+post-destroot {
+    if {${subport} eq ${name} || ${subport} eq "${subport}-qt5"} {
+        # install docs
+        xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}
+        xinstall -m 644 -W ${worksrcpath} COPYING README TODO \
+            ${destroot}${prefix}/share/doc/${subport}
+    }
+
+    if {${subport} eq "${name}"} {
+        # install cmake file (taken from port 'kdelibs4'). To use this
+        # file, include '-DCMAKE_MODULE_PATH=...' in configure.args during
+        # the initial 'configure' stage (which uses CMake), to the full
+        # path of where the CMake files are installed.
+        xinstall -d -m 755 ${destroot}${qt_cmake_module_dir}
+        xinstall -m 644 -W ${filespath} FindQCA2.cmake \
+            ${destroot}${qt_cmake_module_dir}
+
+    }
+}
+
+# avoid installing the examples into Qt's binary tree
+variant examples description {Include examples in install} {
+    post-destroot {
+        xinstall -d -m 755 ${destroot}${prefix}/share/${subport}/examples/
+        file copy {*}[glob ${worksrcpath}/examples/*] \
+            ${destroot}${prefix}/share/${subport}/examples/
+    }
+}
+
+### Plugin subports:
+### The ossl, cyrus-sasl and gnupg plugins used to be standalone ports
+### the former two are now implemented as subports. The gnupg and the other
+### plugins are built together with the main ports.
+###
+# Qt4 receives no suffix:
+set qt.versions     {"" "-qt5" "-qt6"}
+foreach qv ${qt.versions} {
+    # the main ports
+    if {${subport} eq "${name}${qv}"} {
+        # revbump for botan2
+        revision                0
+        depends_lib-append      port:botan \
+                                port:libgcrypt \
+                                port:nss
+        configure.args-append   -DBUILD_PLUGINS:STRING="botan\;gcrypt\;gnupg\;logger\;nss\;softstore"
+    }
+
+    # plugins depend on the corresponding main port and the libraries of which they expose the Functionality
+    subport ${name}${qv}-ossl {
+        PortGroup               openssl 1.0
+
+        license                 LGPL-2.1+
+        depends_lib             port:${name}${qv}
+        if {${Qt_Major} eq "qt4"} {
+            openssl.branch      1.1
+        }
+        configure.args-append   -DBUILD_PLUGINS:STRING="ossl"
+        build.dir               ${workpath}/build/plugins/qca-ossl
+    }
+    subport ${name}${qv}-cyrus-sasl {
+        license                 LGPL-2.1+
+        depends_lib             port:${name}${qv} port:cyrus-sasl2
+        configure.args-append   -DBUILD_PLUGINS:STRING="cyrus-sasl"
+        build.dir               ${workpath}/build/plugins/qca-cyrus-sasl
+    }
+    subport ${name}${qv}-pkcs11 {
+        PortGroup               openssl 1.0
+
+        license                 LGPL-2.1+
+        depends_lib             port:${name}${qv} port:nss port:pkcs11-helper
+        if {${Qt_Major} eq "qt4"} {
+            # qca-pkcs11 will build (and link) against OpenSSL3 but its dependencies don't
+            # so it seems wise to avoid mixing OpenSSL versions.
+            openssl.branch      1.1
+        }
+        configure.args-append   -DBUILD_PLUGINS:STRING="pkcs11"
+        build.dir               ${workpath}/build/plugins/qca-pkcs11
+    }
+}
+
+set qt.versions     {"" "-qt5"}
+foreach qv ${qt.versions} {
+    # gnupg subports obsolete, may be removed in April 2027
+    subport ${name}${qv}-gnupg {
+        PortGroup               obsolete 1.0
+
+        replaced_by             ${name}${qv}
+    }
+}
+
+livecheck.type  regex
+livecheck.url   https://download.kde.org/stable/qca
+livecheck.regex "(2\\.\\d+(?:\\.\\d+)+(?:\\.\\d+)*)\\/"

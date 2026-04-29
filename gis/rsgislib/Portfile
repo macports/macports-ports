@@ -1,0 +1,159 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           cmake 1.1
+PortGroup           boost 1.0
+PortGroup           active_variants   1.1
+
+# Fails to build with gcc and old Boost.
+# Same std::__and_ error as in: https://trac.macports.org/ticket/68014
+boost.version       1.81
+
+github.setup        remotesensinginfo rsgislib 5.2.1
+revision            0
+categories          gis
+license             GPL-3
+maintainers         {yahoo.com:n_larsson @nilason} openmaintainer
+description         RSGISlib - Remote Sensing and GIS Library
+long_description    The {*}${description} provides a lot of advanced tools \
+                    to perform image analysis and feature detection in \
+                    remote sensing and GIS applications.
+homepage            http://www.rsgislib.org
+
+github.tarball_from archive
+
+checksums           rmd160  c8e523bb396450b4ec828cc9a4cacb8d16bb6138 \
+                    sha256  001fc88755b41a04cc02e26750231bac727e2465184cf7bc1cd073b8ae2e02c6 \
+                    size    173256626
+
+depends_lib-append  port:gdal
+depends_lib-append  port:gsl
+depends_lib-append  port:kealib
+depends_lib-append  port:muparser
+depends_lib-append  port:hdf5
+
+patchfiles-append   patch-CMakeLists.txt.diff
+patchfiles-append   patch_python.cmakelist.diff
+
+compiler.cxx_standard       2014
+compiler.blacklist-append   {clang < 340}
+
+configure.args-append   -DBOOST_INCLUDE_DIR=[boost::include_dir] \
+                        -DBOOST_LIB_PATH=[boost::lib_dir] \
+                        -DGSL_INCLUDE_DIR=${prefix}/include \
+                        -DGSL_LIB_PATH=${prefix}/lib \
+                        -DGDAL_INCLUDE_DIR=${prefix}/include \
+                        -DGDAL_LIB_PATH=${prefix}/lib \
+                        -DMUPARSER_INCLUDE_DIR=${prefix}/include \
+                        -DMUPARSER_LIB_PATH=${prefix}/lib \
+                        -DKEA_INCLUDE_DIR=${prefix}/include \
+                        -DKEA_LIB_PATH=${prefix}/lib
+
+configure.args-append   -DRSGISLIB_WITH_UTILTIES=ON \
+                        -DRSGISLIB_WITH_DATA=OFF \
+                        -DRSGIS_PYTHON=OFF
+
+
+# Figure out HDF5's mpi include directory
+set mpl_include_dir ""
+if {![catch {set result [active_variants hdf5 openmpi]}]} {
+    if {$result} {
+        set mpl_include_dir "-I${prefix}/include/openmpi-mp"
+    }
+}
+if {![catch {set result [active_variants hdf5 mpich]}]} {
+    if {$result} {
+        set mpl_include_dir "-I${prefix}/include/mpich-mp"
+    }
+}
+configure.args-append   -DHDF5_INCLUDE_DIR=${prefix}/include
+configure.args-append   -DHDF5_LIB_PATH=${prefix}/lib
+configure.cxxflags-append \
+                        ${mpl_include_dir}
+
+# remove python executables, they are re-added in Python subport
+if {${name} eq ${subport}} {
+    post-destroot {
+        foreach pyfile [glob ${destroot}${prefix}/bin/*.py] {
+                ui_info "${subport}: deleting python file: ${pyfile}"
+                delete ${pyfile}
+        }
+    }
+    notes-append "
+        Install a Python sub-port to install Python bindings,\
+        for available sub-ports see: 'port info --subports ${name}'.
+        "
+}
+
+# create Python subports
+set python_versions {310 311 312 313 314}
+foreach v ${python_versions} {
+    subport py${v}-${github.project} {
+        PortGroup           python 1.0
+        PortGroup           select 1.0
+
+        categories          gis python
+
+        depends_lib-append  port:${github.project}
+
+        use_configure       yes
+
+        python.default_version  ${v}
+        python.add_dependencies no
+        build.cmd           make
+        build.target
+        destroot.cmd        make install
+        destroot.destdir    DESTDIR=${destroot}
+
+        master_sites        ${github.master_sites}
+    }
+}
+
+# Python bindings for supported Python versions
+if {[string match "py*" ${subport}]} {
+
+    description     Python ${python.branch} bindings for {*}${description}
+    long_description\
+                    This package provides Python ${python.branch}\
+                    bindings, modules, and scripts.
+
+    depends_build-append   port:py${python.version}-numpy
+    depends_build-append   port:py${python.version}-gdal
+
+    configure.args-replace -DRSGIS_PYTHON=OFF -DRSGIS_PYTHON=ON
+    configure.args-append  -DPython3_SITELIB=${python.pkgd}
+
+    post-patch {
+        reinplace -q "s|__PYVER__|${python.branch}|" ${worksrcpath}/python/CMakeLists.txt
+        reinplace -q "s|/usr/bin/env python|${python.bin}|" {*}[glob ${worksrcpath}/tools/*.py.in]
+        fs-traverse f ${worksrcpath} {
+            if {[file extension ${f}] eq ".py"} {
+                reinplace -q "s|/usr/bin/env python|${python.bin}|" ${f}
+            }
+        }
+    }
+
+    post-destroot {
+        system -W ${destroot}${python.pkgd}/rsgislib "${python.bin} -m compileall ."
+        xinstall -d ${destroot}${python.prefix}/bin
+        move {*}[glob ${destroot}${prefix}/bin/*.py] ${destroot}${python.prefix}/bin
+        delete {*}[glob ${destroot}${prefix}/bin/*]
+        foreach bin [glob -nocomplain -tails -directory "${destroot}${python.prefix}/bin" *] {
+            if {[catch {file type "${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"}]} {
+                ln -s "${python.prefix}/bin/${bin}" "${destroot}${prefix}/bin/${bin}-${python.branch}"
+            }
+        }
+        delete ${destroot}${prefix}/include
+        delete ${destroot}${prefix}/lib
+
+        set destroot_sel_dir ${destroot}${prefix}/etc/select/${github.project}
+        reinplace -q "s|__PYVER__|${python.branch}|" ${destroot_sel_dir}/py-rsgislib
+        move ${destroot_sel_dir}/py-rsgislib ${destroot_sel_dir}/py${python.version}-rsgislib
+    }
+
+    livecheck.type      none
+
+    select.group        ${github.project}
+    select.file         ${filespath}/py-rsgislib
+}

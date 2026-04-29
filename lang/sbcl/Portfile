@@ -1,0 +1,234 @@
+# -*- mode: tcl; coding: utf-8; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- # vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem      1.0
+
+PortGroup       legacysupport 1.1
+
+name            sbcl
+
+# Note to maintainers:
+#
+# Please bump the revisions of math/maxima, math/fricas and possibly
+# math/maxima-devel when this port changes.
+version         2.6.3
+revision        0
+epoch           1
+
+categories      lang
+license         BSD
+maintainers     {easieste @easye} openmaintainer
+
+description     The Steel Bank Common Lisp system
+
+long_description \
+    Steel Bank Common Lisp (SBCL) is a Open Source implementation of ANSI \
+    Common Lisp. It provides an interactive environment including an \
+    integrated native compiler, interpreter, and debugger. SBCL is quite \
+    suitable for the creation of long running system services, as the compiler \
+    trades the time for a long initial compilation for blazingly fast loading \
+    of its binary runtime fasl representation.
+
+
+homepage        http://www.sbcl.org
+
+# https://bugs.launchpad.net/sbcl/+bug/2033284
+patchfiles      0001-fix-building-when-root-directory-contain-non-ASCII-c.patch \
+                0002-add-MacPorts-XDG_DATA_DIRS.patch
+
+# https://github.com/sbcl/sbcl/pull/64
+patchfiles-append \
+    0004-fix-pthread-macOS.patch
+
+# <https://github.com/macports/macports-ports/pull/29636>
+# TCP_KEEPCNT and TCP_KEEPINTVL are only implemented
+# starting with macOS Mavericks.
+if {${os.platform} eq "darwin" && ${os.major} < 13} {
+    patchfiles-append   0006-unbreak-bsd-sockets.patch
+}
+
+checksums           rmd160  26568c78d99825ebff018f4fe5a4a6214ff603b8 \
+                    sha256  e7432fb642952dd25a5fc0c56d218f3d0aa596ce42d33efa83091bca7d69988a \
+                    size    8452288
+
+if {${name} eq ${subport}} {
+    master_sites \
+                sourceforge
+
+    use_bzip2   yes
+
+    distfiles   ${name}-${version}-source${extract.suffix}
+    worksrcdir  ${name}-${version}
+}
+
+conflicts       sbcl-devel
+
+subport sbcl-devel {
+    PortGroup   github  1.0
+
+    github.setup \
+                sbcl sbcl 411fb247c2e0d8e713ccd32729ce70c07783fec4
+    version     20240924
+    revision    0
+
+    conflicts   sbcl
+
+    checksums   rmd160  e7d661a26319cc88e9fe3fb4ea53cb2af11550e2 \
+                sha256  c93da098c5937a23bf93c991206f42a25fe0a32adb098b17d276d53d3c63f712 \
+                size    10289958
+    github.tarball_from archive
+
+    pre-build {
+        system -W ${worksrcpath} "echo '\"${version}\"' > version.lisp-expr"
+    }
+}
+
+if {${name} eq ${subport}} {
+    # clock_gettime
+    legacysupport.newest_darwin_requires_legacy 15
+}
+
+# Uses: __attribute__((aligned(8)))
+# See: https://bugs.launchpad.net/sbcl/+bug/1991485
+compiler.blacklist-append \
+                *gcc-3.* *gcc-4.*
+
+post-patch {
+    reinplace "s|@@PREFIX@@|${prefix}|g" \
+                ${worksrcpath}/contrib/asdf/uiop.lisp
+
+    reinplace "s|/usr/local/lib/${name}|${prefix}/lib/${name}|g" \
+                ${worksrcpath}/doc/sbcl.1
+
+    # This is the way to bypass path to MacPorts includes into sbcl.mk
+    set config_path ${worksrcpath}/src/runtime
+    foreach f [glob -tails -directory ${config_path} Config.*-darwin] {
+        ui_debug "Adding MacPorts paths into ${f}"
+        set config [open ${config_path}/$f a]
+        puts ${config} "CFLAGS += -I${prefix}/include [legacysupport::get_cpp_flags]"
+        puts ${config} "DEPEND_FLAGS += -I${prefix}/include [legacysupport::get_cpp_flags]"
+        puts ${config} "OS_LIBS += -L${prefix}/lib [legacysupport::get_library_link_flags]"
+        close ${config}
+    }
+}
+
+# SBCL records used compiler inside lib/sbcl/sbcl.mk which may lead to not working sb-grovel
+if { [string match macports-clang-* ${configure.compiler}] } {
+    depends_run-append \
+                    port:[string map {"macports-" ""} ${configure.compiler}]
+}
+if { [string match macports-gcc-* ${configure.compiler}] } {
+    depends_run-append \
+                   port:[string map {"macports-gcc-" "gcc"} ${configure.compiler}]
+}
+
+use_configure   no
+
+pre-build {
+    # disable all warning
+    set sbclrc [open $env(HOME)/.sbclrc w+]
+    puts ${sbclrc} "(declaim (sb-ext:muffle-conditions cl:warning))"
+    close ${sbclrc}
+}
+
+# <https://trac.macports.org/ticket/72571> notes need for explicit compiler macos-13 (Ventura)
+# TODO:  get more testing coverage for what exactly works on macos-13
+if {${os.platform} eq "darwin" && ${macos_version_major} == 13} {
+    depends_build-append   port:clang-18
+    configure.compiler     macports-clang-18        
+}
+
+build.env-append \
+                CC=${configure.cc} \
+                CXX=${configure.cxx} \
+                CPP=${configure.cpp} \
+                SBCL_MACOSX_VERSION_MIN=${macosx_deployment_target}
+
+use_parallel_build  no
+
+build.cmd       sh
+build.target    make.sh
+build.args-append \
+                --prefix=${prefix}
+
+variant bootstrap_ecl description { Use ECL to bootstrap compilation instead of SBCL binary. } {}
+
+if { ![variant_isset bootstrap_ecl]  } {
+    depends_build-append           port:sbcl-bootstrap
+    depends_skip_archcheck-append  sbcl-bootstrap
+    build.args-append              --xc-host=${prefix}/libexec/sbcl-bootstrap/bin/sbcl
+} else {
+    depends_build-append           path:bin/ecl:ecl
+    build.args-append              --xc-host=${prefix}/bin/ecl
+}
+
+if {${configure.build_arch} eq "i386"} {
+    build.args-append \
+                --arch=x86
+} elseif {${configure.build_arch} eq "x86_64"} {
+    build.args-append \
+                --arch=x86-64
+} else {
+    build.args-append \
+                --arch=${configure.build_arch}
+}
+
+# SBCL enables SIMD only when host CPU supports AVX2 which may not be true for buildbot.
+# To make build consistent, let disable it by default and enable via variant.
+# See: https://trac.macports.org/ticket/67437
+build.args-append \
+                --without-sb-simd
+variant simd description {Enable build of SIMD extention, that fails on CPU without AVX2 support.} {
+    build.args-replace --without-sb-simd --with-sb-simd
+}
+
+post-build {
+    if {[variant_isset html] || [variant_isset pdf]} {
+        system -W ${worksrcpath}/doc "INSTALL_ROOT=${destroot}${prefix} sh ${worksrcpath}/doc/make-doc.sh"
+    }
+}
+
+if {![variant_isset threads]} {
+    default_variants +fancy
+}
+
+variant html conflicts pdf description {Installs documentation in HTML and Info formats.} {
+    depends_build-append bin:texi2dvi:texinfo
+    depends_build-append bin:makeinfo:texinfo
+    post-patch {
+        reinplace -W ${worksrcpath} \
+            {s|$GNUMAKE html pdf info|$GNUMAKE html info|g} \
+            doc/make-doc.sh
+    }
+}
+
+variant pdf conflicts html description {Installs documentation in PDF, HTML and Info formats.  Involves the installation of a TexLive dependency chain, which can dramatically slow down the installation of the SBCL port.} {
+    depends_build-append bin:dvips:texlive
+    depends_build-append bin:texi2dvi:texinfo
+    depends_build-append bin:makeinfo:texinfo
+}
+
+variant threads description {Enable multi-threaded runtime using the Mach pthreads interface.} {
+    build.args-append   --with-sb-thread
+}
+
+variant fancy conflicts threads description {Configure SBCL compilation with all available compatible options (including threading).} {
+    build.args-append   --fancy
+    # As of version 2.2.6, zstd is used for core compression.
+    depends_lib-append  port:zstd
+}
+
+test.run        yes
+test.dir        ${worksrcpath}/tests
+test.env        CC=${configure.cc} \
+                CXX=${configure.cxx} \
+                CPP=${configure.cpp}
+test.target     run-tests.sh
+
+destroot.env    INSTALL_ROOT=${destroot}${prefix}
+destroot.target install.sh
+destroot.destdir
+
+if {${name} eq ${subport}} {
+    livecheck.url   http://sourceforge.net/api/file/index/project-id/1373/rss?path=%2F${name}
+    livecheck.regex guid.*${name}-(\\d+(\\.\\d+)+)-source
+}

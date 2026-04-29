@@ -1,0 +1,164 @@
+From 7be73826410a8c78e4eca30ae1e4b590cadb5a2b Mon Sep 17 00:00:00 2001
+From: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+Date: Mon, 31 Oct 2016 21:08:27 +0100
+Subject: [PATCH 3/3] use int32_t instead off_t for file size
+Bug: https://bugs.debian.org/632585
+
+Using off_t (64bit) is kinda waste. With last change we only need 16x the
+size of the old file. So for a 2GiB - 1 file we would allocate almost
+32GiB (the content of the old file would be loaded on demand from disk).
+This is a lot. Since the file size is less than 2GiB we leave the upper 4
+bytes unused.
+With this change the max file size is limitted to 2GiB - 1 and we require
+8x the size of the oldfile which makes almost 16GiB.
+
+When we assume a virtual address space of 3GiB on a 32bit then the max
+oldsize increased from about ~180MiB to ~341MiB.
+
+_If_ some sees this as a regression because files >2GiB can not be used
+anymore please provide another binary with -DUSE_OFF_T. The binary has
+less than 20KiB.
+
+Signed-off-by: Sebastian Andrzej Siewior <sebastian@breakpoint.cc>
+---
+ bsdiff.c | 62 ++++++++++++++++++++++++++++++++++++++++----------------------
+ 1 file changed, 40 insertions(+), 22 deletions(-)
+
+diff --git a/bsdiff.c b/bsdiff.c
+index f975e3722cba..997c87b01f56 100644
+--- a/bsdiff.c
++++ b/bsdiff.c
+@@ -39,11 +39,24 @@ __FBSDID("$FreeBSD: src/usr.bin/bsdiff/bsdiff/bsdiff.c,v 1.1 2005/08/06 01:59:05
+ #include <unistd.h>
+ #include <sys/mman.h>
+ 
++#include <limits.h>
++
++#ifdef USE_OFF_T
++
++#define t_off off_t
++#define t_off_max LLONG_MAX
++
++#else
++
++#define t_off int32_t
++#define t_off_max INT_MAX
++#endif
++
+ #define MIN(x,y) (((x)<(y)) ? (x) : (y))
+ 
+-static void split(off_t *I,off_t *V,off_t start,off_t len,off_t h)
++static void split(t_off *I,t_off *V,t_off start,t_off len,t_off h)
+ {
+-	off_t i,j,k,x,tmp,jj,kk;
++	t_off i,j,k,x,tmp,jj,kk;
+ 
+ 	if(len<16) {
+ 		for(k=start;k<start+len;k+=j) {
+@@ -102,10 +115,10 @@ static void split(off_t *I,off_t *V,off_t start,off_t len,off_t h)
+ 	if(start+len>kk) split(I,V,kk,start+len-kk,h);
+ }
+ 
+-static void qsufsort(off_t *I,off_t *V,u_char *old,off_t oldsize)
++static void qsufsort(t_off *I,t_off *V,u_char *old,t_off oldsize)
+ {
+-	off_t buckets[256];
+-	off_t i,h,len;
++	t_off buckets[256];
++	t_off i,h,len;
+ 
+ 	for(i=0;i<256;i++) buckets[i]=0;
+ 	for(i=0;i<oldsize;i++) buckets[old[i]]++;
+@@ -140,9 +153,9 @@ static void qsufsort(off_t *I,off_t *V,u_char *old,off_t oldsize)
+ 	for(i=0;i<oldsize+1;i++) I[V[i]]=i;
+ }
+ 
+-static off_t matchlen(u_char *old,off_t oldsize,u_char *new,off_t newsize)
++static t_off matchlen(u_char *old,t_off oldsize,u_char *new,t_off newsize)
+ {
+-	off_t i;
++	t_off i;
+ 
+ 	for(i=0;(i<oldsize)&&(i<newsize);i++)
+ 		if(old[i]!=new[i]) break;
+@@ -150,10 +163,10 @@ static off_t matchlen(u_char *old,off_t oldsize,u_char *new,off_t newsize)
+ 	return i;
+ }
+ 
+-static off_t search(off_t *I,u_char *old,off_t oldsize,
+-		u_char *new,off_t newsize,off_t st,off_t en,off_t *pos)
++static t_off search(t_off *I,u_char *old,t_off oldsize,
++		u_char *new,t_off newsize,t_off st,t_off en,t_off *pos)
+ {
+-	off_t x,y;
++	t_off x,y;
+ 
+ 	if(en-st<2) {
+ 		x=matchlen(old+I[st],oldsize-I[st],new,newsize);
+@@ -176,9 +189,9 @@ static off_t search(off_t *I,u_char *old,off_t oldsize,
+ 	};
+ }
+ 
+-static void offtout(off_t x,u_char *buf)
++static void offtout(t_off x,u_char *buf)
+ {
+-	off_t y;
++	t_off y;
+ 
+ 	if(x<0) y=-x; else y=x;
+ 
+@@ -199,14 +212,14 @@ int main(int argc,char *argv[])
+ 	int fd;
+ 	u_char *old,*new;
+ 	off_t oldsize,newsize;
+-	off_t *I,*V;
+-	off_t scan,pos,len;
+-	off_t lastscan,lastpos,lastoffset;
+-	off_t oldscore,scsc;
+-	off_t s,Sf,lenf,Sb,lenb;
+-	off_t overlap,Ss,lens;
+-	off_t i;
+-	off_t dblen,eblen;
++	t_off *I,*V;
++	t_off scan,pos,len;
++	t_off lastscan,lastpos,lastoffset;
++	t_off oldscore,scsc;
++	t_off s,Sf,lenf,Sb,lenb;
++	t_off overlap,Ss,lens;
++	t_off i;
++	t_off dblen,eblen;
+ 	u_char *db,*eb;
+ 	u_char buf[8];
+ 	u_char header[32];
+@@ -223,14 +236,16 @@ int main(int argc,char *argv[])
+ 	oldsize = lseek(fd, 0, SEEK_END);
+ 	if (oldsize < 0)
+ 		err(1, "seek %s", argv[1]);
++	if (oldsize > t_off_max)
++		err(1, "file too large %s", argv[1]);
+ 
+ 	old = mmap(NULL, oldsize, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, 0);
+ 	if (old == MAP_FAILED)
+ 		err(1, "mmap() %s", argv[1]);
+ 	close(fd);
+ 
+-	if(((I=malloc((oldsize+1)*sizeof(off_t)))==NULL) ||
+-		((V=malloc((oldsize+1)*sizeof(off_t)))==NULL)) err(1,NULL);
++	if(((I=malloc((oldsize+1)*sizeof(t_off)))==NULL) ||
++		((V=malloc((oldsize+1)*sizeof(t_off)))==NULL)) err(1,NULL);
+ 
+ 	qsufsort(I,V,old,oldsize);
+ 
+@@ -244,6 +259,9 @@ int main(int argc,char *argv[])
+ 	newsize = lseek(fd, 0, SEEK_END);
+ 	if (newsize == -1)
+ 		err(1, "lseek %s", argv[2]);
++	if (newsize > t_off_max)
++		err(1, "file too large %s", argv[2]);
++
+ 	new = mmap(NULL, newsize, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, 0);
+ 	if (new == MAP_FAILED)
+ 		err(1, "mmap %s", argv[2]);
+-- 
+2.9.3
+

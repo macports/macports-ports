@@ -1,0 +1,216 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           select 1.0
+PortGroup           openssl 1.0
+PortGroup           deprecated 1.0
+
+# Reached EOL on 2022-04-12
+deprecated.upstream_support no
+
+name                ruby26
+version             2.6.10
+revision            1
+
+categories          lang ruby
+maintainers         {kimuraw @kimuraw} \
+                    {fwright.net:fw @fhgwright} \
+                    openmaintainer
+platforms           darwin
+
+description         Powerful and clean object-oriented scripting language
+long_description    Ruby is the interpreted scripting language for quick \
+                    and easy object-oriented programming. It has many \
+                    features to process text files and to do system \
+                    management tasks (as in Perl). It is simple, \
+                    straightforward, extensible, and portable.
+
+homepage            https://www.ruby-lang.org/
+license             {Ruby BSD}
+
+master_sites        ruby:2.6
+use_bzip2           yes
+distname            ruby-${version}
+dist_subdir         ruby26
+
+checksums           md5 6ad76db639ab308e3b6c19408729a0cf \
+                    rmd160 ca3dd27234c1413ac7cf480e93aa34dab65f1ebb \
+                    sha1 ece89ec43e107a80efe35b3b7879dbe07e1a636f \
+                    sha256 399e1f13e7fedc3c6ae2ff541bbf26c44dfb63b07b6c186fdd15b4e526e27e9c \
+                    size 14136083
+
+# ruby/openssl does not support openssl-3
+openssl.branch      1.1
+
+depends_lib         port:readline \
+                    port:zlib \
+                    port:libyaml \
+                    port:libffi \
+                    port:gdbm
+depends_run         port:ruby_select
+depends_build       port:pkgconfig
+depends_skip_archcheck pkgconfig
+
+select.group        ruby
+select.file         ${filespath}/ruby26
+
+configure.args      --enable-shared \
+                    --enable-install-static-library \
+                    --disable-install-doc \
+                    --mandir="${prefix}/share/man" \
+                    --enable-pthread \
+                    --without-gmp \
+                    --with-opt-dir="${prefix}" \
+                    --program-suffix=2.6 \
+                    --with-rubylibprefix="${prefix}/lib/ruby2.6" \
+                    --with-openssl-include=[openssl::include_dir] \
+                    --with-openssl-lib=[openssl::lib_dir]
+
+# Patches derived from MacPorts-enhanced GitHub fork at
+#   github.com/fhgwright/ruby
+# These replace and enhance the former topic-specific patches, which can be
+# seen more readably in the fork.
+
+# patch-sources.diff: fixes for various build problems.
+# This diff is from v2_6_10 vs. macports-2_6_10r1.
+#
+patchfiles-append   patch-sources.diff
+
+# patch-generated.diff: additional patches to generated files, which don't
+# exist in the upstream git sources, and which must be patched after the
+# source patches so that make doesn't regard them as outdated.
+# At present, the only patched generated file is 'configure', to avoid
+# the need to rerun autoconf, whose output has reproducibility issues.
+# This diff is from tarball-2_6_10 vs. macports-tarball-2_6_10r1.
+#
+patchfiles-append   patch-generated.diff
+
+# [NOTE] workaround for mismatch of sdk versions on macOS 11.x,
+# such as MacOSX11.0.sdk (buildbot) <=> MacOSX11.1.sdk (user's Mac).
+# (see ruby27)
+post-build {
+    if {${os.major} >= 20} {
+        # ruby saves its compile options (CFLAGS, LDFLAGS, ..) in "rbconfig.rb" at build,
+        # and uses the options when compiling binary extensions.
+
+        # rewrite MacOSX11.1.sdk -> MacOSX.sdk in rbconfig.rb
+        file copy ${worksrcpath}/rbconfig.rb ${worksrcpath}/rbconfig.rb.orig
+        reinplace -E -q {s|(/MacOSX)[0-9\.]+(\.sdk[\'\"]?[[:blank:]])|\1\2|g} \
+            ${worksrcpath}/rbconfig.rb \
+            ${worksrcpath}/ruby-2.6.pc
+        reinplace -E -q {s|(/MacOSX)[0-9\.]+(\.sdk[\'\"]?)$|\1\2|g} \
+            ${worksrcpath}/rbconfig.rb \
+            ${worksrcpath}/ruby-2.6.pc
+    }
+}
+
+# Add the architecture flag as required
+if {[info exists build_arch] && ${build_arch} != ""} {
+    configure.args-append "--with-arch=${build_arch}"
+}
+
+post-patch {
+    # (see rb-bundler) sh "gem build ..." -> sh "gem2.6 build ..."
+    reinplace -E "s/(gem) (build|install|push)/gem2.6 \\2/g" \
+        ${worksrcpath}/lib/bundler/gem_helper.rb
+
+    # Ensure that generated files have clearly later mtimes than sources,
+    # to avoid gratuitous rebuilds by make.
+    # This is already nominally true based on the patching order, but
+    # one-second resolution on timestamps may cover it up.
+    #
+    # Increment the mtime(s) by one second.
+    foreach genfile [list configure] {
+        set genfull ${worksrcpath}/${genfile}
+        file mtime ${genfull} [expr [file mtime ${genfull}] + 1]
+    }
+}
+
+post-destroot {
+    foreach type {site vendor} {
+        set libdir ${destroot}${prefix}/lib/ruby2.6/${type}_ruby/2.6.0
+        xinstall -m 0755 -d ${libdir}
+        foreach subdir [exec find ${libdir} -type d -empty] {
+            destroot.keepdirs-append ${subdir}
+        }
+    }
+
+    # install destination of commands from port:rb26-*
+    xinstall -m 0755 -d ${destroot}${prefix}/libexec/ruby2.6
+    destroot.keepdirs-append ${destroot}${prefix}/libexec/ruby2.6
+}
+
+notes-append "
+To make this the default Ruby (i.e., the version run by\
+the 'ruby', 'gem' or 'bundle' commands), run:
+    sudo port select --set ruby $name
+"
+
+variant doc description "Install rdoc indexes and C API documents" {
+        configure.args-delete   --disable-install-doc
+}
+
+variant gmp description "use gmp" {
+        configure.args-delete   --without-gmp
+        depends_lib-append      port:gmp
+}
+
+variant jemalloc description "use jemalloc" {
+        configure.args-delete   --without-jemalloc
+        configure.args-append   --with-jemalloc
+        depends_lib-append      port:jemalloc
+}
+
+variant universal {
+        # Disable parallel builds for Universal case
+        # See: https://trac.macports.org/ticket/24240
+        use_parallel_build      no
+
+        # use ruby built-in universal mechanism.
+        configure.args-append   --with-arch=[join ${universal_archs} ,]
+        # clear macports' universal flags
+        configure.universal_cflags
+        configure.universal_cppflags
+        configure.universal_cxxflags
+        configure.universal_ldflags
+}
+
+variant relative description "Enable relative loading of libraries to allow for relocation of binaries." {
+        #enable relative loading
+        configure.args-append  --enable-load-relative
+}
+
+# legacy systems support
+platform darwin {
+
+    # Build requires 10.8 SDK when targeting 10.7
+    # see https://trac.macports.org/ticket/57986
+    if {${os.major} == 11} {
+        set ten_eight_sdkpath ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.8.sdk
+        if {[file exists $ten_eight_sdkpath]} {
+            configure.sdkroot $ten_eight_sdkpath
+        } else {
+            pre-fetch {
+                error "Building $name @${version} on Mac OS X 10.7 requires the MacOSX10.8.sdk to be present in ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs"
+            }
+        }
+    }
+
+    if {${os.major} < 11} {
+        depends_build-append    port:gmake
+        build.cmd               ${prefix}/bin/gmake
+        configure.args-append   --disable-dtrace
+        configure.cflags-append -std=c99
+    }
+
+    if {${os.major} == 8} {
+        configure.cppflags-append -DCPU_SUBTYPE_MASK=0xff000000
+    }
+}
+
+test.run        yes
+test.target     check
+
+livecheck.type  regex
+livecheck.url   https://cache.ruby-lang.org/pub/ruby/2.6/
+livecheck.regex ruby-(2\\.6\\.\\d+)[quotemeta ${extract.suffix}]

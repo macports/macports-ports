@@ -1,0 +1,116 @@
+Improve compatibility with PPC (and ARM) platforms.
+https://github.com/omniti-labs/portableumem/commit/cbaa083431161b8f6cdac780d133f5cb6f7d4b30
+--- misc.c.orig
++++ misc.c
+@@ -66,6 +66,9 @@
+ #define	ERR_SIZE 8192		/* must be a power of 2 */
+ 
+ static mutex_t umem_error_lock = DEFAULTMUTEX;
++#ifdef NEED_64_LOCK
++pthread_mutex_t umem_ppc_64inc_lock = PTHREAD_MUTEX_INITIALIZER;
++#endif
+ 
+ static char umem_error_buffer[ERR_SIZE] = "";
+ static uint_t umem_error_begin = 0;
+--- sol_compat.h.orig
++++ sol_compat.h
+@@ -59,7 +59,7 @@ static INLINE hrtime_t gethrtime(void) {
+ static INLINE thread_t _thr_self(void) {
+   return thr_self();
+ }
+-#if defined(_MACH_PORT_T)
++#if defined(__MACH__)
+ #define CPUHINT() (pthread_mach_thread_np(pthread_self()))
+ #endif
+ # define thr_sigsetmask            pthread_sigmask
+@@ -114,6 +114,12 @@ static INLINE int thr_create(void *stack_base,
+ # ifdef _WIN32
+ #  define ec_atomic_inc(a)		InterlockedIncrement(a)
+ #  define ec_atomic_inc64(a)    InterlockedIncrement64(a)
++# elif defined(__MACH__)
++#  include <libkern/OSAtomic.h>
++#  define ec_atomic_inc(x) OSAtomicIncrement32Barrier((int32_t*)x)
++#  if !defined(__ppc__)
++#   define ec_atomic_inc64(x) OSAtomicIncrement64Barrier((int64_t*)x)
++#  endif
+ # elif (defined(__i386__) || defined(__x86_64__)) && defined(__GNUC__)
+ static INLINE uint_t ec_atomic_cas(uint_t *mem, uint_t with, uint_t cmp)
+ {
+@@ -124,6 +130,40 @@ static INLINE uint_t ec_atomic_cas(uint_t *mem, uint_t with, uint_t cmp)
+         : "memory");
+   return prev;
+ }
++static INLINE uint64_t ec_atomic_cas64(uint64_t *mem, uint64_t with,
++  uint64_t cmp)
++{
++  uint64_t prev;
++#  if defined(__x86_64__)
++  __asm__ volatile ("lock; cmpxchgq %1, %2"
++    : "=a" (prev)
++    : "r" (with), "m" (*(mem)), "0" (cmp)
++    : "memory");
++#  else
++  __asm__ volatile (
++    "pushl %%ebx;"
++    "mov 4+%1,%%ecx;"
++    "mov %1,%%ebx;"
++    "lock;"
++    "cmpxchg8b (%3);"
++    "popl %%ebx"
++    : "=A" (prev)
++    : "m" (with), "A" (cmp), "r" (mem)
++    : "%ecx", "memory");
++#  endif
++  return prev;
++}
++static INLINE uint64_t ec_atomic_inc64(uint64_t *mem)
++{
++  register uint64_t last;
++  do {
++    last = *mem;
++  } while (ec_atomic_cas64(mem, last+1, last) != last);
++  return ++last;
++}
++#  define ec_atomic_inc64 ec_atomic_inc64
++# else
++#  error no atomic solution for your platform
+ # endif
+ 
+ # ifndef ec_atomic_inc
+@@ -139,7 +179,18 @@ static INLINE uint_t ec_atomic_inc(uint_t *mem)
+ # ifndef ec_atomic_inc64
+    /* yeah, it's not great.  It's only used to bump failed allocation
+     * counts, so it is not critical right now. */
+-#  define ec_atomic_inc64(a)  (*a)++
++extern pthread_mutex_t umem_ppc_64inc_lock;
++static INLINE uint64_t ec_atomic_inc64(uint64_t *val)
++{
++  uint64_t rval;
++  pthread_mutex_lock(&umem_ppc_64inc_lock);
++  rval = *val + 1;
++  *val = rval;
++  pthread_mutex_unlock(&umem_ppc_64inc_lock);
++  return rval;
++}
++#  define ec_atomic_inc64 ec_atomic_inc64
++#  define NEED_64_LOCK 1
+ # endif
+ 
+ #endif
+--- umem.c.orig
++++ umem.c
+@@ -518,13 +518,10 @@ umem_log_header_t *umem_failure_log;
+ umem_log_header_t *umem_slab_log;
+ 
+ extern thread_t _thr_self(void);
+-#if defined(__MACH__) || defined(__FreeBSD__)
++#ifndef CPUHINT
+ # define CPUHINT()	((int)(_thr_self()))
+ #endif
+ 
+-#ifndef CPUHINT
+-#define	CPUHINT()		(_thr_self())
+-#endif
+ 
+ #define	CPUHINT_MAX()		INT_MAX
+ 

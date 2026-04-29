@@ -1,0 +1,71 @@
+From 887dbc0435056ec58ee48c4d803f110ade1e4c39 Mon Sep 17 00:00:00 2001
+From: Simo Sorce <simo@redhat.com>
+Date: Mon, 21 Jun 2021 14:24:18 -0400
+Subject: [PATCH] Gracefully handle failed initializations
+
+In OpenSSL 3.0 these algorithms have been moved to the legacy provider
+which is not enabled by default. This means allocation can and do fail.
+Handle failed allocations by returning an actual error instead of
+crashing later with a NULL context.
+
+Signed-off-by: Simo Sorce <simo@redhat.com>
+Upstream-Status: Backport [https://github.com/cyrusimap/cyrus-sasl/commit/887dbc0435056ec58ee48c4d803f110ade1e4c39]
+---
+ plugins/digestmd5.c | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/plugins/digestmd5.c b/plugins/digestmd5.c
+index 8cc59150..b0f25574 100644
+--- ./plugins/digestmd5.c
++++ ./plugins/digestmd5.c
+@@ -254,6 +254,7 @@ typedef struct context {
+     decode_context_t decode_context;
+ 
+     /* if privacy mode is used use these functions for encode and decode */
++    char *cipher_name;
+     cipher_function_t *cipher_enc;
+     cipher_function_t *cipher_dec;
+     cipher_init_t *cipher_init;
+@@ -2818,6 +2819,7 @@ static int digestmd5_server_mech_step2(server_context_t *stext,
+ 	}
+ 	
+ 	if (cptr->name) {
++	    text->cipher_name = cptr->name;
+ 	    text->cipher_enc = cptr->cipher_enc;
+ 	    text->cipher_dec = cptr->cipher_dec;
+ 	    text->cipher_init = cptr->cipher_init;
+@@ -2961,7 +2963,10 @@ static int digestmd5_server_mech_step2(server_context_t *stext,
+ 	if (text->cipher_init) {
+ 	    if (text->cipher_init(text, enckey, deckey) != SASL_OK) {
+ 		sparams->utils->seterror(sparams->utils->conn, 0,
+-					 "couldn't init cipher");
++					 "couldn't init cipher '%s'",
++                                         text->cipher_name);
++                result = SASL_FAIL;
++                goto FreeAllMem;
+ 	    }
+ 	}
+     }
+@@ -3512,6 +3517,7 @@ static int make_client_response(context_t *text,
+ 	oparams->mech_ssf = ctext->cipher->ssf;
+ 
+ 	nbits = ctext->cipher->n;
++	text->cipher_name = ctext->cipher->name;
+ 	text->cipher_enc = ctext->cipher->cipher_enc;
+ 	text->cipher_dec = ctext->cipher->cipher_dec;
+ 	text->cipher_free = ctext->cipher->cipher_free;
+@@ -3736,7 +3742,13 @@ static int make_client_response(context_t *text,
+ 	
+ 	/* initialize cipher if need be */
+ 	if (text->cipher_init) {
+-	    text->cipher_init(text, enckey, deckey);
++	    if (text->cipher_init(text, enckey, deckey) != SASL_OK) {
++	        params->utils->seterror(params->utils->conn, 0,
++		         "internal error: failed to init cipher '%s'",
++                         text->cipher_name);
++                result = SASL_FAIL;
++                goto FreeAllocatedMem;
++            }
+ 	}
+     }
+     

@@ -1,0 +1,113 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                unbound
+version             1.25.0
+revision            0
+checksums           rmd160  d5caad4d5d30f1b4177a43b83943bcd06e372de4 \
+                    sha256  062a6eda723fe2f041bee4079b76981569f1d12e066bbd74800242fc1ebddec7 \
+                    size    6818581
+
+categories          net
+license             BSD
+maintainers         {snc @nerdling} openmaintainer
+
+description         Validating, recursive, and caching DNS resolver.
+
+homepage            https://nlnetlabs.nl/projects/unbound/
+master_sites        https://nlnetlabs.nl/downloads/unbound/
+
+depends_build-append \
+                    port:flex
+depends_lib-append  port:expat \
+                    port:libsodium \
+                    path:lib/libssl.dylib:openssl
+
+set unbounduser     unbound
+set unboundgroup    unbound
+
+long_description    Unbound is a validating, recursive, and caching DNS \
+                    server software product from NLnet Labs, VeriSign Inc.,\
+                    Nominet, and Kirei. It is distributed free of charge \
+                    in open source form under the BSD license.\
+                    Unbound is designed as a set of modular components \
+                    that incorporate modern features, such as enhanced \
+                    security (DNSSEC) validation, Internet Protocol \
+                    Version 6 (IPv6), and a client resolver library API \
+                    as an integral part of the architecture.
+
+# add missing definition for older systems
+patchfiles-append   patch-dnsport-ipv6tclass.diff
+
+configure.args-append   --with-pidfile=${prefix}/var/run/${name}/${name}.pid \
+                        --with-ssl=${prefix} \
+                        --with-rootkey-file=${prefix}/etc/${name}/root.key \
+                        --with-libexpat=${prefix} \
+                        --with-libsodium=${prefix} \
+                        --enable-dnscrypt \
+                        --disable-dsa
+
+# util/net_help.c: error: ‘for’ loop initial declaration used outside C99 mode
+configure.cflags-append -std=c99
+
+if {${os.platform} eq "darwin" && ${os.major} == 10} {
+    compiler.blacklist  *llvm-gcc-4.2 *gcc-4.0 gcc-3.3 clang
+}
+
+variant libevent description {Build with libevent (slower, but allows use of large outgoing port ranges)} {
+    depends_lib-append      port:libevent
+    configure.args-append   --with-libevent=${prefix}
+}
+
+variant dnstap description {Enable dnstap support (a binary log format for DNS software)} {
+    depends_lib-append      port:protobuf-c
+    configure.args-append   --enable-dnstap \
+                            --with-protobuf-c=${prefix}
+}
+
+variant nghttp2 description {Build with libnghttp2 (required when setting up ${name} with DoH)} {
+    depends_lib-append      port:nghttp2
+    configure.args-append   --with-libnghttp2=${prefix}
+}
+
+test.run            yes
+
+add_users ${unbounduser} group=${unboundgroup} home=/dev/null realname=Unbound\ Resolver
+post-destroot {
+    xinstall -o ${unbounduser} -g ${unboundgroup} -m 0755 -d ${destroot}${prefix}/var/run/${name}
+    move ${destroot}${prefix}/etc/${name}/${name}.conf ${destroot}${prefix}/etc/${name}/${name}.conf-dist
+    reinplace -W ${destroot}${prefix}/etc/${name} "s/# auto-trust-anchor-file:/auto-trust-anchor-file:/g" ${name}.conf-dist
+    touch ${destroot}${prefix}/var/run/${name}/${name}.pid
+    file attributes ${destroot}${prefix}/var/run/${name}/${name}.pid -owner ${unbounduser} -group ${unboundgroup}
+    file attributes ${destroot}${prefix}/etc/${name} -group ${unboundgroup} -permissions 0775
+}
+
+post-activate {
+    system "${prefix}/sbin/unbound-anchor -a \"${prefix}/etc/${name}/root.key\" || :"
+    file attributes ${prefix}/etc/${name}/root.key -owner ${unbounduser} -group ${unboundgroup}
+}
+
+# Make it run on boot
+# Redirect stderr on launchd-started items because launchd redirects stderr to a black hole
+# Let macports (daemondo) manage the availability of process and pidfile as unbound fails to start at the first attempt
+# because unbound is unable to get port 53. Unbound starts successfully at second attempt.
+startupitem.create  yes
+startupitem.name    unbound
+startupitem.logfile /Library/Logs/unbound-startupitem.log
+startupitem.logevents   yes
+# the following entries handle multiple instances running in parallel
+startupitem.start   "(\'${prefix}/sbin/unbound-anchor\' -a \'${prefix}/etc/${name}/root.key\' 2>&1) \\"\
+    "    || : && (chown ${unbounduser}:${unboundgroup} \'${prefix}/etc/${name}/root.key\' 2>&1) \\"\
+    "    && (for i in \'${prefix}/etc/${name}/${name}\'*conf; \\"\
+    "        do \'${prefix}/sbin/unbound\' -c \"\$i\" 2>&1; done)"
+startupitem.stop    "(for i in \'${prefix}/var/run/${name}/${name}\'*pid; \\"\
+    "    do /bin/kill -15 \$(cat \"\$i\") 2>&1; done)"
+# The following ignores any second process and pidfile
+startupitem.pidfile clean ${prefix}/var/run/${name}/${name}.pid
+
+notes-append        "An example configuration is provided at ${prefix}/etc/${name}/${name}.conf-dist."
+
+livecheck.type      regex
+livecheck.url       ${homepage}about/
+livecheck.regex     {>Unbound ([0-9.]+)<}

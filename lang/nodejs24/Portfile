@@ -1,0 +1,179 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+
+configure.cxx_stdlib    libc++
+compiler.cxx_standard   2020
+
+name                    nodejs24
+version                 24.15.0
+revision                0
+
+categories              lang net
+license                 {MIT BSD}
+maintainers             {ciserlohn @ci42} openmaintainer
+
+platforms               {darwin >= 22}
+
+description             Evented I/O for V8 JavaScript
+
+long_description        Node's goal is to provide an easy way to build scalable network programs in JavaScript. \
+                        Node is similar in design to and influenced by systems like Ruby's Event \
+                        Machine or Python's Twisted. Node takes the event model a bit further-it \
+                        presents the event loop as a language construct instead of as a library.
+
+conflicts               nodejs8 nodejs10 nodejs12 nodejs14 nodejs16 nodejs18 nodejs20 nodejs22
+
+homepage                https://nodejs.org/
+master_sites            ${homepage}dist/v${version}
+use_xz                  yes
+
+checksums               rmd160  6814178c9471a0c8b253c6bb8651efe135750bfb \
+                        sha256  a4f653d79ed140aaad921e8c22a3b585ca85cfdab80d4030f6309e4663a8a1c8 \
+                        size    54197668
+
+distname                node-v${version}
+
+set py_ver              3.14
+set py_ver_nodot        [string map {. {}} ${py_ver}]
+
+depends_build-append    port:pkgconfig \
+                        port:python${py_ver_nodot}
+
+depends_lib-append      path:lib/pkgconfig/icu-uc.pc:icu \
+                        port:zlib
+
+# The Node.js docs says it requires "Xcode >= 16.1 (Apple LLVM >= 17)" [1].
+# [1] https://github.com/nodejs/node/blob/v24.x/BUILDING.md#supported-toolchains
+compiler.blacklist-append {clang < 1700}
+
+proc rec_glob {basedir pattern} {
+    set files [glob -directory $basedir -nocomplain -type f $pattern]
+    foreach dir [glob -directory $basedir -nocomplain -type d *] {
+        lappend files {*}[rec_glob $dir $pattern]
+    }
+    return $files
+}
+
+configure.python        ${prefix}/bin/python${py_ver}
+
+patchfiles              patch-common.gypi.diff
+
+post-patch {
+    foreach f [concat ${worksrcpath}/configure \
+                   ${worksrcpath}/tools/gyp/gyp \
+                   ${worksrcpath}/deps/v8/tools/objdump-v8 \
+                   [rec_glob ${worksrcpath} *.py]] {
+        reinplace -q "s|/usr/bin/env python3|${configure.python}|" ${f}
+        reinplace -q "s|/usr/bin/env python|${configure.python}|" ${f}
+    }
+    foreach gypfile [rec_glob ${worksrcpath} *.gyp*] {
+        reinplace -q "s|'python3'|'${configure.python}'|" ${gypfile}
+        reinplace -q "s|'python'|'${configure.python}'|" ${gypfile}
+    }
+}
+
+pre-configure {
+    # Copy zlib headers here because we do not want to prepend the entire
+    # ${prefix}/include to the include path (the build will then attempt to use
+    # ICU headers)
+    file mkdir ${workpath}/zlib-inc
+    file copy ${prefix}/include/zconf.h ${prefix}/include/zlib.h \
+        ${workpath}/zlib-inc/
+}
+
+configure.args-append   --without-npm
+configure.args-append   --with-intl=system-icu
+configure.args-append   --shared-zlib
+configure.args-append   --shared-zlib-includes=${workpath}/zlib-inc
+configure.args-append   --shared-zlib-libpath=${prefix}/lib
+
+# V8 only supports ARM and IA-32 processors
+supported_archs         i386 x86_64 arm64
+
+universal_variant       no
+
+# https://github.com/nodejs/node/blob/master/doc/changelogs/CHANGELOG_V17.md#openssl-30
+variant no_openssl3_with_quic description {use MacPorts OpenSSL rather than Node.js' provided OpenSSL 3.0 extended with QUIC} {
+    depends_lib-append      port:openssl3
+    configure.args-append   --shared-openssl
+    configure.args-append   --shared-openssl-includes=${prefix}/libexec/openssl3/include/openssl
+    configure.args-append   --shared-openssl-libpath=${prefix}/libexec/openssl3/lib
+}
+
+# "V8 doesn't like cache."
+configure.ccache        no
+
+test.run                yes
+test.cmd                ${build.cmd} -j${build.jobs}
+
+switch $build_arch {
+    i386 {
+        configure.args-append   --dest-cpu=ia32
+    }
+    x86_64 {
+        configure.args-append   --dest-cpu=x64
+    }
+   arm64 {
+        configure.args-append   --dest-cpu=arm64
+    }
+}
+
+build.args-append   CC=${configure.cc} \
+                    CXX=${configure.cxx} \
+                    CXX.host=${configure.cxx} \
+                    CPP=${configure.cpp} \
+                    CPPFLAGS="${configure.cppflags}" \
+                    CFLAGS="${configure.cflags} ${configure.cppflags}" \
+                    CXXFLAGS="${configure.cxxflags} ${configure.cppflags}" \
+                    LDFLAGS="${configure.ldflags}" \
+                    PYTHON=${configure.python} \
+                    V=1
+
+destroot {
+    set bindir ${destroot}${prefix}/bin
+    set libdir ${destroot}${prefix}/lib
+    set libndir ${libdir}/node
+    set libddir ${libdir}/dtrace
+    set incdir ${destroot}${prefix}/include/node
+    set docdir ${destroot}${prefix}/share/doc/${name}
+
+    xinstall -d ${bindir}
+    xinstall -d ${libdir}
+    xinstall -d ${libndir}
+    xinstall -d ${libddir}
+    xinstall -d ${incdir}
+    xinstall -d ${incdir}/uv
+    xinstall -d ${docdir}
+
+    # install binaries
+    xinstall -m 755 -W ${worksrcpath} \
+        out/Release/node \
+        ${bindir}
+
+    # install headers
+    xinstall -m 644 {*}[glob ${worksrcpath}/src/*.h]                ${incdir}
+    xinstall -m 644 {*}[glob ${worksrcpath}/deps/v8/include/*.h]    ${incdir}
+    xinstall -m 644 {*}[glob ${worksrcpath}/deps/uv/include/*.h]    ${incdir}
+    xinstall -m 644 {*}[glob ${worksrcpath}/deps/uv/include/uv/*.h] ${incdir}/uv
+    xinstall -m 644 {*}[glob ${worksrcpath}/deps/cares/include/*.h] ${incdir}
+
+    # install manpage
+    xinstall -m 644 -W ${worksrcpath} \
+        doc/node.1 \
+        ${destroot}${prefix}/share/man/man1
+
+    # install docs
+    xinstall -m 644 -W ${worksrcpath} \
+        CHANGELOG.md \
+        CONTRIBUTING.md \
+        GOVERNANCE.md \
+        LICENSE \
+        README.md \
+        SECURITY.md \
+        ${docdir}
+}
+
+livecheck.url       ${homepage}dist/
+livecheck.type      regex
+livecheck.regex     {v(24\.\d+\.\d+)}

@@ -1,0 +1,232 @@
+--- .gdbinit.orig	2026-03-26 14:53:23.000000000 -0700
++++ .gdbinit	2026-03-26 20:28:33.000000000 -0700
+@@ -1,4 +1,5 @@
+-set startup-with-shell off
++# Move this to end, so failure on older gdbs doesn't blow the rest
++# set startup-with-shell off
+ 
+ define hook-run
+   set $color_type = 0
+@@ -1348,3 +1349,6 @@ define print_flags
+   printf "RUBY_FL_USER17      : %s\n", ((struct RBasic*)($arg0))->flags & RUBY_FL_USER17 ? "1" : "0"
+   printf "RUBY_FL_USER18      : %s\n", ((struct RBasic*)($arg0))->flags & RUBY_FL_USER18 ? "1" : "0"
+ end
++
++# Moved from beginning, since it fails on older gdbs
++set startup-with-shell off
+--- ext/digest/md5/md5cc.h.orig	2026-03-26 14:53:23.000000000 -0700
++++ ext/digest/md5/md5cc.h	2026-03-26 20:28:33.000000000 -0700
+@@ -17,3 +17,11 @@ static DEFINE_FINISH_FUNC_FROM_FINAL(MD5
+ #undef MD5_Finish
+ #define MD5_Update rb_digest_MD5_update
+ #define MD5_Finish rb_digest_MD5_finish
++
++/*
++ * Pre-10.6 defines are with args, which don't match the argless use in
++ * the function pointer inits.  Thus, we redefine MD5_Init as well.
++ * This is a NOP on 10.6+.
++ */
++#undef MD5_Init
++#define MD5_Init CC_MD5_Init
+--- ext/digest/sha1/sha1cc.h.orig	2026-03-26 14:53:23.000000000 -0700
++++ ext/digest/sha1/sha1cc.h	2026-03-26 20:28:33.000000000 -0700
+@@ -12,3 +12,11 @@ static DEFINE_FINISH_FUNC_FROM_FINAL(SHA
+ #undef SHA1_Finish
+ #define SHA1_Update rb_digest_SHA1_update
+ #define SHA1_Finish rb_digest_SHA1_finish
++
++/*
++ * Pre-10.6 defines are with args, which don't match the argless use in
++ * the function pointer inits.  Thus, we redefine SHA1_Init as well.
++ * This is a NOP on 10.6+.
++ */
++#undef SHA1_Init
++#define SHA1_Init CC_SHA1_Init
+--- ext/digest/sha2/sha2cc.h.orig	2026-03-26 14:53:23.000000000 -0700
++++ ext/digest/sha2/sha2cc.h	2026-03-26 20:28:33.000000000 -0700
+@@ -1,6 +1,33 @@
+ #define COMMON_DIGEST_FOR_OPENSSL 1
+ #include <CommonCrypto/CommonDigest.h>
+ 
++/*
++ * Prior to 10.5, OpenSSL-compatible definitions are missing for
++ * SHA2 macros, though the CC_ versions are present.
++ * Add the missing definitions we actually use here if needed.
++ * Note that the definitions are the argless 10.6+-style.
++ * The weird CTX mismatch is copied from the 10.6 header.
++ */
++#ifndef SHA256_DIGEST_LENGTH
++#define SHA256_DIGEST_LENGTH		CC_SHA256_DIGEST_LENGTH
++#define SHA256_CTX					CC_SHA256_CTX
++#define SHA256_Update				CC_SHA256_Update
++#define SHA256_Final				CC_SHA256_Final
++#endif /* !defined SHA256_DIGEST_LENGTH */
++
++#ifndef SHA384_DIGEST_LENGTH
++#define SHA384_DIGEST_LENGTH		CC_SHA384_DIGEST_LENGTH
++#define SHA512_CTX					CC_SHA512_CTX
++#define SHA384_Update				CC_SHA384_Update
++#define SHA384_Final				CC_SHA384_Final
++#endif /* !defined SHA384_DIGEST_LENGTH */
++
++#ifndef SHA512_DIGEST_LENGTH
++#define SHA512_DIGEST_LENGTH		CC_SHA512_DIGEST_LENGTH
++#define SHA512_Update				CC_SHA512_Update
++#define SHA512_Final				CC_SHA512_Final
++#endif /* !defined SHA512_DIGEST_LENGTH */
++
+ #define SHA256_BLOCK_LENGTH	CC_SHA256_BLOCK_BYTES
+ #define SHA384_BLOCK_LENGTH	CC_SHA384_BLOCK_BYTES
+ #define SHA512_BLOCK_LENGTH	CC_SHA512_BLOCK_BYTES
+@@ -29,3 +56,15 @@ static DEFINE_FINISH_FUNC_FROM_FINAL(SHA
+ #undef SHA512_Finish
+ #define SHA512_Update rb_digest_SHA512_update
+ #define SHA512_Finish rb_digest_SHA512_finish
++
++/*
++ * Pre-10.6 defines are with args, which don't match the argless use in
++ * the function pointer inits.  Thus, we redefine SHA*_Init as well.
++ * This is a NOP on 10.6+.
++ */
++#undef SHA256_Init
++#define SHA256_Init CC_SHA256_Init
++#undef SHA384_Init
++#define SHA384_Init CC_SHA384_Init
++#undef SHA512_Init
++#define SHA512_Init CC_SHA512_Init
+--- file.c.orig	2026-03-26 14:53:23.000000000 -0700
++++ file.c	2026-03-26 20:28:33.000000000 -0700
+@@ -300,10 +300,30 @@ rb_CFString_class_initialize_before_fork
+     long len = sizeof(small_str) - 1;
+ 
+     const CFAllocatorRef alloc = kCFAllocatorDefault;
++
++/*
++ * The 'NoCopy' version of CFStringCreateWithBytes didn't appear until
++ * 10.5, though the original CFStringCreateWithBytes has been available
++ * since 10.0.  Hence, we need to use CFStringCreateWithBytes on OS versions
++ * earlier than 10.5.
++ *
++ * There's probably no significant benefit to using the 'NoCopy' version
++ * in this context, so making that substitution unconditionally would
++ * probably be fine (and simpler), but by the principle of least change,
++ * we limit the substitution to earlier OS versions (i.e., 10.4).
++ */
++# if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1050
+     CFStringRef s = CFStringCreateWithBytesNoCopy(alloc,
+                                                   (const UInt8 *)small_str,
+                                                   len, kCFStringEncodingUTF8,
+                                                   FALSE, kCFAllocatorNull);
++# else /* 10.4 */
++    CFStringRef s = CFStringCreateWithBytes(alloc,
++                                            (const UInt8 *)small_str,
++                                            len, kCFStringEncodingUTF8,
++                                            FALSE);
++# endif /* 10.4 */
++
+     CFMutableStringRef m = CFStringCreateMutableCopy(alloc, len, s);
+     CFRelease(m);
+     CFRelease(s);
+@@ -315,10 +335,19 @@ rb_str_append_normalized_ospath(VALUE st
+ {
+     CFIndex buflen = 0;
+     CFRange all;
++
++/* See above comment regarding CFStringCreateWithBytes[NoCopy]. */
++# if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1050
+     CFStringRef s = CFStringCreateWithBytesNoCopy(kCFAllocatorDefault,
+                                                   (const UInt8 *)ptr, len,
+                                                   kCFStringEncodingUTF8, FALSE,
+                                                   kCFAllocatorNull);
++# else /* 10.4 */
++    CFStringRef s = CFStringCreateWithBytes(kCFAllocatorDefault,
++                                            (const UInt8 *)ptr, len,
++                                            kCFStringEncodingUTF8, FALSE);
++# endif /* 10.4 */
++
+     CFMutableStringRef m = CFStringCreateMutableCopy(kCFAllocatorDefault, len, s);
+     long oldlen = RSTRING_LEN(str);
+ 
+--- lib/bundler/gem_helper.rb.orig	2026-03-26 14:53:23.000000000 -0700
++++ lib/bundler/gem_helper.rb	2026-03-26 20:28:33.000000000 -0700
+@@ -231,7 +231,7 @@ module Bundler
+     end
+ 
+     def gem_command
+-      ENV["GEM_COMMAND"]&.shellsplit || ["gem"]
++      ENV["GEM_COMMAND"]&.shellsplit || ["gem3.2"]
+     end
+   end
+ end
+--- signal.c.orig	2026-03-26 14:53:23.000000000 -0700
++++ signal.c	2026-03-26 20:28:33.000000000 -0700
+@@ -842,7 +842,8 @@ check_stack_overflow(int sig, const uint
+     const greg_t bp = mctx->gregs[REG_EBP];
+ #   endif
+ # elif defined __APPLE__
+-#   if __DARWIN_UNIX03
++#   include <AvailabilityMacros.h>
++#   if MAC_OS_X_VERSION_MAX_ALLOWED >= 1050
+ #     define MCTX_SS_REG(reg) __ss.__##reg
+ #   else
+ #     define MCTX_SS_REG(reg) ss.reg
+--- thread_pthread.c.orig	2026-03-26 14:53:23.000000000 -0700
++++ thread_pthread.c	2026-03-26 20:28:33.000000000 -0700
+@@ -42,6 +42,22 @@
+ 
+ #if defined __APPLE__
+ # include <AvailabilityMacros.h>
++
++/*
++ * This code is built with _XOPEN_SOURCE=1 and _DARWIN_C_SOURCE=1, which
++ * blocks the declaration of pthread_mach_thread_np() in pthread.h on 10.4.
++ * Overriding this by also defining _DARWIN_C_SOURCE didn't become available
++ * until 10.5.  The missing prototype went unnoticed until gcc14 started
++ * calling it an error.
++ *
++ * Note that many uses of Apple-specific functions with these settings are
++ * illegal (on 10.4), but for now we just fix the immediate problem by
++ * duplicating the missing declaration.  There's no need to make this
++ * conditional, since redundant prototypes are legal.
++ */
++#include <mach/port.h>
++mach_port_t 	pthread_mach_thread_np(pthread_t);
++
+ #endif
+ 
+ #if defined(HAVE_SYS_EVENTFD_H) && defined(HAVE_EVENTFD)
+--- tool/transform_mjit_header.rb.orig	2026-03-26 14:53:23.000000000 -0700
++++ tool/transform_mjit_header.rb	2026-03-26 20:28:33.000000000 -0700
+@@ -181,7 +181,9 @@ module MJITHeader
+   def self.conflicting_types?(code, cc, cflags)
+     with_code(code) do |path|
+       cmd = "#{cc} #{cflags} #{path}"
+-      out = IO.popen(cmd, err: [:child, :out], &:read)
++      # As per gcc docs, set LC_ALL=C to avoid curly quotes in messages
++      cmd_env = {"LC_ALL" => "C"}
++      out = IO.popen(cmd_env, cmd, err: [:child, :out], &:read)
+       !$?.success? &&
+         (out.match?(/error: conflicting types for '[^']+'/) ||
+          out.match?(/error: redefinition of parameter '[^']+'/))
+--- vm_dump.c.orig	2026-03-26 14:53:23.000000000 -0700
++++ vm_dump.c	2026-03-26 20:28:33.000000000 -0700
+@@ -470,7 +470,8 @@ rb_vmdebug_thread_dump_state(VALUE self)
+ }
+ 
+ #if defined __APPLE__
+-# if __DARWIN_UNIX03
++# include <AvailabilityMacros.h>
++# if MAC_OS_X_VERSION_MAX_ALLOWED >= 1050
+ #   define MCTX_SS_REG(reg) __ss.__##reg
+ # else
+ #   define MCTX_SS_REG(reg) ss.reg
+@@ -482,7 +483,8 @@ rb_vmdebug_thread_dump_state(VALUE self)
+ # ifdef HAVE_LIBUNWIND
+ #  undef backtrace
+ #  define backtrace unw_backtrace
+-# elif defined(__APPLE__) && defined(HAVE_LIBUNWIND_H)
++# elif defined(__APPLE__) && defined(HAVE_LIBUNWIND_H) \
++       && MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
+ #  define UNW_LOCAL_ONLY
+ #  include <libunwind.h>
+ #  include <sys/mman.h>

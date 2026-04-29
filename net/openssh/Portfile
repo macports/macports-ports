@@ -1,0 +1,242 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                openssh
+version             10.3p1
+revision            1
+categories          net
+maintainers         {@artkiver gmail.com:artkiver} openmaintainer
+license             BSD
+installs_libs       no
+conflicts           pkixssh
+
+description         OpenSSH secure login server
+
+long_description    OpenSSH is a FREE version of the SSH protocol suite of \
+                    network connectivity tools that increasing numbers of people on the \
+                    Internet are coming to rely on. Many users of telnet, rlogin, ftp, \
+                    and other such programs might not realize that their password is \
+                    transmitted across the Internet unencrypted, but it is. OpenSSH \
+                    encrypts all traffic (including passwords) to effectively eliminate \
+                    eavesdropping, connection hijacking, and other network-level \
+                    attacks. Additionally, OpenSSH provides a myriad of secure \
+                    tunneling capabilities, as well as a variety of authentication \
+                    methods.
+
+homepage            https://www.openbsd.org/openssh/
+
+checksums           rmd160  07e8abdbc3ab8300bd72185b634fa223bde551a4 \
+                    sha256  56682a36bb92dcf4b4f016fd8ec8e74059b79a8de25c15d670d731e7d18e45f4 \
+                    size    2007369
+
+master_sites        openbsd:OpenSSH/portable \
+                    ftp://ftp.cise.ufl.edu/pub/mirrors/openssh/portable/ \
+                    http://openbsd.mirrors.pair.com/OpenSSH/portable
+
+if {${name} eq ${subport}} {
+    depends_lib         path:lib/libssl.dylib:openssl \
+                        port:libedit \
+                        port:ncurses \
+                        port:zlib
+    depends_run         port:ssh-copy-id
+
+    platform darwin 10 {
+        # /usr/bin/ranlib: object: libopenbsd-compat.a(base64.o) malformed object (unknown load command 2)
+        depends_build-append port:cctools
+    }
+
+    patch.pre_args-replace  -p0 -p1
+    patchfiles          launchd.patch \
+                        pam.patch \
+                        macports-config.patch
+
+    # We need a couple of patches
+    # - pam.patch
+    #   getpwnam(3) on OS X always returns "*********" in the pw_passwd field even
+    #   when run as root, so it can't be used for authentication. This patch just
+    #   forces the use of PAM regardless of the configuration.
+    # - macports-config.patch
+    #   Changes the default configuration from the upstream-provided one by popular
+    #   request.
+
+    # We are patching configure.ac
+    use_autoreconf          yes
+
+    # strnvis(3) isn't actually "broken".  OpenBSD decided to be special and flip
+    # the order of arguments to strnvis and considers everyone else to be broken.
+    configure.cppflags-append -DBROKEN_STRNVIS=1
+
+    configure.ldflags-append  -Wl,-search_paths_first
+    configure.args      --with-ssl-dir=${prefix} \
+                        --sysconfdir=${prefix}/etc/ssh \
+                        --with-privsep-path=/var/empty \
+                        --with-md5-passwords \
+                        --with-pid-dir=${prefix}/var/run \
+                        --with-pam \
+                        --mandir=${prefix}/share/man \
+                        --with-zlib=${prefix} \
+                        --without-kerberos5 \
+                        --with-libedit \
+                        --with-pie \
+                        --without-xauth \
+                        --without-ldns \
+                        --with-audit=bsm \
+                        --with-keychain=apple
+
+    use_parallel_build  yes
+
+    platform macosx {
+        if {${os.major} < 10 || (${os.major} == 10 && ${configure.build_arch} eq "ppc")} {
+            # See: https://trac.macports.org/ticket/60385
+            # clang does not work for ppc on 10.6.8 Rosetta
+            # See also: https://trac.macports.org/ticket/65613
+            configure.args-delete   --with-keychain=apple
+        } elseif {${os.major} <= 11} {
+            # clang is required to build the new Apple Keychain integration due
+            # to it using the Object Subscripting feature, c.f. #59397.
+            # We'll keep it simple and just blacklist any gcc version, cc
+            # (which could be anything), system clang versions prior to those
+            # shipped with Xcode 4.4.
+            # Regarding the macports-clang versions, any version in the
+            # MacPorts tree should suit our needs, since the clang
+            # documentation lists FOSS clang/llvm 3.1 as the first version to
+            # support Object Subscripting and the oldest version in our tree is
+            # now 3.3.
+            compiler.blacklist-append   *gcc* cc {clang < 421}
+        } elseif {(${os.major} >= 22 && ${configure.build_arch} eq "x86_64")} {
+            compiler.blacklist-append   {clang >= 1403 < 1500}
+        }
+    }
+
+    destroot.target     install-nokeys
+
+    test.run            yes
+    test.target         tests
+
+    post-destroot {
+        destroot.keepdirs ${destroot}${prefix}/var/run
+
+        # switch default port to avoid conflict with system sshd
+        reinplace "s|#Port 22|Port 2222|g" ${destroot}${prefix}/etc/ssh/sshd_config
+
+        file rename "${destroot}${prefix}/etc/ssh/sshd_config" "${destroot}${prefix}/etc/ssh/sshd_config.example"
+        file rename "${destroot}${prefix}/etc/ssh/ssh_config" "${destroot}${prefix}/etc/ssh/ssh_config.example"
+    }
+
+    post-activate {
+        if {![file exists "${prefix}/etc/ssh/sshd_config"]} {
+            copy "${prefix}/etc/ssh/sshd_config.example" "${prefix}/etc/ssh/sshd_config"
+        }
+        if {![file exists "${prefix}/etc/ssh/ssh_config"]} {
+            copy "${prefix}/etc/ssh/ssh_config.example" "${prefix}/etc/ssh/ssh_config"
+        }
+    }
+
+    pre-test {
+        ui_msg "Tests require a cooperating server named 'somehost'."
+        ui_msg "Failure to connect to it results in a hang."
+    }
+
+    variant xauth description {Build with support for xauth} {
+        configure.args-replace  --without-xauth \
+                                --with-xauth=${prefix}/bin/xauth
+        depends_run-append      port:xauth
+    }
+
+    variant kerberos5 description "Add Kerberos5 support" {
+        depends_lib-append      port:kerberos5
+        configure.args-delete   --without-kerberos5
+        configure.args-append   --with-kerberos5=${prefix}
+
+        if {${os.platform} eq "darwin"} {
+            post-extract {
+                xinstall -m 0755 -W "${filespath}" slogin "${worksrcpath}/"
+            }
+
+            pre-configure {
+                reinplace -W "${worksrcpath}" "s|@@PREFIX@@|${prefix}|" slogin
+            }
+
+            post-destroot {
+                xinstall -m 0755 ${worksrcpath}/slogin \
+                                 ${destroot}${prefix}/bin/
+            }
+        }
+    }
+
+    variant ldns description "Use ldns for DNSSEC support" {
+        configure.args-replace  --without-ldns \
+                                --with-ldns
+        depends_lib-append      port:ldns
+    }
+
+    variant fido2 description "Enable fido2 support" {
+        configure.args-delete  --without-security-key-builtin
+        configure.args-append  --with-security-key-builtin
+        depends_lib-append      port:libfido2
+    }
+
+    platform darwin {
+        # create link to /usr/include/pam because 'security' was renamed to 'pam'
+        # in OS X.
+        # And then again back to security in 10.6.
+        if {${os.major} < 10} {
+            pre-configure {
+                xinstall -d ${workpath}/include
+                file delete ${workpath}/include/security
+                ln -s /usr/include/pam ${workpath}/include/security
+                configure.cppflags-append "-I${workpath}/include"
+            }
+        }
+    }
+
+    startupitem.create  yes
+    startupitem.name    OpenSSH
+    startupitem.start   \
+        "if \[ -x ${prefix}/sbin/sshd \]; then
+            if \[ ! -f ${prefix}/etc/ssh/ssh_host_rsa_key \]; then
+                ${prefix}/bin/ssh-keygen -t rsa -f \\
+                ${prefix}/etc/ssh/ssh_host_rsa_key -N \"\" -C `hostname`
+            fi
+            if \[ ! -f ${prefix}/etc/ssh/ssh_host_ecdsa_key \]; then
+                ${prefix}/bin/ssh-keygen -t ecdsa -f \\
+                ${prefix}/etc/ssh/ssh_host_ecdsa_key -N \"\" -C `hostname`
+            fi
+            if \[ ! -f ${prefix}/etc/ssh/ssh_host_ed25519_key \]; then
+                ${prefix}/bin/ssh-keygen -t ed25519 -f \\
+                ${prefix}/etc/ssh/ssh_host_ed25519_key -N \"\" -C `hostname`
+            fi
+            ${prefix}/sbin/sshd
+        fi"
+    startupitem.stop    \
+        "if \[ -r ${prefix}/var/run/sshd.pid \]; then
+            kill `cat ${prefix}/var/run/sshd.pid`
+        fi"
+}
+
+subport ssh-copy-id {
+    revision            0
+    platforms           any
+    supported_archs     noarch
+    maintainers         {l2dy @l2dy} openmaintainer
+    description         Shell script to install your public key(s) on a remote machine
+    long_description    {*}${description}
+
+    # Make sure to not create multiple copies of the same distfile.
+    dist_subdir         openssh
+
+    use_configure       no
+    build               {}
+
+    destroot {
+        xinstall -m 755 ${worksrcpath}/contrib/ssh-copy-id ${destroot}${prefix}/bin
+        xinstall -m 644 ${worksrcpath}/contrib/ssh-copy-id.1 ${destroot}${prefix}/share/man/man1
+    }
+}
+notes-append "As previously warned, DSA support has now been removed."
+notes-append "Please refer to https://www.openssh.com/releasenotes.html#10.0p1."
+
+livecheck.type      regex
+livecheck.url       https://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/
+livecheck.regex     openssh-(\[0-9\]+.\[0-9\]+p\[0-9\]+)[quotemeta ${extract.suffix}]

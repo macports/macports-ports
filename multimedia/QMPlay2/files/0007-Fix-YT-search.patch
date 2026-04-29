@@ -1,0 +1,414 @@
+From 176915efac285fe23935db666771af3b93f3bbfc Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <vital.had@gmail.com>
+Date: Tue, 19 Nov 2024 15:09:39 +0800
+Subject: [PATCH 07/11] Fix YT search
+
+---
+ src/modules/Extensions/CMakeLists.txt |   3 +-
+ src/modules/Extensions/YouTube.cpp    | 261 ++++++++++++--------------
+ src/modules/Extensions/YouTube.hpp    |   7 +-
+ src/qmplay2/Functions.cpp             |  31 +++
+ src/qmplay2/headers/Functions.hpp     |   2 +
+ 5 files changed, 157 insertions(+), 147 deletions(-)
+
+diff --git src/modules/Extensions/CMakeLists.txt src/modules/Extensions/CMakeLists.txt
+index a56ceea4..6f69bb81 100644
+--- src/modules/Extensions/CMakeLists.txt
++++ src/modules/Extensions/CMakeLists.txt
+@@ -117,7 +117,8 @@ add_library(${PROJECT_NAME} ${QMPLAY2_MODULE}
+ if(USE_QT5)
+     qt5_use_modules(${PROJECT_NAME} Gui Widgets ${DBUS})
+ else()
+-    target_link_libraries(${PROJECT_NAME} Qt4::QtCore Qt4::QtGui ${DBUS})
++    add_definitions(-I/opt/local/include/QJson4)
++    target_link_libraries(${PROJECT_NAME} Qt4::QtCore Qt4::QtGui QJson4 ${DBUS})
+ endif()
+ 
+ add_dependencies(${PROJECT_NAME} libqmplay2)
+diff --git src/modules/Extensions/YouTube.cpp src/modules/Extensions/YouTube.cpp
+index 4e71605b..73924de2 100644
+--- src/modules/Extensions/YouTube.cpp
++++ src/modules/Extensions/YouTube.cpp
+@@ -26,6 +26,9 @@
+ #include <QStringListModel>
+ #include <QDesktopServices>
+ #include <QTextDocument>
++#include <QJsonParseError.h>
++#include <QJsonObject.h>
++#include <QJsonArray.h>
+ #include <QProgressBar>
+ #include <QApplication>
+ #include <QHeaderView>
+@@ -819,133 +822,94 @@ void YouTube::setAutocomplete(const QByteArray &data)
+ 			completer->complete();
+ 	}
+ }
+-void YouTube::setSearchResults(QString data)
++void YouTube::setSearchResults(const QByteArray &data)
+ {
+-	/* Usuwanie komentarzy HTML */
+-	for (int commentIdx = 0 ;;)
++	const auto json = getYtInitialData(data);
++	const auto contents = json.object()
++		["contents"].toObject()
++		["twoColumnSearchResultsRenderer"].toObject()
++		["primaryContents"].toObject()
++		["sectionListRenderer"].toObject()
++		["contents"].toArray().at(0).toObject()
++		["itemSectionRenderer"].toObject()
++		["contents"].toArray()
++	;
++	for (auto &&obj : contents)
+ 	{
+-		if ((commentIdx = data.indexOf("<!--", commentIdx)) < 0)
+-			break;
+-		int commentEndIdx = data.indexOf("-->", commentIdx);
+-		if (commentEndIdx >= 0) //Jeżeli jest koniec komentarza
+-			data.remove(commentIdx, commentEndIdx - commentIdx + 3); //Wyrzuć zakomentowany fragment
+-		else
+-		{
+-			data.remove(commentIdx, data.length() - commentIdx); //Wyrzuć cały tekst do końca
+-			break;
+-		}
+-	}
++		const auto videoRenderer = obj.toObject()["videoRenderer"].toObject();
++		const auto playlistRenderer = obj.toObject()["playlistRenderer"].toObject();
+ 
+-	int i;
+-	const QStringList splitted = data.split("yt-lockup ");
+-	for (i = 1; i < splitted.count(); ++i)
+-	{
+-		QString title, videoInfoLink, duration, image, user;
+-		const QString &entry = splitted[i];
+-		int idx;
++		const bool isVideo = !videoRenderer.isEmpty() && playlistRenderer.isEmpty();
+ 
+-		if (entry.contains("yt-lockup-channel")) //Ignore channels
+-			continue;
++		QString title, contentId, length, user, publishedTime, viewCount, thumbnail, url;
+ 
+-		const bool isPlaylist = entry.contains("yt-lockup-playlist");
+-
+-		if ((idx = entry.indexOf("yt-lockup-title")) > -1)
++		if (isVideo)
+ 		{
+-			int urlIdx = entry.indexOf("href=\"", idx);
+-			int titleIdx = entry.indexOf("title=\"", idx);
+-			if (titleIdx > -1 && urlIdx > -1 && titleIdx > urlIdx)
+-			{
+-				const int endUrlIdx = entry.indexOf("\"", urlIdx += 6);
+-				const int endTitleIdx = entry.indexOf("\"", titleIdx += 7);
+-				if (endTitleIdx > -1 && endUrlIdx > -1 && endTitleIdx > endUrlIdx)
+-				{
+-					videoInfoLink = entry.mid(urlIdx, endUrlIdx - urlIdx).replace("&amp;", "&");
+-					if (!videoInfoLink.isEmpty() && videoInfoLink.startsWith('/'))
+-						videoInfoLink.prepend(YOUTUBE_URL);
+-					title = entry.mid(titleIdx, endTitleIdx - titleIdx);
+-				}
+-			}
++			title = videoRenderer["title"].toObject()["runs"].toArray().at(0).toObject()["text"].toString();
++			contentId = videoRenderer["videoId"].toString();
++			if (title.isEmpty() || contentId.isEmpty())
++				continue;
++			length = videoRenderer["lengthText"].toObject()["simpleText"].toString();
++			user = videoRenderer["ownerText"].toObject()["runs"].toArray().at(0).toObject()["text"].toString();
++			publishedTime = videoRenderer["publishedTimeText"].toObject()["simpleText"].toString();
++			viewCount = videoRenderer["shortViewCountText"].toObject()["simpleText"].toString();
++			thumbnail = videoRenderer["thumbnail"].toObject()["thumbnails"].toArray().at(0).toObject()["url"].toString();
++			url = YOUTUBE_URL "/watch?v=" + contentId;
+ 		}
+-		if ((idx = entry.indexOf("video-thumb")) > -1)
+-		{
+-			int skip = 0;
+-			int imgIdx = entry.indexOf("data-thumb=\"", idx);
+-			if (imgIdx > -1)
+-				skip = 12;
+-			else
+-			{
+-				imgIdx = entry.indexOf("src=\"", idx);
+-				skip = 5;
+-			}
+-			if (imgIdx > -1)
+-			{
+-				int imgEndIdx = entry.indexOf("\"", imgIdx += skip);
+-				if (imgEndIdx > -1)
+-				{
+-					image = entry.mid(imgIdx, imgEndIdx - imgIdx);
+-					if (image.endsWith(".gif")) //GIF nie jest miniaturką - jest to pojedynczy piksel :D (very old code, is it still relevant?)
+-						image.clear();
+-					else if (image.startsWith("//"))
+-						image.prepend("https:");
+-					if ((idx = image.indexOf("?")) > 0)
+-						image.truncate(idx);
+-				}
+-			}
+-		}
+-		if (!isPlaylist && (idx = entry.indexOf("video-time")) > -1 && (idx = entry.indexOf(">", idx)) > -1)
+-		{
+-			int endIdx = entry.indexOf("<", idx += 1);
+-			if (endIdx > -1)
+-			{
+-				duration = entry.mid(idx, endIdx - idx);
+-				if (!duration.startsWith("0") && duration.indexOf(":") == 1 && duration.count(":") == 1)
+-					duration.prepend("0");
+-			}
+-		}
+-		if ((idx = entry.indexOf("yt-lockup-byline")) > -1)
++		else
+ 		{
+-			int endIdx = entry.indexOf("</a>", idx);
+-			if (endIdx > -1 && (idx = entry.lastIndexOf(">", endIdx)) > -1)
+-			{
+-				++idx;
+-				user = entry.mid(idx, endIdx - idx);
+-			}
++			title = playlistRenderer["title"].toObject()["simpleText"].toString();
++			contentId = playlistRenderer["playlistId"].toString();
++			if (title.isEmpty() || contentId.isEmpty())
++				continue;
++
++			user = playlistRenderer["longBylineText"].toObject()["runs"].toArray().at(0).toObject()["text"].toString();
++			thumbnail = playlistRenderer
++				["thumbnailRenderer"].toObject()
++				["playlistVideoThumbnailRenderer"].toObject()
++				["thumbnail"].toObject()
++				["thumbnails"].toArray().at(0).toObject()
++				["url"].toString()
++			;
++
++			url = YOUTUBE_URL "/playlist?list=" + contentId;
+ 		}
+ 
+-		if (!title.isEmpty() && !videoInfoLink.isEmpty())
+-		{
+-			QTreeWidgetItem *tWI = new QTreeWidgetItem(resultsW);
+-			tWI->setDisabled(true);
++		auto tWI = new QTreeWidgetItem(resultsW);
+ 
+-			QTextDocument txtDoc;
+-			txtDoc.setHtml(title);
++		tWI->setText(0, title);
++		tWI->setText(1, isVideo ? length : tr("Playlist"));
++		tWI->setText(2, user);
+ 
+-			tWI->setText(0, txtDoc.toPlainText());
+-			tWI->setText(1, !isPlaylist ? duration : tr("Playlist"));
+-			tWI->setText(2, user);
++		QString tooltip;
++		tooltip += QString("%1: %2\n").arg(resultsW->headerItem()->text(0), tWI->text(0));
++		tooltip += QString("%1: %2\n").arg(isVideo ? resultsW->headerItem()->text(1) : tr("Playlist"), isVideo ? tWI->text(1) : tr("yes"));
++		tooltip += QString("%1: %2\n").arg(resultsW->headerItem()->text(2), tWI->text(2));
++		tooltip += QString("%1: %2\n").arg(tr("Published time"), publishedTime);
++		tooltip += QString("%1: %2").arg(tr("View count"), viewCount);
++		tWI->setToolTip(0, tooltip);
+ 
+-			tWI->setToolTip(0, QString("%1: %2\n%3: %4\n%5: %6")
+-				.arg(resultsW->headerItem()->text(0), tWI->text(0),
+-				!isPlaylist ? resultsW->headerItem()->text(1) : tr("Playlist"),
+-				!isPlaylist ? tWI->text(1) : tr("yes"),
+-				resultsW->headerItem()->text(2), tWI->text(2))
+-			);
++		tWI->setData(0, Qt::UserRole, url);
++		tWI->setData(1, Qt::UserRole, !isVideo);
+ 
+-			tWI->setData(0, Qt::UserRole, videoInfoLink);
+-			tWI->setData(1, Qt::UserRole, isPlaylist);
++		if (!isVideo)
++		{
++			tWI->setDisabled(true);
+ 
+-			NetworkReply *linkReply = net.start(videoInfoLink);
+-			NetworkReply *imageReply = net.start(image);
+-			linkReply->setProperty("tWI", qVariantFromValue((void *)tWI));
+-			imageReply->setProperty("tWI", qVariantFromValue((void *)tWI));
++			auto linkReply = net.start(url);
++			linkReply->setProperty("tWI", QVariant::fromValue((void *)tWI));
+ 			linkReplies += linkReply;
++		}
++
++		if (!thumbnail.isEmpty())
++		{
++			auto imageReply = net.start(thumbnail);
++			imageReply->setProperty("tWI", QVariant::fromValue((void *)tWI));
+ 			imageReplies += imageReply;
+ 		}
+ 	}
+ 
+-	if (i == 1)
+-		resultsW->clear();
+-	else
++	if (resultsW->topLevelItemCount() > 0)
+ 	{
+ 		pageSwitcher->currPageB->setValue(currPage);
+ 		pageSwitcher->show();
+@@ -1249,44 +1213,53 @@ QStringList YouTube::getUrlByItagPriority(const QList<int> &itags, QStringList r
+ 	return ret;
+ }
+ 
+-void YouTube::preparePlaylist(const QString &data, QTreeWidgetItem *tWI)
++void YouTube::preparePlaylist(const QByteArray &data, QTreeWidgetItem *tWI)
+ {
+-	int idx = data.indexOf("playlist-videos-container");
+-	if (idx > -1)
++	QStringList playlist;
++	const auto json = getYtInitialData(data);
++	const auto contents = json.object()
++		["contents"].toObject()
++		["twoColumnBrowseResultsRenderer"].toObject()
++		["tabs"].toArray().at(0).toObject()
++		["tabRenderer"].toObject()
++		["content"].toObject()
++		["sectionListRenderer"].toObject()
++		["contents"].toArray().at(0).toObject()
++		["itemSectionRenderer"].toObject()
++		["contents"].toArray().at(0).toObject()
++		["playlistVideoListRenderer"].toObject()
++		["contents"].toArray()
++	;
++	for (auto &&obj : contents)
+ 	{
+-		const QString tags[2] = {"video-id", "video-title"};
+-		QStringList playlist, entries = data.mid(idx).split("yt-uix-scroller-scroll-unit", QString::SkipEmptyParts);
+-		entries.removeFirst();
+-		for (const QString &entry : entries)
+-		{
+-			QStringList plistEntry;
+-			for (int i = 0; i < 2; ++i)
+-			{
+-				idx = entry.indexOf(tags[i]);
+-				if (idx > -1 && (idx = entry.indexOf('"', idx += tags[i].length())) > -1)
+-				{
+-					const int endIdx = entry.indexOf('"', idx += 1);
+-					if (endIdx > -1)
+-					{
+-						const QString str = entry.mid(idx, endIdx - idx);
+-						if (!i)
+-							plistEntry += str;
+-						else
+-						{
+-							QTextDocument txtDoc;
+-							txtDoc.setHtml(str);
+-							plistEntry += txtDoc.toPlainText();
+-						}
+-					}
+-				}
+-			}
+-			if (plistEntry.count() == 2)
+-				playlist += plistEntry;
+-		}
+-		if (!playlist.isEmpty())
+-		{
+-			tWI->setData(0, Qt::UserRole + 1, playlist);
+-			tWI->setDisabled(false);
+-		}
++		const auto playlistRenderer = obj.toObject()["playlistVideoRenderer"].toObject();
++		const auto title = playlistRenderer["title"].toObject()["simpleText"].toString();
++		const auto videoId = playlistRenderer["videoId"].toString();
++		if (title.isEmpty() || videoId.isEmpty())
++			continue;
++		playlist += {
++			videoId,
++			title,
++		};
++	}
++	if (!playlist.isEmpty())
++	{
++		tWI->setData(0, Qt::UserRole + 1, playlist);
++		tWI->setDisabled(false);
+ 	}
+ }
++
++QJsonDocument YouTube::getYtInitialData(const QByteArray &data)
++{
++	int idx = data.indexOf("ytInitialData");
++	if (idx < 0)
++		return QJsonDocument();
++	idx = data.indexOf("{", idx);
++	if (idx < 0)
++		return QJsonDocument();
++	int idx2 = Functions::findJsonEnd(data, idx);
++	if (idx2 < 0)
++		return QJsonDocument();
++	const auto jsonData = data.mid(idx, idx2 - idx);
++	return QJsonDocument::fromJson(jsonData);
++}
+diff --git src/modules/Extensions/YouTube.hpp src/modules/Extensions/YouTube.hpp
+index 97e7be21..9070b408 100644
+--- src/modules/Extensions/YouTube.hpp
++++ src/modules/Extensions/YouTube.hpp
+@@ -25,6 +25,7 @@
+ #include <QTreeWidget>
+ #include <QPointer>
+ #include <QMap>
++#include <QJsonDocument.h>
+ 
+ class QProgressBar;
+ class QToolButton;
+@@ -132,13 +133,15 @@ private:
+ 	void deleteReplies();
+ 
+ 	void setAutocomplete(const QByteArray &data);
+-	void setSearchResults(QString data);
++	void setSearchResults(const QByteArray &data);
+ 
+ 	QStringList getYouTubeVideo(const QString &data, const QString &PARAM = QString(), QTreeWidgetItem *tWI = nullptr, const QString &url = QString(), IOController<YouTubeDL> *youtube_dl = nullptr); //jeżeli (tWI == nullptr) to zwraca {URL, file_extension, TITLE}
+ 	QStringList getUrlByItagPriority(const QList<int> &itags, QStringList ret);
+ 
+-	void preparePlaylist(const QString &data, QTreeWidgetItem *tWI);
++	void preparePlaylist(const QByteArray &data, QTreeWidgetItem *tWI);
+ 
++	QJsonDocument getYtInitialData(const QByteArray &data);
++private:
+ 	DockWidget *dw;
+ 
+ 	QIcon youtubeIcon, videoIcon;
+diff --git src/qmplay2/Functions.cpp src/qmplay2/Functions.cpp
+index 35e59931..03ec70ee 100644
+--- src/qmplay2/Functions.cpp
++++ src/qmplay2/Functions.cpp
+@@ -912,3 +912,34 @@ QByteArray Functions::decryptAes256Cbc(const QByteArray &password, const QByteAr
+ 	deciphered.resize(decryptedLen + finalizeLen);
+ 	return deciphered;
+ }
++
++int Functions::findJsonEnd(const QByteArray &data, int idx)
++{
++	const int dataLen = data.length();
++	if (dataLen < 1 || idx < 0 || idx >= dataLen || data.at(idx) != '{')
++		return -1;
++	int brackets = 1;
++	bool inString = false;
++	char prevChr = '\0';
++	for (int i = idx + 1; i < dataLen; ++i)
++	{
++		const char chr = data.at(i);
++		if (chr == '"')
++		{
++			if (!inString)
++				inString = true;
++			else if (prevChr != '\\')
++				inString = false;
++		}
++		prevChr = chr;
++		if (inString)
++			continue;
++		if (chr == '{')
++			++brackets;
++		else if (chr == '}')
++			--brackets;
++		if (brackets == 0)
++			return i + 1;
++	}
++	return -1;
++}
+diff --git src/qmplay2/headers/Functions.hpp src/qmplay2/headers/Functions.hpp
+index e74c48f1..ef4dd090 100644
+--- src/qmplay2/headers/Functions.hpp
++++ src/qmplay2/headers/Functions.hpp
+@@ -158,4 +158,6 @@ namespace Functions
+ 	void setHeaderSectionResizeMode(QHeaderView *header, int index, int resizeMode);
+ 
+ 	QByteArray decryptAes256Cbc(const QByteArray &password, const QByteArray &salt, const QByteArray &ciphered);
++
++	int findJsonEnd(const QByteArray &data, int idx = 0);
+ }

@@ -1,0 +1,274 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem      1.0
+PortGroup       muniversal 1.0
+PortGroup       mpi 1.0
+PortGroup       xcode_workaround 1.0
+
+name            fftw-3
+version         3.3.10
+revision        0
+
+checksums       rmd160  067dd44017c42bf7f702ee66ea4f8c309624134d \
+                sha256  56c932549852cddcfafdab3820b0200c7742675be92179e59e6215b340e26467 \
+                size    4144100
+
+categories      math
+license         GPL-2+
+platforms       darwin
+maintainers     {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
+homepage        http://www.fftw.org/
+distname        fftw-${version}
+
+master_sites \
+    ${homepage} \
+    ftp://ftp.fftw.org/pub/fftw/ \
+    ftp://ftp.kusastro.kyoto-u.ac.jp/pub/src/GNU/fftw/
+
+description \
+    Fast C routines to compute the Discrete Fourier Transform
+
+long_description \
+    FFTW is a C subroutine library for computing the \
+    Discrete Fourier Transform (DFT) in one or more \
+    dimensions, of both real and complex data, and of \
+    arbitrary input size. We believe that FFTW, which is \
+    free software, should become the FFT library of choice \
+    for most applications. Our benchmarks, performed on a \
+    variety of platforms, show that FFTW's performance is \
+    typically superior to that of other publicly available \
+    FFT software. Moreover, FFTW's performance is portable: \
+    the program will perform well on most architectures \
+    without modification. \
+    This port is of fftw version 3.x. It has many \
+    improvements relative to 2.x, but is not backwardly \
+    compatible.
+
+compilers.setup default_fortran
+
+# see https://trac.macports.org/ticket/59678
+xcode_workaround.fixed_xcode_version 11.2
+
+variant openmp description {Add OpenMP support} {
+    configure.args-append --enable-openmp
+}
+variant threads description {Legacy compatibility variant} requires openmp {
+}
+if {[variant_isset openmp] && ![c_variant_isset]} {
+    compiler.openmp_version 2.5
+}
+
+variant pfft_patches description {Apply patches recommended for use as dependency of pfft port} {
+    if {![mpi_variant_isset]} {
+        ui_warn "Variant +pfft_patches has no effect without setting an MPI variant."
+    }
+
+    # Cut from scripts at https://www-user.tu-chemnitz.de/~potts/workgroup/pippig/software.php.en#fftwinstall,
+    # except that the last hunk of mpi/transpose-pairwise.c has been incorporated into 3.3.5 already.
+    #Important: Within these scripts we apply the following patches that have been submitted to FFTW but are not yet included in FFTW-3.3.4:
+    #  We add two more global transposition algorithms to the planner.
+    #  We patch file mpi/transpose-pairwise.c in order to fix a double free bug.
+    patchfiles-append patch-pfft.diff
+
+    # mpi/Makefile.am is modified, and effects are complicated to emulate with a patch to mpi/Makefile.in
+    use_autoreconf yes
+}
+
+# don't change configure.cc, etc. since we'll take care of that manually with
+# MPICC env var
+mpi.setup
+
+# blacklist older versions of clang which do not handle the --enable-avx option (#41622, #41673)
+compiler.blacklist-append {clang <= 211.10.1} gcc-4.2
+# see https://trac.macports.org/ticket/60145
+compiler.blacklist-append *gcc-3.* *gcc-4.*
+
+configure.args \
+    --enable-threads \
+    --disable-fortran \
+    --enable-shared
+
+configure.optflags -O3
+
+configure.cflags-append \
+    -fno-common \
+    -fomit-frame-pointer \
+    -fstrict-aliasing
+
+pre-configure {
+    if { [avx_compiler_isset] == 1 } {
+        array set merger_configure_args {
+            arm64  ""
+            ppc    "--enable-fma"
+            ppc64  "--enable-fma"
+            i386   "--enable-sse2 --enable-avx"
+            x86_64 "--enable-sse2 --enable-avx"
+        }
+    } else {
+        array set merger_configure_args {
+            arm64  ""
+            ppc    "--enable-fma"
+            ppc64  "--enable-fma"
+            i386   "--enable-sse2"
+            x86_64 "--enable-sse2"
+        }
+    }
+}
+
+test.run     yes
+test.target  check
+
+use_parallel_build yes
+
+platform darwin {
+  if {${os.major} < 10} {
+    configure.args-append --with-our-malloc
+  }
+}
+
+subport fftw-3-single {
+    configure.args-append --enable-float
+
+    depends_lib port:fftw-3
+
+    pre-configure {
+        if { [avx_compiler_isset] == 1 } {
+            array set merger_configure_args {
+                arm64  "--enable-neon"
+                ppc    "--enable-fma --enable-altivec"
+                ppc64  "--enable-fma --enable-altivec"
+                i386   "--enable-sse --enable-avx"
+                x86_64 "--enable-sse --enable-avx"
+            }
+        } else {
+            array set merger_configure_args {
+                arm64  "--enable-neon"
+                ppc    "--enable-fma --enable-altivec"
+                ppc64  "--enable-fma --enable-altivec"
+                i386   "--enable-sse"
+                x86_64 "--enable-sse"
+            }
+        }
+
+        if {![variant_exists universal] || ![variant_isset universal]} {
+            configure.args-append $merger_configure_args(${configure.build_arch})
+        }
+
+        platform i386 {
+            if {![variant_exists universal] || ![variant_isset universal]} {
+                configure.args-delete --enable-sse2
+                configure.args-append --enable-sse
+            }
+        }
+    }
+
+    post-destroot {
+        file delete ${destroot}${prefix}/include/fftw3.f
+        file delete ${destroot}${prefix}/include/fftw3.f03
+        file delete ${destroot}${prefix}/include/fftw3l.f03
+        file delete ${destroot}${prefix}/include/fftw3q.f03
+        file delete ${destroot}${prefix}/include/fftw3.h
+        file delete ${destroot}${prefix}/bin/fftw-wisdom-to-conf
+        file delete ${destroot}${prefix}/share/man/man1/fftw-wisdom-to-conf.1
+        file delete ${destroot}${prefix}/share/info/fftw3.info
+        file delete ${destroot}${prefix}/share/info/fftw3.info-1
+        file delete ${destroot}${prefix}/share/info/fftw3.info-2
+        file delete ${destroot}${prefix}/share/info/fftw3.info-3
+        file delete ${destroot}${prefix}/share/info/fftw3.info-4
+        file delete ${destroot}${prefix}/share/info/fftw3.info-5
+
+        if {[mpi_variant_isset]} {
+          file delete ${destroot}${prefix}/include/fftw3-mpi.f03
+          file delete ${destroot}${prefix}/include/fftw3-mpi.h
+          file delete ${destroot}${prefix}/include/fftw3l-mpi.f03
+        }
+    }
+}
+
+subport fftw-3-long {
+    configure.args-append --enable-long-double
+
+    depends_lib port:fftw-3
+
+    pre-configure {
+        array set merger_configure_args {
+            arm64  ""
+            ppc    ""
+            ppc64  ""
+            i386   ""
+            x86_64 ""
+        }
+    }
+
+    post-destroot {
+        file delete ${destroot}${prefix}/include/fftw3.f
+        file delete ${destroot}${prefix}/include/fftw3.f03
+        file delete ${destroot}${prefix}/include/fftw3l.f03
+        file delete ${destroot}${prefix}/include/fftw3q.f03
+        file delete ${destroot}${prefix}/include/fftw3.h
+        file delete ${destroot}${prefix}/bin/fftw-wisdom-to-conf
+        file delete ${destroot}${prefix}/share/man/man1/fftw-wisdom-to-conf.1
+        file delete ${destroot}${prefix}/share/info/fftw3.info
+        file delete ${destroot}${prefix}/share/info/fftw3.info-1
+        file delete ${destroot}${prefix}/share/info/fftw3.info-2
+        file delete ${destroot}${prefix}/share/info/fftw3.info-3
+        file delete ${destroot}${prefix}/share/info/fftw3.info-4
+        file delete ${destroot}${prefix}/share/info/fftw3.info-5
+
+        if {[mpi_variant_isset]} {
+          file delete ${destroot}${prefix}/include/fftw3-mpi.f03
+          file delete ${destroot}${prefix}/include/fftw3-mpi.h
+          file delete ${destroot}${prefix}/include/fftw3l-mpi.f03
+        }
+    }
+}
+
+if {${os.arch} eq "i386"} {
+    lappend merger_configure_args(arm64)   "--disable-fortran"
+    lappend merger_configure_args(ppc)     "--disable-fortran"
+    lappend merger_configure_args(ppc64)   "--disable-fortran"
+} elseif {${os.arch} eq "powerpc"} {
+    lappend merger_configure_args(arm64)   "--disable-fortran"
+    lappend merger_configure_args(i386)    "--disable-fortran"
+    lappend merger_configure_args(x86_64)  "--disable-fortran"
+} else {
+    lappend merger_configure_args(ppc)     "--disable-fortran"
+    lappend merger_configure_args(ppc64)   "--disable-fortran"
+    lappend merger_configure_args(i386)    "--disable-fortran"
+    lappend merger_configure_args(x86_64)  "--disable-fortran"
+}
+
+if {[fortran_variant_isset]} {
+    configure.args-delete --disable-fortran
+}
+
+# this is put at the bottom to run last (after the sub-ports have done their own
+# logic)
+pre-configure {
+    if {[mpi_variant_isset]} {
+        # MPIRUN is needed for test phase
+        configure.env           MPICC=${mpi.cc} MPIRUN=${mpi.exec}
+        configure.args-append   --enable-mpi
+    }
+
+    if {![variant_exists universal] || ![variant_isset universal]} {
+        configure.args-append $merger_configure_args(${configure.build_arch})
+
+        # Fix G3 build
+        platform powerpc {
+            if {[catch {sysctl hw.vectorunit} result] || $result == 0} {
+                # Added twice so delete twice
+                configure.args-delete "--enable-fma --enable-altivec"
+                configure.args-delete "--enable-fma --enable-altivec"
+            }
+        }
+    }
+}
+
+if {${name} eq ${subport}} {
+    livecheck.type  regex
+    livecheck.url   ${homepage}
+    livecheck.regex {FFTW (\d+(?:\.\d+)*) is the latest}
+} else {
+    livecheck.type  none
+}

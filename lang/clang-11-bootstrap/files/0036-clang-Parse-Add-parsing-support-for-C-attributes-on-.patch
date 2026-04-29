@@ -1,0 +1,423 @@
+From da46206ab118338f438756e7d3bf2cd87f1badb0 Mon Sep 17 00:00:00 2001
+From: "Kirill A. Korinsky" <kirill@korins.ky>
+Date: Tue, 30 Aug 2022 14:35:02 +0200
+Subject: [PATCH] [clang][Parse] Add parsing support for C++ attributes on
+ using-declarations
+
+This is backport of https://reviews.llvm.org/D91630 to clang-11
+---
+ clang/docs/LanguageExtensions.rst             | 14 +++++
+ clang/docs/ReleaseNotes.rst                   |  3 ++
+ .../clang/Basic/DiagnosticParseKinds.td       |  3 ++
+ .../clang/Basic/DiagnosticSemaKinds.td        |  3 ++
+ clang/include/clang/Basic/Features.def        |  1 +
+ clang/include/clang/Parse/Parser.h            |  5 ++
+ clang/lib/Parse/ParseDecl.cpp                 |  7 +++
+ clang/lib/Parse/ParseDeclCXX.cpp              | 54 +++++++++----------
+ clang/lib/Sema/SemaDeclAttr.cpp               | 12 +++++
+ clang/lib/Sema/SemaDeclCXX.cpp                |  6 ++-
+ clang/test/Parser/cxx0x-attributes.cpp        | 15 ++++--
+ .../cxx11-attributes-on-using-declaration.cpp | 42 +++++++++++++++
+ 12 files changed, 131 insertions(+), 34 deletions(-)
+ create mode 100644 clang/test/SemaCXX/cxx11-attributes-on-using-declaration.cpp
+
+diff --git a/clang/docs/LanguageExtensions.rst b/clang/docs/LanguageExtensions.rst
+index 06ecc186c7dc..7408333be64f 100644
+--- a/clang/docs/LanguageExtensions.rst
++++ b/clang/docs/LanguageExtensions.rst
+@@ -619,6 +619,20 @@ Attributes on the ``enum`` declaration do not apply to individual enumerators.
+ 
+ Query for this feature with ``__has_extension(enumerator_attributes)``.
+ 
++C++11 Attributes on using-declarations
++======================================
++
++Clang allows C++-style ``[[]]`` attributes to be written on using-declarations.
++For instance:
++
++.. code-block:: c++
++
++  [[clang::using_if_exists]] using foo::bar;
++  using foo::baz [[clang::using_if_exists]];
++
++You can test for support for this extension with
++``__has_extension(cxx_attributes_on_using_declarations)``.
++
+ 'User-Specified' System Frameworks
+ ==================================
+ 
+diff --git a/clang/docs/ReleaseNotes.rst b/clang/docs/ReleaseNotes.rst
+index 0ccaa7a82121..720e941e3b87 100644
+--- a/clang/docs/ReleaseNotes.rst
++++ b/clang/docs/ReleaseNotes.rst
+@@ -302,6 +302,9 @@ Attribute Changes in Clang
+   `Clang Plugins <ClangPlugins.html#defining-attributes>`_ documentation for
+   details.
+ 
++- Added support for C++11-style ``[[]]`` attributes on using-declarations, as a
++  clang extension.
++
+ Windows Support
+ ---------------
+ 
+diff --git a/clang/include/clang/Basic/DiagnosticParseKinds.td b/clang/include/clang/Basic/DiagnosticParseKinds.td
+index 1038a4119d4c..a89e6067b2b5 100644
+--- a/clang/include/clang/Basic/DiagnosticParseKinds.td
++++ b/clang/include/clang/Basic/DiagnosticParseKinds.td
+@@ -672,6 +672,9 @@ def ext_using_attribute_ns : ExtWarn<
+ def err_using_attribute_ns_conflict : Error<
+   "attribute with scope specifier cannot follow default scope specifier">;
+ def err_attributes_not_allowed : Error<"an attribute list cannot appear here">;
++def ext_cxx11_attr_placement : ExtWarn<
++  "ISO C++ does not allow an attribute list to appear here">,
++  InGroup<DiagGroup<"cxx-attribute-extension">>;
+ def err_attributes_misplaced : Error<"misplaced attributes; expected attributes here">;
+ def err_l_square_l_square_not_attribute : Error<
+   "C++11 only allows consecutive left square brackets when "
+diff --git a/clang/include/clang/Basic/DiagnosticSemaKinds.td b/clang/include/clang/Basic/DiagnosticSemaKinds.td
+index 0581296ac802..2f4511e4110f 100644
+--- a/clang/include/clang/Basic/DiagnosticSemaKinds.td
++++ b/clang/include/clang/Basic/DiagnosticSemaKinds.td
+@@ -3824,6 +3824,9 @@ def warn_attribute_sentinel_named_arguments : Warning<
+ def warn_attribute_sentinel_not_variadic : Warning<
+   "'sentinel' attribute only supported for variadic %select{functions|blocks}0">,
+   InGroup<IgnoredAttributes>;
++def warn_deprecated_ignored_on_using : Warning<
++  "%0 currently has no effect on a using declaration">,
++  InGroup<IgnoredAttributes>;
+ def err_attribute_sentinel_less_than_zero : Error<
+   "'sentinel' parameter 1 less than zero">;
+ def err_attribute_sentinel_not_zero_or_one : Error<
+diff --git a/clang/include/clang/Basic/Features.def b/clang/include/clang/Basic/Features.def
+index 999bcb7e2e29..7234eceb493e 100644
+--- a/clang/include/clang/Basic/Features.def
++++ b/clang/include/clang/Basic/Features.def
+@@ -255,6 +255,7 @@ EXTENSION(pragma_clang_attribute_external_declaration, true)
+ EXTENSION(gnu_asm, LangOpts.GNUAsm)
+ EXTENSION(gnu_asm_goto_with_outputs, LangOpts.GNUAsm)
+ EXTENSION(matrix_types, LangOpts.MatrixTypes)
++EXTENSION(cxx_attributes_on_using_declarations, LangOpts.CPlusPlus11)
+ 
+ #undef EXTENSION
+ #undef FEATURE
+diff --git a/clang/include/clang/Parse/Parser.h b/clang/include/clang/Parse/Parser.h
+index e809d87b59a0..8a7418389933 100644
+--- a/clang/include/clang/Parse/Parser.h
++++ b/clang/include/clang/Parse/Parser.h
+@@ -2631,6 +2631,10 @@ private:
+   /// locations where attributes are not allowed.
+   void DiagnoseAndSkipCXX11Attributes();
+ 
++  /// Emit warnings for C++11 and C2x attributes that are in a position that
++  /// clang accepts as an extension.
++  void DiagnoseCXX11AttributeExtension(ParsedAttributesWithRange &Attrs);
++
+   /// Parses syntax-generic attribute arguments for attributes which are
+   /// known to the implementation, and adds them to the given ParsedAttributes
+   /// list with the given attribute syntax. Returns the number of arguments
+@@ -2962,6 +2966,7 @@ private:
+                                        const ParsedTemplateInfo &TemplateInfo,
+                                        SourceLocation UsingLoc,
+                                        SourceLocation &DeclEnd,
++                                       ParsedAttributesWithRange &Attrs,
+                                        AccessSpecifier AS = AS_none);
+   Decl *ParseAliasDeclarationAfterDeclarator(
+       const ParsedTemplateInfo &TemplateInfo, SourceLocation UsingLoc,
+diff --git a/clang/lib/Parse/ParseDecl.cpp b/clang/lib/Parse/ParseDecl.cpp
+index c87d240a8206..8967aa74feda 100644
+--- a/clang/lib/Parse/ParseDecl.cpp
++++ b/clang/lib/Parse/ParseDecl.cpp
+@@ -1549,6 +1549,13 @@ void Parser::ProhibitCXX11Attributes(ParsedAttributesWithRange &Attrs,
+   }
+ }
+ 
++void Parser::DiagnoseCXX11AttributeExtension(ParsedAttributesWithRange &Attrs) {
++  for (const ParsedAttr &PA : Attrs) {
++    if (PA.isCXX11Attribute() || PA.isC2xAttribute())
++      Diag(PA.getLoc(), diag::ext_cxx11_attr_placement) << PA << PA.getRange();
++  }
++}
++
+ // Usually, `__attribute__((attrib)) class Foo {} var` means that attribute
+ // applies to var, not the type Foo.
+ // As an exception to the rule, __declspec(align(...)) before the
+diff --git a/clang/lib/Parse/ParseDeclCXX.cpp b/clang/lib/Parse/ParseDeclCXX.cpp
+index ddcbb5615fee..f4b774f7071d 100644
+--- a/clang/lib/Parse/ParseDeclCXX.cpp
++++ b/clang/lib/Parse/ParseDeclCXX.cpp
+@@ -497,11 +497,7 @@ Parser::ParseUsingDirectiveOrDeclaration(DeclaratorContext Context,
+   }
+ 
+   // Otherwise, it must be a using-declaration or an alias-declaration.
+-
+-  // Using declarations can't have attributes.
+-  ProhibitAttributes(attrs);
+-
+-  return ParseUsingDeclaration(Context, TemplateInfo, UsingLoc, DeclEnd,
++  return ParseUsingDeclaration(Context, TemplateInfo, UsingLoc, DeclEnd, attrs,
+                                AS_none);
+ }
+ 
+@@ -628,7 +624,8 @@ bool Parser::ParseUsingDeclarator(DeclaratorContext Context,
+       Context == DeclaratorContext::MemberContext &&
+       Tok.is(tok::identifier) &&
+       (NextToken().is(tok::semi) || NextToken().is(tok::comma) ||
+-       NextToken().is(tok::ellipsis)) &&
++       NextToken().is(tok::ellipsis) || NextToken().is(tok::l_square) ||
++       NextToken().is(tok::kw___attribute)) &&
+       D.SS.isNotEmpty() && LastII == Tok.getIdentifierInfo() &&
+       !D.SS.getScopeRep()->getAsNamespace() &&
+       !D.SS.getScopeRep()->getAsNamespaceAlias()) {
+@@ -671,11 +668,10 @@ bool Parser::ParseUsingDeclarator(DeclaratorContext Context,
+ ///     alias-declaration: C++11 [dcl.dcl]p1
+ ///       'using' identifier attribute-specifier-seq[opt] = type-id ;
+ ///
+-Parser::DeclGroupPtrTy
+-Parser::ParseUsingDeclaration(DeclaratorContext Context,
+-                              const ParsedTemplateInfo &TemplateInfo,
+-                              SourceLocation UsingLoc, SourceLocation &DeclEnd,
+-                              AccessSpecifier AS) {
++Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
++    DeclaratorContext Context, const ParsedTemplateInfo &TemplateInfo,
++    SourceLocation UsingLoc, SourceLocation &DeclEnd,
++    ParsedAttributesWithRange &PrefixAttrs, AccessSpecifier AS) {
+   // Check for misplaced attributes before the identifier in an
+   // alias-declaration.
+   ParsedAttributesWithRange MisplacedAttrs(AttrFactory);
+@@ -688,6 +684,17 @@ Parser::ParseUsingDeclaration(DeclaratorContext Context,
+   MaybeParseGNUAttributes(Attrs);
+   MaybeParseCXX11Attributes(Attrs);
+ 
++  // If we had any misplaced attributes from earlier, this is where they
++  // should have been written.
++  if (MisplacedAttrs.Range.isValid()) {
++    Diag(MisplacedAttrs.Range.getBegin(), diag::err_attributes_not_allowed)
++        << FixItHint::CreateInsertionFromRange(
++               Tok.getLocation(),
++               CharSourceRange::getTokenRange(MisplacedAttrs.Range))
++        << FixItHint::CreateRemoval(MisplacedAttrs.Range);
++    Attrs.takeAllFrom(MisplacedAttrs);
++  }
++
+   // Maybe this is an alias-declaration.
+   if (Tok.is(tok::equal)) {
+     if (InvalidDeclarator) {
+@@ -695,16 +702,7 @@ Parser::ParseUsingDeclaration(DeclaratorContext Context,
+       return nullptr;
+     }
+ 
+-    // If we had any misplaced attributes from earlier, this is where they
+-    // should have been written.
+-    if (MisplacedAttrs.Range.isValid()) {
+-      Diag(MisplacedAttrs.Range.getBegin(), diag::err_attributes_not_allowed)
+-        << FixItHint::CreateInsertionFromRange(
+-               Tok.getLocation(),
+-               CharSourceRange::getTokenRange(MisplacedAttrs.Range))
+-        << FixItHint::CreateRemoval(MisplacedAttrs.Range);
+-      Attrs.takeAllFrom(MisplacedAttrs);
+-    }
++    ProhibitAttributes(PrefixAttrs);
+ 
+     Decl *DeclFromDeclSpec = nullptr;
+     Decl *AD = ParseAliasDeclarationAfterDeclarator(
+@@ -712,10 +710,7 @@ Parser::ParseUsingDeclaration(DeclaratorContext Context,
+     return Actions.ConvertDeclToDeclGroup(AD, DeclFromDeclSpec);
+   }
+ 
+-  // C++11 attributes are not allowed on a using-declaration, but GNU ones
+-  // are.
+-  ProhibitAttributes(MisplacedAttrs);
+-  ProhibitAttributes(Attrs);
++  DiagnoseCXX11AttributeExtension(PrefixAttrs);
+ 
+   // Diagnose an attempt to declare a templated using-declaration.
+   // In C++11, alias-declarations can be templates:
+@@ -733,8 +728,11 @@ Parser::ParseUsingDeclaration(DeclaratorContext Context,
+ 
+   SmallVector<Decl *, 8> DeclsInGroup;
+   while (true) {
+-    // Parse (optional) attributes (most likely GNU strong-using extension).
++    // Parse (optional) attributes.
+     MaybeParseGNUAttributes(Attrs);
++    MaybeParseCXX11Attributes(Attrs);
++    DiagnoseCXX11AttributeExtension(Attrs);
++    Attrs.addAll(PrefixAttrs.begin(), PrefixAttrs.end());
+ 
+     if (InvalidDeclarator)
+       SkipUntil(tok::comma, tok::semi, StopBeforeMatch);
+@@ -2578,8 +2576,6 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
+   MaybeParseMicrosoftAttributes(attrs);
+ 
+   if (Tok.is(tok::kw_using)) {
+-    ProhibitAttributes(attrs);
+-
+     // Eat 'using'.
+     SourceLocation UsingLoc = ConsumeToken();
+ 
+@@ -2598,7 +2594,7 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
+     SourceLocation DeclEnd;
+     // Otherwise, it must be a using-declaration or an alias-declaration.
+     return ParseUsingDeclaration(DeclaratorContext::MemberContext, TemplateInfo,
+-                                 UsingLoc, DeclEnd, AS);
++                                 UsingLoc, DeclEnd, attrs, AS);
+   }
+ 
+   // Hold late-parsed attributes so we can attach a Decl to them later.
+diff --git a/clang/lib/Sema/SemaDeclAttr.cpp b/clang/lib/Sema/SemaDeclAttr.cpp
+index 3cff1937e221..92f0c314635b 100644
+--- a/clang/lib/Sema/SemaDeclAttr.cpp
++++ b/clang/lib/Sema/SemaDeclAttr.cpp
+@@ -2416,6 +2416,13 @@ AvailabilityAttr *Sema::mergeAvailabilityAttr(
+ }
+ 
+ static void handleAvailabilityAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
++  if (isa<UsingDecl, UnresolvedUsingTypenameDecl, UnresolvedUsingValueDecl>(
++          D)) {
++    S.Diag(AL.getRange().getBegin(), diag::warn_deprecated_ignored_on_using)
++        << AL;
++    return;
++  }
++
+   if (!checkAttributeNumArgs(S, AL, 1))
+     return;
+   IdentifierLoc *Platform = AL.getArgAsIdent(0);
+@@ -6398,6 +6405,11 @@ static void handleDeprecatedAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+       // namespace.
+       return;
+     }
++  } else if (isa<UsingDecl, UnresolvedUsingTypenameDecl,
++                 UnresolvedUsingValueDecl>(D)) {
++    S.Diag(AL.getRange().getBegin(), diag::warn_deprecated_ignored_on_using)
++        << AL;
++    return;
+   }
+ 
+   // Handle the cases where the attribute has a text message.
+diff --git a/clang/lib/Sema/SemaDeclCXX.cpp b/clang/lib/Sema/SemaDeclCXX.cpp
+index 710fe3bce6ef..119f61a1f2d9 100644
+--- a/clang/lib/Sema/SemaDeclCXX.cpp
++++ b/clang/lib/Sema/SemaDeclCXX.cpp
+@@ -11638,7 +11638,7 @@ bool Sema::CheckUsingShadowDecl(UsingDecl *Using, NamedDecl *Orig,
+   // Always emit a diagnostic for a mismatch between an unresolved
+   // using_if_exists and a resolved using declaration in either direction.
+   if (isa<UnresolvedUsingIfExistsDecl>(Target) !=
+-      (isa_and_nonnull<UnresolvedUsingIfExistsDecl>(NonTag))) {
++      (llvm::isa_and_nonnull<UnresolvedUsingIfExistsDecl>(NonTag))) {
+     if (!NonTag && !Tag)
+       return false;
+     Diag(Using->getLocation(), diag::err_using_decl_conflict);
+@@ -11991,9 +11991,9 @@ NamedDecl *Sema::BuildUsingDeclaration(
+   }
+ 
+   DeclContext *LookupContext = computeDeclContext(SS);
+-  NamedDecl *D;
+   NestedNameSpecifierLoc QualifierLoc = SS.getWithLocInContext(Context);
+   if (!LookupContext || EllipsisLoc.isValid()) {
++    NamedDecl *D;
+     if (HasTypenameKeyword) {
+       // FIXME: not all declaration name kinds are legal here
+       D = UnresolvedUsingTypenameDecl::Create(Context, CurContext,
+@@ -12007,6 +12007,7 @@ NamedDecl *Sema::BuildUsingDeclaration(
+     }
+     D->setAccess(AS);
+     CurContext->addDecl(D);
++    ProcessDeclAttributeList(S, D, AttrList);
+     return D;
+   }
+ 
+@@ -12016,6 +12017,7 @@ NamedDecl *Sema::BuildUsingDeclaration(
+                           UsingName, HasTypenameKeyword);
+     UD->setAccess(AS);
+     CurContext->addDecl(UD);
++    ProcessDeclAttributeList(S, UD, AttrList);
+     UD->setInvalidDecl(Invalid);
+     return UD;
+   };
+diff --git a/clang/test/Parser/cxx0x-attributes.cpp b/clang/test/Parser/cxx0x-attributes.cpp
+index 101e03845b8f..f01fe389a992 100644
+--- a/clang/test/Parser/cxx0x-attributes.cpp
++++ b/clang/test/Parser/cxx0x-attributes.cpp
+@@ -131,12 +131,12 @@ extern "C++" [[]] { } // expected-error {{an attribute list cannot appear here}}
+ [[]] static_assert(true, ""); //expected-error {{an attribute list cannot appear here}}
+ [[]] asm(""); // expected-error {{an attribute list cannot appear here}}
+ 
+-[[]] using ns::i; // expected-error {{an attribute list cannot appear here}}
++[[]] using ns::i;
+ [[unknown]] using namespace ns; // expected-warning {{unknown attribute 'unknown' ignored}}
+ [[noreturn]] using namespace ns; // expected-error {{'noreturn' attribute only applies to functions}}
+ namespace [[]] ns2 {} // expected-warning {{attributes on a namespace declaration are a C++17 extension}}
+ 
+-using [[]] alignas(4) [[]] ns::i; // expected-error {{an attribute list cannot appear here}}
++using[[]] alignas(4)[[]] ns::i;          // expected-error {{an attribute list cannot appear here}} expected-error {{'alignas' attribute only applies to variables, data members and tag types}} expected-warning {{ISO C++}}
+ using [[]] alignas(4) [[]] foobar = int; // expected-error {{an attribute list cannot appear here}} expected-error {{'alignas' attribute only applies to}}
+ 
+ void bad_attributes_in_do_while() {
+@@ -157,7 +157,16 @@ void bad_attributes_in_do_while() {
+ [[]] using T = int; // expected-error {{an attribute list cannot appear here}}
+ using T [[]] = int; // ok
+ template<typename T> using U [[]] = T;
+-using ns::i [[]]; // expected-error {{an attribute list cannot appear here}}
++using ns::i [[]];
++using ns::i [[]], ns::i [[]]; // expected-warning {{use of multiple declarators in a single using declaration is a C++17 extension}}
++struct using_in_struct_base {
++  typedef int i, j, k, l;
++};
++struct using_in_struct : using_in_struct_base {
++  [[]] using using_in_struct_base::i;
++  using using_in_struct_base::j [[]];
++  [[]] using using_in_struct_base::k [[]], using_in_struct_base::l [[]]; // expected-warning {{use of multiple declarators in a single using declaration is a C++17 extension}}
++};
+ using [[]] ns::i; // expected-error {{an attribute list cannot appear here}}
+ using T [[unknown]] = int; // expected-warning {{unknown attribute 'unknown' ignored}}
+ using T [[noreturn]] = int; // expected-error {{'noreturn' attribute only applies to functions}}
+diff --git a/clang/test/SemaCXX/cxx11-attributes-on-using-declaration.cpp b/clang/test/SemaCXX/cxx11-attributes-on-using-declaration.cpp
+new file mode 100644
+index 000000000000..5823ba7bfc2f
+--- /dev/null
++++ b/clang/test/SemaCXX/cxx11-attributes-on-using-declaration.cpp
+@@ -0,0 +1,42 @@
++// RUN: %clang_cc1 -pedantic -triple x86_64-apple-macos11 -std=c++20 -fsyntax-only -verify %s
++
++static_assert(__has_extension(cxx_attributes_on_using_declarations), "");
++
++namespace NS { typedef int x; }
++
++[[clang::annotate("foo")]] using NS::x; // expected-warning{{ISO C++ does not allow an attribute list to appear here}}
++
++
++[[deprecated]] using NS::x;                                    // expected-warning {{'deprecated' currently has no effect on a using declaration}} expected-warning{{ISO C++ does not allow}}
++using NS::x [[deprecated]];                                    // expected-warning {{'deprecated' currently has no effect on a using declaration}} expected-warning{{ISO C++ does not allow}}
++using NS::x __attribute__((deprecated));                       // expected-warning {{'deprecated' currently has no effect on a using declaration}}
++using NS::x __attribute__((availability(macos,introduced=1))); // expected-warning {{'availability' currently has no effect on a using declaration}}
++
++[[clang::availability(macos,introduced=1)]] using NS::x; // expected-warning {{'availability' currently has no effect on a using declaration}} expected-warning{{ISO C++ does not allow}}
++
++// expected-warning@+1 3 {{ISO C++ does not allow an attribute list to appear here}}
++[[clang::annotate("A")]] using NS::x [[clang::annotate("Y")]], NS::x [[clang::annotate("Z")]];
++
++template <class T>
++struct S : T {
++  [[deprecated]] using typename T::x; // expected-warning{{ISO C++ does not allow}} expected-warning {{'deprecated' currently has no effect on a using declaration}}
++  [[deprecated]] using T::y;          // expected-warning{{ISO C++ does not allow}} expected-warning {{'deprecated' currently has no effect on a using declaration}}
++
++  using typename T::z [[deprecated]]; // expected-warning{{ISO C++ does not allow}} expected-warning {{'deprecated' currently has no effect on a using declaration}}
++  using T::a [[deprecated]];          // expected-warning{{ISO C++ does not allow}} expected-warning {{'deprecated' currently has no effect on a using declaration}}
++};
++
++struct Base {};
++
++template <class B>
++struct DepBase1 : B {
++  using B::B [[]];
++
++};
++template <class B>
++struct DepBase2 : B {
++  using B::B __attribute__(());
++};
++
++DepBase1<Base> db1;
++DepBase2<Base> db2;
+-- 
+2.37.2
+

@@ -1,0 +1,170 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                librsvg
+set my_name         librsvg
+conflicts           librsvg-devel
+
+categories          graphics gnome
+license             {GPL-2+ LGPL-2+}
+maintainers         {mascguy @mascguy} openmaintainer
+
+description         GNOME implementation of rsvg.
+long_description    {*}${description}
+homepage            https://wiki.gnome.org/Projects/LibRsvg
+
+depends_build-append \
+                    port:pkgconfig
+
+depends_lib-append \
+                    path:lib/pkgconfig/cairo.pc:cairo \
+                    port:freetype \
+                    path:lib/pkgconfig/gdk-pixbuf-2.0.pc:gdk-pixbuf2 \
+                    path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    path:lib/pkgconfig/harfbuzz.pc:harfbuzz \
+                    port:libxml2 \
+                    path:lib/pkgconfig/pango.pc:pango \
+                    path:bin/vala:vala
+
+license_noconflict \
+                    gobject-introspection \
+                    rust \
+                    vala
+
+# https://trac.macports.org/ticket/70693
+# new releases of librsvg depend on cargo and its libraries,
+# which became unbuildable on macOS <10.7
+set min_darwin_for_rust 11
+
+#----------------------------------------------------------------------------------------
+# Developer-only override, allowing easy testing of desired behavior:
+# - librsvg.override.fallback=yes - Force use of fallback release
+# - librsvg.override.fallback=no  - Force use of latest release
+#----------------------------------------------------------------------------------------
+if {[info exists librsvg.override.fallback]} {
+    if {[string is boolean -strict ${librsvg.override.fallback}]} {
+        ui_msg "librsvg.override.fallback specified: ${librsvg.override.fallback}"
+        set librsvg_fallback \
+            [string is true -strict ${librsvg.override.fallback}]
+    } else {
+        error "librsvg.override.fallback must be specified as a valid boolean value"
+    }
+} else {
+    if {${os.platform} eq "darwin" && (
+            ${os.major} < ${min_darwin_for_rust}
+            || ${configure.build_arch} in "ppc ppc64"
+            || ${universal_possible} && [variant_isset universal] && ("ppc" in ${configure.universal_archs} || "ppc64" in ${configure.universal_archs})
+        )} {
+        set librsvg_fallback yes
+    } else {
+        set librsvg_fallback no
+    }
+}
+
+if {${librsvg_fallback}} {
+    # revert to latest pre-cargo version
+    PortGroup       gobject_introspection 1.0
+
+    version         2.40.21
+    revision        1
+    epoch           1
+
+    checksums       rmd160  5135ad75e976658936d03655faa37f9ed1c11a3e \
+                    sha256  f7628905f1cada84e87e2b14883ed57d8094dca3281d5bcb24ece4279e9a92ba \
+                    size    1655860
+
+    patchfiles-append \
+                    patch-librsvg-makefile-in-vapi-deps.diff \
+                    libxml2-2.14.6.patch
+
+    # pre-cargo versions still use libcroco
+    depends_lib-append \
+                    port:libcroco
+
+    # variant viewer disabled by default in an attempt to avoid loading
+    # gtk3 by those who are using it strictly as a library outside of GTK+/GNOME.
+    # https://trac.macports.org/ticket/43328
+    # https://trac.macports.org/ticket/47443
+    # https://trac.macports.org/ticket/47596
+    variant viewer description "Build the rsvg-view-3 viewer utility." {
+        depends_lib-append  path:lib/pkgconfig/gtk+-3.0.pc:gtk3
+        depends_run-append  port:adwaita-icon-theme
+    }
+    if {![variant_isset viewer]} {
+        patchfiles-append   patch-disable-viewer-pre-cargo.diff
+    }
+} else {
+    # rust PG modifies `configure.ldflags` in callback function
+    # gobject_introspection uses `configure.ldflags` in callback function
+    # therefore, rust PG must precede gobject_introspection PG
+    PortGroup       rust 1.0
+    PortGroup       gobject_introspection 1.0
+
+    version         2.58.5
+    revision        1
+    epoch           2
+
+    checksums       rmd160  2a92ed0d4784ca51dfc3d32267e96161d53cff2f \
+                    sha256  224233a0e347d38c415f15a49f0e0885313e3ecc18f3192055f9304dd2f3a27a \
+                    size    6194788
+
+    # when CARGO_BUILD_TARGET is set, directory structure changes
+    patchfiles-append \
+                    patch-configure-rust_target_subdir.diff
+
+    compiler.c_standard 2011
+}
+
+set branch          [join [lrange [split ${version} .] 0 1] .]
+master_sites        gnome:sources/${my_name}/${branch}/
+distname            ${my_name}-${version}
+dist_subdir         ${my_name}
+use_xz              yes
+
+gobject_introspection yes
+
+configure.args-append \
+                    --disable-Bsymbolic \
+                    --disable-gtk-doc \
+                    --disable-silent-rules \
+                    --enable-introspection=yes \
+                    --enable-vala=yes
+
+configure.ldflags-append \
+                    -lobjc
+
+test.run            yes
+test.dir            ${worksrcpath}/tests
+test.target         check
+
+post-destroot {
+    set docdir ${prefix}/share/doc/${name}
+    xinstall -d ${destroot}${docdir}
+    xinstall -m 644 -W ${worksrcpath} AUTHORS COPYING.LIB \
+        ${destroot}${docdir}
+
+    if {${librsvg_fallback}} {
+        xinstall -m 644 -W ${worksrcpath} COPYING \
+            ${destroot}${docdir}
+    }
+
+    xinstall -m 755 -W ${filespath} svg2pdf \
+        ${destroot}${prefix}/bin
+
+    set badfile ${prefix}/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-svg.a
+    if {[file exists ${destroot}${badfile}]} {
+        file delete ${destroot}${badfile}
+    }
+}
+
+post-activate {
+    system "${prefix}/bin/gdk-pixbuf-query-loaders --update-cache"
+}
+
+post-deactivate {
+    system "${prefix}/bin/gdk-pixbuf-query-loaders --update-cache"
+}
+
+livecheck.type      gnome
+livecheck.name      ${my_name}

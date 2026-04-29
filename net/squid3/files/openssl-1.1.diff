@@ -1,0 +1,850 @@
+--- src/ssl/gadgets.h.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/gadgets.h	2019-09-10 15:14:31.000000000 +1000
+@@ -80,13 +80,13 @@ public:
+  * TidyPointer typedefs for  common SSL objects
+  */
+ CtoCpp1(X509_free, X509 *)
+-typedef LockingPointer<X509, X509_free_cpp, CRYPTO_LOCK_X509> X509_Pointer;
++typedef TidyPointer<X509, X509_free_cpp> X509_Pointer;
+ 
+ sk_free_wrapper(sk_X509, STACK_OF(X509) *, X509_free)
+ typedef TidyPointer<STACK_OF(X509), sk_X509_free_wrapper> X509_STACK_Pointer;
+ 
+ CtoCpp1(EVP_PKEY_free, EVP_PKEY *)
+-typedef LockingPointer<EVP_PKEY, EVP_PKEY_free_cpp, CRYPTO_LOCK_EVP_PKEY> EVP_PKEY_Pointer;
++typedef TidyPointer<EVP_PKEY, EVP_PKEY_free_cpp> EVP_PKEY_Pointer;
+ 
+ CtoCpp1(BN_free, BIGNUM *)
+ typedef TidyPointer<BIGNUM, BN_free_cpp> BIGNUM_Pointer;
+@@ -113,7 +113,7 @@ CtoCpp1(SSL_CTX_free, SSL_CTX *)
+ typedef TidyPointer<SSL_CTX, SSL_CTX_free_cpp> SSL_CTX_Pointer;
+ 
+ CtoCpp1(SSL_free, SSL *)
+-typedef LockingPointer<SSL, SSL_free_cpp, CRYPTO_LOCK_SSL> SSL_Pointer;
++typedef TidyPointer<SSL, SSL_free_cpp> SSL_Pointer;
+ 
+ CtoCpp1(DH_free, DH *);
+ typedef TidyPointer<DH, DH_free_cpp> DH_Pointer;
+--- src/ssl/gadgets.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/gadgets.cc	2019-09-12 11:36:11.000000000 +1000
+@@ -109,7 +109,7 @@ bool Ssl::writeCertAndPrivateKeyToFile(S
+     if (!pkey || !cert)
+         return false;
+ 
+-    Ssl::BIO_Pointer bio(BIO_new(BIO_s_file_internal()));
++    Ssl::BIO_Pointer bio(BIO_new(BIO_s_file()));
+     if (!bio)
+         return false;
+     if (!BIO_write_filename(bio.get(), const_cast<char *>(filename)))
+@@ -292,7 +292,8 @@ mimicExtensions(Ssl::X509_Pointer & cert
+         DecipherOnly
+     };
+ 
+-    int mimicAlgo = OBJ_obj2nid(mimicCert.get()->cert_info->key->algor->algorithm);
++    EVP_PKEY *certKey = X509_get_pubkey(mimicCert.get());
++    const bool rsaPkey = (EVP_PKEY_get0_RSA(certKey) != NULL);
+ 
+     int added = 0;
+     int nid;
+@@ -302,7 +303,7 @@ mimicExtensions(Ssl::X509_Pointer & cert
+             // Mimic extension exactly.
+             if (X509_add_ext(cert.get(), ext, -1))
+                 ++added;
+-            if ( nid == NID_key_usage && mimicAlgo != NID_rsaEncryption ) {
++            if ( nid == NID_key_usage && !rsaPkey ) {
+                 // NSS does not requre the KeyEncipherment flag on EC keys
+                 // but it does require it for RSA keys.  Since ssl-bump
+                 // substitutes RSA keys for EC ones, we need to ensure that
+@@ -321,12 +322,12 @@ mimicExtensions(Ssl::X509_Pointer & cert
+                                                 &ext_der,
+                                                 (const ASN1_ITEM *)ASN1_ITEM_ptr(method->it));
+ 
+-                    ASN1_OCTET_STRING *ext_oct = M_ASN1_OCTET_STRING_new();
++                    ASN1_OCTET_STRING *ext_oct = ASN1_OCTET_STRING_new();
+                     ext_oct->data = ext_der;
+                     ext_oct->length = ext_len;
+                     X509_EXTENSION_set_data(ext, ext_oct);
+ 
+-                    M_ASN1_OCTET_STRING_free(ext_oct);
++                    ASN1_OCTET_STRING_free(ext_oct);
+                     ASN1_BIT_STRING_free(keyusage);
+                 }
+             }
+@@ -462,7 +463,7 @@ static bool generateFakeSslCertificate(S
+     Ssl::EVP_PKEY_Pointer pkey;
+     // Use signing certificates private key as generated certificate private key
+     if (properties.signWithPkey.get())
+-        pkey.resetAndLock(properties.signWithPkey.get());
++        pkey.reset(properties.signWithPkey.get());
+     else // if not exist generate one
+         pkey.reset(Ssl::createSslPrivateKey());
+ 
+@@ -603,7 +604,7 @@ static X509 * readSslX509Certificate(cha
+ {
+     if (!certFilename)
+         return NULL;
+-    Ssl::BIO_Pointer bio(BIO_new(BIO_s_file_internal()));
++    Ssl::BIO_Pointer bio(BIO_new(BIO_s_file()));
+     if (!bio)
+         return NULL;
+     if (!BIO_read_filename(bio.get(), certFilename))
+@@ -616,7 +617,7 @@ EVP_PKEY * Ssl::readSslPrivateKey(char c
+ {
+     if (!keyFilename)
+         return NULL;
+-    Ssl::BIO_Pointer bio(BIO_new(BIO_s_file_internal()));
++    Ssl::BIO_Pointer bio(BIO_new(BIO_s_file()));
+     if (!bio)
+         return NULL;
+     if (!BIO_read_filename(bio.get(), keyFilename))
+@@ -750,7 +751,7 @@ bool Ssl::certificateMatchesProperties(X
+     if (cert1_altnames) {
+         int numalts = sk_GENERAL_NAME_num(cert1_altnames);
+         for (int i = 0; match && i < numalts; ++i) {
+-            const GENERAL_NAME *aName = sk_GENERAL_NAME_value(cert1_altnames, i);
++            GENERAL_NAME *aName = sk_GENERAL_NAME_value(cert1_altnames, i);
+             match = sk_GENERAL_NAME_find(cert2_altnames, aName);
+         }
+     } else if (cert2_altnames)
+--- src/ssl/bio.h.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/bio.h	2019-09-12 14:58:05.000000000 +1000
+@@ -40,11 +40,11 @@ public:
+         bool get(const SSL *ssl); ///< Retrieves the features from SSL object
+         /// Retrieves features from raw SSL Hello message.
+         /// \param record  whether to store Message to the helloMessage member
+-        bool get(const MemBuf &, bool record = true);
++        bool get(const MemBuf &, bool record = true, SSL *ssl = NULL);
+         /// Parses a v3 ClientHello message
+-        bool parseV3Hello(const unsigned char *hello, size_t helloSize);
++        bool parseV3Hello(const unsigned char *hello, size_t helloSize, SSL *ssl);
+         /// Parses a v23 ClientHello message
+-        bool parseV23Hello(const unsigned char *hello, size_t helloSize);
++        bool parseV23Hello(const unsigned char *hello, size_t helloSize, SSL *ssl);
+         /// Parses a v3 ServerHello message.
+         bool parseV3ServerHello(const unsigned char *hello, size_t helloSize);
+         /// Prints to os stream a human readable form of sslFeatures object
+--- src/ssl/bio.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/bio.cc	2019-09-12 14:53:50.000000000 +1000
+@@ -41,25 +41,23 @@ static int squid_bio_destroy(BIO *data);
+ /* SSL callbacks */
+ static void squid_ssl_info(const SSL *ssl, int where, int ret);
+ 
+-/// Initialization structure for the BIO table with
+-/// Squid-specific methods and BIO method wrappers.
+-static BIO_METHOD SquidMethods = {
+-    BIO_TYPE_SOCKET,
+-    "squid",
+-    squid_bio_write,
+-    squid_bio_read,
+-    squid_bio_puts,
+-    NULL, // squid_bio_gets not supported
+-    squid_bio_ctrl,
+-    squid_bio_create,
+-    squid_bio_destroy,
+-    NULL // squid_callback_ctrl not supported
+-};
++static BIO_METHOD *SquidMethods = NULL;
+ 
+ BIO *
+ Ssl::Bio::Create(const int fd, Ssl::Bio::Type type)
+ {
+-    if (BIO *bio = BIO_new(&SquidMethods)) {
++    if (!SquidMethods) {
++        SquidMethods = BIO_meth_new(BIO_TYPE_SOCKET, "squid");
++        BIO_meth_set_write(SquidMethods, squid_bio_write);
++        BIO_meth_set_read(SquidMethods, squid_bio_read);
++        BIO_meth_set_puts(SquidMethods, squid_bio_puts);
++        BIO_meth_set_gets(SquidMethods, NULL);
++        BIO_meth_set_ctrl(SquidMethods, squid_bio_ctrl);
++        BIO_meth_set_create(SquidMethods, squid_bio_create);
++        BIO_meth_set_destroy(SquidMethods, squid_bio_destroy);
++    }
++
++    if (BIO *bio = BIO_new(SquidMethods)) {
+         BIO_int_ctrl(bio, BIO_C_SET_FD, type, fd);
+         return bio;
+     }
+@@ -185,21 +183,6 @@ Ssl::ClientBio::ClientBio(const int anFd
+     renegotiations.configure(10*1000);
+ }
+ 
+-bool
+-Ssl::ClientBio::isClientHello(int state)
+-{
+-    return (
+-#if defined(SSL2_ST_GET_CLIENT_HELLO_A)
+-               state == SSL2_ST_GET_CLIENT_HELLO_A ||
+-#endif
+-               state == SSL3_ST_SR_CLNT_HELLO_A ||
+-               state == SSL23_ST_SR_CLNT_HELLO_A ||
+-               state == SSL23_ST_SR_CLNT_HELLO_B ||
+-               state == SSL3_ST_SR_CLNT_HELLO_B ||
+-               state == SSL3_ST_SR_CLNT_HELLO_C
+-           );
+-}
+-
+ void
+ Ssl::ClientBio::stateChanged(const SSL *ssl, int where, int ret)
+ {
+@@ -570,10 +553,7 @@ Ssl::ServerBio::resumingSession()
+ static int
+ squid_bio_create(BIO *bi)
+ {
+-    bi->init = 0; // set when we store Bio object and socket fd (BIO_C_SET_FD)
+-    bi->num = 0;
+-    bi->ptr = NULL;
+-    bi->flags = 0;
++    BIO_set_data(bi, NULL);
+     return 1;
+ }
+ 
+@@ -581,8 +561,8 @@ squid_bio_create(BIO *bi)
+ static int
+ squid_bio_destroy(BIO *table)
+ {
+-    delete static_cast<Ssl::Bio*>(table->ptr);
+-    table->ptr = NULL;
++    delete static_cast<Ssl::Bio*>(BIO_get_data(table));
++    BIO_set_data(table, NULL);
+     return 1;
+ }
+ 
+@@ -590,7 +570,7 @@ squid_bio_destroy(BIO *table)
+ static int
+ squid_bio_write(BIO *table, const char *buf, int size)
+ {
+-    Ssl::Bio *bio = static_cast<Ssl::Bio*>(table->ptr);
++    Ssl::Bio *bio = static_cast<Ssl::Bio*>(BIO_get_data(table));
+     assert(bio);
+     return bio->write(buf, size, table);
+ }
+@@ -599,7 +579,7 @@ squid_bio_write(BIO *table, const char *
+ static int
+ squid_bio_read(BIO *table, char *buf, int size)
+ {
+-    Ssl::Bio *bio = static_cast<Ssl::Bio*>(table->ptr);
++    Ssl::Bio *bio = static_cast<Ssl::Bio*>(BIO_get_data(table));
+     assert(bio);
+     return bio->read(buf, size, table);
+ }
+@@ -627,15 +607,15 @@ squid_bio_ctrl(BIO *table, int cmd, long
+             bio = new Ssl::ServerBio(fd);
+         else
+             bio = new Ssl::ClientBio(fd);
+-        assert(!table->ptr);
+-        table->ptr = bio;
+-        table->init = 1;
++        assert(!BIO_get_data(table));
++        BIO_set_data(table, bio);
++        BIO_set_init(table, 1);
+         return 0;
+     }
+ 
+     case BIO_C_GET_FD:
+-        if (table->init) {
+-            Ssl::Bio *bio = static_cast<Ssl::Bio*>(table->ptr);
++        if (BIO_get_init(table)) {
++            Ssl::Bio *bio = static_cast<Ssl::Bio*>(BIO_get_data(table));
+             assert(bio);
+             if (arg2)
+                 *static_cast<int*>(arg2) = bio->fd();
+@@ -649,8 +629,8 @@ squid_bio_ctrl(BIO *table, int cmd, long
+         return 0;
+ 
+     case BIO_CTRL_FLUSH:
+-        if (table->init) {
+-            Ssl::Bio *bio = static_cast<Ssl::Bio*>(table->ptr);
++        if (BIO_get_init(table)) {
++            Ssl::Bio *bio = static_cast<Ssl::Bio*>(BIO_get_data(table));
+             assert(bio);
+             bio->flush(table);
+             return 1;
+@@ -680,7 +660,7 @@ static void
+ squid_ssl_info(const SSL *ssl, int where, int ret)
+ {
+     if (BIO *table = SSL_get_rbio(ssl)) {
+-        if (Ssl::Bio *bio = static_cast<Ssl::Bio*>(table->ptr))
++        if (Ssl::Bio *bio = static_cast<Ssl::Bio*>(BIO_get_data(table)))
+             bio->stateChanged(ssl, where, ret);
+     }
+ }
+@@ -721,32 +701,32 @@ Ssl::Bio::sslFeatures::get(const SSL *ss
+ #endif
+ 
+ #if !defined(OPENSSL_NO_COMP)
+-    if (ssl->session->compress_meth)
+-        compressMethod = ssl->session->compress_meth;
++    if (SSL_SESSION_get_compress_id(SSL_get_session(ssl)))
++        compressMethod = SSL_SESSION_get_compress_id(SSL_get_session(ssl));
+     else if (sslVersion >= 3) //if it is 3 or newer version then compression is disabled
+ #endif
+         compressMethod = 0;
+     debugs(83, 7, "SSL compression: " << compressMethod);
+ 
+     STACK_OF(SSL_CIPHER) * ciphers = NULL;
+-    if (ssl->server)
+-        ciphers = ssl->session->ciphers;
++    if (SSL_get_client_ciphers(ssl))
++        ciphers = SSL_get_client_ciphers(ssl);
+     else
+-        ciphers = ssl->cipher_list;
++        ciphers = SSL_get_ciphers(ssl);
+     if (ciphers) {
+         for (int i = 0; i < sk_SSL_CIPHER_num(ciphers); ++i) {
+-            SSL_CIPHER *c = sk_SSL_CIPHER_value(ciphers, i);
++            const SSL_CIPHER *c = sk_SSL_CIPHER_value(ciphers, i);
+             if (c != NULL) {
+                 if (!clientRequestedCiphers.empty())
+                     clientRequestedCiphers.append(":");
+-                clientRequestedCiphers.append(c->name);
++                clientRequestedCiphers.append(SSL_CIPHER_get_name(c));
+             }
+         }
+     }
+     debugs(83, 7, "Ciphers requested by client: " << clientRequestedCiphers);
+ 
+-    if (sslVersion >=3 && ssl->s3 && ssl->s3->client_random[0]) {
+-        memcpy(client_random, ssl->s3->client_random, SSL3_RANDOM_SIZE);
++    if (sslVersion >=3) {
++        SSL_get_client_random(ssl, client_random, SSL3_RANDOM_SIZE);
+     }
+ 
+ #if 0 /* XXX: OpenSSL 0.9.8k lacks at least some of these tlsext_* fields */
+@@ -915,7 +895,7 @@ Ssl::Bio::sslFeatures::helloRecord(const
+ }
+ 
+ bool
+-Ssl::Bio::sslFeatures::get(const MemBuf &buf, bool record)
++Ssl::Bio::sslFeatures::get(const MemBuf &buf, bool record, SSL *ssl)
+ {
+     int msgSize;
+     if ((msgSize = parseMsgHead(buf)) <= 0) {
+@@ -935,7 +915,7 @@ Ssl::Bio::sslFeatures::get(const MemBuf 
+     }
+ 
+     if (msg[0] & 0x80)
+-        return parseV23Hello(msg, (size_t)msgSize);
++        return parseV23Hello(msg, (size_t)msgSize, ssl);
+     else {
+         // Hello messages require 5 bytes header + 1 byte Msg type + 3 bytes for Msg size
+         if (buf.contentSize() < 9)
+@@ -950,7 +930,7 @@ Ssl::Bio::sslFeatures::get(const MemBuf 
+                 return true;
+             }
+         } else if (msg[5] == 0x1) // ClientHello message,
+-            return parseV3Hello(msg, (size_t)msgSize);
++            return parseV3Hello(msg, (size_t)msgSize, ssl);
+     }
+ 
+     return false;
+@@ -1030,7 +1010,7 @@ Ssl::Bio::sslFeatures::parseV3ServerHell
+ }
+ 
+ bool
+-Ssl::Bio::sslFeatures::parseV3Hello(const unsigned char *messageContainer, size_t messageContainerSize)
++Ssl::Bio::sslFeatures::parseV3Hello(const unsigned char *messageContainer, size_t messageContainerSize, SSL *ssl)
+ {
+     // Parse a ClientHello Handshake message
+     // RFC5246 section 7.4, 7.4.1.2
+@@ -1093,18 +1073,13 @@ Ssl::Bio::sslFeatures::parseV3Hello(cons
+ 
+     ciphers += 2;
+     if (ciphersLen) {
+-#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+-        const SSL_METHOD *method = TLS_method();
+-#else
+-        const SSL_METHOD *method = SSLv23_method();
+-#endif
+         for (size_t i = 0; i < ciphersLen; i += 2) {
+             // each cipher in v3/tls  HELLO message is of size 2
+-            const SSL_CIPHER *c = method->get_cipher_by_char((ciphers + i));
++            const SSL_CIPHER *c = SSL_CIPHER_find(ssl, (ciphers + i));
+             if (c != NULL) {
+                 if (!clientRequestedCiphers.empty())
+                     clientRequestedCiphers.append(":");
+-                clientRequestedCiphers.append(c->name);
++                clientRequestedCiphers.append(SSL_CIPHER_get_name(c));
+             } else
+                 unknownCiphers = true;
+         }
+@@ -1181,7 +1156,7 @@ Ssl::Bio::sslFeatures::parseV3Hello(cons
+ }
+ 
+ bool
+-Ssl::Bio::sslFeatures::parseV23Hello(const unsigned char *hello, size_t size)
++Ssl::Bio::sslFeatures::parseV23Hello(const unsigned char *hello, size_t size, SSL *ssl)
+ {
+     debugs(83, 7, "Get fake features from v23 ClientHello message.");
+     if (size < 7)
+@@ -1194,11 +1169,6 @@ Ssl::Bio::sslFeatures::parseV23Hello(con
+         return false;
+ 
+     if (ciphersLen) {
+-#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+-        const SSL_METHOD *method = TLS_method();
+-#else
+-        const SSL_METHOD *method = SSLv23_method();
+-#endif
+         for (unsigned int i = 0; i < ciphersLen; i += 3) {
+             // The v2 hello messages cipher has 3 bytes.
+             // The v2 cipher has the first byte not null
+@@ -1206,11 +1176,11 @@ Ssl::Bio::sslFeatures::parseV23Hello(con
+             // are ignoring these ciphers
+             if (ciphers[i] != 0)
+                 continue;
+-            const SSL_CIPHER *c = method->get_cipher_by_char((ciphers + i + 1));
++            const SSL_CIPHER *c = SSL_CIPHER_find(ssl, (ciphers + i + 1));
+             if (c != NULL) {
+                 if (!clientRequestedCiphers.empty())
+                     clientRequestedCiphers.append(":");
+-                clientRequestedCiphers.append(c->name);
++                clientRequestedCiphers.append(SSL_CIPHER_get_name(c));
+             }
+         }
+     }
+--- src/ssl/cert_validate_message.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/cert_validate_message.cc	2019-09-12 15:05:19.000000000 +1000
+@@ -209,7 +209,7 @@ Ssl::CertValidationResponse::RecvdError 
+ void
+ Ssl::CertValidationResponse::RecvdError::setCert(X509 *aCert)
+ {
+-    cert.resetAndLock(aCert);
++    cert.reset(aCert);
+ }
+ 
+ Ssl::CertValidationMsg::CertItem::CertItem(const CertItem &old)
+@@ -228,7 +228,7 @@ Ssl::CertValidationMsg::CertItem & Ssl::
+ void
+ Ssl::CertValidationMsg::CertItem::setCert(X509 *aCert)
+ {
+-    cert.resetAndLock(aCert);
++    cert.reset(aCert);
+ }
+ 
+ const std::string Ssl::CertValidationMsg::code_cert_validate("cert_validate");
+--- src/ssl/ErrorDetail.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/ErrorDetail.cc	2019-09-12 15:07:25.000000000 +1000
+@@ -627,12 +627,12 @@ const String &Ssl::ErrorDetail::toString
+ Ssl::ErrorDetail::ErrorDetail( Ssl::ssl_error_t err_no, X509 *cert, X509 *broken, const char *aReason): error_no (err_no), lib_error_no(SSL_ERROR_NONE), errReason(aReason)
+ {
+     if (cert)
+-        peer_cert.resetAndLock(cert);
++        peer_cert.reset(cert);
+ 
+     if (broken)
+-        broken_cert.resetAndLock(broken);
++        broken_cert.reset(broken);
+     else
+-        broken_cert.resetAndLock(cert);
++        broken_cert.reset(cert);
+ 
+     detailEntry.error_no = SSL_ERROR_NONE;
+ }
+@@ -643,11 +643,11 @@ Ssl::ErrorDetail::ErrorDetail(Ssl::Error
+     request = anErrDetail.request;
+ 
+     if (anErrDetail.peer_cert.get()) {
+-        peer_cert.resetAndLock(anErrDetail.peer_cert.get());
++        peer_cert.reset(anErrDetail.peer_cert.get());
+     }
+ 
+     if (anErrDetail.broken_cert.get()) {
+-        broken_cert.resetAndLock(anErrDetail.broken_cert.get());
++        broken_cert.reset(anErrDetail.broken_cert.get());
+     }
+ 
+     detailEntry = anErrDetail.detailEntry;
+--- src/ssl/PeerConnector.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/PeerConnector.cc	2019-09-12 15:27:55.000000000 +1000
+@@ -149,7 +149,7 @@ Ssl::PeerConnector::initializeSsl()
+         // In server-first bumping mode, clientSsl is NULL.
+         if (SSL *clientSsl = fd_table[clientConn->fd].ssl) {
+             BIO *b = SSL_get_rbio(clientSsl);
+-            cltBio = static_cast<Ssl::ClientBio *>(b->ptr);
++            cltBio = static_cast<Ssl::ClientBio *>(BIO_get_data(b));
+             const Ssl::Bio::sslFeatures &features = cltBio->getFeatures();
+             if (!features.serverName.isEmpty())
+                 hostName = new SBuf(features.serverName);
+@@ -175,7 +175,7 @@ Ssl::PeerConnector::initializeSsl()
+                 features.applyToSSL(ssl, csd->sslBumpMode);
+ 
+             BIO *b = SSL_get_rbio(ssl);
+-            Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(b->ptr);
++            Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(BIO_get_data(b));
+             // Inherite client features, like SSL version, SNI and other
+             srvBio->setClientFeatures(features);
+             srvBio->recordInput(true);
+@@ -218,7 +218,6 @@ Ssl::PeerConnector::initializeSsl()
+     if (request->clientConnectionManager.valid() &&
+             request->clientConnectionManager->serverBump() &&
+             (peeked_cert = request->clientConnectionManager->serverBump()->serverCert.get())) {
+-        CRYPTO_add(&(peeked_cert->references),1,CRYPTO_LOCK_X509);
+         SSL_set_ex_data(ssl, ssl_ex_index_ssl_peeked_cert, peeked_cert);
+     }
+ }
+@@ -292,7 +291,7 @@ Ssl::PeerConnector::serverCertificateVer
+     if (ConnStateData *csd = request->clientConnectionManager.valid()) {
+         Ssl::X509_Pointer serverCert;
+         if(Ssl::ServerBump *serverBump = csd->serverBump())
+-            serverCert.resetAndLock(serverBump->serverCert.get());
++            serverCert.reset(serverBump->serverCert.get());
+         else {
+             const int fd = serverConnection()->fd;
+             SSL *ssl = fd_table[fd].ssl;
+@@ -398,7 +397,7 @@ Ssl::PeerConnector::checkForPeekAndSplic
+     acl_checklist->banAction(allow_t(ACCESS_ALLOWED, Ssl::bumpServerFirst));
+     SSL *ssl = fd_table[serverConn->fd].ssl;
+     BIO *b = SSL_get_rbio(ssl);
+-    Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(b->ptr);
++    Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(BIO_get_data(b));
+     if (!srvBio->canSplice())
+         acl_checklist->banAction(allow_t(ACCESS_ALLOWED, Ssl::bumpSplice));
+     if (!srvBio->canBump())
+@@ -411,7 +410,7 @@ Ssl::PeerConnector::checkForPeekAndSplic
+ {
+     SSL *ssl = fd_table[serverConn->fd].ssl;
+     BIO *b = SSL_get_rbio(ssl);
+-    Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(b->ptr);
++    Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(BIO_get_data(b));
+     debugs(83,5, "Will check for peek and splice on FD " << serverConn->fd);
+ 
+     Ssl::BumpMode finalAction = action;
+@@ -578,7 +577,7 @@ Ssl::PeerConnector::handleNegotiateError
+     SSL *ssl = fd_table[fd].ssl;
+     int ssl_error = SSL_get_error(ssl, ret);
+     BIO *b = SSL_get_rbio(ssl);
+-    Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(b->ptr);
++    Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(BIO_get_data(b));
+ 
+ #ifdef EPROTO
+     int sysErrNo = EPROTO;
+@@ -676,7 +675,7 @@ Ssl::PeerConnector::handleNegotiateError
+     if (request->clientConnectionManager.valid()) {
+         // remember the server certificate from the ErrorDetail object
+         if (Ssl::ServerBump *serverBump = request->clientConnectionManager->serverBump())
+-            serverBump->serverCert.resetAndLock(anErr->detail->peerCert());
++            serverBump->serverCert.reset(anErr->detail->peerCert());
+ 
+         // For intercepted connections, set the host name to the server
+         // certificate CN. Otherwise, we just hope that CONNECT is using
+--- src/ssl/ServerBump.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/ServerBump.cc	2019-09-12 15:30:14.000000000 +1000
+@@ -55,7 +55,7 @@ Ssl::ServerBump::attachServerSSL(SSL *ss
+     if (serverSSL.get())
+         return;
+ 
+-    serverSSL.resetAndLock(ssl);
++    serverSSL.reset(ssl);
+ }
+ 
+ const Ssl::CertErrors *
+--- src/ssl/support.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/support.cc	2019-09-12 16:03:35.000000000 +1000
+@@ -227,7 +227,7 @@ static int
+ ssl_verify_cb(int ok, X509_STORE_CTX * ctx)
+ {
+     // preserve original ctx->error before SSL_ calls can overwrite it
+-    Ssl::ssl_error_t error_no = ok ? SSL_ERROR_NONE : ctx->error;
++    Ssl::ssl_error_t error_no = ok ? SSL_ERROR_NONE : X509_STORE_CTX_get_error(ctx);
+ 
+     char buffer[256] = "";
+     SSL *ssl = (SSL *)X509_STORE_CTX_get_ex_data(ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
+@@ -236,7 +236,7 @@ ssl_verify_cb(int ok, X509_STORE_CTX * c
+     void *dont_verify_domain = SSL_CTX_get_ex_data(sslctx, ssl_ctx_ex_index_dont_verify_domain);
+     ACLChecklist *check = (ACLChecklist*)SSL_get_ex_data(ssl, ssl_ex_index_cert_error_check);
+     X509 *peeked_cert = (X509 *)SSL_get_ex_data(ssl, ssl_ex_index_ssl_peeked_cert);
+-    X509 *peer_cert = ctx->cert;
++    X509 *peer_cert = X509_STORE_CTX_get0_cert(ctx);
+ 
+     X509_NAME_oneline(X509_get_subject_name(peer_cert), buffer,
+                       sizeof(buffer));
+@@ -308,7 +308,7 @@ ssl_verify_cb(int ok, X509_STORE_CTX * c
+                 ACLFilledChecklist *filledCheck = Filled(check);
+                 assert(!filledCheck->sslErrors);
+                 filledCheck->sslErrors = new Ssl::CertErrors(Ssl::CertError(error_no, broken_cert));
+-                filledCheck->serverCert.resetAndLock(peer_cert);
++                filledCheck->serverCert.reset(peer_cert);
+                 if (check->fastCheck() == ACCESS_ALLOWED) {
+                     debugs(83, 3, "bypassing SSL error " << error_no << " in " << buffer);
+                     ok = 1;
+@@ -651,7 +651,7 @@ Ssl::parse_flags(const char *flags)
+ 
+ // "dup" function for SSL_get_ex_new_index("cert_err_check")
+ static int
+-ssl_dupAclChecklist(CRYPTO_EX_DATA *, CRYPTO_EX_DATA *, void *,
++ssl_dupAclChecklist(CRYPTO_EX_DATA *, const CRYPTO_EX_DATA *, void *,
+                     int, long, void *)
+ {
+     // We do not support duplication of ACLCheckLists.
+@@ -1088,13 +1088,8 @@ Ssl::method(int version)
+     switch (version) {
+ 
+     case 2:
+-#if !defined(OPENSSL_NO_SSL2)
+-        debugs(83, 5, "Using SSLv2.");
+-        return SSLv2_client_method();
+-#else
+         debugs(83, DBG_IMPORTANT, "SSLv2 is not available in this Proxy.");
+         return NULL;
+-#endif
+         break;
+ 
+     case 3:
+@@ -1150,13 +1145,8 @@ Ssl::serverMethod(int version)
+     switch (version) {
+ 
+     case 2:
+-#if !defined(OPENSSL_NO_SSL2)
+-        debugs(83, 5, "Using SSLv2.");
+-        return SSLv2_server_method();
+-#else
+         debugs(83, DBG_IMPORTANT, "SSLv2 is not available in this Proxy.");
+         return NULL;
+-#endif
+         break;
+ 
+     case 3:
+@@ -1579,13 +1569,8 @@ Ssl::contextMethod(int version)
+     switch (version) {
+ 
+     case 2:
+-#if !defined(OPENSSL_NO_SSL2)
+-        debugs(83, 5, "Using SSLv2.");
+-        method = SSLv2_server_method();
+-#else
+         debugs(83, DBG_IMPORTANT, "SSLv2 is not available in this Proxy.");
+         return NULL;
+-#endif
+         break;
+ 
+     case 3:
+@@ -1691,7 +1676,7 @@ Ssl::chainCertificatesToSSLContext(SSL_C
+     X509 *signingCert = port.signingCert.get();
+     if (SSL_CTX_add_extra_chain_cert(sslContext, signingCert)) {
+         // increase the certificate lock
+-        CRYPTO_add(&(signingCert->references),1,CRYPTO_LOCK_X509);
++        ;
+     } else {
+         const int ssl_error = ERR_get_error();
+         debugs(33, DBG_IMPORTANT, "WARNING: can not add signing certificate to SSL context chain: " << ERR_error_string(ssl_error, NULL));
+@@ -1804,7 +1789,7 @@ void Ssl::addChainToSslContext(SSL_CTX *
+         X509 *cert = sk_X509_value(chain, i);
+         if (SSL_CTX_add_extra_chain_cert(sslContext, cert)) {
+             // increase the certificate lock
+-            CRYPTO_add(&(cert->references),1,CRYPTO_LOCK_X509);
++            ;
+         } else {
+             const int ssl_error = ERR_get_error();
+             debugs(83, DBG_IMPORTANT, "WARNING: can not add certificate to SSL context chain: " << ERR_error_string(ssl_error, NULL));
+@@ -1847,7 +1832,7 @@ findCertByIssuerFast(X509_STORE_CTX *ctx
+     const Pair ret = list.equal_range(SBuf(buffer));
+     for (Ssl::CertsIndexedList::iterator it = ret.first; it != ret.second; ++it) {
+         X509 *issuer = it->second;
+-        if (ctx->check_issued(ctx, cert, issuer)) {
++        if (X509_STORE_CTX_get_check_issued(ctx)(ctx, cert, issuer)) {
+             return issuer;
+         }
+     }
+@@ -1861,7 +1846,7 @@ findCertByIssuerSlowly(X509_STORE_CTX *c
+     const int skItemsNum = sk_X509_num(sk);
+     for (int i = 0; i < skItemsNum; ++i) {
+         X509 *issuer = sk_X509_value(sk, i);
+-        if (ctx->check_issued(ctx, cert, issuer))
++        if (X509_STORE_CTX_get_check_issued(ctx)(ctx, cert, issuer))
+             return issuer;
+     }
+     return NULL;
+@@ -1873,11 +1858,12 @@ completeIssuers(X509_STORE_CTX *ctx, STA
+ {
+     debugs(83, 2,  "completing " << sk_X509_num(untrustedCerts) << " OpenSSL untrusted certs using " << SquidUntrustedCerts.size() << " configured untrusted certificates");
+ 
+-    int depth = ctx->param->depth;
+-    X509 *current = ctx->cert;
++    const X509_VERIFY_PARAM *param = X509_STORE_CTX_get0_param(ctx);
++    int depth = X509_VERIFY_PARAM_get_depth(param);
++    X509 *current = X509_STORE_CTX_get0_cert(ctx);
+     int i = 0;
+     for (i = 0; current && (i < depth); ++i) {
+-        if (ctx->check_issued(ctx, current, current)) {
++        if (X509_STORE_CTX_get_check_issued(ctx)(ctx, current, current)) {
+             // either ctx->cert is itself self-signed or untrustedCerts
+             // aready contain the self-signed current certificate
+             break;
+@@ -1905,12 +1891,12 @@ untrustedToStoreCtx_cb(X509_STORE_CTX *c
+     // OpenSSL already maintains ctx->untrusted but we cannot modify
+     // internal OpenSSL list directly. We have to give OpenSSL our own
+     // list, but it must include certificates on the OpenSSL ctx->untrusted
+-    STACK_OF(X509) *oldUntrusted = ctx->untrusted;
++    STACK_OF(X509) *oldUntrusted = X509_STORE_CTX_get0_untrusted(ctx);
+     STACK_OF(X509) *sk = sk_X509_dup(oldUntrusted); // oldUntrusted is always not NULL
+     completeIssuers(ctx, sk);
+-    X509_STORE_CTX_set_chain(ctx, sk); // No locking/unlocking, just sets ctx->untrusted
++    X509_STORE_CTX_set0_untrusted(ctx, sk); // No locking/unlocking, just sets ctx->untrusted
+     int ret = X509_verify_cert(ctx);
+-    X509_STORE_CTX_set_chain(ctx, oldUntrusted); // Set back the old untrusted list
++    X509_STORE_CTX_set0_untrusted(ctx, oldUntrusted); // Set back the old untrusted list
+     sk_X509_free(sk); // Release sk list
+     return ret;
+ }
+@@ -1950,7 +1936,7 @@ static X509 * readSslX509CertificatesCha
+ {
+     if (!certFilename)
+         return NULL;
+-    Ssl::BIO_Pointer bio(BIO_new(BIO_s_file_internal()));
++    Ssl::BIO_Pointer bio(BIO_new(BIO_s_file()));
+     if (!bio)
+         return NULL;
+     if (!BIO_read_filename(bio.get(), certFilename))
+@@ -2023,8 +2009,8 @@ bool Ssl::generateUntrustedCert(X509_Poi
+     // O, OU, and other CA subject fields will be mimicked
+     // Expiration date and other common properties will be mimicked
+     certProperties.signAlgorithm = Ssl::algSignSelf;
+-    certProperties.signWithPkey.resetAndLock(pkey.get());
+-    certProperties.mimicCert.resetAndLock(cert.get());
++    certProperties.signWithPkey.reset(pkey.get());
++    certProperties.mimicCert.reset(cert.get());
+     return Ssl::generateSslCertificate(untrustedCert, untrustedPkey, certProperties);
+ }
+ 
+@@ -2077,19 +2063,19 @@ Ssl::CreateServer(SSL_CTX *sslContext, c
+ 
+ Ssl::CertError::CertError(ssl_error_t anErr, X509 *aCert): code(anErr)
+ {
+-    cert.resetAndLock(aCert);
++    cert.reset(aCert);
+ }
+ 
+ Ssl::CertError::CertError(CertError const &err): code(err.code)
+ {
+-    cert.resetAndLock(err.cert.get());
++    cert.reset(err.cert.get());
+ }
+ 
+ Ssl::CertError &
+ Ssl::CertError::operator = (const CertError &old)
+ {
+     code = old.code;
+-    cert.resetAndLock(old.cert.get());
++    cert.reset(old.cert.get());
+     return *this;
+ }
+ 
+@@ -2115,8 +2101,8 @@ store_session_cb(SSL *ssl, SSL_SESSION *
+ 
+     SSL_SESSION_set_timeout(session, Config.SSL.session_ttl);
+ 
+-    unsigned char *id = session->session_id;
+-    unsigned int idlen = session->session_id_length;
++    unsigned int idlen;
++    const unsigned char *id = SSL_SESSION_get_id(session, &idlen);
+     unsigned char key[MEMMAP_SLOT_KEY_SIZE];
+     // Session ids are of size 32bytes. They should always fit to a
+     // MemMap::Slot::key
+@@ -2159,7 +2145,7 @@ remove_session_cb(SSL_CTX *, SSL_SESSION
+ }
+ 
+ static SSL_SESSION *
+-get_session_cb(SSL *, unsigned char *sessionID, int len, int *copy)
++get_session_cb(SSL *, const unsigned char *sessionID, int len, int *copy)
+ {
+     if (!SslSessionCache)
+         return NULL;
+--- src/ssl/helper.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/ssl/helper.cc	2019-09-12 16:17:03.000000000 +1000
+@@ -265,7 +265,6 @@ void Ssl::CertValidationHelper::sslSubmi
+     crtdvdData->query += '\n';
+     crtdvdData->callback = callback;
+     crtdvdData->ssl = request.ssl;
+-    CRYPTO_add(&crtdvdData->ssl->references,1,CRYPTO_LOCK_SSL);
+     Ssl::CertValidationResponse::Pointer const*validationResponse;
+ 
+     if (CertValidationHelper::HelperCache &&
+--- src/client_side.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/client_side.cc	2019-09-12 16:25:54.000000000 +1000
+@@ -4071,9 +4071,9 @@ void ConnStateData::buildSslCertGenerati
+     // fake certificate adaptation requires bump-server-first mode
+     if (!sslServerBump) {
+         assert(port->signingCert.get());
+-        certProperties.signWithX509.resetAndLock(port->signingCert.get());
++        certProperties.signWithX509.reset(port->signingCert.get());
+         if (port->signPkey.get())
+-            certProperties.signWithPkey.resetAndLock(port->signPkey.get());
++            certProperties.signWithPkey.reset(port->signPkey.get());
+         certProperties.signAlgorithm = Ssl::algSignTrusted;
+         return;
+     }
+@@ -4085,7 +4085,7 @@ void ConnStateData::buildSslCertGenerati
+     assert(sslServerBump->entry);
+     if (sslServerBump->entry->isEmpty()) {
+         if (X509 *mimicCert = sslServerBump->serverCert.get())
+-            certProperties.mimicCert.resetAndLock(mimicCert);
++            certProperties.mimicCert.reset(mimicCert);
+ 
+         ACLFilledChecklist checklist(NULL, sslServerBump->request.getRaw(),
+                                      clientConnection != NULL ? clientConnection->rfc931 : dash_str);
+@@ -4138,14 +4138,14 @@ void ConnStateData::buildSslCertGenerati
+ 
+     if (certProperties.signAlgorithm == Ssl::algSignUntrusted) {
+         assert(port->untrustedSigningCert.get());
+-        certProperties.signWithX509.resetAndLock(port->untrustedSigningCert.get());
+-        certProperties.signWithPkey.resetAndLock(port->untrustedSignPkey.get());
++        certProperties.signWithX509.reset(port->untrustedSigningCert.get());
++        certProperties.signWithPkey.reset(port->untrustedSignPkey.get());
+     } else {
+         assert(port->signingCert.get());
+-        certProperties.signWithX509.resetAndLock(port->signingCert.get());
++        certProperties.signWithX509.reset(port->signingCert.get());
+ 
+         if (port->signPkey.get())
+-            certProperties.signWithPkey.resetAndLock(port->signPkey.get());
++            certProperties.signWithPkey.reset(port->signPkey.get());
+     }
+     signAlgorithm = certProperties.signAlgorithm;
+ 
+@@ -4324,7 +4324,7 @@ clientPeekAndSpliceSSL(int fd, void *dat
+ 
+     BIO *b = SSL_get_rbio(ssl);
+     assert(b);
+-    Ssl::ClientBio *bio = static_cast<Ssl::ClientBio *>(b->ptr);
++    Ssl::ClientBio *bio = static_cast<Ssl::ClientBio *>(BIO_get_data(b));
+     if (bio->gotHello()) {
+         if (conn->serverBump()) {
+             Ssl::Bio::sslFeatures const &features = bio->getFeatures();
+@@ -4360,7 +4360,7 @@ void ConnStateData::startPeekAndSplice()
+ 
+     SSL *ssl = fd_table[clientConnection->fd].ssl;
+     BIO *b = SSL_get_rbio(ssl);
+-    Ssl::ClientBio *bio = static_cast<Ssl::ClientBio *>(b->ptr);
++    Ssl::ClientBio *bio = static_cast<Ssl::ClientBio *>(BIO_get_data(b));
+     bio->hold(true);
+ }
+ 
+@@ -4391,7 +4391,7 @@ void httpsSslBumpStep2AccessCheckDone(al
+         //Normally we can splice here, because we just got client hello message
+         SSL *ssl = fd_table[connState->clientConnection->fd].ssl;
+         BIO *b = SSL_get_rbio(ssl);
+-        Ssl::ClientBio *bio = static_cast<Ssl::ClientBio *>(b->ptr);
++        Ssl::ClientBio *bio = static_cast<Ssl::ClientBio *>(BIO_get_data(b));
+         MemBuf const &rbuf = bio->rBufData();
+         debugs(83,5, "Bio for  " << connState->clientConnection << " read " << rbuf.contentSize() << " helo bytes");
+         // Do splice:
+@@ -4446,7 +4446,7 @@ ConnStateData::doPeekAndSpliceStep()
+     SSL *ssl = fd_table[clientConnection->fd].ssl;
+     BIO *b = SSL_get_rbio(ssl);
+     assert(b);
+-    Ssl::ClientBio *bio = static_cast<Ssl::ClientBio *>(b->ptr);
++    Ssl::ClientBio *bio = static_cast<Ssl::ClientBio *>(BIO_get_data(b));
+ 
+     debugs(33, 5, "PeekAndSplice mode, proceed with client negotiation. Currrent state:" << SSL_state_string_long(ssl));
+     bio->hold(false);
+--- src/tunnel.cc.orig	2018-07-16 06:46:55.000000000 +1000
++++ src/tunnel.cc	2019-09-12 16:28:50.000000000 +1000
+@@ -1281,7 +1281,7 @@ switchToTunnel(HttpRequest *request, Com
+     SSL *ssl = fd_table[srvConn->fd].ssl;
+     assert(ssl);
+     BIO *b = SSL_get_rbio(ssl);
+-    Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(b->ptr);
++    Ssl::ServerBio *srvBio = static_cast<Ssl::ServerBio *>(BIO_get_data(b));
+     const MemBuf &buf = srvBio->rBufData();
+ 
+     AsyncCall::Pointer call = commCbCall(5,5, "tunnelConnectedWriteDone",

@@ -1,0 +1,205 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           muniversal 1.0
+PortGroup           legacysupport 1.1
+PortGroup           github 1.0
+
+# Availability.h
+legacysupport.newest_darwin_requires_legacy 8
+
+set major_v         3
+# For former rollback to 3.1.x release where needed. Must now stay.
+epoch               1
+github.setup        openssl openssl ${major_v}.6.2 openssl-
+name                openssl3
+revision            0
+
+github.tarball_from releases
+checksums           rmd160  bff0f8c1831d9c112422182be482bc15d3e87c8c \
+                    sha256  aaf51a1fe064384f811daeaeb4ec4dce7340ec8bd893027eee676af31e83a04f \
+                    size    54913556
+
+# Please revbump these ports when updating the openssl3 version/revision
+#  - freeradius (#43461)
+#  - openssh (#54990)
+#  - p5-net-ssleay (#67321, for minor version bumps)
+#  - openssl (to rebuild the shim links).
+
+categories          devel security
+license             Apache-2
+maintainers         {larryv @larryv} {cal @neverpanic} openmaintainer
+
+description         OpenSSL SSL/TLS cryptography library
+long_description    The OpenSSL Project is a collaborative effort to \
+                    develop a robust, commercial-grade, full-featured, \
+                    and Open Source toolkit implementing the Secure \
+                    Sockets Layer (SSL v2/v3) and Transport Layer \
+                    Security (TLS v1) protocols as well as \
+                    a full-strength general purpose cryptography \
+                    library.
+homepage            https://www.openssl-library.org
+
+depends_lib         port:zlib
+
+distname            openssl-${version}
+
+# Old obsolete subport for overriding version holdback
+# Make it explicitly obsolete for now
+#
+if {${os.platform} eq "darwin" && ${os.major} < 18} {
+    subport ${name}-devel {
+        PortGroup           obsolete 1.0
+
+        replaced_by         ${name}
+    }
+}
+
+# https://github.com/macports/macports-ports/pull/26250#issuecomment-2437709579
+# OpenSSL 3.4.0 implements new intrinsic code that increases compiler
+# requirements. We can only use bootstrap Clang because the newer
+# one depends on openssl by default and causes a dependency cycle.
+if {${os.platform} eq "darwin" && ${os.major} < 18 && ${os.major} > 8} {
+    if {${configure.build_arch} in {"x86_64" "i386"}} {
+        depends_build-append port:clang-11-bootstrap
+        depends_skip_archcheck-append clang-11-bootstrap
+        configure.cc ${prefix}/libexec/clang-11-bootstrap/bin/clang
+        configure.cxx ${prefix}/libexec/clang-11-bootstrap/bin/clang++
+        # https://trac.macports.org/ticket/71201
+        # https://trac.macports.org/ticket/71246
+        # cctools is only needed for Snow Leopard i386/x86_64 and older.
+        # On Yosemite and newer systems it triggers the dependency cycle again.
+        if {${os.major} < 11} {
+            depends_build-append port:cctools
+        }
+    }
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    # Having the stdlib set to libc++ on 10.6 causes a dependency on a
+    # macports-clang compiler to be added, which would be a dep cycle.
+    configure.cxx_stdlib
+}
+
+set my_name         openssl-${major_v}
+set my_prefix       ${prefix}/libexec/${name}
+
+configure.ccache    no
+configure.perl      /usr/bin/perl
+configure.cmd       ./Configure
+configure.pre_args  --prefix=${my_prefix}
+configure.args      -L${prefix}/lib \
+                    --openssldir=${my_prefix}/etc/openssl \
+                    no-tests \
+                    shared \
+                    zlib
+
+# Use SDK if necessary.
+if {${configure.sdkroot} ne ""} {
+    configure.args-append   '-isysroot ${configure.sdkroot}' \
+                            -Wl,-syslibroot,${configure.sdkroot}
+}
+
+set merger_arch_compiler no
+array set merger_configure_args {
+    ppc     darwin-ppc-cc
+    i386    darwin-i386-cc
+    ppc64   darwin64-ppc-cc
+    x86_64  darwin64-x86_64-cc
+    arm64   darwin64-arm64-cc
+}
+platform darwin {
+    # Don't use i386 assembly on Tiger (#38015, #43303).
+    if {${os.major} <= 8} {
+        append merger_configure_args(i386) { no-asm}
+        # https://trac.macports.org/ticket/58992
+        configure.args-append no-async
+    }
+    # Don't use x86-64 assembly on Tiger or Leopard.
+    if {${os.major} <= 9} {
+        append merger_configure_args(x86_64) { no-asm}
+        # OpenSSL requires Perl 5.10.0, while Leopard ships Perl 5.8.8
+        depends_build-append    port:perl5
+        configure.perl          ${prefix}/bin/perl5
+    }
+}
+# Don't pass --host to configure.
+array set merger_host {ppc {} i386 {} ppc64 {} x86_64 {} arm64 {}}
+
+if {(!${universal_possible} || ![variant_isset universal])
+        && [info exists merger_configure_args(${configure.build_arch})]} {
+    configure.args-append $merger_configure_args(${configure.build_arch})
+}
+configure.universal_args-delete --disable-dependency-tracking
+
+# https://github.com/openssl/openssl/issues/16551
+# Fixes "Undefined symbols for architecture i386: ___atomic_is_lock_free"
+if {(${configure.build_arch} eq "i386") || (${universal_possible} && [variant_isset universal] && "i386" in ${configure.universal_archs})} {
+    configure.args-append   -DBROKEN_CLANG_ATOMICS
+}
+
+pre-destroot {
+    if {[variant_exists universal] && [variant_isset universal]} {
+        global merger_dont_diff
+        if {[llength ${universal_archs_to_use}] > 2} {
+            lappend merger_dont_diff ${my_prefix}/include/openssl/configuration.h
+            # Previous version/revisions got this wrong, but this situation
+            # is too obscure to justify revbumping the dependents.
+            notes-append "Universal dependents may need to be rebuilt."
+        }
+    }
+}
+
+destroot.keepdirs-append \
+    ${destroot}${my_prefix}/etc/openssl/openssl.cnf.d
+
+post-destroot {
+    # Create some links to main prefix
+    xinstall -d ${destroot}${prefix}/include/${my_name}
+    xinstall -d ${destroot}${prefix}/lib/${my_name}
+    ln -s ${my_prefix}/include/openssl ${destroot}/${prefix}/include/${my_name}/
+    foreach l [glob -tails -directory ${destroot}${my_prefix}/lib *] {
+        ln -s ${my_prefix}/lib/${l} ${destroot}/${prefix}/lib/${my_name}/${l}
+    }
+    foreach b [glob -tails -directory ${destroot}${my_prefix}/bin *] {
+        ln -s ${my_prefix}/bin/${b} ${destroot}/${prefix}/bin/${b}-${major_v}
+    }
+    # shared/man dir seems to still end up in ${prefix} and not libexec...
+    move ${destroot}${prefix}/share/man ${destroot}/${my_prefix}/share/
+    # Create link to certs from curl-ca-bundle in install prefix
+    ln -s ${prefix}/share/curl/curl-ca-bundle.crt ${destroot}${my_prefix}/etc/openssl/cert.pem
+
+    xinstall -m 0755 -d ${destroot}${my_prefix}/etc/openssl/openssl.cnf.d
+
+    set cnf [open ${destroot}${my_prefix}/etc/openssl/openssl.cnf a]
+    puts $cnf ""
+    puts $cnf "# Provide a path for providers and other configuration snippets to drop in"
+    puts $cnf ".include ${my_prefix}/etc/openssl/openssl.cnf.d/"
+    close $cnf
+}
+
+destroot.args       MANDIR=${prefix}/share/man MANSUFFIX=ssl
+
+variant rfc3779 description {enable RFC 3779: X.509 Extensions for IP Addresses and AS Identifiers} {
+    configure.args-append   enable-rfc3779
+}
+
+variant fips description {enable FIPS} {
+    configure.args-append   enable-fips
+}
+
+variant tests description {enable tests} {
+    configure.args-delete   no-tests
+
+    test.run                yes
+    test.target-append      HARNESS_JOBS=${build.jobs}
+}
+
+variant legacy description {enable legacy providers by default} {
+    # See https://trac.macports.org/ticket/63857 for context
+    post-destroot {
+        xinstall -m 0644 ${filespath}/legacy.cnf ${destroot}${my_prefix}/etc/openssl/openssl.cnf.d/legacy.cnf
+    }
+}
+
+livecheck.regex      "archive/refs/tags/openssl-((?!.*(alpha|beta))\[^\"]+)\\.tar\\.gz"

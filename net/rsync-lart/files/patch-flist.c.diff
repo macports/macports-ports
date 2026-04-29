@@ -1,0 +1,94 @@
+--- flist.c.orig	2006-01-09 12:35:38.000000000 -0600
++++ flist.c	2006-01-09 12:35:51.000000000 -0600
+@@ -27,6 +27,10 @@
+ 
+ #include "rsync.h"
+ 
++#ifdef HAVE_COPYFILE_H
++#include <copyfile.h>
++#endif
++
+ extern int verbose;
+ extern int dry_run;
+ extern int list_only;
+@@ -65,6 +69,10 @@
+ extern struct filter_list_struct filter_list;
+ extern struct filter_list_struct server_filter_list;
+ 
++#ifdef EA_SUPPORT
++extern int extended_attributes;
++#endif
++
+ int io_error;
+ dev_t filesystem_dev; /* used to implement -x */
+ 
+@@ -982,6 +990,54 @@
+ 	if (file->basename[0]) {
+ 		flist->files[flist->count++] = file;
+ 		send_file_entry(file, f, base_flags);
++#ifdef EA_SUPPORT
++		/* If the file doesn't begin with "._", and has
++		 * either acls or extended attributes, serialize
++		 * the data out and add a fake file to the file
++		 * list  with the "._" prepended to the basename.
++		 * of the original source.
++		 */
++		if (extended_attributes) {
++#ifdef HAVE_COPYFILE
++		    if(strncmp(file->basename, "._", 2)
++			&& copyfile(fname, NULL, 0,
++			    COPYFILE_CHECK | COPYFILE_METADATA)) {
++			char *bp;
++			struct file_struct *file2 = NULL;
++			int alloc_len;
++			
++			if (verbose > 4)
++			    rprintf(FINFO, "added synthetic file for: %s\n", fname);
++
++			alloc_len = file_struct_len
++			    + strlen(file->basename) + 1 + 2 // + strlen("._")
++			    + MD4_SUM_LENGTH;
++
++			bp = pool_alloc(flist->file_pool, alloc_len, "receive_metadata_entry");
++
++			file2 = (struct file_struct *)bp;
++			memcpy(bp, file, file_struct_len);
++			bp += file_struct_len;
++
++			file2->basename = bp;
++			memcpy(bp + 2, file->basename, strlen(file->basename) + 1);
++			file2->basename[0] = '.';
++			file2->basename[1] = '_';
++			file2->length = 1;
++			file2->mode = S_IFREG | S_IRUSR;
++
++			flist_expand(flist);
++			flist->files[flist->count++] = file2;
++
++			if (f != -1)
++			    write_byte(f, 1);
++			send_file_entry(file2, f, base_flags);
++		    }
++#endif
++			if (f != -1)
++			    write_byte(f, 0);
++		}
++#endif
+ 	}
+ 	return file;
+ }
+@@ -1318,6 +1374,14 @@
+ 			flags |= read_byte(f) << 8;
+ 		file = receive_file_entry(flist, flags, f);
+ 
++#ifdef EA_SUPPORT
++		if (extended_attributes && read_byte(f))
++		    if (verbose > 4)
++			rprintf(FINFO, "receiving synthetic file entry for: %s/%s\n",
++				flist->files[flist->count]->dirname ? flist->files[flist->count]->dirname : ".",
++				flist->files[flist->count]->basename);
++#endif
++
+ 		if (S_ISREG(file->mode))
+ 			stats.total_size += file->length;
+ 

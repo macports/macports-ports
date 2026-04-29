@@ -1,0 +1,199 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           compilers 1.0
+PortGroup           github 1.0
+PortGroup           muniversal 1.1
+PortGroup           xcode_workaround 1.0
+
+name                OpenBLAS
+categories          math science
+license             BSD
+maintainers         {nicos @NicosPavlov} {michaelld @michaelld} openmaintainer
+description         OpenBLAS is an optimized BLAS library based on GotoBLAS2
+long_description    {*}${description}
+
+# Block compilers that do not support thread-local storage.
+compiler.cxx_standard 2011
+compiler.c_standard   2011
+compiler.thread_local_storage yes
+
+subport OpenBLAS-devel {}
+
+if {[string first "-devel" $subport] > 0} {
+
+    github.setup    OpenMathLib OpenBLAS 9b3cc7835bd98439924cd6b9d1bf5e951b950bc0
+    github.tarball_from archive
+    version         20260402-[string range ${github.version} 0 7]
+    checksums       rmd160  bd861aab88b42eece021ac94846228bb3681ee7c \
+                    sha256  dbd477ad6cc88f650f99d7820dd6202eed322df6afb96072f32ed4c313146b7c \
+                    size    25282237
+    revision        0
+
+    conflicts       OpenBLAS
+
+    github.livecheck.branch develop
+
+    # Not using precompiled binaries in -devel support
+    default_variants-append +native
+
+} else {
+
+    github.setup    OpenMathLib OpenBLAS 0.3.32 v
+    github.tarball_from releases
+    checksums       rmd160  03a6a562c6b688d41442035ee4d5cbf194481d9d \
+                    sha256  f8a1138e01fddca9e4c29f9684fd570ba39dedc9ca76055e1425d5d4b1a4a766 \
+                    size    25221171
+    revision        0
+
+    conflicts       OpenBLAS-devel
+
+    if {![variant_isset native]} {
+        notes "
+        This version is built based on a base architecture for convenience,
+        which may not be optimized for your system. To build a version
+        customized for your machine, use the +native variant"
+    }
+}
+
+compilers.choose    fc
+
+compilers.setup     default_fortran
+
+variant lapack description "Add Lapack/CLapack support to the library" { }
+default_variants-append +lapack
+
+variant native description "Force compilation on machine to get fully optimized library" {
+    # Prevent precompiled binaries to let compilation optimise the library for the user processor
+    archive_sites
+}
+
+# Workaround for test failure :-
+# > ./sblat2 < ./sblat2.dat
+# Program received signal SIGSEGV: Segmentation fault - invalid memory reference.
+xcode_workaround.fixed_xcode_version 11.2
+xcode_workaround.type append_to_compiler_name
+
+if {${muniversal.build_arch} in [list arm64 ppc64 x86_64]} {
+    configure.args-append \
+                    -DBINARY64=ON
+}
+
+configure.cflags    -O3
+configure.args-append \
+                    -DCOMMON_PROF=-pg
+
+if {![variant_isset lapack]} {
+    configure.args-append \
+                    -DBUILD_WITHOUT_LAPACK=ON
+}
+
+if {![variant_isset native]} {
+    # Do not limit threads to the number on buildbots
+    configure.args-append \
+                    -DNUM_THREADS=56
+
+    switch ${muniversal.build_arch} {
+        arm64 {
+            configure.args-append \
+                    -DTARGET=ARMV8
+        }
+        x86_64 {
+            if {${os.major} >= 18} {
+                configure.args-append \
+                    -DTARGET=NEHALEM
+            } else {
+                configure.args-append \
+                    -DTARGET=CORE2
+            }
+        }
+        i386 {
+            configure.args-append \
+                    -DTARGET=YONAH
+        }
+        ppc {
+            configure.args-append \
+                    -DTARGET=PPCG4
+        }
+        ppc64 {
+            configure.args-append \
+                    -DTARGET=PPC970
+        }
+        default {
+
+        }
+    }
+}
+
+if {${muniversal.build_arch} ni [list i386 x86_64]} {
+    # not on x86 of some sort; just disable AVX
+    configure.args-append \
+                    -DNO_AVX=ON \
+                    -DNO_AVX2=ON \
+                    -DNO_AVX512=ON
+} else {
+    if {![avx_compiler_isset]} {
+            configure.args-append \
+                    -DNO_AVX=ON
+    }
+    # Disable AVX2 on OSX10.6 and older only.
+    # On newer platforms AVX2 is now supported via
+    # https://github.com/macports/macports-ports/pull/3486
+    if { ${os.major} <= 10 } {
+        configure.args-append \
+                    -DNO_AVX2=ON
+    }
+    # Deactivating AVX512 instructions which do not build
+    # at this point. Keeping them in -devel subport. See
+    # https://trac.macports.org/ticket/57912
+    if {[string first "-devel" $subport] < 1} {
+        configure.args-append \
+                    -DNO_AVX512=ON
+    }
+}
+
+configure.args-append       -DCMAKE_AR=${prefix}/bin/ar \
+                            -DCMAKE_NM=${prefix}/bin/nm \
+                            -DCMAKE_OBJDUMP=${prefix}/bin/objdump \
+                            -DCMAKE_RANLIB=${prefix}/bin/ranlib \
+                            -DCMAKE_STRIP=${prefix}/bin/strip \
+                            -DCMAKE_LINKER=${prefix}/bin/ld
+
+depends_build-append        path:libexec/coreutils/libstdbuf.so:coreutils \
+                            port:cctools \
+                            port:ld64
+depends_skip_archcheck      coreutils \
+                            cctools \
+                            ld64
+
+muniversal.combine          ${prefix}/lib/pkgconfig/openblas.pc
+
+# Build a shared library, not static!
+configure.args-append       -DBUILD_SHARED_LIBS=ON
+
+# compilers PG adds its own rpath to make GC happy, and cmake adds rpath which
+# leads to two rpath and Sonoma linker failed on duplicated rpath. To avoid that
+# mess let me remove cmake's rpath.
+configure.pre_args-delete   -DCMAKE_INSTALL_RPATH=${prefix}/lib
+
+configure.pre_args-replace  -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+                            -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+cmake.install_rpath
+compilers.add_gcc_rpath_support no
+
+post-destroot {
+    # For compatibility, put header files in ${prefix}/include
+    foreach h [glob -tails -directory "${destroot}${prefix}/include/openblas" *.h] {
+        if {${h} eq "cblas.h"} {
+            ln -s openblas/${h} ${destroot}${prefix}/include/cblas_openblas.h
+        } else {
+            ln -s openblas/${h} ${destroot}${prefix}/include/${h}
+        }
+    }
+
+    if {${muniversal.build_arch} ne ${configure.build_arch}} {
+        reinplace "s|^openblas_config=|#openblas_config=|" ${destroot}${prefix}/lib/pkgconfig/openblas.pc
+    }
+}

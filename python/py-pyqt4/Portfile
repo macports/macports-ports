@@ -1,0 +1,267 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem      1.0
+PortGroup       python 1.0
+
+name            py-pyqt4
+
+categories-append     devel
+platforms       macosx
+maintainers     {michaelld @michaelld} openmaintainer
+license         GPL-3
+description     PyQt4 is a set of Python bindings for the Qt4 toolkit
+long_description \
+    PyQt4 is a set of Python bindings for the Qt4 toolkit. The \
+    bindings are implemented as a set of Python modules: qt, \
+    qtcanvas, qtgl, qtnetwork, qtsql, qttable, qtui and qtxml, \
+    and contains 300 classes and over 5,750 functions and methods.
+homepage        https://www.riverbankcomputing.com/software/pyqt/intro
+
+version         4.12.1
+
+set branch      [join [lrange [split ${version} .] 0 1] .]
+set patch       [lindex [split ${version} .] 2]
+
+# pre-declare provided subports
+
+python.versions 27 37 310
+python.default_version 27
+
+foreach py_ver ${python.versions} {
+    subport py${py_ver}-pyqt4 {}
+}
+
+if {${name} ne ${subport}} {
+
+    PortGroup   qt4 1.0
+
+    master_sites    sourceforge:pyqt
+
+    if {${patch} == 0} {
+        distname    PyQt4_gpl_mac-${branch}
+    } else {
+        distname    PyQt4_gpl_mac-${version}
+    }
+
+    # bump the epoch to revert the version back to 4.12.1
+    epoch              1
+
+    # bump the revision back to 2, where it was
+    # before the updates to 4.12.[23].
+    revision           4
+
+    checksums   rmd160 07125dd79a1d76dd83680a4f940f267f792486aa \
+                sha256 3224ab2c4d392891eb0abbc2bf076fef2ead3a5bb36ceae2383df4dda00ccce5 \
+                size   11324734
+
+    patchfiles-append  patch-configure.py.diff \
+                       patch-add_ppc64.diff
+
+    dist_subdir        python
+
+    depends_lib-append port:py${python.version}-sip4 \
+                       port:dbus-python${python.version} \
+                       port:dbus
+
+    # patch-configure.py* file alters configure.py so that the
+    # qtdesigner plugin can link.  It ensures that both LFLAGS are
+    # included and that the relevant version framework is linked.  It
+    # also adds a "framework" directory concept to make the split in
+    # qt4-mac as of 4.8.0, and uses it where appropriate.
+
+    # fix location of MacPorts'-installed Qt .apps, step 1
+
+    patchfiles-append patch-fix-qt_apps_dir.diff
+
+    # because CPATH is set, pkgconfig does not include
+    # ${prefix}/include even when requested the configure.py script,
+    # however, adds /phonon to the include directory
+    configure.env-append \
+        PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+
+    post-patch {
+        reinplace "s|@@MACPORTS_PYTHON_FRAMEWORK@@|${python.prefix}/Python|" ${worksrcpath}/configure.py
+
+        # fix location of MacPorts'-installed Qt .apps, step 2
+
+        reinplace "s|@QT_APPS_DIR@|${qt_apps_dir}|" \
+            ${worksrcpath}/examples/demos/qtdemo/menumanager.py \
+            examples/designer/plugins/plugins.py
+    }
+
+    use_configure yes
+
+    pre-configure {
+        # allow ccache, if specified by the user
+        if {[tbool configure.ccache]} {
+            configure.env-append CCACHE=ccache
+        }
+
+        foreach arch [get_canonical_archs] {
+            configure.args-append --use-arch=$arch
+        }
+    }
+
+    configure.cmd       "${python.bin} configure.py -q ${qt_qmake_cmd} --verbose --confirm-license"
+    configure.pre_args
+    configure.universal_args-delete --disable-dependency-tracking
+
+    configure.args-append   -e QtGui \
+                            -e QtHelp \
+                            -e QtMultimedia \
+                            -e QtNetwork \
+                            -e QtDeclarative \
+                            -e QtOpenGL \
+                            -e QtScript \
+                            -e QtScriptTools \
+                            -e QtSql \
+                            -e QtSvg \
+                            -e QtTest \
+                            -e QtWebKit \
+                            -e QtXml \
+                            -e QtXmlPatterns \
+                            -e QAxContainer \
+                            -e QtDesigner \
+                            --dbus=${python.include}/dbus-1.0 \
+                            --no-qsci-api \
+                            --sipdir=${python.prefix}/share/sip/PyQt4
+
+    # SIP's configure tools ignore environment variables, so have to
+    # get important info in in other ways if/as possible; SIP will, by
+    # default, use what was found by QMake when qt4-mac was installed.
+
+    set cflags   "${configure.cflags}"
+    set cxxflags "${configure.cxxflags}"
+    if {[tbool configure.pipe]} {
+        set cflags   "${cflags} -pipe"
+        set cxxflags "${cxxflags} -pipe"
+    }
+
+    configure.post_args \
+        CC=${configure.cc} \
+        CXX=${configure.cxx} \
+        LFLAGS="-F${frameworks_dir} ${configure.ldflags}" \
+        CFLAGS="${cflags}" \
+        CXXFLAGS="${cxxflags}"
+
+    variant phonon description {Add phonon support} {
+        configure.args-append   -e phonon
+        depends_lib-append      port:phonon
+    }
+
+    variant scintilla description {Add QScintilla API file } {
+        configure.args-delete   --no-qsci-api
+        configure.args-append   --qsci-api \
+                                --qsci-api-destdir=${qt_data_dir}/qsci
+        depends_lib-append      port:qscintilla-qt4
+
+        post-destroot {
+            # move the Qsci API file to a Python specific name
+            move ${destroot}${qt_data_dir}/qsci/api/python/PyQt4.api \
+                ${destroot}${qt_data_dir}/qsci/api/python/PyQt4-Python${python.branch}.api
+        }
+    }
+
+    post-configure {
+        if {[variant_exists universal] && [variant_isset universal]} {
+            set conflags ""
+            foreach arch ${configure.universal_archs} {
+                if {${arch} eq "i386"} {append conflags "x86 "} else {
+                    if {${arch} eq "ppc64"} {append conflags "ppc_64 "} else {
+                        append conflags ${arch} " "
+                    }
+                }
+            }
+
+            set profiles [exec find ${worksrcpath} -name "*.pro"]
+            foreach profile ${profiles} {
+                reinplace -E "s|^(CONFIG\[ \\t].*)|\\1 ${conflags}|" ${profile}
+            }
+
+            # This file exists if Qt was installed non-universal.
+            # Easiest just to check if it was created.
+            if {[file exists ${worksrcpath}/designer/python.pro ]} {
+                system -W ${worksrcpath}/designer "${qt_qmake_cmd} \
+                    -spec ${qt_mkspecs_dir}/macx-g++ \
+                    -o Makefile python.pro"
+            }
+        }
+    }
+
+    # allow ccache, if specified by the user
+    pre-build {
+        if {[tbool configure.ccache]} {
+            build.post_args "CCACHE=ccache"
+        }
+    }
+
+    build.cmd           make
+    build.target        all
+    use_parallel_build  yes
+
+    destroot.cmd        ${build.cmd}
+    destroot.destdir    DESTDIR=${destroot}
+
+    test.run            yes
+    python.test_framework
+    test.cmd            cd qt && ${python.bin} -c 'import PyQt4'
+
+    post-destroot {
+        # Clean out empty dirs first
+        set docdir ${destroot}${prefix}/share/doc
+        file delete ${docdir}/${subport}/examples
+        file delete ${docdir}/${subport}/
+        file copy ${worksrcpath}/doc ${docdir}/${subport}
+        file copy ${worksrcpath}/examples \
+            ${docdir}/${subport}
+        xinstall -m 644 -W ${worksrcpath} \
+            ChangeLog LICENSE NEWS README THANKS \
+            ${docdir}/${subport}
+
+        # Rename designer plugin to include Python version; easiest
+        # just to check if it was created, instead of patching.
+        if {[file exists ${destroot}${qt_plugins_dir}/designer/libpyqt4.dylib]} {
+            # rename Qt4 specific files
+            # (a) designer plugin
+            set old_name libpyqt4.dylib
+            set new_name libpy${python.version}qt4.dylib
+
+            move ${destroot}${qt_plugins_dir}/designer/${old_name} \
+                ${destroot}${qt_plugins_dir}/designer/${new_name}
+            system "install_name_tool -id ${new_name} \
+                ${destroot}${qt_plugins_dir}/designer/${new_name}"
+        }
+
+        # delete python3 code from python2 installs and vice versa,
+        # if each exists
+        if {${python.version} >= 30} {
+            if {[file exists ${destroot}${python.pkgd}/PyQt4/uic/port_v2]} {
+                delete ${destroot}${python.pkgd}/PyQt4/uic/port_v2
+            }
+        } else {
+            if {[file exists ${destroot}${python.pkgd}/PyQt4/uic/port_v3]} {
+                delete ${destroot}${python.pkgd}/PyQt4/uic/port_v3
+            }
+        }
+    }
+
+    variant debug description "Build debug libraries" {
+        configure.cmd-append --debug
+    }
+
+}
+
+if {[string last devel ${subport}] != -1} {
+
+    livecheck.type   none
+
+} else {
+
+    if {${patch} == 0} {
+        livecheck.version ${branch}
+    }
+    livecheck.type   regex
+    livecheck.url    https://www.riverbankcomputing.com/software/pyqt/download
+    livecheck.regex  >PyQt4_gpl_mac-(\[0-9.\]*).tar.gz<
+
+}

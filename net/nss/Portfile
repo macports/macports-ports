@@ -1,0 +1,206 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           muniversal 1.0
+
+name                nss
+version             3.123.1
+revision            0
+
+set NSS_VMAJOR      [lindex [split ${version} .] 0]
+set NSS_VMINOR      [lindex [split ${version} .] 1]
+set NSS_VPATCH      [lindex [split ${version} .] 2]
+if {${NSS_VPATCH} eq ""} {
+    # NSS_VPATCH should always be a number
+    set NSS_VPATCH 0
+}
+
+categories          net
+maintainers         nomaintainer
+license             {MPL-2 GPL-2+ LGPL-2.1+}
+description         Network Security Service libraries.
+long_description    {*}${description}
+homepage            https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS
+
+set my_release      NSS_[string map {. _} ${version}]_RTM
+
+master_sites        https://ftp.mozilla.org/pub/security/nss/releases/${my_release}/src/ \
+                    ftp://ftp.mozilla.org/pub/security/nss/releases/${my_release}/src/
+
+checksums           rmd160  47fd23e4b4ce75ad43ca69b903ba3bfc6bd73ee7 \
+                    sha256  42065a3ff780a9710a3dddcd1cee9b9be2aa40628883cea851d562eb58b178b0 \
+                    size    77762541
+
+use_configure       no
+
+# build fails with gcc-4.2 on Intel, but succeeds with gcc-4.2 on PPC
+# cc1: error: unrecognized command line option "-mpclmul"
+# cc1: error: unrecognized command line option "-maes"
+if {${configure.build_arch} in [list i386 x86_64]} {
+    compiler.blacklist-append *gcc-4.* *gcc-3.*
+}
+
+patchfiles          undef-prefix.patch
+
+# VSX and Crypto have to be disabled, since they belong to post-G5 ISA.
+# See: https://bugzilla.mozilla.org/show_bug.cgi?id=1687164
+# gcc-4.2 does not recognize these flags:
+# cc1: error: unrecognized command line option "-mcrypto"
+# cc1: error: unrecognized command line option "-mvsx"
+# Recent gcc does, however build still fails: https://trac.macports.org/ticket/64900
+# Therefore approach is different from Intel case.
+if {${configure.build_arch} in [list ppc ppc64]} {
+    patchfiles-append patch-ppc.diff
+}
+
+# fails with clang-425: https://trac.macports.org/ticket/63245
+#   warning: implicit declaration of function '_mm_sha256xxxxx'
+# fails with clang < 800: https://trac.macports.org/ticket/67585
+#   error: "AES/PCLMUL instructions not enabled"
+# TODO: Latter blacklisting is a quick fix only; needs more investigation
+compiler.blacklist-append {clang < 800}
+
+depends_lib     port:nspr \
+                port:zlib \
+                port:sqlite3
+
+destroot.dir ${destroot.dir}/dist
+build.dir    ${build.dir}/nss
+
+# external tests require C++11
+build.args   NSS_DISABLE_GTESTS=1
+
+# disable use of -Werror
+build.args-append NSS_ENABLE_WERROR=0
+
+# muniversal destroot requires a Makefile
+post-extract {
+    xinstall -d -m 0755 ${destroot.dir}
+
+    copy ${filespath}/Makefile-MacPorts-Install.in ${destroot.dir}/Makefile-MacPorts-Install
+    reinplace "s|__MACPORTS_PREFIX__|${prefix}|g" ${destroot.dir}/Makefile-MacPorts-Install
+}
+
+destroot.args-append \
+    -f Makefile-MacPorts-Install
+
+post-patch {
+    # libraries are not relative to any main executable, so no need for @executable_path
+    reinplace "s|@executable_path|${prefix}/lib/nss|g" \
+        ${build.dir}/coreconf/Darwin.mk \
+        ${build.dir}/lib/freebl/config.mk
+}
+
+post-destroot {
+    # applications seem to expect an nss-config executable and nss.pc file, but nss does not provide them
+    # see https://bugzilla.mozilla.org/show_bug.cgi?id=530672
+
+    xinstall  -m 0755 ${filespath}/nss-config.in       ${destroot}${prefix}/bin/nss-config
+    reinplace "s,@libdir@,${prefix}/lib/nss,g"         ${destroot}${prefix}/bin/nss-config
+    reinplace "s,@prefix@,${prefix},g"                 ${destroot}${prefix}/bin/nss-config
+    reinplace "s,@exec_prefix@,${prefix},g"            ${destroot}${prefix}/bin/nss-config
+    reinplace "s,@includedir@,${prefix}/include/nss,g" ${destroot}${prefix}/bin/nss-config
+    reinplace "s,@MOD_MAJOR_VERSION@,${NSS_VMAJOR},g"  ${destroot}${prefix}/bin/nss-config
+    reinplace "s,@MOD_MINOR_VERSION@,${NSS_VMINOR},g"  ${destroot}${prefix}/bin/nss-config
+    reinplace "s,@MOD_PATCH_VERSION@,${NSS_VPATCH},g"  ${destroot}${prefix}/bin/nss-config
+
+    set nspr_version [exec ${prefix}/bin/nspr-config --version]
+    set nss_version  [exec ${destroot}${prefix}/bin/nss-config --version]
+
+    xinstall  -m 0644 ${filespath}/nss.pc.in          ${destroot}${prefix}/lib/pkgconfig/nss.pc
+    reinplace "s,@libdir@,${prefix}/lib/nss,g"        ${destroot}${prefix}/lib/pkgconfig/nss.pc
+    reinplace "s,@prefix@,${prefix},g"                ${destroot}${prefix}/lib/pkgconfig/nss.pc
+    reinplace "s,@exec_prefix@,${prefix},g"           ${destroot}${prefix}/lib/pkgconfig/nss.pc
+    reinplace "s,@includedir@,${prefix}/include/nss," ${destroot}${prefix}/lib/pkgconfig/nss.pc
+    reinplace "s,@NSPR_VERSION@,${nspr_version},g"    ${destroot}${prefix}/lib/pkgconfig/nss.pc
+    reinplace "s,@NSS_VERSION@,${nss_version},g"      ${destroot}${prefix}/lib/pkgconfig/nss.pc
+
+    # install man files
+    xinstall -m 0644 \
+        {*}[glob ${build.dir}/doc/nroff/*.1] \
+        ${destroot}${prefix}/share/man/man1/
+}
+
+use_parallel_build  no
+
+# tls13esni.c:72: error: 'for' loop initial declaration used outside C99 mode
+compiler.c_standard 1999
+configure.cflags-append -std=c99
+
+array set cpu_arch_map [list \
+    arm64   aarch64 \
+    ppc     ppc \
+    ppc64   ppc64 \
+    i386    i386 \
+    x86_64  x86_64]
+
+if {!${universal_possible} || ![variant_isset universal]} {
+    if {${configure.build_arch} in [list arm64 ppc64 x86_64]} {
+        build.args-append USE_64=1
+    }
+    if {[info exists cpu_arch_map(${configure.build_arch})]} {
+        build.args-append CPU_ARCH=$cpu_arch_map(${configure.build_arch})
+    }
+
+    build.args-append \
+        CC="${configure.cc} ${configure.cflags} [get_canonical_archflags cc]" \
+        CCC="${configure.cxx} ${configure.cxxflags} [get_canonical_archflags cxx]"
+} else {
+    lappend merger_build_args(arm64)  USE_64=1 CPU_ARCH=aarch64
+    lappend merger_build_args(i386)   CPU_ARCH=i386
+    lappend merger_build_args(ppc64)  USE_64=1
+    lappend merger_build_args(x86_64) USE_64=1 CPU_ARCH=x86_64
+
+    foreach arch ${universal_archs} {
+        lappend merger_build_args(${arch}) \
+            CC="${configure.cc} ${configure.cflags} -arch ${arch}" \
+            CCC="${configure.cxx} ${configure.cxxflags} -arch ${arch}"
+    }
+}
+
+build.args-append \
+    NSPR_INCLUDE_DIR=${prefix}/include/nspr \
+    NSPR_LIB_DIR=${prefix}/lib/nspr \
+    NSS_USE_SYSTEM_SQLITE=1 \
+    USE_SYSTEM_ZLIB=1 \
+    BUILD_OPT=1 \
+    OPTIMIZER="${configure.optflags}" \
+    OBJDIR_NAME="Output.OBJD"
+
+if {${configure.sdkroot} ne ""} {
+    build.args-append \
+        MACOS_SDK_DIR=${configure.sdkroot}
+}
+
+if {${universal_possible} && [variant_isset universal]} {
+    # chk files can not be merged
+
+    merger-post-destroot {
+        foreach arch ${universal_archs_to_use} {
+            foreach chk [glob -nocomplain -directory ${destroot}-${arch}${prefix}/lib/nss *.chk] {
+                # delete chk file and replace it with an empty file, which can be merged
+                # keep the empty file so that later, we can know which chk files need to be regenerated from universal library
+                file delete ${chk}
+                touch ${chk}
+            }
+        }
+    }
+
+    post-destroot {
+        foreach chk [glob -nocomplain -directory ${destroot}${prefix}/lib/nss *.chk] {
+            # replace empty chk file with an actual one generated from universal library
+            file delete ${chk}
+            set base [file rootname ${chk}]
+            system "env DYLD_LIBRARY_PATH=${destroot}${prefix}/lib/nss ${destroot}${prefix}/bin/shlibsign -i ${base}.dylib -o ${chk}"
+        }
+    }
+}
+
+livecheck.type    regex
+livecheck.url     https://ftp.mozilla.org/pub/security/nss/releases/
+if {${NSS_VPATCH} eq 0} {
+    livecheck.version "${NSS_VMAJOR}_${NSS_VMINOR}"
+} else {
+    livecheck.version "${NSS_VMAJOR}_${NSS_VMINOR}_${NSS_VPATCH}"
+}
+livecheck.regex   {(\d+_\d+(?:_\d+)*)}

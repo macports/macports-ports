@@ -1,0 +1,199 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           texlive         1.0
+PortGroup           xcodeversion    1.0
+PortGroup           wxWidgets       1.0
+
+name                gnuplot
+version             6.0.4
+revision            0
+
+categories          math science
+# the license has some inconvenient requirements that we're not meeting
+# to be allowed to distribute binaries
+license             Restrictive
+# luckily nothing has to link against this
+installs_libs       no
+maintainers         {mps @Schamschula} openmaintainer
+
+description         A command-driven interactive function plotting program
+
+long_description    Gnuplot is a command-driven interactive function \
+                    plotting program. Plots any number of functions, \
+                    built up of C operators, C library functions, and \
+                    some things C does not have like **, sgn(), etc. \
+                    Also support for plotting data files, to compare \
+                    actual data to theoretical curves.
+
+homepage            https://gnuplot.sourceforge.net/
+master_sites        sourceforge:project/gnuplot/gnuplot/${version}
+dist_subdir         ${name}/${version}
+
+checksums           rmd160  b3c4022efeb8459b45922e4f22277608e4356c8b \
+                    sha256  458d94769625e73d5f6232500f49cbadcb2b183380d43d2266a0f9701aeb9c5b \
+                    size    7549894
+
+depends_build       port:pkgconfig
+
+depends_lib         port:expat \
+                    port:fontconfig \
+                    port:gd2 \
+                    path:lib/libcaca.dylib:libcaca \
+                    port:libcerf \
+                    port:libiconv \
+                    path:include/turbojpeg.h:libjpeg-turbo \
+                    port:libpng \
+                    port:ncurses \
+                    port:openspecfun \
+                    port:readline \
+                    port:webp \
+                    port:zlib
+
+minimum_xcodeversions \
+                    {9 3.1}
+
+patchfiles          patch-configure.diff
+
+# If the compiler defaults to C++20, a header file `version` exists.
+# `-I$(top_builddir)` will find the local file VERSION instead.
+patchfiles-append   patch-cxx20.diff
+
+configure.args      --with-caca=${prefix} \
+                    --with-gd=${prefix} \
+                    --with-readline=${prefix} \
+                    --without-aquaterm \
+                    --without-x \
+                    --infodir='\${prefix}/share/info' \
+                    --mandir='\${prefix}/share/man' \
+                    --disable-wxwidgets \
+                    --without-bitmap-terminals \
+                    --without-cairo \
+                    --without-latex \
+                    --without-lua \
+                    --without-qt
+
+# the configure script fails to correctly parse pkgconfig/libcerf.pc
+configure.env       LIBCERF_CFLAGS=-I${prefix}/include \
+                    LIBCERF_LIBS=-L${prefix}/lib -lcerf
+
+variant aquaterm description "Enable AquaTerm terminal" {
+    depends_lib-append          port:aquaterm
+    configure.args-replace      --without-aquaterm --with-aquaterm
+    configure.cflags-append     "-F${frameworks_dir}"
+    configure.ldflags-append    "-F${frameworks_dir}"
+}
+
+variant x11 {
+    configure.args-replace      --without-x --with-x
+    depends_lib-append          port:xpm
+}
+
+variant luaterm description "Enable lua-based terminals" {
+    PortGroup                   lua 1.0
+
+    configure.args-replace      --without-lua --with-lua
+    build.args-append           LUA=${lua.bin}
+    # other libraries add ${prefix}/include to the CPPFLAGS before ${configure.cppflags}
+    # so if lua is installed, its headers will be found
+    lua.finds_default           yes
+}
+
+variant pangocairo description "Enable cairo-based terminals" {
+    configure.args-delete       --without-cairo
+}
+
+variant wxwidgets description "Enable wxt terminal" {
+    if {${os.platform} eq "darwin" && ${os.major} >= 16} {
+        wxWidgets.use           wxWidgets-3.2
+    } else {
+        wxWidgets.use           wxWidgets-3.0
+    }
+    depends_lib-append          port:${wxWidgets.port}
+    configure.args-replace      --disable-wxwidgets --with-wx=${wxWidgets.wxdir}
+}
+
+variant qt conflicts qt5 description "Enable qt terminal with Qt 4" {
+    PortGroup qt4 1.0
+
+    configure.args-replace      --without-qt --with-qt=qt4
+}
+
+variant qt5 conflicts qt description "Enable qt terminal with Qt 5" {
+    # Latest versions of Qt require C++11
+    PortGroup qt5   1.0
+
+    compiler.cxx_standard       2011
+    configure.cxxflags-append   -std=c++11
+
+    qt5.depends_component       qtsvg    \
+                                qttools
+
+    configure.args-replace      --without-qt --with-qt=qt5
+}
+
+
+# Ideally one would enable just PMB by default, but '--with-bitmap-terminals'
+# enables lots of other obsolete terminals which clutter the output of 'set term'.
+variant old_bitmap_terminals description "Enable PBM (Portable Bit Map) and other older bitmap terminals" {
+    configure.args-replace      --without-bitmap-terminals --with-bitmap-terminals
+}
+
+default_variants                +luaterm +pangocairo
+if {![variant_isset qt] && ![variant_isset qt5]} {
+    if {${os.platform} eq "darwin" && ${os.major} < 19} {
+        default_variants-append +qt
+    } else {
+        default_variants-append +qt5
+    }
+}
+
+# aquaterm is currently not building on 10.4
+if {${os.platform} eq "darwin" && ${os.major} > 8} {
+    default_variants-append     +aquaterm
+}
+# wxWidgets 3.0 requires 10.5 or later (or non-Darwin)
+if {${os.platform} ne "darwin" || ${os.major} > 8} {
+    default_variants-append     +wxwidgets
+}
+
+if {[variant_isset pangocairo] || [variant_isset wxwidgets]} {
+    depends_lib-append          path:lib/pkgconfig/pango.pc:pango
+}
+
+# Building and installing TeX macro files for TikZ could/should be done by gnuplot's Makefile,
+# but without a patch that would require a dependency on texlive.
+# Apart from that the files would fly to the wrong place in TDS,
+# so that plain TeX and ConTeXt could not find them (an upstream bug).
+# So we 'manually' generate and copy the necessary files.
+post-build {
+    if {[variant_isset luaterm]} {
+        system -W ${worksrcpath}/share/LaTeX "${lua.bin} ../../term/lua/gnuplot-tikz.lua style"
+    }
+}
+
+post-destroot {
+    if {[variant_isset luaterm]} {
+        set texmf ${destroot}${texlive_texmfports}
+        set luadir ${worksrcpath}/share/LaTeX
+        xinstall -d -m 0755 ${texmf}/tex/context/third/gnuplot-lua-tikz
+        xinstall -d -m 0755 ${texmf}/tex/generic/gnuplot-lua-tikz
+        xinstall -d -m 0755 ${texmf}/tex/latex/gnuplot-lua-tikz
+        xinstall -d -m 0755 ${texmf}/tex/plain/gnuplot-lua-tikz
+
+        xinstall -m 0644 ${luadir}/t-gnuplot-lua-tikz.tex      ${texmf}/tex/context/third/gnuplot-lua-tikz
+        xinstall -m 0644 ${luadir}/gnuplot-lua-tikz-common.tex ${texmf}/tex/generic/gnuplot-lua-tikz
+        xinstall -m 0644 ${luadir}/gnuplot-lua-tikz.sty        ${texmf}/tex/latex/gnuplot-lua-tikz
+        xinstall -m 0644 ${luadir}/gnuplot-lua-tikz.tex        ${texmf}/tex/plain/gnuplot-lua-tikz
+    }
+
+    set destdocdir ${destroot}${prefix}/share/doc/${name}
+    xinstall -d -m 0755 ${destdocdir}
+    xinstall -m 0644 ${worksrcpath}/docs/${name}.pdf ${destdocdir}
+
+    # copy demo files
+    file copy ${worksrcpath}/demo ${destdocdir}
+    foreach {makefile} {Makefile Makefile.in Makefile.am Makefile.am.in} {
+        delete ${destdocdir}/demo/${makefile}
+    }
+}

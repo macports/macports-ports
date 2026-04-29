@@ -1,0 +1,167 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           cmake 1.1
+PortGroup           boost 1.0
+
+# libfive does not have releases; the master branch is recommended.
+# See https://libfive.com/download/
+github.setup        libfive libfive 71899313d36ce14de6646ef760fa6bbc5c0cc067
+# Change github.tarball_from to 'releases' or 'archive' next update
+github.tarball_from tarball
+version             20241103
+revision            1
+
+categories          graphics math cad
+license             MPL-2
+maintainers         nomaintainer
+
+homepage            https://libfive.com/
+
+description         Library for 3D solid modeling
+
+long_description    libfive is a software library and set of tools for solid modeling, \
+                    especially suited for parametric and procedural design. It is \
+                    infrastructure for generative design, mass customization, and \
+                    domain-specific CAD tools.
+
+checksums           rmd160  946e212d3de61c47d6ceb4bc0bd251ba5691ce39 \
+                    sha256  546cfc85e5321b0d22d920fa829119dc30a7c679bdeea29e04d3674b9686ad57 \
+                    size    917395
+
+# Even though eigen3 is header-only, it must be a library dependency because
+# the libfive headers include it.
+depends_lib-append  path:share/pkgconfig/eigen3.pc:eigen3 \
+                    port:libpng
+
+depends_build-append \
+                    path:bin/pkg-config:pkgconfig
+
+compiler.c_standard 1999
+compiler.cxx_standard \
+                    2017
+
+# These will be overridden by enabled variants
+configure.args-append \
+                    -DBUILD_GUILE_BINDINGS=OFF \
+                    -DBUILD_PYTHON_BINDINGS=OFF \
+                    -DBUILD_STUDIO_APP=OFF
+
+# Workaround from https://github.com/libfive/libfive/blob/71899313d36ce14de6646ef760fa6bbc5c0cc067/CMakeLists.txt#L85
+configure.cxxflags-append \
+                    -D__USE_ISOC99
+
+patchfiles          patch-remove-march-native.diff
+patchfiles          patch-use-macports-guile.diff
+
+# Guile binding:
+
+variant guile description {Build guile 3.0 bindings} {
+    depends_lib-append      port:guile-3.0
+    configure.args-replace  -DBUILD_GUILE_BINDINGS=OFF -DBUILD_GUILE_BINDINGS=ON
+
+    build.env-append        GUILE_AUTO_COMPILE=0
+
+    # The Guile bindings are under GPL-2+
+    if { ! ("GPL-2+" in $license) } {
+        license-append GPL-2+
+    }
+}
+
+# Python bindings:
+
+set pythons_versions {3.10 3.11 3.12 3.13}
+
+set pythons_ports {}
+foreach v ${pythons_versions} {
+    lappend pythons_ports python[string map {. {}} ${v}]
+}
+
+foreach v ${pythons_versions} {
+    set s [string map {. {}} ${v}]
+    set p python${s}
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+
+    variant ${p} description "Build bindings for Python ${v}" conflicts {*}${c} "
+        depends_lib-append      port:${p}
+        depends_build-append    port:py${s}-setuptools
+        configure.args-replace  -DBUILD_PYTHON_BINDINGS=OFF -DBUILD_PYTHON_BINDINGS=ON
+        configure.args-append   -DPython3_EXECUTABLE=${frameworks_dir}/Python.framework/Versions/${v}/bin/python${v}
+    "
+}
+
+# Studio app:
+
+variant studio requires guile description {Build GUI app} {
+    PortGroup               qt5 1.0
+
+    qt5.min_version         5.12
+
+    configure.args-replace  -DBUILD_STUDIO_APP=OFF -DBUILD_STUDIO_APP=ON
+
+    # The Studio app is under GPL-2+
+    if { ! ("GPL-2+" in $license) } {
+        license-append GPL-2+
+    }
+
+    # The Studio app only uses Qt, but does not use OpenSSL directly.
+    # Qt's licenses include OpenSSLException.
+    license_noconflict      openssl
+
+    depends_build-append    path:lib/pkgconfig/librsvg-2.0.pc:librsvg
+
+    post-build {
+        # Create app icon
+
+        set svg    ${worksrcpath}/studio/deploy/icon/icon.svg
+
+        file mkdir ${build.dir}/icon.iconset
+
+        foreach res {16 32 128 256 512} {
+            set hres [expr 2*${res}]
+            system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w ${res} ${svg}  > ${build.dir}/icon.iconset/icon_${res}x${res}.png"
+            system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w ${hres} ${svg} > ${build.dir}/icon.iconset/icon_${res}x${res}@2x.png"
+        }
+
+        file mkdir ${build.dir}/studio/Studio.app/Contents/Resources
+
+        system -W ${worksrcpath} "/usr/bin/iconutil -c icns -o ${build.dir}/studio/Studio.app/Contents/Resources/studio.icns ${build.dir}/icon.iconset"
+
+        # Include actual version into Info.plist
+        reinplace "s|0\.0\.0|${version}|g" ${build.dir}/studio/Studio.app/Contents/Info.plist
+    }
+
+    post-destroot {
+        move ${build.dir}/studio/Studio.app ${destroot}${applications_dir}
+
+        set examplesdir ${prefix}/share/${name}/examples
+
+        xinstall -d ${destroot}${examplesdir}
+        xinstall -m 0644 {*}[glob ${worksrcpath}/studio/examples/*.io] ${destroot}${examplesdir}
+
+        notes-append "${name} studio examples were installed into ${examplesdir}."
+    }
+}
+
+# Testing:
+
+# As of version 20210424 there may be test failures for REQUIRE( a.count() == 2 )
+# See https://github.com/libfive/libfive/issues/424
+
+test.run            yes
+test.cmd            ${build.dir}/libfive/test/libfive-test
+test.target
+
+# Default variants:
+
+set selected_python python313
+foreach v ${pythons_versions} {
+    set s [string map {. {}} ${v}]
+    if {[variant_isset python${s}]} {
+        set selected_python python${s}
+    }
+}
+
+default_variants    +studio +guile +${selected_python}

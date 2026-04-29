@@ -1,0 +1,484 @@
+--- cvsps-2.1.orig/debian/control
++++ cvsps-2.1/debian/control
+@@ -0,0 +1,18 @@
++Source: cvsps
++Section: devel
++Priority: optional
++Maintainer: Michael Casadevall <sonicmctails@gmail.com>
++Build-Depends: debhelper (>> 4.0.0), zlib1g-dev, dpatch
++Standards-Version: 3.7.2
++
++Package: cvsps
++Architecture: any
++Depends: ${shlibs:Depends}, cvs
++Description: Tool to generate CVS patch set information
++ CVSps is a program for generating 'patch set' information from a CVS
++ repository.  A patch set in this case is defined as a set of changes made
++ to a collection of files, all committed at the same time (using a single
++ 'cvs commit' command).  This information is valuable for seeing the
++ big picture of the evolution of a CVS project.  While CVS tracks revision
++ information, it is often difficult to see what changes were committed
++ 'atomically' to the repository.
+--- cvsps-2.1.orig/debian/compat
++++ cvsps-2.1/debian/compat
+@@ -0,0 +1 @@
++4
+--- cvsps-2.1.orig/debian/rules
++++ cvsps-2.1/debian/rules
+@@ -0,0 +1,71 @@
++#!/usr/bin/make -f
++# Sample debian/rules that uses debhelper.
++# GNU copyright 1997 to 1999 by Joey Hess.
++
++# Uncomment this to turn on verbose mode.
++#export DH_VERBOSE=1
++
++configure: configure-stamp
++configure-stamp: patch
++	dh_testdir
++	# Add here commands to configure the package.
++	
++
++	touch configure-stamp
++
++build: configure-stamp build-stamp
++build-stamp:
++	dh_testdir
++
++	$(MAKE)
++
++	touch build-stamp
++
++clean: clean-patched unpatch
++clean-patched:
++	dh_testdir
++	dh_testroot
++	rm -f build-stamp configure-stamp
++
++	[ ! -f Makefile ] || $(MAKE) clean
++
++	dh_clean
++
++install: build
++	dh_testdir
++	dh_testroot
++	dh_clean -k
++	dh_installdirs
++
++	prefix=$(CURDIR)/debian/cvsps/usr $(MAKE) install
++
++
++binary-indep: build install
++
++patch: patch-stamp
++patch-stamp:
++	dpatch apply-all
++	touch patch-stamp
++
++unpatch:
++	dpatch deapply-all
++	rm -rf patch-stamp debian/patched
++	
++binary-arch: build install
++	dh_testdir
++	dh_testroot	
++	dh_installdocs
++	dh_installman
++	dh_installchangelogs CHANGELOG
++	dh_link
++	dh_strip
++	dh_compress
++	dh_fixperms
++	dh_installdeb
++	dh_shlibdeps
++	dh_gencontrol
++	dh_md5sums
++	dh_builddeb
++
++binary: binary-indep binary-arch
++.PHONY: build clean binary-indep binary-arch binary install configure
+--- cvsps-2.1.orig/debian/patches/00list
++++ cvsps-2.1/debian/patches/00list
+@@ -0,0 +1,3 @@
++01_ignoretrunk.dpatch
++02_dynamicbufferalloc.dpatch
++03_diffoptstypo.dpatch
+--- cvsps-2.1.orig/debian/patches/04_freebsdversionstring.dpatch
++++ cvsps-2.1/debian/patches/04_freebsdversionstring.dpatch
+@@ -0,0 +1,32 @@
++#! /bin/sh /usr/share/dpatch/dpatch-run
++## 04_freebsdversionstring.dpatch by Anand Kumria
++##
++## All lines beginning with `## DP:' are a description of the patch.
++## DP: cope with single quotes in FreeBSD cvs pserver version string
++
++@DPATCH@
++diff -urNad cvsps-2.1~/cap.c cvsps-2.1/cap.c
++--- cvsps-2.1~/cap.c	2005-05-25 23:39:40.000000000 -0400
+++++ cvsps-2.1/cap.c	2007-06-11 13:38:01.939320951 -0400
++@@ -121,11 +121,19 @@
++ 	return 0;
++     }
++ 
+++    /* We might have encountered a FreeBSD system which
+++     * has a mucked up version string of:
+++     *  Concurrent Versions System (CVS) '1.11.17'-FreeBSD (client/server)
+++     * so re-test just in case
+++     */
++     p += skip;
++     if (sscanf(p, "%d.%d.%d", &major, &minor, &extra) != 3)
++     {	
++-	debug(DEBUG_APPMSG1, "WARNING: malformed CVS version: %s", str);
++-	return 0;
+++        if (sscanf(p, "'%d.%d.%d'", &major, &minor, &extra) != 3)
+++	{
+++		debug(DEBUG_APPMSG1, "WARNING: malformed CVS version: %s", str);
+++		return 0;
+++	}
++     }
++ 
++     return (major > req_major || 
+--- cvsps-2.1.orig/debian/patches/02_dynamicbufferalloc.dpatch
++++ cvsps-2.1/debian/patches/02_dynamicbufferalloc.dpatch
+@@ -0,0 +1,125 @@
++#! /bin/sh /usr/share/dpatch/dpatch-run
++## 02_dynamicbufferalloc.dpatch by  <crafterm@debian.org>
++##
++## All lines beginning with `## DP:' are a description of the patch.
++## DP: Dynamic buffer allocation
++
++@DPATCH@
++
++diff -urN cvsps-2.1-orig/cache.c cvsps-2.1/cache.c
++--- cvsps-2.1-orig/cache.c	2005-05-25 22:39:40.000000000 -0500
+++++ cvsps-2.1/cache.c	2005-07-26 15:21:29.716569500 -0500
++@@ -108,10 +108,19 @@
++     int tag_flags = 0;
++     char branchbuff[LOG_STR_MAX] = "";
++     int branch_add = 0;
++-    char logbuff[LOG_STR_MAX] = "";
+++    int logbufflen = LOG_STR_MAX + 1;
+++    char * logbuff = malloc(logbufflen);
++     time_t cache_date = -1;
++     int read_version;
++ 
+++    if (logbuff == NULL)
+++    {
+++	debug(DEBUG_SYSERROR, "could not malloc %d bytes for logbuff in read_cache", logbufflen);
+++	exit(1);
+++    }
+++
+++    logbuff[0] = 0;
+++
++     if (!(fp = cache_open("r")))
++ 	goto out;
++ 
++@@ -299,8 +308,19 @@
++ 	    else
++ 	    {
++ 		/* Make sure we have enough in the buffer */
++-		if (strlen(logbuff)+strlen(buff)<LOG_STR_MAX)
++-		    strcat(logbuff, buff);
+++		int len = strlen(buff);
+++		if (strlen(logbuff) + len >= LOG_STR_MAX)
+++		{
+++		    logbufflen += (len >= LOG_STR_MAX ? (len+1) : LOG_STR_MAX);
+++		    char * newlogbuff = realloc(logbuff, logbufflen);
+++		    if (newlogbuff == NULL)
+++		    {
+++			debug(DEBUG_SYSERROR, "could not realloc %d bytes for logbuff in read_cache", logbufflen);
+++			exit(1);
+++		    }
+++		    logbuff = newlogbuff;
+++		}
+++		strcat(logbuff, buff);
++ 	    }
++ 	    break;
++ 	case CACHE_NEED_PS_MEMBERS:
++@@ -332,6 +352,7 @@
++  out_close:
++     fclose(fp);
++  out:
+++    free(logbuff);
++     return cache_date;
++ }
++ 
++diff -urN cvsps-2.1-orig/cvsps.c cvsps-2.1/cvsps.c
++--- cvsps-2.1-orig/cvsps.c	2005-05-25 22:39:40.000000000 -0500
+++++ cvsps-2.1/cvsps.c	2005-07-26 15:22:02.558230700 -0500
++@@ -265,7 +265,8 @@
++     PatchSetMember * psm = NULL;
++     char datebuff[20];
++     char authbuff[AUTH_STR_MAX];
++-    char logbuff[LOG_STR_MAX + 1];
+++    int logbufflen = LOG_STR_MAX + 1;
+++    char * logbuff = malloc(logbufflen);
++     int loglen = 0;
++     int have_log = 0;
++     char cmd[BUFSIZ];
++@@ -273,6 +274,12 @@
++     char use_rep_buff[PATH_MAX];
++     char * ltype;
++ 
+++    if (logbuff == NULL)
+++    {
+++	debug(DEBUG_SYSERROR, "could not malloc %d bytes for logbuff in load_from_cvs", logbufflen);
+++	exit(1);
+++    }
+++
++     if (!no_rlog && !test_log_file && cvs_check_cap(CAP_HAVE_RLOG))
++     {
++ 	ltype = "rlog";
++@@ -480,24 +487,22 @@
++ 		 */
++ 		if (have_log || !is_revision_metadata(buff))
++ 		{
++-		    /* if the log buffer is full, that's it.  
++-		     * 
++-		     * Also, read lines (fgets) always have \n in them
++-		     * which we count on.  So if truncation happens,
++-		     * be careful to put a \n on.
++-		     * 
++-		     * Buffer has LOG_STR_MAX + 1 for room for \0 if
++-		     * necessary
++-		     */
++-		    if (loglen < LOG_STR_MAX)
+++		    /* If the log buffer is full, try to reallocate more. */
+++		    if (loglen < logbufflen)
++ 		    {
++ 			int len = strlen(buff);
++ 			
++-			if (len >= LOG_STR_MAX - loglen)
+++			if (len >= logbufflen - loglen)
++ 			{
++-			    debug(DEBUG_APPMSG1, "WARNING: maximum log length exceeded, truncating log");
++-			    len = LOG_STR_MAX - loglen;
++-			    buff[len - 1] = '\n';
+++			    debug(DEBUG_STATUS, "reallocating logbufflen to %d bytes for file %s", logbufflen, file->filename);
+++			    logbufflen += (len >= LOG_STR_MAX ? (len+1) : LOG_STR_MAX);
+++			    char * newlogbuff = realloc(logbuff, logbufflen);
+++			    if (newlogbuff == NULL)
+++			    {
+++				debug(DEBUG_SYSERROR, "could not realloc %d bytes for logbuff in load_from_cvs", logbufflen);
+++				exit(1);
+++			    }
+++			    logbuff = newlogbuff;
++ 			}
++ 
++ 			debug(DEBUG_STATUS, "appending %s to log", buff);
+--- cvsps-2.1.orig/debian/patches/03_diffoptstypo.dpatch
++++ cvsps-2.1/debian/patches/03_diffoptstypo.dpatch
+@@ -0,0 +1,19 @@
++#! /bin/sh /usr/share/dpatch/dpatch-run
++## 03_diffoptstypo.dpatch by  <crafterm@debian.org>
++##
++## All lines beginning with `## DP:' are a description of the patch.
++## DP: Diff opts typo fix
++
++@DPATCH@
++
++--- cvsps-2.1-orig/cvsps.1	2005-05-26 05:39:40.000000000 +0200
+++++ cvsps-2.1/cvsps.1	2005-07-28 15:17:48.885112048 +0200
++@@ -83,7 +83,7 @@
++ disable the use of rlog internally.  Note: rlog is
++ required for stable PatchSet numbering.  Use with care.
++ .TP
++-.B \-\-diffs\-opts <option string>
+++.B \-\-diff\-opts <option string>
++ send a custom set of options to diff, for example to increase
++ the number of context lines, or change the diff format.
++ .TP
+--- cvsps-2.1.orig/debian/patches/01_ignoretrunk.dpatch
++++ cvsps-2.1/debian/patches/01_ignoretrunk.dpatch
+@@ -0,0 +1,23 @@
++#! /bin/sh /usr/share/dpatch/dpatch-run
++## 01_ignoretrunk.dpatch by  <crafterm@debian.org>
++##
++## All lines beginning with `## DP:' are a description of the patch.
++## DP: Ignore TRUNK branch name patch
++
++@DPATCH@
++
++diff -urN cvsps-2.1.orig/cvsps.c cvsps-2.1/cvsps.c
++--- cvsps-2.1.orig/cvsps.c	2005-05-25 22:39:40.000000000 -0500
+++++ cvsps-2.1/cvsps.c	2005-06-19 23:07:20.000000000 -0500
++@@ -2104,6 +2109,11 @@
++     
++     if (!get_branch_ext(rev, eot, &leaf))
++     {
+++	if (strcmp(tag, "TRUNK") == 0)
+++	{
+++	    debug(DEBUG_STATUS, "ignoring the TRUNK branch/tag");
+++	    return;
+++	}
++ 	debug(DEBUG_APPERROR, "malformed revision");
++ 	exit(1);
++     }
+--- cvsps-2.1.orig/debian/copyright
++++ cvsps-2.1/debian/copyright
+@@ -0,0 +1,26 @@
++This package was debianized by Marcus Crafter <crafterm@debian.org> on
++Thu,  10 Dec 2001 16:51:54 +0100.
++
++It was downloaded from http://www.cobite.com/cvsps/
++
++Copyright Holder: David Mansfield <CVSps@dm.cobite.com>
++
++License:
++
++   This package is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 2 of the License, or
++   (at your option) any later version.
++
++   This package is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this package; if not, write to the Free Software
++   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
++
++On Debian systems, the complete text of the GNU General
++Public License can be found in `/usr/share/common-licenses/GPL'.
++
+--- cvsps-2.1.orig/debian/docs
++++ cvsps-2.1/debian/docs
+@@ -0,0 +1 @@
++README
+--- cvsps-2.1.orig/debian/dirs
++++ cvsps-2.1/debian/dirs
+@@ -0,0 +1 @@
++usr/bin
+--- cvsps-2.1.orig/debian/changelog
++++ cvsps-2.1/debian/changelog
+@@ -0,0 +1,128 @@
++cvsps (2.1-4) unstable; urgency=low
++
++  * New Maintainer (closes: #382809)
++
++ -- Michael Casadevall <sonicmctails@gmail.com>  Tue, 04 Sep 2007 19:26:33 -0500
++
++cvsps (2.1-3) unstable; urgency=low
++
++  * QA Upload.
++  * Apply patch from Anand Kumria to cope with single quotes in
++    FreeBSD CVS pserver version strings.  closes: #358374.
++
++ -- Clint Adams <schizo@debian.org>  Mon, 11 Jun 2007 13:41:49 -0400
++
++cvsps (2.1-2) unstable; urgency=low
++
++  * QA Upload
++  * Set Maintainer to QA Group, Orphaned:  #382809
++  * Bump compat level and B-D on at least dh 4.0.0
++  * Update debian/copyright
++  * Fix malformed line in debian/changelog
++  * Conforms with latest Standards Version 3.7.2
++
++ -- Michael Ablassmeier <abi@debian.org>  Tue, 29 Aug 2006 15:16:44 +0200
++
++cvsps (2.1-1) unstable; urgency=low
++
++  * New upstream version.
++    (closes: #314822)
++  * Applied TRUNK ignore patch from David D. Kilzer
++    (closes: #315023)
++  * Applied dynamic buffer allocation patch from David D. Kilzer
++    (closes: #315024)
++  * Applied man page typo fix from Roberto C. Sanchez
++    (closes: #311686)
++
++ -- Marcus Crafter <crafterm@debian.org>  Thu, 28 Jul 2005 13:32:58 +0100
++
++cvsps (2.0rc1-5) unstable; urgency=low
++
++  * Applied patch from Kim Hansen to fix time calculation bug
++  * Applied cvs output parsing error from upstream
++    (closes: #289803, #267910)
++
++ -- Marcus Crafter <crafterm@debian.org>  Thu, 27 Jan 2005 17:47:58 +0100
++
++cvsps (2.0rc1-4) unstable; urgency=low
++
++  * Applied documentation patch from J. Bruce Fields
++    (closes: #258100)
++
++ -- Marcus Crafter <crafterm@debian.org>  Fri, 20 Aug 2004 12:59:06 +0200
++
++cvsps (2.0rc1-3) unstable; urgency=low
++
++  * Included contributed directory name handling patch from David Kilzer.
++    (closes: #231744)
++
++ -- Marcus Crafter <crafterm@debian.org>  Tue, 22 Jun 2004 22:23:26 +0200
++
++cvsps (2.0rc1-2) unstable; urgency=low
++
++  * Included upstream patch for fixing http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=255274
++  * Included contributed manpage patch from James Morrison
++  * Included contributed GNU/Hurd compliation patch from Santiago Vila
++  * Included contributed segfault patch from Daniel Kobras
++    (closes: #255274, #224425, #218323, #200014)
++
++ -- Marcus Crafter <crafterm@debian.org>  Mon, 21 Jun 2004 19:30:46 +0200
++
++cvsps (2.0rc1-1) unstable; urgency=low
++
++  * New upstream release.
++    (closes: #191621)
++
++ -- Marcus Crafter <crafterm@debian.org>  Mon, 19 May 2003 10:35:46 +1000
++
++cvsps (1.3.3-1) unstable; urgency=low
++
++  * New upstream release.
++    (closes: #164574)
++
++ -- Marcus Crafter <crafterm@debian.org>  Mon, 14 Oct 2002 12:50:38 +0200
++
++cvsps (1.3.2-1) unstable; urgency=low
++
++  * New upstream release.
++
++ -- Marcus Crafter <crafterm@debian.org>  Wed,  3 Jul 2002 17:13:45 +0200
++
++cvsps (1.3.1-1) unstable; urgency=low
++
++  * New upstream release.
++    (closes: #149803)
++
++ -- Marcus Crafter <crafterm@debian.org>  Mon, 17 Jun 2002 14:34:30 +0200
++
++cvsps (1.3-4) unstable; urgency=low
++
++  * Fixed lintian errors.
++
++ -- Marcus Crafter <crafterm@debian.org>  Tue, 19 Mar 2002 19:37:20 +0100
++
++cvsps (1.3-3) unstable; urgency=low
++
++  * Fixed installed location of cvsps.1 manpage.
++    (closes: #127532)
++
++ -- Marcus Crafter <crafterm@debian.org>  Tue,  5 Feb 2002 12:58:03 +0100
++
++cvsps (1.3-2) unstable; urgency=low
++
++  * Fixed various spelling mistakes in the description. Thanks to Matt
++    Zimmerman <mdz@debian.org> for reporting them.
++    (closes: Bug#124531)
++
++ -- Marcus Crafter <crafterm@debian.org>  Tue, 18 Dec 2001 12:24:13 +0100
++
++cvsps (1.3-1) unstable; urgency=low
++
++  * Initial Release.
++    (closes: Bug#122715)
++
++ -- Marcus Crafter <crafterm@debian.org>  Mon, 10 Dec 2001 16:50:43 +0100
++
++Local variables:
++mode: debian-changelog
++End:
