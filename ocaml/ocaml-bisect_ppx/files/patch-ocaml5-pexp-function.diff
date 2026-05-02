@@ -1,0 +1,107 @@
+--- src/ppx/instrument.ml	2026-05-06 22:10:41
++++ src/ppx/instrument.ml	2026-05-06 22:11:05
+@@ -1314,38 +1314,55 @@
+             instrument_expr ~use_loc_of:e ~post:true (Exp.assert_ e_new)
+ 
+           (* Expressions that have subexpressions that might not get visited. *)
+-          | Pexp_function cases ->
+-            traverse_cases ~is_in_tail_position:true cases
+-            >>| fun cases_new ->
+-            let cases, _, _, need_binding = instrument_cases cases_new in
+-            if need_binding then
+-              Exp.fun_ ~loc ~attrs
+-                Ppxlib.Nolabel None ([%pat? ___bisect_matched_value___])
+-                (Exp.match_ ~loc
+-                  ([%expr ___bisect_matched_value___]) cases)
+-            else
+-              Exp.function_ ~loc ~attrs cases
+-
+-          | Pexp_fun (label, default_value, p, e) ->
+-            begin match default_value with
+-            | None ->
+-              return None
+-            | Some e ->
+-              traverse ~is_in_tail_position:false e
+-              >>| fun e ->
+-              Some (instrument_expr e)
++          | Pexp_function (params, constraint_, body) ->
++            begin match body with
++            | Pfunction_cases (cases, cases_loc, cases_attrs) ->
++              traverse_cases ~is_in_tail_position:true cases
++              >>| fun cases_new ->
++              let cases, _, _, need_binding = instrument_cases cases_new in
++              if need_binding then
++                if params = [] then
++                  Exp.fun_ ~loc ~attrs
++                    Ppxlib.Nolabel None ([%pat? ___bisect_matched_value___])
++                    (Exp.match_ ~loc
++                      ([%expr ___bisect_matched_value___]) cases)
++                else
++                  {e with pexp_desc =
++                    Pexp_function (params, constraint_,
++                      Pfunction_body (
++                        Exp.fun_ ~loc Ppxlib.Nolabel None
++                          [%pat? ___bisect_matched_value___]
++                          (Exp.match_ ~loc
++                            ([%expr ___bisect_matched_value___]) cases)))}
++              else
++                {e with pexp_desc =
++                  Pexp_function (params, constraint_,
++                    Pfunction_cases (cases, cases_loc, cases_attrs))}
++            | Pfunction_body body_expr ->
++              let instrument_param param =
++                match param.Parsetree.pparam_desc with
++                | Pparam_val (label, Some dv, p) ->
++                  traverse ~is_in_tail_position:false dv
++                  >>| fun dv_new ->
++                  {param with Parsetree.pparam_desc =
++                    Pparam_val (label, Some (instrument_expr dv_new), p)}
++                | _ ->
++                  return param
++              in
++              collect_errors (List.map instrument_param params)
++              >>= fun new_params ->
++              traverse ~is_in_tail_position:true body_expr
++              >>| fun body_new ->
++              let body_new =
++                match body_new.pexp_desc with
++                | Pexp_function _ -> body_new
++                | Pexp_constraint (e', t) ->
++                  {body_new with pexp_desc = Pexp_constraint (instrument_expr e', t)}
++                | _ -> instrument_expr body_new
++              in
++              {e with pexp_desc =
++                Pexp_function (new_params, constraint_, Pfunction_body body_new)}
+             end
+-            >>= fun default_value ->
+-            traverse ~is_in_tail_position:true e
+-            >>| fun e ->
+-            let e =
+-              match e.pexp_desc with
+-              | Pexp_function _ | Pexp_fun _ -> e
+-              | Pexp_constraint (e', t) ->
+-                {e with pexp_desc = Pexp_constraint (instrument_expr e', t)}
+-              | _ -> instrument_expr e
+-            in
+-            Exp.fun_ ~loc ~attrs label default_value p e
+ 
+           | Pexp_match (e, cases) ->
+             traverse_cases ~is_in_tail_position cases
+@@ -1418,7 +1435,7 @@
+           | Pexp_lazy e ->
+             let rec is_trivial_syntactic_value e =
+               match e.Parsetree.pexp_desc with
+-              | Pexp_function _ | Pexp_fun _ | Pexp_poly _ | Pexp_ident _
++              | Pexp_function _ | Pexp_poly _ | Pexp_ident _
+               | Pexp_constant _ | Pexp_construct (_, None) ->
+                 true
+               | Pexp_constraint (e, _) | Pexp_coerce (e, _, _) ->
+@@ -1446,7 +1463,7 @@
+             >>| fun e ->
+             let e =
+               match e.pexp_desc with
+-              | Pexp_function _ | Pexp_fun _ -> e
++              | Pexp_function _ -> e
+               | _ -> instrument_expr e
+             in
+             Exp.poly ~loc ~attrs e t
