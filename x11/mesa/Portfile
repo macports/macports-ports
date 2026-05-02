@@ -13,12 +13,12 @@ epoch                   1
 
 name                    mesa
 conflicts               gl-headers
-version                 25.3.5
+version                 26.0.5
 revision                0
 
-checksums               rmd160  35c0ff40b910554f0b81b0ca12bbd22ce6a20933 \
-                        sha256  be472413475082df945e0f9be34f5af008baa03eb357e067ce5a611a2d44c44b \
-                        size    43473072
+checksums               rmd160  c4019abcecaf5cea1e008ee1d864d86450b226ee \
+                        sha256  d229c9937d9a25ca0a8958c59f425174563d300ec42acbea2dbe84a055023368 \
+                        size    43889232
 
 categories              x11 graphics
 maintainers             {jeremyhu @jeremyhu} openmaintainer
@@ -44,20 +44,19 @@ depends_build-append    path:bin/pkg-config:pkgconfig \
                         port:py${py_ver_nodot}-mako \
                         port:py${py_ver_nodot}-packaging \
                         port:py${py_ver_nodot}-yaml \
-                        port:xorg-xorgproto
+                        port:xorg-xorgproto \
+                        port:xorg-libXrandr
 
 depends_lib-append      port:expat \
                         port:xorg-libxcb \
                         port:xorg-libX11 \
                         port:xorg-libXext \
-                        port:xorg-libXdamage \
-                        port:xorg-libXrandr \
+                        port:xorg-libXfixes \
                         port:zlib \
                         port:zstd
 
 patchfiles              patch-meson-spec-python.diff \
                         patch-pre-10.8-scandir.diff \
-                        patch-fix-linking.diff \
                         patch-fix-zink.diff
 
 # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/32658
@@ -71,13 +70,8 @@ patchfiles-append       patch-missing-mach-init-include.patch
 # https://trac.macports.org/ticket/73343
 patchfiles-append       patch-gallium_vl_csc_c.diff
 
-# MP ticket 66269
-# the sizes of int and GLint are different on 10.4 PPC, at least
-# not sure how many systems this might affect, but all systems on buildbot were OK
-# restrict to Tiger for now, therefore
-platform darwin 8 {
-    patchfiles-append   patch-mesa-apple-cgi-int-differences.diff
-}
+# https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/40926
+patchfiles-append       patch-fix-glx.diff
 
 post-patch {
     reinplace "s|@@python3@@|${prefix}/bin/python${py_ver}|g" meson.build
@@ -95,14 +89,10 @@ configure.args          -Degl=disabled \
                         -Dgles1=disabled \
                         -Dgles2=disabled
 
-set drivers             [list softpipe]
+set gallium_drivers     [list softpipe]
+set vulkan_drivers      [list]
 
 platform darwin {
-    if {${os.major} < 9} {
-          # Xplugin.h is missing on Tiger
-          configure.cppflags-append -I${filespath}/include
-    }
-
     if {${os.major} < 10} {
           # avoid use of libunwind, which is not in the System on < darwin 10
           # see https://trac.macports.org/ticket/65934
@@ -128,14 +118,12 @@ if {[string match *gcc* ${configure.compiler}]} {
     configure.cxxflags-append -fpermissive
 }
 
-variant llvm description "enable the llvmpipe driver" {
-    set llvm_ver            21
+set llvm_ver            22
+meson.native.binaries   llvm-config=${prefix}/libexec/llvm-${llvm_ver}/bin/llvm-config
+
+variant llvmpipe description "enable the llvmpipe driver" {
     depends_lib-append      port:llvm-${llvm_ver}
-    # for llvm-config
-    configure.env-append    PATH=${prefix}/libexec/llvm-${llvm_ver}/bin:$env(PATH)
-    # for llvm-ar
-    build.env-append        PATH=${prefix}/libexec/llvm-${llvm_ver}/bin:$env(PATH)
-    lappend drivers         llvmpipe
+    lappend gallium_drivers llvmpipe
 }
 
 # Does not work currently
@@ -146,12 +134,23 @@ variant zink description "enable the zink driver" {
         configure.args-append   -Dmoltenvk-dir=${prefix}
     }
     depends_run-append      port:vulkan-loader
-    lappend drivers         zink
+    lappend gallium_drivers zink
+}
+
+variant kosmickrisp description "enable the KosmicKrisp driver" {
+    depends_build-append    port:xorg-libxshmfence
+    depends_lib-append      port:llvm-${llvm_ver} \
+                            port:libclc-${llvm_ver} \
+                            port:spirv-tools
+    configure.pkg_config_path   ${prefix}/libexec/llvm-$llvm_ver/lib/pkgconfig \
+                                ${prefix}/libexec/llvm-$llvm_ver/share/pkgconfig
+    lappend vulkan_drivers  kosmickrisp
 }
 
 # Avoid enabling on macOS as it disables hardware acceleration
-if {${os.platform} ne "darwin"} {
-    default_variants        +llvm
+# Temporarily enable for Tahoe - https://github.com/XQuartz/XQuartz/issues/446
+if {${os.platform} ne "darwin" || ${os.major} >= 25} {
+    default_variants        +llvmpipe
 }
 
 post-patch {
@@ -161,7 +160,8 @@ post-patch {
 }
 
 pre-configure {
-    configure.args-append   -Dgallium-drivers=[join $drivers ,]
+    configure.args-append   -Dgallium-drivers=[join $gallium_drivers ,] \
+                            -Dvulkan-drivers=[join $vulkan_drivers ,]
 }
 
 post-destroot {

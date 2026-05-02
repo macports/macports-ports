@@ -367,9 +367,10 @@ default test.target     {}
 default test.args       {[python_get_defaults test_args]}
 
 default python.add_dependencies yes
-proc python_add_dependencies {} {
+proc python_callback {} {
+    global name subport version python._first_version
     if {[option python.add_dependencies]} {
-        global subport python.version python.default_version test.run
+        global python.version python.default_version test.run
         if {[string match py-* $subport]} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
             depends_lib-delete port:py${python.default_version}[string trimleft $subport py]
@@ -458,8 +459,13 @@ proc python_add_dependencies {} {
             }
         }
     }
+    # if a subport of a py-* port has not changed the version, disable livecheck.
+    if {[info exists python._first_version] && [string match py-* $name]
+        && ${name} ne ${subport} && ${version} eq ${python._first_version}} {
+        livecheck.type  none
+    }
 }
-port::register_callback python_add_dependencies
+port::register_callback python_callback
 
 
 proc python_get_defaults {var} {
@@ -612,15 +618,6 @@ proc python._set_version {option action args} {
         set python._first_version [option ${option}]
     }
 }
-
-# if no subport of a py-* port has not changed the version, disable livecheck.
-pre-livecheck {
-    global name subport version python._first_version
-    if {[string match py-* [option name]] && ${name} ne ${subport} && ${version} eq ${python._first_version}} {
-        livecheck.type  none
-    }
-}
-
 
 pre-test {
     # set PYTHONPATH if not already set

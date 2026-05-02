@@ -7,15 +7,17 @@
 #
 # Please keep this list sorted.
 
-namespace eval portfetch::mirror_sites { }
+namespace eval ::portfetch::mirror_sites {
 
-set portfetch::mirror_sites::sites(afterstep) {
+variable sites
+
+set sites(afterstep) {
     ftp://ftp.afterstep.org/
 }
 
 # The link: http://www.apache.org/dyn/closer.cgi
 # Maybe that one's enough, and we'll rely on their “cdn”
-set portfetch::mirror_sites::sites(apache) {
+set sites(apache) {
     https://archive.apache.org/dist/
     http://apache.is.co.za/
     https://mirror.aarnet.edu.au/pub/apache/
@@ -29,7 +31,7 @@ set portfetch::mirror_sites::sites(apache) {
 # Equivalent to "perl_cpan"; neither name takes precedence over the other.
 # Mirrors: https://cpan.metacpan.org/SITES.html
 # Mirror status: http://mirrors.cpan.org
-set portfetch::mirror_sites::sites(cpan) {
+set sites(cpan) {
     https://cpan.metacpan.org/modules/by-module/
     https://www.cpan.org/modules/by-module/
     http://artfiles.org/cpan.org/modules/by-module/
@@ -127,7 +129,7 @@ set portfetch::mirror_sites::sites(cpan) {
 }
 
 # Equivalent to "tex_ctan"; neither name takes precedence over the other.
-set portfetch::mirror_sites::sites(ctan) {
+set sites(ctan) {
     http://ctan.math.utah.edu/ctan/tex-archive/
     https://mirror.aarnet.edu.au/pub/CTAN/
     http://mirror.internode.on.net/pub/ctan/
@@ -142,7 +144,7 @@ set portfetch::mirror_sites::sites(ctan) {
 # work automatically (which is, append first letter of port name, then
 # port name) so just use a basic form here and fake it in ports that need
 # to use this.
-set portfetch::mirror_sites::sites(debian) {
+set sites(debian) {
     http://ftp.au.debian.org/debian/pool/main/:nosubdir
     http://ftp.wa.au.debian.org/debian/pool/main/:nosubdir
     http://ftp.bg.debian.org/debian/pool/main/:nosubdir
@@ -172,7 +174,7 @@ set portfetch::mirror_sites::sites(debian) {
     http://ftp.us.debian.org/debian/pool/main/:nosubdir
 }
 
-set portfetch::mirror_sites::sites(fink) {
+set sites(fink) {
     http://distfiles.hnd.jp.asi.finkmirrors.net/:nosubdir
     http://distfiles.master.finkmirrors.net/:nosubdir
     https://www.mirrorservice.org/sites/distfiles.finkmirrors.net/:nosubdir
@@ -185,13 +187,13 @@ set portfetch::mirror_sites::sites(fink) {
 # given some weighting criteria.
 # It probably doesn't matter a bunch, though, and plain
 # DNS lookups and HTTP requests are fine.
-set portfetch::mirror_sites::sites(freebsd) {
+set sites(freebsd) {
     http://distcache.FreeBSD.org/ports-distfiles/:nosubdir
 }
 
 # https://api.gentoo.org/mirrors/distfiles.xml appears to be valid now
 # Does not work: curl -s http://www.gentoo.org/main/en/mirrors2.xml | sed -n '/(http)\|(ftp)/s/.*"\([^"]*\)".*/    \1\/distfiles\/:nosubdir/p' | sed s@//distfiles@/distfiles@g
-set portfetch::mirror_sites::sites(gentoo) {
+set sites(gentoo) {
     http://ftp-stud.hs-esslingen.de/pub/Mirrors/gentoo/distfiles/:nosubdir
     http://ftp.dei.uc.pt/pub/linux/gentoo/distfiles/:nosubdir
     http://ftp.fau.de/gentoo/distfiles/:nosubdir
@@ -241,7 +243,7 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://www.mirrorservice.org/sites/distfiles.gentoo.org/distfiles/:nosubdir
 }
 
-set portfetch::mirror_sites::sites(gimp) {
+set sites(gimp) {
     https://artfiles.org/gimp.org/pub/
     https://download.gimp.org/pub/
     https://ftp.acc.umu.se/pub/gimp/
@@ -263,7 +265,7 @@ set portfetch::mirror_sites::sites(gimp) {
     http://www.ring.gr.jp/pub/graphics/
 }
 
-set portfetch::mirror_sites::sites(gnome) {
+set sites(gnome) {
     http://ftp.gnome.org/pub/GNOME/
     https://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
     https://fr2.rpmfind.net/linux/gnome.org/
@@ -284,7 +286,7 @@ set portfetch::mirror_sites::sites(gnome) {
     https://ftp-stud.hs-esslingen.de/pub/Mirrors/ftp.gnome.org/
 }
 
-set portfetch::mirror_sites::sites(gnu) {
+set sites(gnu) {
     https://artfiles.org/gnu.org/
     https://ftp.gnu.org/gnu/
     https://www.mirrorservice.org/sites/ftp.gnu.org/gnu/
@@ -302,21 +304,21 @@ set portfetch::mirror_sites::sites(gnu) {
     ftp://ftp.unicamp.br/pub/gnu/
 }
 
-set portfetch::mirror_sites::sites(gnupg) {
+set sites(gnupg) {
     https://gnupg.org/ftp/gcrypt/
     https://www.mirrorservice.org/sites/ftp.gnupg.org/gcrypt/
     http://www.ring.gr.jp/pub/net/gnupg/
 }
 
-set portfetch::mirror_sites::sites(gnustep) {
+set sites(gnustep) {
     http://ftpmain.gnustep.org/pub/gnustep/
 }
 
-set portfetch::mirror_sites::sites(googlecode) {
+set sites(googlecode) {
     https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/
 }
 
-set portfetch::mirror_sites::sites(isc) {
+set sites(isc) {
     https://www.mirrorservice.org/sites/ftp.isc.org/isc/
     http://ftp.kaist.ac.kr/isc/
     http://mirror.internode.on.net/pub/isc/
@@ -327,7 +329,7 @@ set portfetch::mirror_sites::sites(isc) {
     ftp://ftp.ripe.net/mirrors/sites/ftp.isc.org/isc/
 }
 
-set portfetch::mirror_sites::sites(kde) {
+set sites(kde) {
     https://www.mirrorservice.org/sites/ftp.kde.org/pub/kde/
     http://ftp.gtlib.gatech.edu/pub/kde/
     http://kde.mirrors.hoobly.com/
@@ -336,7 +338,7 @@ set portfetch::mirror_sites::sites(kde) {
     http://mirrors.mit.edu/kde/
 }
 
-set portfetch::mirror_sites::sites(macports) {
+set sites(macports) {
     https://svn.macports.org/repository/macports/distfiles/
 }
 
@@ -349,34 +351,35 @@ set portfetch::mirror_sites::sites(macports) {
 # Some servers that support https haven't added the MacPorts hostnames
 # to their SSL certificate as Subject Alternative Names so we can't use
 # https with them yet.
-global os.platform os.major
-set letsencrypt_https_or_http   [expr {${os.platform} ne "darwin" || ${os.major} == 16 || ${os.major} > 18 ? "https" : "http"}]
-set letsencrypt_https_only      [expr {${os.platform} ne "darwin" || ${os.major} == 16 || ${os.major} > 18 ? "https" : ""}]
-set fastly      ${letsencrypt_https_or_http}
+namespace upvar :: os.platform os.platform
+namespace upvar :: os.major os.major
+variable letsencrypt_https_or_http   [expr {${os.platform} ne "darwin" || ${os.major} == 16 || ${os.major} > 18 ? "https" : "http"}]
+variable letsencrypt_https_only      [expr {${os.platform} ne "darwin" || ${os.major} == 16 || ${os.major} > 18 ? "https" : ""}]
+variable fastly      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
-#set aarnet.au   ${letsencrypt_https_or_http}
-set aarnet.au   http
-set atl.us      http
-set bos.us      ${letsencrypt_https_or_http}
-set cph.dk      ${letsencrypt_https_or_http}
-set cjj.kr      http
+#variable aarnet.au   ${letsencrypt_https_or_http}
+variable aarnet.au   http
+variable atl.us      http
+variable bos.us      ${letsencrypt_https_or_http}
+variable cph.dk      ${letsencrypt_https_or_http}
+variable cjj.kr      http
 # cert doesn't have macports.org SANs; admin notified
-#set fco.it      ${letsencrypt_https_or_http}
-set fco.it      http
-set fra.de      ${letsencrypt_https_or_http}
-set jog.id      http
-set kmq.jp      ${letsencrypt_https_or_http}
-set mse.uk      ${letsencrypt_https_or_http}
-set nue.de      ${letsencrypt_https_or_http}
-set pek.cn      ${letsencrypt_https_or_http}
-set vie.at      ${letsencrypt_https_or_http}
+#variable fco.it      ${letsencrypt_https_or_http}
+variable fco.it      http
+variable fra.de      ${letsencrypt_https_or_http}
+variable jog.id      http
+variable kmq.jp      ${letsencrypt_https_or_http}
+variable mse.uk      ${letsencrypt_https_or_http}
+variable nue.de      ${letsencrypt_https_or_http}
+variable pek.cn      ${letsencrypt_https_or_http}
+variable vie.at      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
-#set ykf.ca      ${letsencrypt_https_or_http}
-set ykf.ca      http
-set fcix.net    http
-set sjtu.edu.cn ${letsencrypt_https_only}
+#variable ykf.ca      ${letsencrypt_https_or_http}
+variable ykf.ca      http
+variable fcix.net    http
+variable sjtu.edu.cn ${letsencrypt_https_only}
 
-set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inline -not "
+set sites(macports_distfiles) [lsearch -all -glob -inline -not "
     ${fastly}://distfiles.macports.org/:mirror
     ${nue.de}://nue.de.distfiles.macports.org/:mirror
     ${fcix.net}://mirror.fcix.net/macports/distfiles/:mirror
@@ -399,13 +402,13 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
 # MySQL
 # Test ports:
 # $ for port in mysql{5,51,55,56} ; do echo "Port: ${port}" && curl -sI $(port distfiles ${port} | grep -v macports | grep -E "^ *(https)://"); done
-set portfetch::mirror_sites::sites(mysql) {
+set sites(mysql) {
     https://cdn.mysql.com/Downloads/:nosubdir
 }
 
 # https://www.netbsd.org/mirrors/
 # CDN: http://cdn.NetBSD.org/pub/NetBSD/
-set portfetch::mirror_sites::sites(netbsd) {
+set sites(netbsd) {
     http://cdn.NetBSD.org/pub/NetBSD/
     http://ftp.NetBSD.org/pub/NetBSD/
     http://ftp.fi.NetBSD.org/pub/NetBSD/
@@ -429,7 +432,7 @@ set portfetch::mirror_sites::sites(netbsd) {
 
 # Equivalent to "savannah"; neither name takes precedence over the other.
 # https://download-mirror.savannah.gnu.org/releases/00_MIRRORS.txt
-set portfetch::mirror_sites::sites(nongnu) {
+set sites(nongnu) {
     https://bigsearcher.com/mirrors/nongnu/
     http://download-mirror.savannah.gnu.org/releases/
     http://ftp.acc.umu.se/mirror/gnu.org/savannah/
@@ -452,7 +455,7 @@ set portfetch::mirror_sites::sites(nongnu) {
 
 
 # https://www.openbsd.org/ftp.html
-set portfetch::mirror_sites::sites(openbsd) {
+set sites(openbsd) {
     https://cdn.openbsd.org/pub/OpenBSD/
     https://cloudflare.cdn.openbsd.org/pub/OpenBSD/
     https://artfiles.org/openbsd/
@@ -515,7 +518,7 @@ set portfetch::mirror_sites::sites(openbsd) {
 
 # https://osdn.net/docs/Mirrors
 # They don't actually list the URLs; these were obtained by guessing.
-set portfetch::mirror_sites::sites(osdn) {
+set sites(osdn) {
     http://aarnet.dl.osdn.jp/
     http://c3sl.dl.osdn.jp/
     http://gigenet.dl.osdn.jp/
@@ -528,15 +531,15 @@ set portfetch::mirror_sites::sites(osdn) {
 }
 
 # Equivalent to "cpan"; neither name takes precedence over the other.
-set portfetch::mirror_sites::sites(perl_cpan) \
-        $portfetch::mirror_sites::sites(cpan)
+set sites(perl_cpan) \
+        $sites(cpan)
 
 # PHP
-set portfetch::mirror_sites::sites(php) {
+set sites(php) {
     http://www.php.net/:nosubdir
 }
 
-set portfetch::mirror_sites::sites(postgresql) {
+set sites(postgresql) {
     http://ftp.postgresql.org/pub/
     https://mirror.aarnet.edu.au/pub/postgresql/
     https://www.mirrorservice.org/sites/ftp.postgresql.org/
@@ -551,11 +554,11 @@ set portfetch::mirror_sites::sites(postgresql) {
 # hash-based subdir in order to fetch. Requires TLS 1.2, which doesn't work
 # on 10.8 and earlier.
 
-set portfetch::mirror_sites::sites(pypi) {
+set sites(pypi) {
     https://files.pythonhosted.org/packages/source/:nosubdir
 }
 
-set portfetch::mirror_sites::sites(ruby) {
+set sites(ruby) {
     https://cache.ruby-lang.org/pub/ruby/
     https://mirror.cyberbits.eu/ruby/
     ftp://ftp.fu-berlin.de/unix/languages/ruby/
@@ -564,11 +567,11 @@ set portfetch::mirror_sites::sites(ruby) {
 }
 
 # Equivalent to "nongnu"; neither name takes precedence over the other.
-set portfetch::mirror_sites::sites(savannah) \
-        $portfetch::mirror_sites::sites(nongnu)
+set sites(savannah) \
+        $sites(nongnu)
 
 # https://sourceforge.net/p/forge/documentation/Mirrors/
-set portfetch::mirror_sites::sites(sourceforge) {
+set sites(sourceforge) {
     http://altushost-swe.dl.sourceforge.net/
     http://cfhcable.dl.sourceforge.net/
     http://cytranet-dal.dl.sourceforge.net/
@@ -592,13 +595,13 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://zenlayer.dl.sourceforge.net/
 }
 
-set portfetch::mirror_sites::sites(sourceforge_jp) {
+set sites(sourceforge_jp) {
     http://iij.dl.sourceforge.jp/
     http://jaist.dl.sourceforge.jp/
     http://osdn.dl.sourceforge.jp/
 }
 
-set portfetch::mirror_sites::sites(sunsite) {
+set sites(sunsite) {
     http://www.gtlib.gatech.edu/pub/Linux/
     http://www.ibiblio.org/pub/Linux/
     ftp://ftp.icm.edu.pl/vol/rzm5/linux-ibiblio/
@@ -606,7 +609,7 @@ set portfetch::mirror_sites::sites(sunsite) {
     ftp://ftp.nvg.ntnu.no/pub/mirrors/metalab.unc.edu/
 }
 
-set portfetch::mirror_sites::sites(tcltk) {
+set sites(tcltk) {
     https://www.mirrorservice.org/sites/ftp.tcl.tk/pub/tcl/
     ftp://ftp.funet.fi/pub/languages/tcl/tcl/
     ftp://ftp.tcl.tk/pub/tcl/
@@ -614,10 +617,10 @@ set portfetch::mirror_sites::sites(tcltk) {
 }
 
 # Equivalent to "ctan"; neither name takes precedence over the other.
-set portfetch::mirror_sites::sites(tex_ctan) \
-        $portfetch::mirror_sites::sites(ctan)
+set sites(tex_ctan) \
+        $sites(ctan)
 
-set portfetch::mirror_sites::sites(xorg) {
+set sites(xorg) {
     https://www.x.org/archive/
     https://xorg.freedesktop.org/archive/
     https://xorg.freedesktop.org/releases/
@@ -628,4 +631,6 @@ set portfetch::mirror_sites::sites(xorg) {
     http://mirror.csclub.uwaterloo.ca/x.org/
     ftp://ftp.ntua.gr/pub/X11/X.org/
     ftp://sunsite.uio.no/pub/X11/
+}
+
 }

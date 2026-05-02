@@ -5,7 +5,7 @@ PortGroup           github 1.0
 PortGroup           mpi 1.0
 PortGroup           python 1.0
 
-github.setup        pytorch pytorch 2.10.0 v
+github.setup        pytorch pytorch 2.11.0 v
 revision            1
 name                py-${github.project}
 license             BSD
@@ -28,9 +28,9 @@ homepage            https://pytorch.org/
 
 distname            ${github.project}-${github.tag_prefix}${version}
 
-checksums           rmd160  415467785bffb765b114e0de46f49a7b195d7e8c \
-                    sha256  fa8ccbe87f83f48735505371c1c313b4aa6db400b0ae4f8a02844d1e150c695f \
-                    size    372567293
+checksums           rmd160  a011c570a84ea581f50b81db6e8d07cbce4e17f9 \
+                    sha256  ab3fde9e7e382f45ac942be6ea2c2ef362c5ccd6f55ed6d5f35e6ea81d3ab88e \
+                    size    421160531
 
 python.versions     310 311 312 313 314
 
@@ -44,6 +44,7 @@ mpi.setup
 compiler.cxx_standard 2017
 
 compiler.blacklist-append *gcc*
+compiler.blacklist-append {clang < 1700}
 
 variant mkl description {Enable Intel Math Kernel Library support} { }
 
@@ -54,8 +55,7 @@ if {${configure.build_arch} eq "x86_64" && !($universal_possible && [variant_iss
 }
 
 platform darwin {
-    # MPS support added in 10.13
-    if {${os.major} >= 17} {
+    if {${os.major} >= 18} {
         variant mps description {Enable Apple Metal Performance Shaders (MPS) support} {
             use_xcode       yes
 
@@ -81,13 +81,6 @@ use device \"mps\". Matrix multiplication example:
         }
 
         default_variants-append +mps
-    }
-
-    # fix on macOS 12-13 with Xcode 14:
-    if { ${os.major} == 21 && [vercmp ${xcodeversion} 14] >= 0 } {
-        patchfiles-append   patch-macOS12-xcode14.diff
-    } elseif { ${os.major} == 22 && [vercmp ${xcodeversion} 14] >= 0 } {
-        patchfiles-append   patch-macOS13-xcode14.diff
     }
 }
 
@@ -121,6 +114,11 @@ if {${name} ne ${subport}} {
         port:py${python.version}-packaging \
         port:py${python.version}-zstd
 
+    # Please remove patch at next upgrade
+    # Incorporate fix https://github.com/pytorch/pytorch/issues/178079
+    # See: https://github.com/pytorch/pytorch/issues/178079#issuecomment-4229264282
+    patchfiles-prepend      patch-issue-178079.diff
+
     # remove unnecessary dependencies and version pinning 
     patchfiles-append       patch-pyproject_toml.diff
 
@@ -129,6 +127,10 @@ if {${name} ne ${subport}} {
     # Upstream PyTorch issue: https://github.com/pytorch/pytorch/issues/58054
     # diff -NaurdwB ./py-pytorch-orig/c10/util/Logging.cpp ./py-pytorch-new/c10/util/Logging.cpp | sed -E -e 's/\.\/py-pytorch-(orig|new)/\./g' | sed -E -e 's|/opt/local|@@PREFIX@@|g' > ~/Downloads/patch-glog-init-check.diff
     patchfiles-append       patch-glog-init-check.diff
+
+    # Fix lambda return type deduction errors with newer Clang.
+    # Upstream PyTorch issue: https://github.com/pytorch/pytorch/issues/178044
+    patchfiles-append       patch-lambda-return-types.diff
 
     # Use Intel Math kernel Library
     if {[variant_isset mkl]} {
@@ -194,6 +196,8 @@ if {${name} ne ${subport}} {
                     USE_GFLAGS=ON \
                     USE_GLOG=ON \
                     USE_LITE_PROTO=ON \
+                    USE_DISTRIBUTED=ON \
+                    USE_GLOO=ON \
                     USE_NCCL=OFF \
                     USE_OPENMP=ON \
                     USE_SYSTEM_PYBIND11=ON \
@@ -206,6 +210,12 @@ if {${name} ne ${subport}} {
         foreach slib [glob -directory ${destroot}${py_torch_root} *.so] {
             system "install_name_tool -add_rpath ${py_torch_root}/lib ${slib}"
         }
+
+        # Upstream PyTorch bundles pybind11 headers in its include directory.
+        # Since we use USE_SYSTEM_PYBIND11=ON, create a symlink so downstream
+        # packages (torchaudio, torchvision, etc.) can find pybind11 headers.
+        ln -s ${python.pkgd}/pybind11/include/pybind11 \
+            ${destroot}${py_torch_root}/include/pybind11
 
         set docdir ${prefix}/share/doc/${subport}
         xinstall -d ${destroot}${docdir}
