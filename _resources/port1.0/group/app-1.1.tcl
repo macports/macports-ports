@@ -272,6 +272,43 @@ proc app::get_default_hide_dock_icon {} {
 options app.use_launch_script
 default app.use_launch_script  no
 
+#-------------------------------------------------------------------------------
+# app.sign: sign the app bundle
+#
+# Sign the created app bundle. Useful for avoiding repeated firewall and privacy
+# popups, and crashes on Apple Silicon.
+#-------------------------------------------------------------------------------
+
+options app.sign
+default app.sign no
+
+#-------------------------------------------------------------------------------
+# app.signing_args: extra auguments passed to codesign command
+#
+# Examples: --deep, --force
+#-------------------------------------------------------------------------------
+
+options app.signing_identity
+default app.signing_identity "-"
+
+#-------------------------------------------------------------------------------
+# app.signing_entitlements: entitlements file used to sign the app
+#
+# Defaults to the empty. If non empty, --entitlements arg will be added to
+# app.signing_args.
+#-------------------------------------------------------------------------------
+
+options app.signing_entitlements
+default app.signing_entitlements ""
+
+options app.signing_args
+default app.signing_args ""
+
+#-------------------------------------------------------------------------------
+# app.signing_identity: identity used to sign the app
+#
+# Defaults to the adhoc identity (sign to run locally).
+#-------------------------------------------------------------------------------
 
 proc app::pre_destroot {} {
     global destroot applications_dir
@@ -308,6 +345,10 @@ proc app::post_destroot {} {
     set app_privacy_photo        [option app.privacy_photo]
     set app_retina               [option app.retina]
     set app_short_version_string [option app.short_version_string]
+    set app_sign                 [option app.sign]
+    set app_signing_identity     [option app.signing_identity]
+    set app_signing_entitlements [option app.signing_entitlements]
+    set app_signing_args         [option app.signing_args]
     set app_use_launch_script    [option app.use_launch_script]
     set app_version              [option app.version]
 
@@ -467,6 +508,15 @@ proc app::post_destroot {} {
         set fp [open ${app_dir_contents}/PkgInfo w]
         puts -nonewline ${fp} "APPL????"
         close ${fp}
+
+        # Sign the app bundle.
+        if {[tbool app_sign]} {
+            if {${app_signing_entitlements} ne ""} {
+                set app_signing_args "--entitlements ${app_signing_entitlements} ${app_signing_args}"
+            }
+            system -W ${destroot}${applications_dir} \
+                "/usr/bin/codesign --sign ${app_signing_identity} ${app_signing_args} [shellescape ${app_name}].app"
+        }
     }
 }
 
