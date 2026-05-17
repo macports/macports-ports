@@ -208,11 +208,13 @@ namespace eval java {
         set version_path_dict
     }
 
-    # Match a normalized major version string like 7, 8*, 9+
+    # Match a normalized major version string like 7, 8*, 9+, 8-11
     proc match_jvm_version { version_requested versions_found } {
         if {[string first "+" $version_requested] != -1} {
             set version_requested [regsub {\+} $version_requested ""]
             match_less_equal $version_requested $versions_found
+        } elseif {[regexp {^(\d+)-(\d+)$} $version_requested -> min_ver max_ver]} {
+            match_range $min_ver $max_ver $versions_found
         } else {
             set version_requested [regsub {\*} $version_requested ""]
             match_equal $version_requested $versions_found
@@ -231,6 +233,23 @@ namespace eval java {
             if {$search_key == $td_key} {
                 set ret_value [dict get $target_dict $td_key]
                 return $ret_value
+            }
+        }
+        return -code error
+    }
+
+    # Returns the value of the first dictionary entry whose key falls
+    # within [min_ver, max_ver] inclusive.  The dict is sorted descending,
+    # so the highest matching version wins.
+    #
+    # @param min_ver Lower bound (inclusive)
+    # @param max_ver Upper bound (inclusive)
+    # @param target_dict The dictionary to search
+    # @return The value of the first matching entry, or an error if none found.
+    proc match_range { min_ver max_ver target_dict } {
+        foreach td_key [dict keys $target_dict] {
+            if {$min_ver <= $td_key && $td_key <= $max_ver} {
+                return [dict get $target_dict $td_key]
             }
         }
         return -code error
