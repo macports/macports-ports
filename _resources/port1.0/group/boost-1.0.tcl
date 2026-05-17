@@ -24,6 +24,7 @@ default boost_cache_cppflags      ""
 default boost_cache_cxxflags      ""
 default boost_cache_ldflags       ""
 default boost_cache_cmake_flags   ""
+default boost_cache_cmake_prefix  ""
 default boost_cache_env_vars      ""
 
 proc boost::default_version {} {
@@ -76,7 +77,7 @@ proc boost::cpp_flags {} {
 proc boost::configure_build {} {
     global cmake.prefix_path
     global boost_cache_version_nodot boost_cache_depends boost_cache_cxxflags
-    global boost_cache_ldflags boost_cache_cmake_flags boost_cache_cmake
+    global boost_cache_ldflags boost_cache_cmake_flags boost_cache_cmake_prefix
     global boost_cache_env_vars boost_cache_cpath boost_cache_cppflags
 
     ui_debug "boost PG: Configure build for boost [boost::version]"
@@ -154,7 +155,11 @@ proc boost::configure_build {} {
             }
         }
         if {[info exists cmake.prefix_path]} {
-            cmake.prefix_path-append    [boost::install_area]
+            if { ${boost_cache_cmake_prefix} ne "" } {
+                cmake.prefix_path-delete    ${boost_cache_cmake_prefix}
+            }
+            set boost_cache_cmake_prefix    [boost::install_area]
+            cmake.prefix_path-append        ${boost_cache_cmake_prefix}
         }
         # Try and cover all bases here and set all possible variables ...
         # See https://cmake.org/cmake/help/latest/module/FindBoost.html
