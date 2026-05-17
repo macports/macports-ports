@@ -125,9 +125,7 @@ proc cmake::system_prefix_path {} {
 
 proc cmake::module_path {} {
     set modpath "[join [concat [option cmake_share_module_dir] [option cmake.module_path]] \;]"
-    set prepath "[join [concat [option cmake.prefix_path] [option cmake.module_path]] \;]"
-    # TODO - replace with this once ports are updated to use the correct variable
-    # set prepath "[join [option cmake.prefix_path] \;]"
+    set prepath "[join [option cmake.prefix_path] \;]"
     return [list \
         -DCMAKE_MODULE_PATH="${modpath}" \
         -DCMAKE_PREFIX_PATH="${prepath}"
