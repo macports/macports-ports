@@ -149,17 +149,17 @@ proc boost::configure_build {} {
     # As we are appending to configure flags, need to check if cmake is in use
     # before appending the cmake specific flags
     if { [string match *cmake* [option configure.cmd] ] } {
-        if { ${boost_cache_cmake_flags} ne "" } {
-            foreach flag ${boost_cache_cmake_flags} {
-                configure.args-delete ${flag}
-            }
-        }
         if {[info exists cmake.prefix_path]} {
             if { ${boost_cache_cmake_prefix} ne "" } {
                 cmake.prefix_path-delete    ${boost_cache_cmake_prefix}
             }
             set boost_cache_cmake_prefix    [boost::install_area]
             cmake.prefix_path-append        ${boost_cache_cmake_prefix}
+        }
+        if { ${boost_cache_cmake_flags} ne "" } {
+            foreach flag ${boost_cache_cmake_flags} {
+                configure.args-delete ${flag}
+            }
         }
         # Try and cover all bases here and set all possible variables ...
         # See https://cmake.org/cmake/help/latest/module/FindBoost.html
