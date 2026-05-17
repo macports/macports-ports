@@ -88,7 +88,7 @@ proc qt6::callback {} {
     switch -exact [option qt6.find_method] {
         qt_dirs {
             configure.env-append            QT_DIR=[option qt6.dir]
-            foreach module {"" CoreTools GuiTools} {
+            foreach module {"" CoreTools GuiTools LinguistTools} {
                 configure.env-append        Qt6${module}_DIR=[option qt6.dir]
             }
         }
