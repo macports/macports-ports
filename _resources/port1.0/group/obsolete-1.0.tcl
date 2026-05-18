@@ -4,10 +4,16 @@
 #
 #   PortGroup           obsolete 1.0
 #   replaced_by         name-of-port-that-deprecated-this-port
+#
+# Optional:
+#   obsolete.note       "Additional guidance for the user."
 
 # set a number of reasonable defaults for a port that is only there to
 # inform users that they should uninstall it and install something else
 # instead; you might want to override some of the defaults though.
+
+options obsolete.note
+default obsolete.note ""
 
 proc obsolete.set_descriptions {replaced_by} {
     if {${replaced_by} eq ""} {
@@ -64,5 +70,17 @@ pre-configure {
     } else {
         ui_error "${subport} is obsolete; please uninstall it."
     }
+    set note [option obsolete.note]
+    if {$note ne ""} {
+        ui_error $note
+    }
     return -code error "obsolete port"
+}
+
+# Append obsolete.note to long_description when set.
+option_proc obsolete.note obsolete.note_proc
+proc obsolete.note_proc {option action args} {
+    if {${action} eq "set" && [lindex $args 0] ne ""} {
+        long_description-append [lindex $args 0]
+    }
 }
