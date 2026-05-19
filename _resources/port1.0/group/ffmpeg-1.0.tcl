@@ -35,18 +35,19 @@ proc ffmpeg::set_vars {action} {
 
 proc ffmpeg::configure_build {} {
     global ffmpeg._version
+    if {${ffmpeg._version} eq ""} return
     ffmpeg::set_vars        delete
     set ffmpeg._version     [option ffmpeg.version]
     ffmpeg::set_vars        prepend
 }
 
 proc ffmpeg::version_proc {option action args} {
+    global ffmpeg._version
     if {${action} ne "set"} return
+    set ffmpeg._version [option ffmpeg.version]
     ffmpeg::configure_build
 }
 
+set ffmpeg._version ""
 port::register_callback ffmpeg::configure_build
 option_proc ffmpeg.version ffmpeg::version_proc
-
-set ffmpeg._version [option ffmpeg.version]
-ffmpeg::configure_build
