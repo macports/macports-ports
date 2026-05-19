@@ -44,7 +44,9 @@ proc ffmpeg::configure_build {} {
 proc ffmpeg::version_proc {option action args} {
     global ffmpeg._version
     if {${action} ne "set"} return
-    set ffmpeg._version [option ffmpeg.version]
+    if {${ffmpeg._version} eq ""} {
+        set ffmpeg._version [option ffmpeg.version]
+    }
     ffmpeg::configure_build
 }
 
