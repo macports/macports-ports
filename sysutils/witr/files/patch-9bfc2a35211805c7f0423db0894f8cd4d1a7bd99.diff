@@ -1,0 +1,313 @@
+diff --git a/internal/proc/command.go b/internal/proc/command.go
+index 98891c7..a450d84 100644
+--- a/internal/proc/command.go
++++ b/internal/proc/command.go
+@@ -49,6 +49,25 @@ func isWordChar(c byte) bool {
+ 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+ }
+ 
++// binaryBasename returns the executable name from a string that is known to
++// be a single full binary path (e.g. from `lsof ftxt`, `/proc/<pid>/exe`, or
++// `ps -o comm=` on its own line). Unlike extractExecutableName it does NOT
++// tokenize on whitespace, so paths containing spaces — like macOS .app
++// bundles ("/Applications/Microsoft Teams.app/Contents/MacOS/Microsoft Teams")
++// — are preserved intact.
++func binaryBasename(rawPath string) string {
++	s := strings.TrimSpace(rawPath)
++	s = strings.Trim(s, `"'`)
++	if s == "" {
++		return ""
++	}
++	base := filepath.Base(s)
++	if base == "." || base == "/" {
++		return ""
++	}
++	return base
++}
++
+ func extractExecutableName(cmdline string) string {
+ 	args := splitCmdline(cmdline)
+ 	for _, arg := range args {
+diff --git a/internal/proc/command_test.go b/internal/proc/command_test.go
+index 49faa33..152548c 100644
+--- a/internal/proc/command_test.go
++++ b/internal/proc/command_test.go
+@@ -127,6 +127,17 @@ func TestExtractExecutableName(t *testing.T) {
+ 			cmdline: "/usr/bin/my-very-long-process-name --flag",
+ 			want:    "my-very-long-process-name",
+ 		},
++		{
++			// Documents the known limitation that caused issue #201: when `ps`
++			// emits an unquoted argv (which it always does on darwin/freebsd),
++			// a path containing spaces is tokenized incorrectly. Callers must
++			// use binaryBasename(comm) or binaryBasename(binPath) to get the
++			// correct display name in this case — extractExecutableName cannot
++			// recover it from raw args alone.
++			name:    "loses spaces in unquoted .app path (issue #201)",
++			cmdline: "/Applications/Microsoft Teams.app/Contents/MacOS/Microsoft Teams --arg",
++			want:    "Microsoft",
++		},
+ 	}
+ 
+ 	for _, tt := range tests {
+@@ -139,3 +150,64 @@ func TestExtractExecutableName(t *testing.T) {
+ 		})
+ 	}
+ }
++
++func TestBinaryBasename(t *testing.T) {
++	t.Parallel()
++
++	tests := []struct {
++		name string
++		in   string
++		want string
++	}{
++		{
++			name: "preserves spaces in .app path",
++			in:   "/Applications/Microsoft Teams.app/Contents/MacOS/Microsoft Teams",
++			want: "Microsoft Teams",
++		},
++		{
++			name: "preserves spaces in helper renderer path",
++			in:   "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/Current/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)",
++			want: "Google Chrome Helper (Renderer)",
++		},
++		{
++			name: "trims surrounding whitespace and newline (ps -o comm= output)",
++			in:   "/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n",
++			want: "Electron",
++		},
++		{
++			name: "strips surrounding quotes",
++			in:   `"/usr/local/bin/my server"`,
++			want: "my server",
++		},
++		{
++			name: "returns empty for empty input",
++			in:   "",
++			want: "",
++		},
++		{
++			name: "returns empty for whitespace-only input",
++			in:   "   \n  ",
++			want: "",
++		},
++		{
++			name: "rejects bare slash",
++			in:   "/",
++			want: "",
++		},
++		{
++			name: "handles simple basename without path",
++			in:   "bash",
++			want: "bash",
++		},
++	}
++
++	for _, tt := range tests {
++		tt := tt
++		t.Run(tt.name, func(t *testing.T) {
++			t.Parallel()
++			if got := binaryBasename(tt.in); got != tt.want {
++				t.Fatalf("binaryBasename(%q) = %q, want %q", tt.in, got, tt.want)
++			}
++		})
++	}
++}
+diff --git a/internal/proc/process_darwin.go b/internal/proc/process_darwin.go
+index 31e881a..0791bcb 100644
+--- a/internal/proc/process_darwin.go
++++ b/internal/proc/process_darwin.go
+@@ -77,15 +77,22 @@ func ReadProcess(pid int) (model.Process, error) {
+ 		health = "high-mem"
+ 	}
+ 
+-	// Derive display name from the full command line to avoid kernel comm truncation
+-	// and space-in-name parsing issues (e.g. "Microsoft Teams WebView Helper").
+-	displayName := extractExecutableName(rawCmdline)
++	// Display name resolution order:
++	//   1. filepath.Base(binPath) — binPath comes from `lsof ftxt` as a single
++	//      unsplit line, so spaces in .app bundle paths are preserved.
++	//   2. `ps -p <pid> -o comm=` on its own line — also preserves spaces.
++	//   3. extractExecutableName(rawCmdline) — last resort. `ps -o args=` joins
++	//      argv with single spaces and does not quote paths, so this can
++	//      truncate names when the executable path contains spaces (issue #201).
++	displayName := binaryBasename(binPath)
+ 	if displayName == "" {
+-		// Fall back to ucomm for processes with no visible command line (kernel threads)
+-		if ucommOut, ucommErr := exec.Command("ps", "-p", pidStr, "-o", "ucomm=").Output(); ucommErr == nil {
+-			displayName = strings.TrimSpace(string(ucommOut))
++		if commOut, commErr := exec.Command("ps", "-p", pidStr, "-o", "comm=").Output(); commErr == nil {
++			displayName = binaryBasename(string(commOut))
+ 		}
+ 	}
++	if displayName == "" {
++		displayName = extractExecutableName(rawCmdline)
++	}
+ 	if cmdline == "" {
+ 		cmdline = displayName
+ 	}
+diff --git a/internal/proc/process_freebsd.go b/internal/proc/process_freebsd.go
+index 14b208d..d60c40a 100644
+--- a/internal/proc/process_freebsd.go
++++ b/internal/proc/process_freebsd.go
+@@ -82,13 +82,23 @@ func ReadProcess(pid int) (model.Process, error) {
+ 		health = "high-mem"
+ 	}
+ 
+-	displayName := extractExecutableName(rawCmdline)
++	// Display name resolution order:
++	//   1. filepath.Base(binPath) — binPath comes from `procstat -f` as a
++	//      single unsplit line, preserving any spaces in the path.
++	//   2. `ps -p <pid> -o comm=` on its own line — also preserves spaces.
++	//   3. extractExecutableName(rawCmdline) — last resort. `ps -o args=`
++	//      joins argv with single spaces and does not quote paths, so this
++	//      can truncate names when the executable path contains spaces
++	//      (issue #201).
++	displayName := binaryBasename(binPath)
+ 	if displayName == "" {
+-		// Fall back to comm for processes with no visible command line
+ 		if commOut, commErr := exec.Command("ps", "-p", pidStr, "-o", "comm=").Output(); commErr == nil {
+-			displayName = strings.TrimSpace(string(commOut))
++			displayName = binaryBasename(string(commOut))
+ 		}
+ 	}
++	if displayName == "" {
++		displayName = extractExecutableName(rawCmdline)
++	}
+ 	if cmdline == "" {
+ 		cmdline = displayName
+ 	}
+diff --git a/internal/proc/process_list_darwin.go b/internal/proc/process_list_darwin.go
+index d527d0c..566ff7a 100644
+--- a/internal/proc/process_list_darwin.go
++++ b/internal/proc/process_list_darwin.go
+@@ -16,15 +16,19 @@ import (
+ // ListProcesses returns a list of all running processes with basic details (PID, Command, State).
+ // This is used by the TUI to display the process list.
+ func ListProcesses() ([]model.Process, error) {
+-	// Use ps to fetch rich information efficiently: pid, ppid, user, lstart, %cpu, rss, %mem, args
+-	// comm is excluded because it can contain spaces (e.g. "Microsoft Teams"),
+-	// which breaks strings.Fields parsing. The display name is derived from args instead.
++	// Use ps to fetch rich information efficiently: pid, ppid, user, lstart, %cpu, rss, %mem, args.
++	// comm is excluded from this row because it can contain spaces (e.g.
++	// "Microsoft Teams") which breaks the strings.Fields column parse used below;
++	// it is fetched separately via readPIDCommMap() so the display name is taken
++	// from an unambiguous source rather than re-derived from the space-joined args.
+ 	out, err := exec.Command("ps", "-axo", "pid,ppid,user,lstart,%cpu,rss,%mem,args").Output()
+ 	if err != nil {
+ 		// Fallback to fast snapshot if ps fails
+ 		return ListProcessSnapshot()
+ 	}
+ 
++	commMap := readPIDCommMap()
++
+ 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+ 
+ 	// Skip header
+@@ -69,7 +73,13 @@ func ListProcesses() ([]model.Process, error) {
+ 			cmdline = strings.Join(fields[11:], " ")
+ 		}
+ 
+-		displayName := extractExecutableName(cmdline)
++		// Prefer the comm value (full executable path on macOS, captured
++		// separately so embedded spaces survive) over an args-based extractor
++		// which would mis-split paths like "/Applications/Microsoft Teams.app/...".
++		displayName := binaryBasename(commMap[pid])
++		if displayName == "" {
++			displayName = extractExecutableName(cmdline)
++		}
+ 		if displayName == "" && len(fields) > 11 {
+ 			displayName = fields[11]
+ 		}
+diff --git a/internal/proc/process_list_freebsd.go b/internal/proc/process_list_freebsd.go
+index d5b305a..497c82f 100644
+--- a/internal/proc/process_list_freebsd.go
++++ b/internal/proc/process_list_freebsd.go
+@@ -17,7 +17,10 @@ import (
+ // This is used by the TUI to display the process list.
+ func ListProcesses() ([]model.Process, error) {
+ 	// Use ps to fetch rich information efficiently: pid, ppid, user, lstart, %cpu, rss, %mem, args.
+-	// comm is excluded because it can contain spaces, which breaks strings.Fields parsing.
++	// comm is excluded from this row because it can contain spaces which breaks
++	// the strings.Fields column parse used below; it is fetched separately via
++	// readPIDCommMap() so the display name comes from an unambiguous source
++	// instead of being re-derived from the space-joined args.
+ 	// LC_ALL=C is required so lstart yields the expected 5-token English format;
+ 	// otherwise field offsets shift and %cpu picks up the rss column
+ 	cmd := exec.Command("ps", "-axo", "pid,ppid,user,lstart,%cpu,rss,%mem,args")
+@@ -28,6 +31,8 @@ func ListProcesses() ([]model.Process, error) {
+ 		return ListProcessSnapshot()
+ 	}
+ 
++	commMap := readPIDCommMap()
++
+ 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+ 
+ 	// Skip header
+@@ -72,7 +77,12 @@ func ListProcesses() ([]model.Process, error) {
+ 			cmdline = strings.Join(fields[11:], " ")
+ 		}
+ 
+-		displayName := extractExecutableName(cmdline)
++		// Prefer the separately-captured comm value over an args-based extractor
++		// so paths containing spaces are not mis-split.
++		displayName := binaryBasename(commMap[pid])
++		if displayName == "" {
++			displayName = extractExecutableName(cmdline)
++		}
+ 		if displayName == "" && len(fields) > 11 {
+ 			displayName = fields[11]
+ 		}
+diff --git a/internal/proc/psenv_unix.go b/internal/proc/psenv_unix.go
+index 32fc002..e670596 100644
+--- a/internal/proc/psenv_unix.go
++++ b/internal/proc/psenv_unix.go
+@@ -4,6 +4,8 @@ package proc
+ 
+ import (
+ 	"os"
++	"os/exec"
++	"strconv"
+ 	"strings"
+ )
+ 
+@@ -17,3 +19,37 @@ func buildEnvForPS() []string {
+ 	env = append(env, "LC_ALL=C", "TZ=UTC")
+ 	return env
+ }
++
++// readPIDCommMap returns a pid->comm map produced by a single `ps -axo pid=,comm=`
++// invocation. On macOS comm holds the full executable path (spaces included);
++// on FreeBSD it holds the short command name. Either way the value is the
++// authoritative source for the display name and is parsed by splitting on the
++// first whitespace only, so values containing spaces survive intact.
++func readPIDCommMap() map[int]string {
++	cmd := exec.Command("ps", "-axo", "pid=,comm=")
++	cmd.Env = buildEnvForPS()
++	out, err := cmd.Output()
++	if err != nil {
++		return nil
++	}
++	m := make(map[int]string)
++	for _, line := range strings.Split(string(out), "\n") {
++		trimmed := strings.TrimLeft(line, " \t")
++		if trimmed == "" {
++			continue
++		}
++		idx := strings.IndexAny(trimmed, " \t")
++		if idx < 0 {
++			continue
++		}
++		pid, err := strconv.Atoi(trimmed[:idx])
++		if err != nil {
++			continue
++		}
++		comm := strings.TrimSpace(trimmed[idx+1:])
++		if comm != "" {
++			m[pid] = comm
++		}
++	}
++	return m
++}
