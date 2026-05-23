@@ -6,7 +6,7 @@ PortGroup           legacysupport 1.1
 
 name                ghc
 version             9.14.1
-revision            1
+revision            2
 categories          lang haskell
 maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
 license             BSD
@@ -191,6 +191,90 @@ proc ghc_prebuilt_commands {} {
         set exedir  ${prefix}/lib/${distname}
         set docdir  ${prefix}/share/doc/${distname}
         set mandir  ${prefix}/share/man/man1
+
+        # The upstream Darwin bindist is built against the SDK iconv, whose
+        # entry points are iconv*. MacPorts libiconv exports libiconv*, and
+        # ${prefix}/lib may appear before the SDK library path in downstream
+        # GHC links. Rewrite ghc-internal's iconv references so the prebuilt
+        # compiler is consistent with its MacPorts libiconv dependency.
+        foreach archive [glob -nocomplain \
+                ${destroot}${exedir}/lib/*/ghc-internal-*/libHSghc-internal*.a] {
+            set iconv_object {}
+            foreach archive_member [split [exec ar -t ${archive}] \n] {
+                if {[regexp {^iconv(\.p)?_o$|^iconv\.o$} ${archive_member}]} {
+                    set iconv_object ${archive_member}
+                    break
+                }
+            }
+            if {${iconv_object} eq {}} {
+                ui_debug "No iconv object found in ${archive}"
+                continue
+            }
+
+            set rewrite_dir ${workpath}/[file tail ${archive}]-iconv-rewrite
+            delete -force ${rewrite_dir}
+            xinstall -d ${rewrite_dir}
+
+            system -W ${rewrite_dir} \
+                    "ar -x ${archive} ${iconv_object}"
+            system -W ${rewrite_dir} \
+                    "${prefix}/bin/llvm-objcopy-mp-${ghc_llvm_version} \
+                    --redefine-sym _iconv=_libiconv \
+                    --redefine-sym _iconv_open=_libiconv_open \
+                    --redefine-sym _iconv_close=_libiconv_close \
+                    ${iconv_object} iconv.rewritten.o"
+            move -force ${rewrite_dir}/iconv.rewritten.o ${rewrite_dir}/${iconv_object}
+            system -W ${rewrite_dir} \
+                    "ar -r ${archive} ${iconv_object}"
+            system \
+                    "ranlib ${archive}"
+        }
+
+        foreach dylib [glob -nocomplain \
+                ${destroot}${exedir}/lib/*/libHSghc-internal*.dylib] {
+            system \
+                    "${prefix}/bin/llvm-objcopy-mp-${ghc_llvm_version} \
+                    --redefine-sym _iconv=_libiconv \
+                    --redefine-sym _iconv_open=_libiconv_open \
+                    --redefine-sym _iconv_close=_libiconv_close \
+                    ${dylib} ${dylib}.rewritten"
+            move -force ${dylib}.rewritten ${dylib}
+            system \
+                    "install_name_tool -change /usr/lib/libiconv.2.dylib \
+                    ${prefix}/lib/libiconv.2.dylib ${dylib}"
+        }
+
+        foreach conf [glob -nocomplain \
+                ${destroot}${exedir}/lib/package.conf.d/ghc-internal-*.conf*] {
+            set conf_fd [open ${conf} r]
+            set conf_contents [read ${conf_fd}]
+            close ${conf_fd}
+
+            if {[string first "    ${prefix}/lib" ${conf_contents}] == -1} {
+                set conf_lines [split ${conf_contents} \n]
+                set conf_contents {}
+                foreach line ${conf_lines} {
+                    lappend conf_contents ${line}
+                    if {${line} in [list "library-dirs:" "library-dirs-static:"]} {
+                        set append_libdir_after_indented_line yes
+                    } elseif {[info exists append_libdir_after_indented_line]} {
+                        if {[string match "    *" ${line}]} {
+                            lappend conf_contents "    ${prefix}/lib"
+                            unset append_libdir_after_indented_line
+                        }
+                    } elseif {[string match "dynamic-library-dirs:*" ${line}]} {
+                        lappend conf_contents "    ${prefix}/lib"
+                    }
+                }
+                set conf_contents [join ${conf_contents} \n]
+                set conf_fd [open ${conf} w]
+                puts -nonewline ${conf_fd} ${conf_contents}
+                close ${conf_fd}
+            }
+        }
+        system \
+                "${destroot}${exedir}/bin/ghc-pkg --global-package-db \
+                ${destroot}${exedir}/lib/package.conf.d recache"
 
         delete -force \
             ${destroot}${docdir}/archives
@@ -454,8 +538,8 @@ if {${name} eq ${subport}} {
 Copy/edit ${prefix}/etc/ghci.conf to your directory ~/.ghc
 for a user-specific startup configuration.
 
-Note: variant `ghc +prebuilt` is used as a fallback when `ghc` 
-cannot be compiled, whereas port `ghc-prebuilt` is necessary to bootstrap 
+Note: variant `ghc +prebuilt` is used as a fallback when `ghc`
+cannot be compiled, whereas port `ghc-prebuilt` is necessary to bootstrap
 Haskell build tools, including port `ghc`."
 
     livecheck.url   ${livecheck_url}
@@ -464,7 +548,7 @@ Haskell build tools, including port `ghc`."
 }
 
 subport ghc-prebuilt {
-    revision        0
+    revision        1
 
     ghc_prebuilt_commands
 
