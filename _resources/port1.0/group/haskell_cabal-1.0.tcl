@@ -74,11 +74,12 @@ proc haskell_cabal.build_getjobsarg {args} {
 
 proc haskell_cabal.get_env {} {
     global haskell_cabal.cabal_root haskell_cabal.use_prebuilt
-    set myenv [list CABAL_CONFIG=${haskell_cabal.cabal_root}/config]
+    set myenv [list CABAL_CONFIG=${haskell_cabal.cabal_root}/config \
+                    PATH=${haskell_cabal.cabal_root}/bin:$::env(PATH) \
+    ]
     if {[tbool haskell_cabal.use_prebuilt]} {
         lappend myenv \
                     GHC=${haskell_cabal.cabal_root}/bin/ghc \
-                    PATH=${haskell_cabal.cabal_root}/bin:$::env(PATH)
     }
     return $myenv
 }
@@ -144,8 +145,15 @@ post-patch {
                     "  haddockdir: \$htmldir" \
                     "  sysconfdir: ${prefix}/${haskell_cabal.sysconfdir}" \
                     "" \
-                    "program-locations" \
-                    "  gcc-location: ${configure.cc}" \
+                    "-- https://trac.macports.org/ticket/74034" \
+                    "-- https://github.com/haskell/cabal/issues/8476" \
+                    "-- uncomment when cabal upstream honors these settings" \
+                    "-- program-locations" \
+                    "--   gcc-location: ${configure.cc}" \
+                    "-- " \
+                    "-- program-default-options" \
+                    "--   ghc-options: -pgmc=${configure.cc}" \
+                    "--   runghc-options: -pgmc=${configure.cc}" \
                     ] {
         puts ${cabal_config_fd} ${line}
     }
@@ -242,6 +250,28 @@ post-patch {
             ln -s   ${prefix}/bin/${f}-prebuilt \
                     ${haskell_cabal.cabal_root}/bin/${f}
         }
+    }
+
+    # https://trac.macports.org/ticket/74034
+    # symlink gcc to ${configure.cc} if ${prefix}/bin/gcc exists
+    # because cabal appears not to use gcc-location/ghc-options: -pgmc=
+    if {[file exists ${prefix}/bin/gcc] \
+            && [file executable ${prefix}/bin/gcc]} {
+        if {! [file isdirectory ${haskell_cabal.cabal_root}/bin]} {
+            xinstall -d ${haskell_cabal.cabal_root}/bin
+        }
+
+        ln -s       ${configure.cc} \
+                    ${haskell_cabal.cabal_root}/bin/gcc
+    }
+    if {[file exists ${prefix}/bin/g++] \
+            && [file executable ${prefix}/bin/g++]} {
+        if {! [file isdirectory ${haskell_cabal.cabal_root}/bin]} {
+            xinstall -d ${haskell_cabal.cabal_root}/bin
+        }
+
+        ln -s       ${configure.cxx} \
+                    ${haskell_cabal.cabal_root}/bin/g++
     }
 }
 
