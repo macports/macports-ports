@@ -1,17 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           muniversal 1.0
 PortGroup           mpi 1.0
 PortGroup           legacysupport 1.1
 PortGroup           github 1.0
+PortGroup           cmake 1.1
 
-github.setup        HDFGroup hdf5 1.14.6 hdf5_
-set distversion     $version
+github.setup        HDFGroup hdf5 2.1.1
 revision            0
-
-#set mainversion     [lindex [split ${distversion} -] 0]
-#set shortversion    [join [lrange [split ${mainversion} .] 0 1] .]
 
 categories          science
 maintainers         {eborisch @eborisch} openmaintainer
@@ -30,19 +26,17 @@ long_description    HDF5 is a data model, library, and file format for storing\
 
 homepage            https://www.hdfgroup.org/solutions/hdf5/
 github.tarball_from releases
-distname            ${name}-${distversion}
 
 checksums \
-    rmd160  25870c7e455e7f83bd043ed60ed6662c94ac90d5 \
-    sha256  e4defbac30f50d64e1556374aa49e574417c9e72c6b1de7a4ff88c4b1bea6e9b \
-    size    39289609
+    rmd160  e1fc58cd2d17ad1d269ef7d2fa4f9e4a8b84e499 \
+    sha256  efff93b5a904d66e8f626d7da60b5eedc9faf544be27dbabbaa87967b8ad798b \
+    size    42049698
+
+compiler.cxx_standard       2011
 
 mpi.setup           -gcc44 -gcc45
 
 depends_lib         port:zlib port:libaec
-use_parallel_build  yes
-
-patchfiles          patch-tools-src-misc-h5cc.in.diff
 
 # llvm-gcc-4.2 produced code fails type conversion tests
 # Upstream suggestion is use -O0. Clang-produced code passes all tests.
@@ -64,94 +58,83 @@ compilers.add_gcc_rpath_support no
 
 # Use lib/hdf5 rather than hdf5/lib plugin directory
 configure.args \
-                    --disable-cxx \
-                    --disable-fortran \
-                    --disable-hl \
-                    --disable-parallel \
-                    --disable-silent-rules \
-                    --disable-threadsafe \
-                    --enable-build-mode=production \
-                    --enable-shared \
-                    --enable-static \
-                    --with-default-plugindir=${prefix}/lib/hdf5 \
-                    --with-szlib=${prefix}/lib/libaec \
-                    --with-zlib=yes
+                    -DCMAKE_BUILD_TYPE:STRING=Release \
+                    -DCMAKE_FIND_DEBUG_MODE:BOOL=OFF \
+                    -DH5_DEFAULT_PLUGINDIR:STRING=${prefix}/lib/hdf5 \
+                    -DHDF5_BUILD_CPP_LIB:BOOL=ON \
+                    -DHDF5_BUILD_FORTRAN:BOOL=OFF \
+                    -DHDF5_ENABLE_OPTIMIZATION:BOOL=ON \
+                    -DHDF5_ENABLE_SZIP_SUPPORT:BOOL=ON \
+                    -DHDF5_ENABLE_ZLIB_SUPPORT:BOOL=ON \
+                    -DHDF5_INSTALL_CMAKE_DIR:STRING=${cmake_share_module_dir} \
+                    -DSZIP_INCLUDE_DIR:PATH=${prefix}/lib/libaec/include \
+                    -DSZIP_LIBRARY:FILEPATH=${prefix}/lib/libaec/lib/libsz.dylib \
+                    -DSZIP_USE_EXTERNAL:BOOL=OFF \
+                    -Dlibaec_INCLUDE_DIR:PATH=${prefix}/lib/libaec/include \
+                    -Dlibaec_LIBRARY:FILEPATH=${prefix}/lib/libaec/lib/libaec.dylib
+
+configure.env-append ZLIB_ROOT=${prefix}/lib
+configure.env-append libaec_DIR=${prefix}/lib/libaec
+configure.cflags-append -fno-common
 
 # Actively checks how to get clang to warn on implicit functions with this.
 configure.checks.implicit_function_declaration.whitelist-append strchr
 
-# http://mail.hdfgroup.org/pipermail/hdf-forum_hdfgroup.org/2010-March/002682.html
-license             NCSA
+# https://github.com/HDFGroup/hdf5/pull/5638
+license             BSD
 
-default_variants    +cxx +hl +fortran
+default_variants +fortran
 
-post-configure {
-    if {[variant_exists universal] && [variant_isset universal]} {
-        set dirs {}
-        foreach arch ${universal_archs_to_use} {
-            lappend dirs ${worksrcpath}-${arch}
-        }
-    } else {
-        set dirs ${worksrcpath}
-    }
-    foreach dir ${dirs} {
-        reinplace -E {s|-arch [a-z0-9_]+||g} \
-            ${dir}/bin/h5cc \
-            ${dir}/c++/src/h5c++ \
-            ${dir}/src/libhdf5.settings \
-            ${dir}/fortran/src/h5fc
-        if {${configure.ccache}} {
-            reinplace -W ${dir} {s|ccache ||} bin/h5cc c++/src/h5c++
-        }
-    }
+variant fortran description {Build fortran libs} {
+    configure.args-replace  -DHDF5_BUILD_FORTRAN:BOOL=OFF -DHDF5_BUILD_FORTRAN:BOOL=ON
+    configure.args-append   -DHDF5_INSTALL_MOD_FORTRAN:BOOL=ON
 }
 
 post-destroot {
+    # Move LICENSE, etc.
     xinstall -d ${destroot}${prefix}/share/hdf5/
-    xinstall -m 444 ${worksrcpath}/COPYING\
-      ${destroot}${prefix}/share/hdf5/
+    foreach f [ glob -type f ${destroot}${prefix}/share/* ] {
+        move $f ${destroot}${prefix}/share/hdf5/
+    }
 
-    # remove paths to libraries used to build HDF5 when packaging HDF5
-    system -W ${destroot}${prefix}/bin "${worksrcpath}/bin/pkgscrpts/h5rmflags -prefix=${prefix}"
+    foreach f [ glob ${destroot}${prefix}/mod/static/* ] {
+        move $f ${destroot}${prefix}/include/
+    }
 
-    # ensure libraries are found and that they are from MacPorts
-    # see https://trac.macports.org/ticket/67507
-    # Depending on build config, a number of different files need to be patched
-    # just let the system find which ones need it for this build.
-    system -W ${destroot}${prefix}/bin \
-        "grep -Il --null -- '-lsz -lz' * | xargs -0 sed -i '' \
-          -e 's^-lsz^${prefix}/lib/libaec/lib/libsz.dylib^' \
-          -e 's^-lz^${prefix}/lib/libz.dylib^'"
+    delete ${destroot}${prefix}/mod
 }
 
 test.run            yes
-test.target         check
 
-variant hl description {
-    Enable High Level interface.
-  +hl is EXPERIMENTAL with +threadsafe
+variant threadsafe description {
+    Enable threadsafety.
+  +threadsafe is EXPERIMENTAL
 } {
-    configure.args-delete       --disable-hl
-    configure.args-append       --enable-hl
+    # Tell hdf5 to configure in this experimental configuration
+    configure.args-append       -DHDF5_ALLOW_UNSUPPORTED=ON \
+                                -DHDF5_ENABLE_THREADSAFE=ON
+
+    pre-configure {
+        ui_warn {
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+hdf5 will been configured in an unsupported "Experimental" mode due to\
++threadsafe.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    }
+    }
+
+
+    notes-append {
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+hdf5 has been installed in an unsupported "Experimental" mode due to\
++threadsafe.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    }
+
 }
 
-variant cxx description {
-    Enable c++ interface.
-  +cxx is EXPERIMENTAL with +threadsafe or any mpi variant
-} {
-    configure.args-delete       --disable-cxx
-    configure.args-append       --enable-cxx
-
-    # See: https://github.com/ubarsc/kealib/issues/42
-    compiler.cxx_standard       2011
-}
-
-variant fortran description {
-    Enable Fortran bindings.
-  +fortran is EXPERIMENTAL with +threadsafe
-} {
-    configure.args-delete       --disable-fortran
-    configure.args-append       --enable-fortran
+if {[ mpi_variant_isset ]} {
+    configure.args-append       -DHDF5_ENABLE_PARALLEL=ON
 }
 
 if {[variant_isset fortran] && ![fortran_variant_isset]} {
@@ -159,51 +142,6 @@ if {[variant_isset fortran] && ![fortran_variant_isset]} {
     if {![fortran_variant_isset]} {
         error "+fortran requires a fortran compiler to be selected"
     }
-}
-
-if {([ variant_isset gfortran ] || [ variant_isset g95 ]) && ![ variant_isset fortran ]} {
-    default_variants +fortran
-}
-
-variant threadsafe description {
-    Enable threadsafety.
-  +threadsafe is EXPERIMENTAL with +cxx, +fortran, or any mpi variant
-} {
-    configure.args-delete       --disable-threadsafe
-    configure.args-append       --enable-threadsafe --with-pthread
-}
-
-if {[ variant_isset threadsafe ] && ([ variant_isset cxx ] ||
-                                     [ variant_isset hl ] ||
-                                     [ variant_isset fortran ]) ||
-    ([ mpi_variant_isset ])  &&
-    ([ variant_isset cxx ]   || [ variant_isset threadsafe ])  } {
-
-    # Tell hdf5 to configure in this experimental configuration
-    configure.args-append       --enable-unsupported
-
-    notes-append {
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-hdf5 has been installed in an unsupported "Experimental" mode due to\
-selected variants. See "port variants hdf5 | grep EXPERIMENTAL" for more\
-information.
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    }
-
-    pre-configure {
-        ui_warn {
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-hdf5 will been configured in an unsupported "Experimental" mode due to\
-selected variants. See "port variants hdf5 | grep EXPERIMENTAL" for more\
-information.
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    }
-    }
-}
-
-if {[ mpi_variant_isset ]} {
-    configure.args-delete       --disable-parallel
-    configure.args-append       --enable-parallel
 }
 
 notes-append {
