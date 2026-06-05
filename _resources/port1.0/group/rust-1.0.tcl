@@ -242,14 +242,14 @@ proc rust::handle_crates {} {
         # As the :disttag cannot contain dots, the version number cannot be
         # used.
         #
-        # To download the crate file curl-0.4.11.crate, the URL is
-        #    https://crates.io/api/v1/crates/curl/0.4.11/download.
-        # Use ?dummy= to ignore ${distfile}
-        # see https://trac.macports.org/wiki/PortfileRecipes#fetchwithgetparams
+        # Fetch crates from the static.crates.io CDN. MacPorts appends
+        # /${cratefile} to the master_site, so the base directory below
+        # yields the canonical crate URL, e.g.
+        #    https://static.crates.io/crates/curl/curl-0.4.11.crate
         set cratefile       ${cname}-${cversion}.crate
         set cratetag        crate-${cname}-${chksum}
         distfiles-append    ${cratefile}:${cratetag}
-        master_sites-append https://crates.io/api/v1/crates/${cname}/${cversion}/download?dummy=:${cratetag}
+        master_sites-append https://static.crates.io/crates/${cname}:${cratetag}
         checksums-append    ${cratefile} sha256 ${chksum}
     }
 
