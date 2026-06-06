@@ -19,7 +19,7 @@
 #
 # python.pep517: build using PEP517 (default is "yes" for Python 3.7+)
 # python.pep517_backend: specify the backend to use; one of "setuptools" (default),
-#   "flit", "hatch", "poetry", "maturin", "meson", or "pdm"
+#   "flit", "hatch", "poetry", "maturin", "meson", "pdm", "uv", or "scikit"
 #
 # python.test_framework: specify the test framework to use; one of "pytest" (default),
 #   "nose", "unittest", or <empty string>
@@ -80,13 +80,9 @@ proc python_get_version {} {
 
 proc python_get_default_version {} {
     global python.versions
-    set def_v 313
-    if {[info exists python.versions]} {
-        if {${def_v} in ${python.versions}} {
-            return ${def_v}
-        } else {
-            return [lindex ${python.versions} end]
-        }
+    set def_v 314
+    if {[info exists python.versions] && ${def_v} ni ${python.versions}} {
+        return [lindex ${python.versions} end]
     } else {
         return ${def_v}
     }
@@ -371,9 +367,10 @@ default test.target     {}
 default test.args       {[python_get_defaults test_args]}
 
 default python.add_dependencies yes
-proc python_add_dependencies {} {
+proc python_callback {} {
+    global name subport version python._first_version
     if {[option python.add_dependencies]} {
-        global subport python.version python.default_version test.run
+        global python.version python.default_version test.run
         if {[string match py-* $subport]} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
             depends_lib-delete port:py${python.default_version}[string trimleft $subport py]
@@ -429,20 +426,32 @@ proc python_add_dependencies {} {
                         depends_build-delete    port:py${python.version}-pdm-backend
                         depends_build-append    port:py${python.version}-pdm-backend
                     }
+                    uv {
+                        depends_build-delete    port:py${python.version}-uv-build
+                        depends_build-append    port:py${python.version}-uv-build
+                    }
+                    scikit {
+                        depends_build-delete    port:py${python.version}-scikit-build-core \
+                                                port:ninja
+                        depends_build-append    port:py${python.version}-scikit-build-core \
+                                                port:ninja
+                    }
                     default {}
                 }
             }
             if {[tbool test.run]} {
                 switch -- [option python.test_framework] {
                     pytest {
-                        depends_test-delete    port:py${python.version}-pytest
-                        depends_test-append    port:py${python.version}-pytest
+                        depends_test-delete     port:py${python.version}-pytest
+                        depends_test-append     port:py${python.version}-pytest
                     }
                     nose {
-                        depends_test-delete    port:py${python.version}-nose
+                        depends_test-delete     port:py${python.version}-nose \
+                                                port:py${python.version}-pynose
                         if {${python.version} < 312} {
-                            depends_test-append \
-                                                port:py${python.version}-nose
+                            depends_test-append port:py${python.version}-nose
+                        } else {
+                            depends_test-append port:py${python.version}-pynose
                         }
                     }
                     default {}
@@ -450,8 +459,13 @@ proc python_add_dependencies {} {
             }
         }
     }
+    # if a subport of a py-* port has not changed the version, disable livecheck.
+    if {[info exists python._first_version] && [string match py-* $name]
+        && ${name} ne ${subport} && ${version} eq ${python._first_version}} {
+        livecheck.type  none
+    }
 }
-port::register_callback python_add_dependencies
+port::register_callback python_callback
 
 
 proc python_get_defaults {var} {
@@ -574,7 +588,7 @@ options python.add_archflags python.add_cflags python.add_cxxflags \
         python.move_binaries python.move_binaries_suffix
 
 default python.add_archflags yes
-# Setuptool 75.7.0 (supporting Python 3.9+) changed how CFLAGS is handled. 
+# Setuptool 75.7.0 (supporting Python 3.9+) changed how CFLAGS is handled.
 default python.add_cflags {[expr {$supported_archs ne "noarch" && [info exists python.version] && ${python.version} >= 39}]}
 default python.add_cxxflags {${python.add_cflags}}
 default python.add_fflags no
@@ -604,15 +618,6 @@ proc python._set_version {option action args} {
         set python._first_version [option ${option}]
     }
 }
-
-# if no subport of a py-* port has not changed the version, disable livecheck.
-pre-livecheck {
-    global name subport version python._first_version
-    if {[string match py-* [option name]] && ${name} ne ${subport} && ${version} eq ${python._first_version}} {
-        livecheck.type  none
-    }
-}
-
 
 pre-test {
     # set PYTHONPATH if not already set

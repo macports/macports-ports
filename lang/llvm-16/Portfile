@@ -1,8 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem                            1.0
-PortGroup select                      1.0
-PortGroup compiler_blacklist_versions 1.0
 PortGroup active_variants             1.1
 PortGroup cmake                       1.1
 PortGroup legacysupport               1.1
@@ -25,11 +23,11 @@ set clang_exe_version   ${llvm_version}
 version                 ${llvm_version}.0.6
 
 name                    llvm-${llvm_version}
-revision                1
-subport                 mlir-${llvm_version}  { revision [ expr ${revision} + 0 ] }
-subport                 clang-${llvm_version} { revision [ expr ${revision} + 5 ] }
-subport                 lldb-${llvm_version}  { revision [ expr ${revision} + 2 ] }
-subport                 flang-${llvm_version} { revision [ expr ${revision} + 1 ] }
+revision                3
+subport                 mlir-${llvm_version}  { revision 1 }
+subport                 clang-${llvm_version} { revision 9 }
+subport                 lldb-${llvm_version}  { revision 4 }
+subport                 flang-${llvm_version} { revision 3 }
 
 checksums               rmd160  b86eeac2e1dd052a182022109374372844934cfc \
                         sha256  ce5e71081d17ce9e86d7cbcfa28c4b04b9300f8fb7e78422b1feb6bc52c3028e \
@@ -55,9 +53,6 @@ compiler.fallback       clang macports-clang-14 macports-clang-15
 #cmake.generator         Ninja
 cmake.install_prefix    ${sub_prefix}
 cmake.build_type        Release
-
-# clean up some cmake-PG added values we don't want to use, because we want @rpaths
-cmake.install_rpath
 
 configure.pre_args-delete \
     -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib"
@@ -119,7 +114,7 @@ platform darwin {
     }
 }
 
-patch.dir ${workpath}/${distname}
+patch.dir               ${workpath}/${distname}
 patch.pre_args-replace  -p0 -p1
 
 patchfiles-append \
@@ -143,7 +138,8 @@ patchfiles-append \
     0032-lldb-Add-cstdio-include-to-fix-a595b931f1f91897317a4.patch \
     0033-xray-Use-L-instead-of-.L-for-Mach-O.patch \
     0034-builtins-Move-cfi-start-s-after-the-symbol-name-NFC.patch \
-    0999-i386-fix.diff
+    0999-i386-fix.diff \
+    1234-stop-on-linker-error.patch
 
 if {${os.platform} eq "darwin" && ${os.major} < 14} {
     patchfiles-append \
@@ -233,7 +229,6 @@ if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_da
 }
 
 if {${subport} eq "llvm-${llvm_version}"} {
-
     homepage            https://llvm.org/
     description         llvm is a next generation compiler infrastructure
     long_description    The LLVM Core libraries provide a modern source- and \
@@ -243,11 +238,10 @@ if {${subport} eq "llvm-${llvm_version}"} {
                         around a well specified code representation known as \
                         the LLVM intermediate representation ("LLVM IR").
 
-    depends_lib-append  port:libedit port:libffi port:ncurses path:lib/libxar.dylib:xar port:zlib port:zstd
-    depends_run-append  port:llvm_select
-
-    select.group        llvm
-    select.file         ${filespath}/mp-${subport}
+    depends_lib-append  port:libedit port:libffi port:libxml2 \
+                        port:ncurses path:lib/libxar.dylib:xar \
+                        port:zlib port:zstd
+    depends_run-append  port:llvm_select-${llvm_version}
 
     configure.args-append \
                         -DLLVM_ENABLE_PROJECTS="polly"
@@ -283,15 +277,16 @@ if { ${subport} eq "clang-${llvm_version}" } {
                         for languages in the C language family (C, C++, Objective C/C++, OpenCL, \
                         CUDA, and RenderScript) for the LLVM project.
 
-    depends_run-append  port:clang_select port:cctools
-    select.group        clang
-    select.file         ${filespath}/mp-${subport}
+    depends_run-append  port:clang_select-${llvm_version} port:cctools
 
     configure.args-append   \
         -DLLVM_ENABLE_PROJECTS="clang\;clang-tools-extra\;compiler-rt\;lld" \
         -DLLVM_ENABLE_RUNTIMES="libcxx\;libcxxabi" \
         -DLIBCXX_ENABLE_SHARED=ON    \
-        -DLIBCXX_INSTALL_LIBRARY=ON
+        -DLIBCXX_INSTALL_LIBRARY=ON \
+        -DLIBCXX_ENABLE_VENDOR_AVAILABILITY_ANNOTATIONS=ON \
+        -DLIBCXX_INSTALL_LIBRARY_DIR=${sub_prefix}/lib/libc++ \
+        -DLIBCXXABI_INSTALL_LIBRARY_DIR=${sub_prefix}/lib/libc++
 
     destroot {
         # we have to run the destroot like this, because individual targets for each of the
@@ -325,6 +320,15 @@ if { ${subport} eq "flang-${llvm_version}" } {
     depends_lib-append  port:clang-${llvm_version} port:mlir-${llvm_version}
     depends_run-append  port:bash
 
+    # Xcode Clang 16.3+ (macOS 15+) errors on template keyword without
+    # explicit template arguments in flang/runtime/reduction-templates.h
+    if {[string match *clang* ${configure.compiler}] && ${os.major} >= 24} {
+        configure.cxxflags-append -Wno-missing-template-arg-list-after-template-kw
+    }
+
+    # https://trac.macports.org/ticket/72931
+    build.mem_per_job   3072
+
     destroot {
         # we have to run the destroot like this, because individual targets for each of the
         # components we want to install are not available; we want "everything but llvm"
@@ -333,6 +337,7 @@ if { ${subport} eq "flang-${llvm_version}" } {
 }
 
 if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
+    platforms {darwin < 26}
 
     depends_lib-append  port:libxml2 port:libomp port:llvm-${llvm_version}
     depends_run-append  port:ld64
@@ -375,6 +380,15 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
                                  -DCOMPILER_RT_BUILD_MEMPROF=OFF
     }
 
+    if {${os.platform} eq "darwin" && ${os.major} >= 25} {
+        # tsan and other sanitizers fail to link on macOS 26+ (Darwin 25+) due to
+        # the new Apple ld-prime linker rejecting 32-bit relocations in 64-bit binaries
+        # e.g. tsan_rtl_aarch64.S: "ld: 32-bit pointer in 64-bit arch"
+        configure.args-append    -DCOMPILER_RT_BUILD_SANITIZERS=OFF \
+                                 -DCOMPILER_RT_BUILD_XRAY=OFF \
+                                 -DCOMPILER_RT_BUILD_MEMPROF=OFF
+    }
+
     if {${os.platform} eq "darwin" && ${os.major} <= 11} {
         # xpc.h available 10.7 but doesn't support nullable features
         configure.args-append    -DCLANGD_BUILD_XPC=OFF
@@ -389,7 +403,6 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
 }
 
 if {${subport} eq "lldb-${llvm_version}"} {
-
     homepage            https://lldb.llvm.org/
     description         the LLVM debugger
     long_description    lldb is the "LLVM native" debugger.
@@ -397,10 +410,7 @@ if {${subport} eq "lldb-${llvm_version}"} {
     depends_lib-append  port:libedit port:libffi port:ncurses port:python${py_ver_nodot} path:lib/libxar.dylib:xar port:zlib
     depends_lib-append  port:llvm-${llvm_version} port:clang-${llvm_version}
     depends_build-append port:swig-python path:bin/doxygen:doxygen
-    depends_run-append  port:lldb_select
-
-    select.group        lldb
-    select.file         ${filespath}/mp-${subport}
+    depends_run-append  port:lldb_select-${llvm_version}
 
     # error: use of undeclared identifier 'CPU_SUBTYPE_ARM64E
     platforms {darwin >= 18}
@@ -498,7 +508,6 @@ post-destroot {
 }
 
 if {${subport} eq "clang-${llvm_version}"} {
-
     variant analyzer description {Install clang static analyzer} {
         # these have to be switched on or off together
         configure.args-replace -DCLANG_ENABLE_STATIC_ANALYZER=OFF \

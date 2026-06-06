@@ -1,18 +1,18 @@
---- src/util/sys_defs.h.orig	2014-12-26 09:33:02.000000000 +1100
-+++ src/util/sys_defs.h	2015-02-12 15:40:02.000000000 +1100
-@@ -230,9 +230,9 @@
+--- src/util/sys_defs.h.orig	2026-02-26 11:29:13
++++ src/util/sys_defs.h	2026-03-07 15:01:45
+@@ -235,9 +235,9 @@
  #define HAS_DB
  #define HAS_SA_LEN
  #define NATIVE_DB_TYPE	"hash"
--#define ALIAS_DB_MAP	DEF_DB_TYPE ":/etc/aliases"
-+#define ALIAS_DB_MAP	DEF_DB_TYPE ":__PREFIX/etc/postfix/aliases"
+-#define ALIAS_DB_MAP	"$default_database_type:/etc/aliases"
++#define ALIAS_DB_MAP	"$default_database_type:__PREFIX/etc/postfix/aliases"
  #define GETTIMEOFDAY(t) gettimeofday(t,(struct timezone *) 0)
 -#define ROOT_PATH	"/bin:/usr/bin:/sbin:/usr/sbin"
 +#define ROOT_PATH	"__PREFIX/bin:/bin:/usr/bin:/sbin:/usr/sbin"
  #define USE_STATFS
  #define STATFS_IN_SYS_MOUNT_H
  #define HAS_POSIX_REGEXP
-@@ -244,11 +244,11 @@
+@@ -249,11 +249,11 @@
  #define HAVE_GETIFADDRS
  #endif
  #define HAS_FUTIMES			/* XXX Guessing */

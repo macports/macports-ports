@@ -1,3 +1,5 @@
+;;  -*- lexical-binding: t; -*-
+;;
 ;; load-path contains ${prefix}/share/emacs/site-lisp and its subdirecotries.
 ;; See #12115, #29232, #32146.
 (setq load-path (cons "__PREFIX__/share/emacs/site-lisp" load-path))
@@ -14,3 +16,5 @@
 ;; Use the OS X Emoji font for Emoticons
 (when (fboundp 'set-fontset-font)
   (set-fontset-font t 'emoji '("Apple Color Emoji" . "iso10646-1") nil 'prepend))
+
+(setq etags-program-name "__APPLICATIONS_DIR__/Emacs.app/Contents/MacOS/bin/etags")

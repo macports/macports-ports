@@ -5,7 +5,6 @@
 # Usage:
 # PortGroup         fortran 1.0
 
-PortGroup           compiler_blacklist_versions 1.0
 PortGroup           compilers 1.0
 PortGroup           github 1.0
 

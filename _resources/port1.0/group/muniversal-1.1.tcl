@@ -229,7 +229,7 @@ proc muniversal::cpu64bit_capable {} {
     if {[option os.major] >= 11} {
         # 10.7 and later only support 64-bit hardware
         return 1
-    } elseif {[option os.major] >= 9 && ![catch {sysctl hw.cpu64bit_capable} result]} {
+    } elseif {![catch {sysctl hw.cpu64bit_capable} result]} {
         return $result
     } elseif {(![catch {sysctl hw.optional.x86_64} is_x86_64] && ${is_x86_64})
               || (![catch {sysctl hw.optional.64bitops} is_ppc64] && ${is_ppc64})} {
@@ -836,9 +836,9 @@ proc portpatch::patch_main {args} {
         return -code error [msgcat::mc "Patch files missing"]
     }
 
-    set gzcat "[findBinary gzip $portutil::autoconf::gzip_path] -dc"
-    set bzcat "[findBinary bzip2 $portutil::autoconf::bzip2_path] -dc"
-    catch {set xzcat "[findBinary xz $portutil::autoconf::xz_path] -dc"}
+    set gzcat "[findBinary gzip $::portutil::autoconf::gzip_path] -dc"
+    set bzcat "[findBinary bzip2 $::portutil::autoconf::bzip2_path] -dc"
+    catch {set xzcat "[findBinary xz $::portutil::autoconf::xz_path] -dc"}
 
     foreach patch $patchlist {
         ui_info "$UI_PREFIX [format [msgcat::mc "Applying %s"] [file tail $patch]]"

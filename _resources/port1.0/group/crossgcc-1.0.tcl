@@ -136,6 +136,16 @@ array set crossgcc.versions_info {
         sha256  e2b09ec21660f01fecffb715e0120265216943f038d0e48a9868713e54f06cea \
         size    98268344
     }}
+    15.2.0 {xz {
+        rmd160  b16e24d6caab2f7be54edc500b99ef08d436d300 \
+        sha256  438fd996826b0c82485a29da03a72d71d6e3541a83ec702df4271f6fe025d24e \
+        size    101056276
+    }}
+    16.1.0 {xz {
+        rmd160  7ee813a1b836be79104104dec125ddd47e7dc819 \
+        sha256  50efb4d94c3397aff3b0d61a5abd748b4dd31d9d3f2ab7be05b171d36a510f79 \
+        size    102456900
+    }}
 }
 
 array set newlib.versions_info {
@@ -169,6 +179,11 @@ array set newlib.versions_info {
         sha256  83a62a99af59e38eb9b0c58ed092ee24d700fff43a22c03e433955113ef35150 \
         size    8832922
     }}
+    4.6.0.20260123 {gz {
+        rmd160  97d1a15f06e550301d2cc68a9cc41bbc3c7b8bd2 \
+        sha256  6ff27e3bf022666f43f7802255be680eeff722ac181b1725d21e2e8318604ee3 \
+        size    9208322
+    }}
 }
 
 proc crossgcc.setup {target version} {
@@ -178,7 +193,6 @@ proc crossgcc.setup {target version} {
     set crossgcc.version $version
 
     uplevel {
-        PortGroup       compiler_blacklist_versions 1.0
         name            ${crossgcc.target}-gcc
         version         ${crossgcc.version}
         categories      cross devel
@@ -362,6 +376,10 @@ proc crossgcc.setup {target version} {
         post-destroot {
             # FSF propaganda (should already be there or would conflict)
             file delete -force "${destroot}/${prefix}/share/man/man7"
+
+            # porting.info is not target-prefixed and conflicts between
+            # cross-gcc ports
+            file delete -force "${destroot}/${prefix}/share/info/porting.info"
         }
 
         livecheck.type  regex

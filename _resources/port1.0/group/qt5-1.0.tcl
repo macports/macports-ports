@@ -231,12 +231,13 @@ namespace eval qt5pg {
                 }
             }
         } else {
+            variable qt5_component_lib
             # ![variant_isset qt5kde]
             foreach component "qtbase ${qt5_private_components}" {
                 if { ${component} eq "qt5" } {
                     depends_lib-append path:share/doc/qt5/README.txt:${qt5.name}
-                } elseif { [info exists qt5pg::qt5_component_lib(${component})] } {
-                    set component_info $qt5pg::qt5_component_lib(${component})
+                } elseif { [info exists qt5_component_lib(${component})] } {
+                    set component_info $qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
                     set version_intro  [lindex ${component_info} 0]
                     if {[vercmp ${qt5.version} >= ${version_intro}]} {
@@ -253,8 +254,8 @@ namespace eval qt5pg {
                 }
             }
             foreach component ${qt5_private_build_components} {
-                if { [info exists qt5pg::qt5_component_lib(${component})] } {
-                    set component_info $qt5pg::qt5_component_lib(${component})
+                if { [info exists qt5_component_lib(${component})] } {
+                    set component_info $qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
                     set version_intro  [lindex ${component_info} 0]
                     if {[vercmp ${qt5.version} >= ${version_intro}]} {
@@ -271,8 +272,8 @@ namespace eval qt5pg {
                 }
             }
             foreach component ${qt5_private_runtime_components} {
-                if { [info exists qt5pg::qt5_component_lib(${component})] } {
-                    set component_info $qt5pg::qt5_component_lib(${component})
+                if { [info exists qt5_component_lib(${component})] } {
+                    set component_info $qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
                     set version_intro  [lindex ${component_info} 0]
                     if {[vercmp ${qt5.version} >= ${version_intro}]} {
