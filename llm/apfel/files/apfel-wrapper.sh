@@ -2,4 +2,4 @@
 
 set -a
 source @@CONFIG_PATH@@/@@ENV_FILE@@
-@@PREFIX@@/bin/@@BIN@@ --serve
+/usr/bin/sudo -nEu "$APFEL_USER" @@PREFIX@@/bin/@@BIN@@ --serve
