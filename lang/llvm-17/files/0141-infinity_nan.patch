@@ -1,0 +1,506 @@
+From d90f137a26cca8b2407a35e8625aff4190d41838 Mon Sep 17 00:00:00 2001
+From: Ian Anderson <iana@apple.com>
+Date: Thu, 23 Oct 2025 10:15:00 -0700
+Subject: [PATCH] [clang][headers] Need a way for math.h to share the
+ definitions of INIFINITY and NAN with float.h (#164348)
+
+This is a backport of llvm 38473c5d351d to release/17.x, with slight
+adjustment due to llvm 0e3fdc222a04, b222fa828432, 0e7590a25cd2,
+2f2b931e1296, df241b19c952, 680da4b5d7ec, 9a7a6dd3c358, and 396b5621f94c
+not being present.
+
+> In C23 mode, both float.h and math.h are required to define INIFINITY
+> and NAN. However, with clang modules, there needs to be a single owner
+> for the declarations. Let that be float.h since that's the suggested
+> true owner in Annex F.2.2 of ISO/IEC 9899:2024, and introduce
+> `__need_infinity_nan` so that math.h can pick up the compiler
+> definitions.
+---
+ .../find-all-symbols/STLPostfixHeaderMap.cpp  |   3 +
+ .../clangd/index/CanonicalIncludes.cpp        |   3 +
+ clang/lib/Headers/CMakeLists.txt              |   3 +
+ clang/lib/Headers/__float_float.h             | 150 ++++++++++++++++++
+ clang/lib/Headers/__float_header_macro.h      |  12 ++
+ clang/lib/Headers/__float_infinity_nan.h      |  20 +++
+ clang/lib/Headers/float.h                     | 146 ++---------------
+ clang/test/Headers/floatneeds.c               |  41 +++++
+ .../gn/secondary/clang/lib/Headers/BUILD.gn   |   3 +
+ 9 files changed, 249 insertions(+), 132 deletions(-)
+ create mode 100644 clang/lib/Headers/__float_float.h
+ create mode 100644 clang/lib/Headers/__float_header_macro.h
+ create mode 100644 clang/lib/Headers/__float_infinity_nan.h
+ create mode 100644 clang/test/Headers/floatneeds.c
+
+diff --git a/clang-tools-extra/clang-include-fixer/find-all-symbols/STLPostfixHeaderMap.cpp b/clang-tools-extra/clang-include-fixer/find-all-symbols/STLPostfixHeaderMap.cpp
+index 5245243bac08..88c640bbbb00 100644
+--- a/clang-tools-extra/clang-include-fixer/find-all-symbols/STLPostfixHeaderMap.cpp
++++ b/clang-tools-extra/clang-include-fixer/find-all-symbols/STLPostfixHeaderMap.cpp
+@@ -13,6 +13,9 @@ namespace find_all_symbols {
+ 
+ const HeaderMapCollector::RegexHeaderMap *getSTLPostfixHeaderMap() {
+   static const HeaderMapCollector::RegexHeaderMap STLPostfixHeaderMap = {
++      {"include/__float_float.h$", "<cfloat>"},
++      {"include/__float_header_macro.h$", "<cfloat>"},
++      {"include/__float_infinity_nan.h$", "<cfloat>"},
+       {"include/__stddef_max_align_t.h$", "<cstddef>"},
+       {"include/__wmmintrin_aes.h$", "<wmmintrin.h>"},
+       {"include/__wmmintrin_pclmul.h$", "<wmmintrin.h>"},
+diff --git a/clang-tools-extra/clangd/index/CanonicalIncludes.cpp b/clang-tools-extra/clangd/index/CanonicalIncludes.cpp
+index 3e3ba4d9f2b5..954ae74bfda3 100644
+--- a/clang-tools-extra/clangd/index/CanonicalIncludes.cpp
++++ b/clang-tools-extra/clangd/index/CanonicalIncludes.cpp
+@@ -16,6 +16,9 @@ namespace clang {
+ namespace clangd {
+ namespace {
+ const std::pair<llvm::StringRef, llvm::StringRef> IncludeMappings[] = {
++    {"include/__float_float.h", "<cfloat>"},
++    {"include/__float_header_macro.h", "<cfloat>"},
++    {"include/__float_infinity_nan.h", "<cfloat>"},
+     {"include/__stddef_max_align_t.h", "<cstddef>"},
+     {"include/__wmmintrin_aes.h", "<wmmintrin.h>"},
+     {"include/__wmmintrin_pclmul.h", "<wmmintrin.h>"},
+diff --git a/clang/lib/Headers/CMakeLists.txt b/clang/lib/Headers/CMakeLists.txt
+index db47de2ad965..beab4e40b0ca 100644
+--- a/clang/lib/Headers/CMakeLists.txt
++++ b/clang/lib/Headers/CMakeLists.txt
+@@ -4,6 +4,9 @@
+ set(core_files
+   builtins.h
+   float.h
++  __float_float.h
++  __float_header_macro.h
++  __float_infinity_nan.h
+   inttypes.h
+   iso646.h
+   limits.h
+diff --git a/clang/lib/Headers/__float_float.h b/clang/lib/Headers/__float_float.h
+new file mode 100644
+index 000000000000..276f9c07279a
+--- /dev/null
++++ b/clang/lib/Headers/__float_float.h
+@@ -0,0 +1,150 @@
++/*===---- __float_float.h --------------------------------------------------===
++ *
++ * Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++ * See https://llvm.org/LICENSE.txt for license information.
++ * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++ *
++ *===-----------------------------------------------------------------------===
++ */
++
++#ifndef __CLANG_FLOAT_FLOAT_H
++#define __CLANG_FLOAT_FLOAT_H
++
++#if (defined(__MINGW32__) || defined(_MSC_VER) || defined(_AIX)) &&            \
++    __STDC_HOSTED__
++
++/* Undefine anything that we'll be redefining below. */
++#  undef FLT_EVAL_METHOD
++#  undef FLT_ROUNDS
++#  undef FLT_RADIX
++#  undef FLT_MANT_DIG
++#  undef DBL_MANT_DIG
++#  undef LDBL_MANT_DIG
++#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
++    !defined(__STRICT_ANSI__) ||                                               \
++    (defined(__cplusplus) && __cplusplus >= 201103L) ||                        \
++    (__STDC_HOSTED__ && defined(_AIX) && defined(_ALL_SOURCE))
++#    undef DECIMAL_DIG
++#  endif
++#  undef FLT_DIG
++#  undef DBL_DIG
++#  undef LDBL_DIG
++#  undef FLT_MIN_EXP
++#  undef DBL_MIN_EXP
++#  undef LDBL_MIN_EXP
++#  undef FLT_MIN_10_EXP
++#  undef DBL_MIN_10_EXP
++#  undef LDBL_MIN_10_EXP
++#  undef FLT_MAX_EXP
++#  undef DBL_MAX_EXP
++#  undef LDBL_MAX_EXP
++#  undef FLT_MAX_10_EXP
++#  undef DBL_MAX_10_EXP
++#  undef LDBL_MAX_10_EXP
++#  undef FLT_MAX
++#  undef DBL_MAX
++#  undef LDBL_MAX
++#  undef FLT_EPSILON
++#  undef DBL_EPSILON
++#  undef LDBL_EPSILON
++#  undef FLT_MIN
++#  undef DBL_MIN
++#  undef LDBL_MIN
++#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) ||              \
++    !defined(__STRICT_ANSI__) ||                                               \
++    (defined(__cplusplus) && __cplusplus >= 201703L) ||                        \
++    (__STDC_HOSTED__ && defined(_AIX) && defined(_ALL_SOURCE))
++#    undef FLT_TRUE_MIN
++#    undef DBL_TRUE_MIN
++#    undef LDBL_TRUE_MIN
++#    undef FLT_DECIMAL_DIG
++#    undef DBL_DECIMAL_DIG
++#    undef LDBL_DECIMAL_DIG
++#    undef FLT_HAS_SUBNORM
++#    undef DBL_HAS_SUBNORM
++#    undef LDBL_HAS_SUBNORM
++#  endif
++#endif
++
++/* Characteristics of floating point types, C99 5.2.4.2.2 */
++
++#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
++    (defined(__cplusplus) && __cplusplus >= 201103L)
++#define FLT_EVAL_METHOD __FLT_EVAL_METHOD__
++#endif
++#define FLT_ROUNDS (__builtin_flt_rounds())
++#define FLT_RADIX __FLT_RADIX__
++
++#define FLT_MANT_DIG __FLT_MANT_DIG__
++#define DBL_MANT_DIG __DBL_MANT_DIG__
++#define LDBL_MANT_DIG __LDBL_MANT_DIG__
++
++#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
++    !defined(__STRICT_ANSI__) ||                                               \
++    (defined(__cplusplus) && __cplusplus >= 201103L) ||                        \
++    (__STDC_HOSTED__ && defined(_AIX) && defined(_ALL_SOURCE))
++#  define DECIMAL_DIG __DECIMAL_DIG__
++#endif
++
++#define FLT_DIG __FLT_DIG__
++#define DBL_DIG __DBL_DIG__
++#define LDBL_DIG __LDBL_DIG__
++
++#define FLT_MIN_EXP __FLT_MIN_EXP__
++#define DBL_MIN_EXP __DBL_MIN_EXP__
++#define LDBL_MIN_EXP __LDBL_MIN_EXP__
++
++#define FLT_MIN_10_EXP __FLT_MIN_10_EXP__
++#define DBL_MIN_10_EXP __DBL_MIN_10_EXP__
++#define LDBL_MIN_10_EXP __LDBL_MIN_10_EXP__
++
++#define FLT_MAX_EXP __FLT_MAX_EXP__
++#define DBL_MAX_EXP __DBL_MAX_EXP__
++#define LDBL_MAX_EXP __LDBL_MAX_EXP__
++
++#define FLT_MAX_10_EXP __FLT_MAX_10_EXP__
++#define DBL_MAX_10_EXP __DBL_MAX_10_EXP__
++#define LDBL_MAX_10_EXP __LDBL_MAX_10_EXP__
++
++#define FLT_MAX __FLT_MAX__
++#define DBL_MAX __DBL_MAX__
++#define LDBL_MAX __LDBL_MAX__
++
++#define FLT_EPSILON __FLT_EPSILON__
++#define DBL_EPSILON __DBL_EPSILON__
++#define LDBL_EPSILON __LDBL_EPSILON__
++
++#define FLT_MIN __FLT_MIN__
++#define DBL_MIN __DBL_MIN__
++#define LDBL_MIN __LDBL_MIN__
++
++#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) ||              \
++    !defined(__STRICT_ANSI__) ||                                               \
++    (defined(__cplusplus) && __cplusplus >= 201703L) ||                        \
++    (__STDC_HOSTED__ && defined(_AIX) && defined(_ALL_SOURCE))
++#  define FLT_TRUE_MIN __FLT_DENORM_MIN__
++#  define DBL_TRUE_MIN __DBL_DENORM_MIN__
++#  define LDBL_TRUE_MIN __LDBL_DENORM_MIN__
++#  define FLT_DECIMAL_DIG __FLT_DECIMAL_DIG__
++#  define DBL_DECIMAL_DIG __DBL_DECIMAL_DIG__
++#  define LDBL_DECIMAL_DIG __LDBL_DECIMAL_DIG__
++#  define FLT_HAS_SUBNORM __FLT_HAS_DENORM__
++#  define DBL_HAS_SUBNORM __DBL_HAS_DENORM__
++#  define LDBL_HAS_SUBNORM __LDBL_HAS_DENORM__
++#endif
++
++#ifdef __STDC_WANT_IEC_60559_TYPES_EXT__
++#  define FLT16_MANT_DIG    __FLT16_MANT_DIG__
++#  define FLT16_DECIMAL_DIG __FLT16_DECIMAL_DIG__
++#  define FLT16_DIG         __FLT16_DIG__
++#  define FLT16_MIN_EXP     __FLT16_MIN_EXP__
++#  define FLT16_MIN_10_EXP  __FLT16_MIN_10_EXP__
++#  define FLT16_MAX_EXP     __FLT16_MAX_EXP__
++#  define FLT16_MAX_10_EXP  __FLT16_MAX_10_EXP__
++#  define FLT16_MAX         __FLT16_MAX__
++#  define FLT16_EPSILON     __FLT16_EPSILON__
++#  define FLT16_MIN         __FLT16_MIN__
++#  define FLT16_TRUE_MIN    __FLT16_TRUE_MIN__
++#endif /* __STDC_WANT_IEC_60559_TYPES_EXT__ */
++
++#endif /* __CLANG_FLOAT_FLOAT_H */
+diff --git a/clang/lib/Headers/__float_header_macro.h b/clang/lib/Headers/__float_header_macro.h
+new file mode 100644
+index 000000000000..11b270e90deb
+--- /dev/null
++++ b/clang/lib/Headers/__float_header_macro.h
+@@ -0,0 +1,12 @@
++/*===---- __float_header_macro.h -------------------------------------------===
++ *
++ * Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++ * See https://llvm.org/LICENSE.txt for license information.
++ * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++ *
++ *===-----------------------------------------------------------------------===
++ */
++
++#ifndef __CLANG_FLOAT_H
++#define __CLANG_FLOAT_H
++#endif /* __CLANG_FLOAT_H */
+diff --git a/clang/lib/Headers/__float_infinity_nan.h b/clang/lib/Headers/__float_infinity_nan.h
+new file mode 100644
+index 000000000000..e3b837318ded
+--- /dev/null
++++ b/clang/lib/Headers/__float_infinity_nan.h
+@@ -0,0 +1,20 @@
++/*===---- __float_infinity_nan.h -------------------------------------------===
++ *
++ * Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++ * See https://llvm.org/LICENSE.txt for license information.
++ * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++ *
++ *===-----------------------------------------------------------------------===
++ */
++
++#ifndef __CLANG_FLOAT_INFINITY_NAN_H
++#define __CLANG_FLOAT_INFINITY_NAN_H
++
++/* C23 5.2.5.3.3p29-30 */
++#undef INFINITY
++#undef NAN
++
++#define INFINITY (__builtin_inf())
++#define NAN (__builtin_nan(""))
++
++#endif /* __CLANG_FLOAT_INFINITY_NAN_H */
+diff --git a/clang/lib/Headers/float.h b/clang/lib/Headers/float.h
+index 0e73bca0a2d6..bcfe7f6dd321 100644
+--- a/clang/lib/Headers/float.h
++++ b/clang/lib/Headers/float.h
+@@ -7,9 +7,16 @@
+  *===-----------------------------------------------------------------------===
+  */
+ 
+-#ifndef __CLANG_FLOAT_H
+-#define __CLANG_FLOAT_H
++#if !defined(__need_infinity_nan)
++#define __need_float_float
++#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L) ||              \
++    !defined(__STRICT_ANSI__)
++#define __need_infinity_nan
++#endif
++#include <__float_header_macro.h>
++#endif
+ 
++#ifdef __need_float_float
+ /* If we're on MinGW, fall back to the system's float.h, which might have
+  * additional definitions provided for Windows.
+  * For more details see http://msdn.microsoft.com/en-us/library/y0ybw9fy.aspx
+@@ -31,138 +38,13 @@
+ 
+ #  include_next <float.h>
+ 
+-/* Undefine anything that we'll be redefining below. */
+-#  undef FLT_EVAL_METHOD
+-#  undef FLT_ROUNDS
+-#  undef FLT_RADIX
+-#  undef FLT_MANT_DIG
+-#  undef DBL_MANT_DIG
+-#  undef LDBL_MANT_DIG
+-#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
+-    !defined(__STRICT_ANSI__) ||                                               \
+-    (defined(__cplusplus) && __cplusplus >= 201103L) ||                        \
+-    (__STDC_HOSTED__ && defined(_AIX) && defined(_ALL_SOURCE))
+-#    undef DECIMAL_DIG
+-#  endif
+-#  undef FLT_DIG
+-#  undef DBL_DIG
+-#  undef LDBL_DIG
+-#  undef FLT_MIN_EXP
+-#  undef DBL_MIN_EXP
+-#  undef LDBL_MIN_EXP
+-#  undef FLT_MIN_10_EXP
+-#  undef DBL_MIN_10_EXP
+-#  undef LDBL_MIN_10_EXP
+-#  undef FLT_MAX_EXP
+-#  undef DBL_MAX_EXP
+-#  undef LDBL_MAX_EXP
+-#  undef FLT_MAX_10_EXP
+-#  undef DBL_MAX_10_EXP
+-#  undef LDBL_MAX_10_EXP
+-#  undef FLT_MAX
+-#  undef DBL_MAX
+-#  undef LDBL_MAX
+-#  undef FLT_EPSILON
+-#  undef DBL_EPSILON
+-#  undef LDBL_EPSILON
+-#  undef FLT_MIN
+-#  undef DBL_MIN
+-#  undef LDBL_MIN
+-#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) ||              \
+-    !defined(__STRICT_ANSI__) ||                                               \
+-    (defined(__cplusplus) && __cplusplus >= 201703L) ||                        \
+-    (__STDC_HOSTED__ && defined(_AIX) && defined(_ALL_SOURCE))
+-#    undef FLT_TRUE_MIN
+-#    undef DBL_TRUE_MIN
+-#    undef LDBL_TRUE_MIN
+-#    undef FLT_DECIMAL_DIG
+-#    undef DBL_DECIMAL_DIG
+-#    undef LDBL_DECIMAL_DIG
+-#    undef FLT_HAS_SUBNORM
+-#    undef DBL_HAS_SUBNORM
+-#    undef LDBL_HAS_SUBNORM
+-#  endif
+-#endif
+-
+-/* Characteristics of floating point types, C99 5.2.4.2.2 */
+-
+-#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
+-    (defined(__cplusplus) && __cplusplus >= 201103L)
+-#define FLT_EVAL_METHOD __FLT_EVAL_METHOD__
+ #endif
+-#define FLT_ROUNDS (__builtin_flt_rounds())
+-#define FLT_RADIX __FLT_RADIX__
+-
+-#define FLT_MANT_DIG __FLT_MANT_DIG__
+-#define DBL_MANT_DIG __DBL_MANT_DIG__
+-#define LDBL_MANT_DIG __LDBL_MANT_DIG__
+ 
+-#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
+-    !defined(__STRICT_ANSI__) ||                                               \
+-    (defined(__cplusplus) && __cplusplus >= 201103L) ||                        \
+-    (__STDC_HOSTED__ && defined(_AIX) && defined(_ALL_SOURCE))
+-#  define DECIMAL_DIG __DECIMAL_DIG__
++#include <__float_float.h>
++#undef __need_float_float
+ #endif
+ 
+-#define FLT_DIG __FLT_DIG__
+-#define DBL_DIG __DBL_DIG__
+-#define LDBL_DIG __LDBL_DIG__
+-
+-#define FLT_MIN_EXP __FLT_MIN_EXP__
+-#define DBL_MIN_EXP __DBL_MIN_EXP__
+-#define LDBL_MIN_EXP __LDBL_MIN_EXP__
+-
+-#define FLT_MIN_10_EXP __FLT_MIN_10_EXP__
+-#define DBL_MIN_10_EXP __DBL_MIN_10_EXP__
+-#define LDBL_MIN_10_EXP __LDBL_MIN_10_EXP__
+-
+-#define FLT_MAX_EXP __FLT_MAX_EXP__
+-#define DBL_MAX_EXP __DBL_MAX_EXP__
+-#define LDBL_MAX_EXP __LDBL_MAX_EXP__
+-
+-#define FLT_MAX_10_EXP __FLT_MAX_10_EXP__
+-#define DBL_MAX_10_EXP __DBL_MAX_10_EXP__
+-#define LDBL_MAX_10_EXP __LDBL_MAX_10_EXP__
+-
+-#define FLT_MAX __FLT_MAX__
+-#define DBL_MAX __DBL_MAX__
+-#define LDBL_MAX __LDBL_MAX__
+-
+-#define FLT_EPSILON __FLT_EPSILON__
+-#define DBL_EPSILON __DBL_EPSILON__
+-#define LDBL_EPSILON __LDBL_EPSILON__
+-
+-#define FLT_MIN __FLT_MIN__
+-#define DBL_MIN __DBL_MIN__
+-#define LDBL_MIN __LDBL_MIN__
+-
+-#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) ||              \
+-    !defined(__STRICT_ANSI__) ||                                               \
+-    (defined(__cplusplus) && __cplusplus >= 201703L) ||                        \
+-    (__STDC_HOSTED__ && defined(_AIX) && defined(_ALL_SOURCE))
+-#  define FLT_TRUE_MIN __FLT_DENORM_MIN__
+-#  define DBL_TRUE_MIN __DBL_DENORM_MIN__
+-#  define LDBL_TRUE_MIN __LDBL_DENORM_MIN__
+-#  define FLT_DECIMAL_DIG __FLT_DECIMAL_DIG__
+-#  define DBL_DECIMAL_DIG __DBL_DECIMAL_DIG__
+-#  define LDBL_DECIMAL_DIG __LDBL_DECIMAL_DIG__
+-#  define FLT_HAS_SUBNORM __FLT_HAS_DENORM__
+-#  define DBL_HAS_SUBNORM __DBL_HAS_DENORM__
+-#  define LDBL_HAS_SUBNORM __LDBL_HAS_DENORM__
++#ifdef __need_infinity_nan
++#include <__float_infinity_nan.h>
++#undef __need_infinity_nan
+ #endif
+-
+-#ifdef __STDC_WANT_IEC_60559_TYPES_EXT__
+-#  define FLT16_MANT_DIG    __FLT16_MANT_DIG__
+-#  define FLT16_DECIMAL_DIG __FLT16_DECIMAL_DIG__
+-#  define FLT16_DIG         __FLT16_DIG__
+-#  define FLT16_MIN_EXP     __FLT16_MIN_EXP__
+-#  define FLT16_MIN_10_EXP  __FLT16_MIN_10_EXP__
+-#  define FLT16_MAX_EXP     __FLT16_MAX_EXP__
+-#  define FLT16_MAX_10_EXP  __FLT16_MAX_10_EXP__
+-#  define FLT16_MAX         __FLT16_MAX__
+-#  define FLT16_EPSILON     __FLT16_EPSILON__
+-#  define FLT16_MIN         __FLT16_MIN__
+-#  define FLT16_TRUE_MIN    __FLT16_TRUE_MIN__
+-#endif /* __STDC_WANT_IEC_60559_TYPES_EXT__ */
+-
+-#endif /* __CLANG_FLOAT_H */
+diff --git a/clang/test/Headers/floatneeds.c b/clang/test/Headers/floatneeds.c
+new file mode 100644
+index 000000000000..e544b4100990
+--- /dev/null
++++ b/clang/test/Headers/floatneeds.c
+@@ -0,0 +1,41 @@
++// RUN: rm -fR %t
++// RUN: split-file %s %t
++// RUN: %clang_cc1 -fsyntax-only -verify=c99 -std=c99 %t/floatneeds0.c
++// RUN: %clang_cc1 -fsyntax-only -verify=c99 -std=c99 %t/floatneeds1.c
++// RUN: %clang_cc1 -fsyntax-only -verify=c23 -std=c23 %t/floatneeds0.c
++// RUN: %clang_cc1 -fsyntax-only -verify=c23 -std=c23 %t/floatneeds1.c
++// RUN: %clang_cc1 -fsyntax-only -verify=c99-modules -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -std=c99 %t/floatneeds0.c
++// RUN: %clang_cc1 -fsyntax-only -verify=c99-modules -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -std=c99 %t/floatneeds1.c
++// RUN: %clang_cc1 -fsyntax-only -verify=c23-modules -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -std=c23 %t/floatneeds0.c
++// RUN: %clang_cc1 -fsyntax-only -verify=c23-modules -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -std=c23 %t/floatneeds1.c
++
++// Use C99 to verify that __need_ can be used to get types that wouldn't normally be available.
++
++//--- floatneeds0.c
++float infinity0 = INFINITY; // c99-error{{undeclared identifier 'INFINITY'}} c23-error{{undeclared identifier 'INFINITY'}} \
++                               c99-modules-error{{undeclared identifier 'INFINITY'}} c23-modules-error{{undeclared identifier 'INFINITY'}}
++float nan0 = NAN; // c99-error{{undeclared identifier 'NAN'}} c23-error{{undeclared identifier 'NAN'}} \
++                     c99-modules-error{{undeclared identifier 'NAN'}} c23-modules-error{{undeclared identifier 'NAN'}}
++float max0 = FLT_MAX; // c99-error{{undeclared identifier 'FLT_MAX'}} c23-error{{undeclared identifier 'FLT_MAX'}} \
++                         c99-modules-error{{undeclared identifier 'FLT_MAX'}} c23-modules-error{{undeclared identifier 'FLT_MAX'}}
++
++#define __need_infinity_nan
++#include <float.h>
++float infinity1 = INFINITY;
++float nan1 = NAN;
++float max1 = FLT_MAX; // c99-error{{undeclared identifier}} c23-error{{undeclared identifier}} \
++                         c99-modules-error{{undeclared identifier}} c23-modules-error{{undeclared identifier}}
++
++#include <float.h>
++float infinity2 = INFINITY;
++float nan2 = NAN;
++float max2 = FLT_MAX;
++
++//--- floatneeds1.c
++// c23-no-diagnostics
++// c23-modules-no-diagnostics
++
++#include <float.h>
++float infinity0 = INFINITY; // c99-error{{undeclared identifier}} c99-modules-error{{undeclared identifier}}
++float nan0 = NAN; // c99-error{{undeclared identifier}} c99-modules-error{{undeclared identifier}}
++float max0 = FLT_MAX;
+diff --git a/llvm/utils/gn/secondary/clang/lib/Headers/BUILD.gn b/llvm/utils/gn/secondary/clang/lib/Headers/BUILD.gn
+index bad86c2c984a..3e1f13bb313a 100644
+--- a/llvm/utils/gn/secondary/clang/lib/Headers/BUILD.gn
++++ b/llvm/utils/gn/secondary/clang/lib/Headers/BUILD.gn
+@@ -95,6 +95,9 @@ copy("Headers") {
+     "__clang_hip_math.h",
+     "__clang_hip_runtime_wrapper.h",
+     "__clang_hip_stdlib.h",
++    "__float_float.h",
++    "__float_header_macro.h",
++    "__float_infinity_nan.h",
+     "__stddef_max_align_t.h",
+     "__wmmintrin_aes.h",
+     "__wmmintrin_pclmul.h",
+-- 
+2.54.0
+
