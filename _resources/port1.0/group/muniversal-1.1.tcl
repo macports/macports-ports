@@ -802,8 +802,8 @@ proc get_canonical_archflags {{tool cc}} {
 
 # make use of architecture dependent variations of patch files
 # N.B.: this is a candidate for inclusion in the base code
-rename portpatch::patch_main portpatch::patch_main_real
-proc portpatch::patch_main {args} {
+ditem_key ${org.macports.patch} procedure portpatch::patch_main_muniversal
+proc portpatch::patch_main_muniversal {args} {
     global UI_PREFIX
 
     set patches [list]
@@ -1001,9 +1001,9 @@ proc portextract::extract_finish {args} {
 }
 
 # copy `destroot` to architecture-dependent version
-rename portdestroot::destroot_start portdestroot::destroot_start_real
-proc portdestroot::destroot_start {args} {
-    portdestroot::destroot_start_real ${args}
+ditem_key ${org.macports.destroot} prerun portdestroot::destroot_start_muniversal
+proc portdestroot::destroot_start_muniversal {args} {
+    portdestroot::destroot_start ${args}
 
     foreach arch [option configure.universal_archs] {
         copy [option destroot] [option workpath]/destroot-${arch}
@@ -1012,8 +1012,8 @@ proc portdestroot::destroot_start {args} {
 }
 
 # merge architecture-dependent versions of `destroot`
-rename portdestroot::destroot_finish portdestroot::destroot_finish_real
-proc portdestroot::destroot_finish {args} {
+ditem_key ${org.macports.destroot} postrun portdestroot::destroot_finish_muniversal
+proc portdestroot::destroot_finish_muniversal {args} {
     global  workpath \
             muniversal.dont_diff \
             muniversal.combine \
@@ -1063,7 +1063,7 @@ proc portdestroot::destroot_finish {args} {
     muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatProc}
     muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatArmElse}
 
-    portdestroot::destroot_finish_real ${args}
+    portdestroot::destroot_finish ${args}
 }
 }
 }
