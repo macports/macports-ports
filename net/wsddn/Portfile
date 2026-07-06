@@ -4,9 +4,10 @@ PortSystem              1.0
 
 PortGroup               cmake 1.1
 PortGroup               github 1.0
+PortGroup               legacysupport 1.1
 
 name                    wsddn
-github.setup            gershnik wsdd-native 1.25 v
+github.setup            gershnik wsdd-native 1.26 v
 revision                0
 categories              net
 maintainers             @gershnik openmaintainer
@@ -20,17 +21,50 @@ github.tarball_from     releases
 distname                wsddn-src-prefetch-${github.version}
 extract.suffix          .tar.bz2
 extract.cmd             bzip2
-checksums               rmd160  87317647f1031543a4a5ebead17b5f3d19de2e5c \
-                        sha256  37e3881ae5b7ae6179610ebf86ff43849fd15fd9f667b70f9b08c79ed725a54f \
-                        size    5230737
+checksums               rmd160  8151bee28c6ba30a3b5e33c9ebed690baa02074b \
+                        sha256  b81f28af31257488f820e6eebc312460d821350cd3dde597a89c3fef1a8cd220 \
+                        size    5232733
 worksrcdir              wsdd-native-${github.version}
 compiler.cxx_standard   2020
 compiler.c_standard     2011
 
+# By default, we do not need legacysupport at least as far back as Snow Leopard
+legacysupport.newest_darwin_requires_legacy    9
+
+if {${os.major} < 10} {
+    # Use consistent version of libstdc++ on old ppc systems.
+    legacysupport.redirect_bins wsddn
+} elseif {${os.major} == 10} {
+    # Snow Leopard (10.6) has broken ld that crashes on modern clang's Mach-O output.
+    # Build with gcc and its own libstdc++, whose output the old linker handles.
+    compiler.blacklist-append   *clang*
+    if {${configure.build_arch} in [list i386 x86_64]} {
+        configure.cxx_stdlib        libstdc++
+    } else {
+        # Use consistent version of libstdc++ on 10.6 ppc
+        legacysupport.redirect_bins wsddn
+    }
+} elseif {${os.major} < 19 && ${configure.cxx_stdlib} eq "libc++"} {
+    # Neither system libc++ before 10.15 nor the libc++ provided by legacysupport 
+    # have sufficient C++20 support. Use the llvm provided libc++ version. 
+    # The llvm libc++ needs legacysupport.
+
+    legacysupport.newest_darwin_requires_legacy    18
+
+    set llvmver 16
+    depends_lib-append   port:llvm-${llvmver}
+    # The availability annotations are bogus for the llvm-16 libc++
+    configure.cxxflags-append -D_LIBCPP_DISABLE_AVAILABILITY=1
+    configure.cxxflags-append -nostdinc++ -isystem ${prefix}/libexec/llvm-${llvmver}/include/c++/v1
+    configure.ldflags-append  -nostdlib++ -L${prefix}/libexec/llvm-${llvmver}/lib/libc++ -Wl,-rpath,${prefix}/libexec/llvm-${llvmver}/lib/libc++ -lc++ -lc++abi
+}
+
 set bundle_identifier   "org.macports.wsddn"
+set has_os_log          [expr {${os.major} >= 16}]
+set has_new_launchctl   [expr {${os.major} >= 14}]
 
 cmake.generator         Ninja
-configure.args-append   -DWSDDN_VERSION="${github.version}" \
+configure.args-append   -DWSDDN_VERSION="${version}" \
                         -C "${worksrcpath}/external/external.cmake" \
                         -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
                         -DWSDDN_BUNDLE_IDENTIFIER=${bundle_identifier} \
@@ -56,13 +90,22 @@ pre-extract {
 
 post-patch {
     reinplace "s|{SAMPLE_IFACE_NAME}|en0|g" ${worksrcpath}/installers/wsddn.conf
-    set reloadinst "# sudo launchctl kill HUP system/${bundle_identifier}\\n"
+    if {$has_new_launchctl} {
+        set reloadinst "# sudo launchctl kill HUP system/${bundle_identifier}\\\n"
+    } else {
+        set reloadinst "# sudo kill -HUP \$(</var/run/wsddn/wsddn.pid)\\\n"
+    }
     reinplace "s|{RELOAD_INSTRUCTIONS}|${reloadinst}|g" ${worksrcpath}/installers/wsddn.conf
-    reinplace {/^set(CMAKE_OSX_DEPLOYMENT_TARGET/d} ${worksrcpath}/CMakeLists.txt
     file copy ${worksrcpath}/installers/wsddn.conf ${worksrcpath}/installers/wsddn.conf.sample
 }
 
 post-build {
+    if {$has_os_log} {
+        set logargs "<string>--log-os-log</string>"
+    } else {
+        set logargs "<string>--pid-file=/var/run/wsddn/wsddn.pid</string>
+        <string>--log-file=/var/log/wsddn.log</string>"
+    }
     set plist [open "${build.dir}/${bundle_identifier}.plist" w 0755]
     puts ${plist} "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
@@ -75,7 +118,7 @@ post-build {
         <string>${prefix}/bin/wsddn</string>
         <string>--launchd</string>
         <string>--config=${prefix}/etc/wsddn.conf</string>
-        <string>--log-os-log</string>
+        ${logargs}
     </array>
     <key>WorkingDirectory</key>
     <string>/var/empty</string>
@@ -96,6 +139,10 @@ post-destroot {
     xinstall -m 0644 ${worksrcpath}/installers/wsddn.conf.sample ${destroot}${prefix}/etc/
     xinstall -d -m 0755 ${destroot}${prefix}/share/doc/wsddn/
     xinstall -m 0644 -W ${worksrcpath} LICENSE Acknowledgements.md ${destroot}${prefix}/share/doc/wsddn/
+    if {!$has_os_log} {
+        xinstall -d -m 0755 ${destroot}${prefix}/etc/newsyslog.d/
+        xinstall -m 0644 ${worksrcpath}/config/freebsd/usr/local/etc/newsyslog.conf.d/wsddn.conf ${destroot}${prefix}/etc/newsyslog.d/wsddn.conf
+    }
 }
 
 post-activate {
@@ -105,17 +152,29 @@ post-activate {
 }
 
 pre-deactivate {
-    system "if /bin/launchctl list \"${bundle_identifier}\" &> /dev/null; then /bin/launchctl bootout system/${bundle_identifier}; fi"
+    if {$has_new_launchctl} {
+        set bootout "bootout system/${bundle_identifier} || true"
+    } else {
+        set bootout "unload /Library/LaunchDaemons/${bundle_identifier}.plist"
+    }
+    system "if /bin/launchctl list \"${bundle_identifier}\" &> /dev/null; then /bin/launchctl ${bootout}; fi"
     system "if dscl . -read /Users/_wsddn > /dev/null 2>&1; then dscl . -delete /Users/_wsddn; fi"
     system "if dscl . -read /Groups/_wsddn > /dev/null 2>&1; then dscl . -delete /Groups/_wsddn; fi"
+}
+
+if {$has_os_log} {
+    set loginfo "
+Daemon and related logs can be viewed in the system log by searching for subsystem or
+process names containing the string \"wsddn\". For example:
+
+    log show --last 15m --debug --info --predicate 'subsystem CONTAINS \"wsddn\" OR process CONTAINS \"wsddn\"'"
+} else {
+    set loginfo "
+Daemon logs are located in /var/log/wsddn.log"
 }
 
 notes-append "
 To customize ${name}, you can edit ${prefix}/etc/wsddn.conf.
 An up-to-date sample is provided in ${prefix}/etc/wsddn.conf.sample
-
-Daemon and related logs can be viewed in the system log by searching for subsystem or
-process names containing the string \"wsddn\". For example:
-
-    log show --last 15m --debug --info --predicate 'subsystem CONTAINS \"wsddn\" OR process CONTAINS \"wsddn\"'
+${loginfo}
 "
