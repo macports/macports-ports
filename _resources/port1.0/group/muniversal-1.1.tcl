@@ -886,16 +886,15 @@ variant universal {
 
 foreach phase {patch configure build destroot test} {
     foreach part {pre procedure post} {
-
+        set override_procs [list]
         # wrap procedures (either user defined or MacPorts) with architecture specific code
-        foreach p [ditem_key [set org.macports.${phase}] ${part}] {
-            if {[info procs user${p}] ne ""} {
-                set proc_name user${p}
-            } else {
-                set proc_name ${p}
+        foreach proc_name [ditem_key [set org.macports.${phase}] ${part}] {
+            lappend override_procs ${proc_name}_muniversal
+            set ns [namespace qualifiers $proc_name]
+            if {![namespace exists $ns]} {
+                namespace eval $ns {}
             }
-            rename ${proc_name} ${proc_name}_orig
-            proc ${proc_name} {{args ""}} "
+            proc ${proc_name}_muniversal {{args ""}} "
                 global worksrcpath UI_PREFIX subport muniversal.current_arch
 
                 foreach arch \"\[option configure.universal_archs\]\" {
@@ -926,7 +925,7 @@ foreach phase {patch configure build destroot test} {
                         option  \${phase_map}.cmd \[muniversal::map_phase \${save-worksrcpath} \[option worksrcpath\] \[option \${phase_map}.cmd\]\]
                     }
 
-                    ${proc_name}_orig
+                    ${proc_name}
 
                     if {\[option muniversal.arch_compiler\]} {
                         foreach tool {f77 f90 fc objc cc objcxx cxx} {
@@ -947,9 +946,10 @@ foreach phase {patch configure build destroot test} {
                 muniversal.build_arch
             "
         }
+        ditem_key [set org.macports.${phase}] ${part} ${override_procs}
     }
 }
-unset phase part p
+unset phase part proc_name override_procs
 
 # copy `worksrcpath` to architecture-dependent version
 # rename portextract::extract_finish portextract::extract_finish_real
