@@ -81,6 +81,6 @@ pre-configure {
 option_proc obsolete.note obsolete.note_proc
 proc obsolete.note_proc {option action args} {
     if {${action} eq "set" && [lindex $args 0] ne ""} {
-        long_description-append [lindex $args 0]
+        long_description-append {*}[lindex $args 0]
     }
 }
