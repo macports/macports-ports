@@ -88,6 +88,22 @@ proc python_get_default_version {} {
     }
 }
 
+# python_numeric_version: python.version may carry a non-numeric suffix
+# (e.g. "315t" for the free-threaded/no-GIL build, per PEP 703). Tcl's
+# expr does not raise an error when comparing a string like "315t"
+# against an integer with >=, <, ==, etc.; instead it silently falls
+# back to lexicographic string comparison, which gives numerically
+# wrong results (e.g. "315t" >= 39 evaluates false, since "1" < "9").
+# Every numeric threshold comparison against python.version must go
+# through this helper instead of comparing ${python.version} directly.
+proc python_numeric_version {} {
+    global python.version
+    if {[regexp {^([0-9]+)} ${python.version} -> num]} {
+        return $num
+    }
+    return ${python.version}
+}
+
 proc python_set_versions {option action args} {
     if {$action ne "set"} {
         return
@@ -134,7 +150,7 @@ proc python_set_versions {option action args} {
         set addcode 1
     }
     if {[info exists addcode] && ![info exists python._addedcode]} {
-        if {[option python.version] >= 313 && [option supported_archs] ne "noarch"} {
+        if {[python_numeric_version] >= 313 && [option supported_archs] ne "noarch"} {
             # Headers need working __atomic_* builtins
             compiler.blacklist-append   {*gcc-4.[0-7]} {clang < 500}
         }
@@ -182,7 +198,7 @@ proc python_set_versions {option action args} {
                 lappend pyobjcflags -isysroot${configure.sysroot}
             }
             # Only needed for Python 3.12, since later require C11.
-            if {${python.version} == 312} {
+            if {[python_numeric_version] == 312} {
                 # python3.12/internal/pycore_frame.h:134: error:
                 # ‘for’ loop initial declaration used outside C99 mode
                 if {[string match *gcc-4.* ${configure.compiler}]} {
@@ -358,7 +374,7 @@ default destroot.cmd    {[python_get_defaults destroot_cmd]}
 default destroot.destdir {[python_get_defaults destroot_destdir]}
 default destroot.target {[python_get_defaults destroot_target]}
 
-default python.pep517   {[expr {[info exists python.version] && ${python.version} >= 37}]}
+default python.pep517   {[expr {[info exists python.version] && [python_numeric_version] >= 37}]}
 default python.pep517_backend   setuptools
 
 default python.test_framework   pytest
@@ -367,6 +383,20 @@ default test.target     {}
 default test.args       {[python_get_defaults test_args]}
 
 default python.add_dependencies yes
+
+# python_interp_port: maps python.version to the correct interpreter
+# port name. Normal versions (e.g. "315") map straight to "python315".
+# Free-threaded versions carry a trailing "t" (e.g. "315t", per PEP 703)
+# but there is no "python315t" port — free-threaded builds are named
+# "python<NNN>-freethreading" instead.
+proc python_interp_port {} {
+    global python.version
+    if {[regexp {^([0-9]+)t$} ${python.version} -> num]} {
+        return "python${num}-freethreading-devel"
+    }
+    return "python${python.version}"
+}
+
 proc python_callback {} {
     global name subport version python._first_version
     if {[option python.add_dependencies]} {
@@ -376,12 +406,13 @@ proc python_callback {} {
             depends_lib-delete port:py${python.default_version}[string trimleft $subport py]
             depends_lib-append port:py${python.default_version}[string trimleft $subport py]
         } else {
-            depends_lib-delete port:python${python.version}
-            depends_lib-append port:python${python.version}
+            set _interp_port [python_interp_port]
+            depends_lib-delete port:${_interp_port}
+            depends_lib-append port:${_interp_port}
             if {[option python.pep517]} {
                 depends_build-delete    port:py${python.version}-build
                 depends_build-append    port:py${python.version}-build
-                if {${python.version} >= 37} {
+                if {[python_numeric_version] >= 37} {
                     depends_build-delete    port:py${python.version}-installer
                     depends_build-append    port:py${python.version}-installer
                 } else {
@@ -395,7 +426,7 @@ proc python_callback {} {
                         # setuptools >= 70.1 provides bdist_wheel
                         # ... but it breaks without wheel.macosx_libfile
                         # https://trac.macports.org/ticket/72342
-                        if {1 || ${python.version} <= 37} {
+                        if {1 || [python_numeric_version] <= 37} {
                             depends_build-delete    port:py${python.version}-wheel
                             depends_build-append    port:py${python.version}-wheel
                         }
@@ -448,7 +479,7 @@ proc python_callback {} {
                     nose {
                         depends_test-delete     port:py${python.version}-nose \
                                                 port:py${python.version}-pynose
-                        if {${python.version} < 312} {
+                        if {[python_numeric_version] < 312} {
                             depends_test-append port:py${python.version}-nose
                         } else {
                             depends_test-append port:py${python.version}-pynose
@@ -501,7 +532,7 @@ proc python_get_defaults {var} {
         }
         destroot_cmd {
             if {${python.pep517}} {
-                if {${python.version} >= 37} {
+                if {[python_numeric_version] >= 37} {
                     set args installer
                 } else {
                     set args "install --verbose"
@@ -558,7 +589,7 @@ proc python_get_defaults {var} {
                 if {[catch {glob ${inc_dir}*} inc_dirs]} {
                     # append 'm' suffix if 30 <= PyVer <= 37
                     # Py27- and Py38+ do not use this suffix
-                    if {${python.version} < 30 || ${python.version} > 37} {
+                    if {[python_numeric_version] < 30 || [python_numeric_version] > 37} {
                         return ${inc_dir}
                     } else {
                         return ${inc_dir}m
@@ -569,7 +600,7 @@ proc python_get_defaults {var} {
             }
         }
         jobs_arg {
-            if {${python.version} >= 35 && [option use_parallel_build]} {
+            if {[python_numeric_version] >= 35 && [option use_parallel_build]} {
                 return " -j[option build.jobs]"
             } else {
                 return ""
@@ -589,7 +620,7 @@ options python.add_archflags python.add_cflags python.add_cxxflags \
 
 default python.add_archflags yes
 # Setuptool 75.7.0 (supporting Python 3.9+) changed how CFLAGS is handled.
-default python.add_cflags {[expr {$supported_archs ne "noarch" && [info exists python.version] && ${python.version} >= 39}]}
+default python.add_cflags {[expr {$supported_archs ne "noarch" && [info exists python.version] && [python_numeric_version] >= 39}]}
 default python.add_cxxflags {${python.add_cflags}}
 default python.add_fflags no
 default python.add_ldflags no
