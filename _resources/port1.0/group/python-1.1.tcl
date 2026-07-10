@@ -29,10 +29,10 @@
 #   "315"); for non-suffixed versions python.suffix and python.version
 #   are identical. Use python.suffix wherever the original form is
 #   needed (real install paths via python.branch, or interpreter
-#   dependency naming via python.depends) -- this avoids ever having
+#   dependency naming via python.runtime) -- this avoids ever having
 #   to write ${python.version}${python.suffix} concatenations.
 #
-# python.depends: the correct port to depend on for this interpreter.
+# python.runtime: the correct port to depend on for this interpreter.
 #   Normal versions map straight to "pythonNNN". Free-threaded versions
 #   do NOT map to "pythonNNNt" (no such port exists); they map to
 #   "pythonNNN-freethreading-devel" instead. Use this instead of
@@ -381,7 +381,7 @@ proc python_set_default_version {option action args} {
 
 options python.branch python.prefix python.bin python.lib python.libdir \
         python.include python.pkgd python.pep517 python.pep517_backend \
-        python.test_framework python.add_dependencies python.depends
+        python.test_framework python.add_dependencies python.runtime
 # for pythonXY, python.branch is X.Y, for pythonXYZ, it's X.YZ
 # derived from python.suffix (the full raw version string, e.g.
 # "315t") rather than python.version, since real install paths need
@@ -408,16 +408,16 @@ default test.cmd        {[python_get_defaults test_cmd]}
 default test.target     {}
 default test.args       {[python_get_defaults test_args]}
 
-# python.depends: the port to actually depend on for this interpreter.
+# python.runtime: the port to actually depend on for this interpreter.
 # Normal versions map straight to "pythonNNN". Free-threaded versions
 # (python.suffix eq "t") do NOT map to "pythonNNNt" -- no such port
 # exists. They map to "pythonNNN-freethreading-devel" instead. The
 # "-devel" suffix is hardcoded for now since the free-threaded 3.15
 # port is still in beta; this will need revisiting once a stable
 # python315-freethreading port exists without the -devel suffix.
-default python.depends  {[python_get_depends]}
+default python.runtime  {[python_get_runtime]}
 
-proc python_get_depends {} {
+proc python_get_runtime {} {
     set v [option python.version]
     set full [option python.suffix]
     set letter [string range $full [string length $v] end]
@@ -431,70 +431,70 @@ default python.add_dependencies yes
 proc python_callback {} {
     global name subport version python._first_version
     if {[option python.add_dependencies]} {
-        global python.version python.default_version test.run python.depends
+        global python.version python.suffix python.default_version test.run python.runtime
         if {[string match py-* $subport]} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
             depends_lib-delete port:py${python.default_version}[string trimleft $subport py]
             depends_lib-append port:py${python.default_version}[string trimleft $subport py]
         } else {
-            depends_lib-delete port:${python.depends}
-            depends_lib-append port:${python.depends}
+            depends_lib-delete port:${python.runtime}
+            depends_lib-append port:${python.runtime}
             if {[option python.pep517]} {
-                depends_build-delete    port:py${python.version}-build
-                depends_build-append    port:py${python.version}-build
+                depends_build-delete    port:py${python.suffix}-build
+                depends_build-append    port:py${python.suffix}-build
                 if {${python.version} >= 37} {
-                    depends_build-delete    port:py${python.version}-installer
-                    depends_build-append    port:py${python.version}-installer
+                    depends_build-delete    port:py${python.suffix}-installer
+                    depends_build-append    port:py${python.suffix}-installer
                 } else {
-                    depends_build-delete    port:py${python.version}-python-install
-                    depends_build-append    port:py${python.version}-python-install
+                    depends_build-delete    port:py${python.suffix}-python-install
+                    depends_build-append    port:py${python.suffix}-python-install
                 }
                 switch -- [option python.pep517_backend] {
                     setuptools {
-                        depends_build-delete    port:py${python.version}-setuptools
-                        depends_build-append    port:py${python.version}-setuptools
+                        depends_build-delete    port:py${python.suffix}-setuptools
+                        depends_build-append    port:py${python.suffix}-setuptools
                         # setuptools >= 70.1 provides bdist_wheel
                         # ... but it breaks without wheel.macosx_libfile
                         # https://trac.macports.org/ticket/72342
                         if {1 || ${python.version} <= 37} {
-                            depends_build-delete    port:py${python.version}-wheel
-                            depends_build-append    port:py${python.version}-wheel
+                            depends_build-delete    port:py${python.suffix}-wheel
+                            depends_build-append    port:py${python.suffix}-wheel
                         }
                     }
                     flit {
-                        depends_build-delete    port:py${python.version}-flit_core
-                        depends_build-append    port:py${python.version}-flit_core
+                        depends_build-delete    port:py${python.suffix}-flit_core
+                        depends_build-append    port:py${python.suffix}-flit_core
                     }
                     hatch {
-                        depends_build-delete    port:py${python.version}-hatchling
-                        depends_build-append    port:py${python.version}-hatchling
+                        depends_build-delete    port:py${python.suffix}-hatchling
+                        depends_build-append    port:py${python.suffix}-hatchling
                     }
                     poetry {
-                        depends_build-delete    port:py${python.version}-poetry-core
-                        depends_build-append    port:py${python.version}-poetry-core
+                        depends_build-delete    port:py${python.suffix}-poetry-core
+                        depends_build-append    port:py${python.suffix}-poetry-core
                     }
                     maturin {
-                        depends_build-delete    port:py${python.version}-maturin \
-                                                port:py${python.version}-setuptools-rust
-                        depends_build-append    port:py${python.version}-maturin \
-                                                port:py${python.version}-setuptools-rust
+                        depends_build-delete    port:py${python.suffix}-maturin \
+                                                port:py${python.suffix}-setuptools-rust
+                        depends_build-append    port:py${python.suffix}-maturin \
+                                                port:py${python.suffix}-setuptools-rust
                     }
                     meson {
-                        depends_build-delete    port:py${python.version}-meson-python
-                        depends_build-append    port:py${python.version}-meson-python
+                        depends_build-delete    port:py${python.suffix}-meson-python
+                        depends_build-append    port:py${python.suffix}-meson-python
                     }
                     pdm {
-                        depends_build-delete    port:py${python.version}-pdm-backend
-                        depends_build-append    port:py${python.version}-pdm-backend
+                        depends_build-delete    port:py${python.suffix}-pdm-backend
+                        depends_build-append    port:py${python.suffix}-pdm-backend
                     }
                     uv {
-                        depends_build-delete    port:py${python.version}-uv-build
-                        depends_build-append    port:py${python.version}-uv-build
+                        depends_build-delete    port:py${python.suffix}-uv-build
+                        depends_build-append    port:py${python.suffix}-uv-build
                     }
                     scikit {
-                        depends_build-delete    port:py${python.version}-scikit-build-core \
+                        depends_build-delete    port:py${python.suffix}-scikit-build-core \
                                                 port:ninja
-                        depends_build-append    port:py${python.version}-scikit-build-core \
+                        depends_build-append    port:py${python.suffix}-scikit-build-core \
                                                 port:ninja
                     }
                     default {}
@@ -503,16 +503,16 @@ proc python_callback {} {
             if {[tbool test.run]} {
                 switch -- [option python.test_framework] {
                     pytest {
-                        depends_test-delete     port:py${python.version}-pytest
-                        depends_test-append     port:py${python.version}-pytest
+                        depends_test-delete     port:py${python.suffix}-pytest
+                        depends_test-append     port:py${python.suffix}-pytest
                     }
                     nose {
-                        depends_test-delete     port:py${python.version}-nose \
-                                                port:py${python.version}-pynose
+                        depends_test-delete     port:py${python.suffix}-nose \
+                                                port:py${python.suffix}-pynose
                         if {${python.version} < 312} {
-                            depends_test-append port:py${python.version}-nose
+                            depends_test-append port:py${python.suffix}-nose
                         } else {
-                            depends_test-append port:py${python.version}-pynose
+                            depends_test-append port:py${python.suffix}-pynose
                         }
                     }
                     default {}
