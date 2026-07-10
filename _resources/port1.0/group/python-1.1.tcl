@@ -23,6 +23,20 @@
 #
 # python.test_framework: specify the test framework to use; one of "pytest" (default),
 #   "nose", "unittest", or <empty string>
+#
+# python.suffix: the full raw version string as originally given (e.g.
+#   "315t" or "315"). python.version is always purely numeric (e.g.
+#   "315"); for non-suffixed versions python.suffix and python.version
+#   are identical. Use python.suffix wherever the original form is
+#   needed (real install paths via python.branch, or interpreter
+#   dependency naming via python.depends) -- this avoids ever having
+#   to write ${python.version}${python.suffix} concatenations.
+#
+# python.depends: the correct port to depend on for this interpreter.
+#   Normal versions map straight to "pythonNNN". Free-threaded versions
+#   do NOT map to "pythonNNNt" (no such port exists); they map to
+#   "pythonNNN-freethreading-devel" instead. Use this instead of
+#   interpolating port:python${python.version} directly.
 
 categories      python
 
@@ -61,21 +75,46 @@ default python.rootname {[regsub ^py- [option name] ""]}
 default master_sites    {pypi:[string index ${python.rootname} 0]/${python.rootname}}
 default distname        {${python.rootname}-${version}}
 
-options python.versions python.version python.default_version
+options python.versions python.version python.default_version python.suffix
 option_proc python.versions python_set_versions
 default python.default_version {[python_get_default_version]}
 default python.version         {[python_get_version]}
+default python.suffix          {[python_get_suffix]}
 
 # see https://trac.macports.org/ticket/34562
 options python.consistent_destroot
 default python.consistent_destroot yes
 
+# python_get_version: returns the purely numeric version (e.g. "315"),
+# storing the original full raw string (e.g. "315t") in python.suffix
+# as a side effect. python.version must stay numeric so that plain
+# numeric comparisons elsewhere in this file (and in consuming
+# Portfiles) work correctly; Tcl's expr silently falls back to
+# lexicographic string comparison for non-numeric operands, which
+# gives WRONG results (not an error) for suffixed version strings.
 proc python_get_version {} {
     if {[string match py-* [option name]]} {
-        return [string range [option subport] 2 [string first "-" [option subport]]-1]
+        set raw [string range [option subport] 2 [string first "-" [option subport]]-1]
     } else {
-        return [option python.default_version]
+        set raw [option python.default_version]
     }
+    global python.suffix
+    set python.suffix $raw
+    if {[regexp {^([0-9]+)} $raw -> numeric]} {
+        return $numeric
+    }
+    return $raw
+}
+
+# python_get_suffix: fallback for python.suffix if it is ever read
+# before python.version has been resolved. Forcing python.version's
+# resolution here also sets python.suffix as a side effect (see
+# python_get_version above), so this always returns the correct full
+# raw string, never just the numeric part.
+proc python_get_suffix {} {
+    option python.version
+    global python.suffix
+    return ${python.suffix}
 }
 
 proc python_get_default_version {} {
@@ -342,9 +381,12 @@ proc python_set_default_version {option action args} {
 
 options python.branch python.prefix python.bin python.lib python.libdir \
         python.include python.pkgd python.pep517 python.pep517_backend \
-        python.test_framework python.add_dependencies
+        python.test_framework python.add_dependencies python.depends
 # for pythonXY, python.branch is X.Y, for pythonXYZ, it's X.YZ
-default python.branch   {[string index ${python.version} 0].[string range ${python.version} 1 end]}
+# derived from python.suffix (the full raw version string, e.g.
+# "315t") rather than python.version, since real install paths need
+# any trailing letter suffix that python.version itself omits.
+default python.branch   {[string index ${python.suffix} 0].[string range ${python.suffix} 1 end]}
 default python.prefix   {${frameworks_dir}/Python.framework/Versions/${python.branch}}
 default python.bin      {${python.prefix}/bin/python${python.branch}}
 default python.lib      {${python.prefix}/Python}
@@ -366,18 +408,37 @@ default test.cmd        {[python_get_defaults test_cmd]}
 default test.target     {}
 default test.args       {[python_get_defaults test_args]}
 
+# python.depends: the port to actually depend on for this interpreter.
+# Normal versions map straight to "pythonNNN". Free-threaded versions
+# (python.suffix eq "t") do NOT map to "pythonNNNt" -- no such port
+# exists. They map to "pythonNNN-freethreading-devel" instead. The
+# "-devel" suffix is hardcoded for now since the free-threaded 3.15
+# port is still in beta; this will need revisiting once a stable
+# python315-freethreading port exists without the -devel suffix.
+default python.depends  {[python_get_depends]}
+
+proc python_get_depends {} {
+    set v [option python.version]
+    set full [option python.suffix]
+    set letter [string range $full [string length $v] end]
+    if {$letter eq "t"} {
+        return "python${v}-freethreading-devel"
+    }
+    return "python${v}"
+}
+
 default python.add_dependencies yes
 proc python_callback {} {
     global name subport version python._first_version
     if {[option python.add_dependencies]} {
-        global python.version python.default_version test.run
+        global python.version python.default_version test.run python.depends
         if {[string match py-* $subport]} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
             depends_lib-delete port:py${python.default_version}[string trimleft $subport py]
             depends_lib-append port:py${python.default_version}[string trimleft $subport py]
         } else {
-            depends_lib-delete port:python${python.version}
-            depends_lib-append port:python${python.version}
+            depends_lib-delete port:${python.depends}
+            depends_lib-append port:${python.depends}
             if {[option python.pep517]} {
                 depends_build-delete    port:py${python.version}-build
                 depends_build-append    port:py${python.version}-build
