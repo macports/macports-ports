@@ -87,7 +87,7 @@ autogen() {
 		;;
 	esac
 	$INTLTOOLIZE -f $copyoption
-	$ACLOCAL
+	$ACLOCAL -I"$AUTOMAKE_PATH/share/gettext/m4"
 	$AUTOMAKE --gnu -a $copyoption
 	autogen_if_missing $1
 	$AUTOCONF

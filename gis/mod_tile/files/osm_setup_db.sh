@@ -37,9 +37,9 @@
 #      OSM2PGSQL_RAM=4096 OSM2PGSQL_CPUS=4 ./osm_setup_db.sh
 #
 # Before running this script, you need to ensure that PostgreSQL has been
-# configured for the 'nobody' to be able to access the 'gis' database without
+# configured for the 'nobody' user to be able to access the 'gis' database without
 # a password.  Refer to the Ident Authentication section in the PostgreSQL
-# Manual, https://www.postgresql.org/docs/12/auth-ident.html to understand any
+# Manual, https://www.postgresql.org/docs/16/auth-ident.html to understand any
 # security implications of this approach.
 #
 # The simplest way to configure this is to add an 'ident' method for 'gis' and
@@ -56,7 +56,7 @@
 #
 # Reload the PostgreSQL server configuration after making the change.  E.g
 #
-# sudo port reload  postgresql12-server
+# sudo port reload  postgresql16-server
 #
 # If the file specified by $PBF_FILENAME exists, it is imported as-is.  If it
 # does not exist, it is assumed to be a file hosted at $PBF_DOWNLOAD_BASE_URL,
@@ -83,7 +83,7 @@ GIS_DB_USER="${GIS_DB_USER:-$GIS_USER}"
 PG_SUPER_USER="${PG_SUPER_USER:-postgres}"
 CURL_BIN="$PREFIX/bin/curl"
 MD5SUM_BIN="$PREFIX/bin/gmd5sum"
-OSM2PGSQL_BIN="$PREFIX/bin/osm2pgsql-lua"
+OSM2PGSQL_BIN="$PREFIX/bin/osm2pgsql"
 PBF_DOWNLOAD_BASE_URL="${PBF_DOWNLOAD_BASE_URL:-https://download.geofabrik.de}"
 PBF_FILENAME="${PBF_FILENAME:-europe/monaco-latest.osm.pbf}"
 POLY_FILENAME="${POLY_FILENAME:-europe/monaco.poly}"
@@ -98,6 +98,11 @@ GREP_BIN=/usr/bin/grep
 if [ $(id -u) -ne 0 ]; then
     sudo $0
     exit 0
+fi
+
+if [ ! -x "$OSM2PGSQL_BIN" ]; then
+    >&2 echo "$OSM2PGSQL_BIN not found.  Please install the osm2pgsql port."
+    exit 1
 fi
 
 initializeDatabase()
@@ -175,14 +180,23 @@ createDatabase()
     sudo -u "$GIS_USER" test -r "$PBF_FILE"
     if [ $? -eq 0 ]; then
 	>&2 echo "Importing from $PBF_FILE... (This can take a very long time, depending on import size and other factors)"
-	sudo -u nobody "$OSM2PGSQL_BIN" -d "$GIS_DB" \
-	     --create --slim  -G --hstore \
-	     --tag-transform-script \
-	     "$PREFIX/share/openstreetmap-carto/openstreetmap-carto.lua" \
-	     -C "$OSM2PGSQL_RAM" --number-processes "$OSM2PGSQL_CPUS" \
-	     -S "$PREFIX/share/openstreetmap-carto/openstreetmap-carto.style" \
-	     --input-reader='pbf' \
-	     "$PBF_FILE"
+	if [ -f "$PREFIX/share/openstreetmap-carto/openstreetmap-carto-flex.lua" ];then
+	    sudo -u nobody "$OSM2PGSQL_BIN" --database="$GIS_DB" \
+		 --create --slim \
+		 --output flex --style="$PREFIX/share/openstreetmap-carto/openstreetmap-carto-flex.lua" \
+		 --cache="$OSM2PGSQL_RAM" --number-processes "$OSM2PGSQL_CPUS" \
+		 --input-reader='pbf' \
+		 "$PBF_FILE"
+	else
+	    sudo -u nobody "$OSM2PGSQL_BIN" -d "$GIS_DB" \
+		 --create --slim  -G --hstore \
+		 --tag-transform-script \
+		 "$PREFIX/share/openstreetmap-carto/openstreetmap-carto.lua" \
+		 -C "$OSM2PGSQL_RAM" --number-processes "$OSM2PGSQL_CPUS" \
+		 -S "$PREFIX/share/openstreetmap-carto/openstreetmap-carto.style" \
+		 --input-reader='pbf' \
+		 "$PBF_FILE"
+	fi
 	if [ $? -ne 0 ]; then
 	    >&2 echo "Error importing $PBF_FILE"
 	    exit 1
@@ -194,6 +208,26 @@ createDatabase()
 	    >&2 echo "Error creating indexes in PostgreSQL"
 	    exit 1
 	fi
+	if [ -f "$PREFIX/share/openstreetmap-carto/functions.sql" ]; then
+	    >&2 echo "Creating functions..."
+	    sudo -u "$GIS_USER" "$PGSQLBINPATH/psql" -d "$GIS_DB" -U "$GIS_DB_USER" \
+		 -f "$PREFIX/share/openstreetmap-carto/functions.sql" >/dev/null
+	    if [ $? -ne 0 ]; then
+		>&2 echo "Error creating functions in PostgreSQL"
+		exit 1
+	    fi
+	fi
+	# White listed key-value tags introduced in openstreetmap-carto version 6.0.0
+	if [ -f "$PREFIX/share/openstreetmap-carto/common-values.sql" ]; then
+	    >&2 echo "Creating table for white listed key-value tags..."
+	    sudo -u "$GIS_USER" "$PGSQLBINPATH/psql" -d "$GIS_DB" -U "$GIS_DB_USER" \
+		 -f "$PREFIX/share/openstreetmap-carto/common-values.sql" >/dev/null
+	    if [ $? -ne 0 ]; then
+		>&2 echo "Error creating table for white listed key-value tags in PostgreSQL"
+		exit 1
+	    fi
+	fi
+
     fi
 }
 

@@ -186,7 +186,8 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
     } else {
         switch ${implementation} {
-            ruby-devel { ruby.branch 3.4 }
+            ruby40 { ruby.branch 4.0 }
+            ruby34 { ruby.branch 3.4 }
             ruby33 { ruby.branch 3.3 }
             ruby32 { ruby.branch 3.2 }
             ruby31 { ruby.branch 3.1 }
@@ -202,7 +203,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             ruby19 { ruby.branch 1.9 }
             ruby   { ruby.branch 1.8 }
             default {
-                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby33, ruby32, ... ruby20, ruby19 or ruby possible)"
+                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby40, ruby34, ... ruby20, ruby19 or ruby possible)"
                 return -code error "ruby.setup failed"
             }
         }
@@ -221,8 +222,9 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             homepage        https://www.rubygems.org/gems/${ruby.project}
             master_sites    https://www.rubygems.org/downloads/
             livecheck.type  regex
-            livecheck.url   https://www.rubygems.org/gems/${ruby.project}
-            livecheck.regex {<i class="page__subheading">(\d|\d[0-9.]*\d)</i>}
+            livecheck.url   \
+                https://www.rubygems.org/gems/${ruby.project}/versions
+            livecheck.regex /gems/${ruby.project}/versions/(\\d|\\d\[0-9.]*\\d)
         }
         sourceforge:* {
             set ruby.project [lindex [split ${source} {:}] 1]

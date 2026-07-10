@@ -22,7 +22,7 @@ options gitlab.master_sites
 default gitlab.master_sites {${gitlab.homepage}/-/archive/${git.branch}}
 
 options gitlab.livecheck.branch
-default gitlab.livecheck.branch master
+default gitlab.livecheck.branch HEAD
 
 options gitlab.livecheck.regex
 default gitlab.livecheck.regex {(\[0-9]\[^<]+)}
@@ -62,13 +62,13 @@ proc gitlab.setup {gl_author gl_project gl_version {gl_tag_prefix ""} {gl_tag_su
         [join ${gitlab.tag_suffix}] eq "" && \
         [regexp "^\[0-9a-f\]{7,}\$" ${gitlab.version}] && \
         ![regexp "^\[0-9\]{8}\$" ${gitlab.version}]} {
-        livecheck.type      regexm
-        default livecheck.url   {${gitlab.homepage}/-/commits/${gitlab.livecheck.branch}?format=atom}
-        livecheck.regex     commit/(\[0-9a-f\]{[string length ${gitlab.version}]})\[0-9a-f\]*</id>
+        default livecheck.type  git
+        default livecheck.url   {${git.url}}
     } else {
         livecheck.type      regex
         livecheck.url       ${gitlab.homepage}/-/tags?format=atom
         default livecheck.regex {[list tags/[join ${gitlab.tag_prefix}][join ${gitlab.livecheck.regex}][join ${gitlab.tag_suffix}]</id>]}
     }
-    livecheck.version       ${gitlab.version}
+    default livecheck.branch    {${gitlab.livecheck.branch}}
+    livecheck.version           ${gitlab.version}
 }

@@ -3,10 +3,9 @@
 PortSystem      1.0
 PortGroup       active_variants 1.1
 
-# Need openat()
+# Need openat() (darwin <= 13) and clock_gettime() (darwin <= 15)
 PortGroup       legacysupport 1.1
-
-legacysupport.newest_darwin_requires_legacy 13
+legacysupport.newest_darwin_requires_legacy 15
 
 name            emacs
 categories      editors
@@ -27,6 +26,10 @@ master_sites    gnu
 
 set rpaths [list]
 
+# GCC version used for the nativecomp variant's libgccjit; also used to point
+# native compilation at the gcc toolchain via GCC_EXEC_PREFIX (see site-start).
+set gcc_v   15
+
 if {$subport eq $name} {
     conflicts   emacs-devel
 }
@@ -44,6 +47,14 @@ depends_build-append  port:autoconf \
                       port:automake \
                       port:libtool
 
+# https://trac.macports.org/wiki/WimplicitFunctionDeclaration#strchr
+configure.checks.implicit_function_declaration.whitelist-append strchr alignof
+
+# Avoid build failure if hdf4 is installed.
+# https://trac.macports.org/ticket/68414
+configure.cppflags-replace \
+                -I${prefix}/include -isystem${prefix}/include
+
 configure.args  --disable-silent-rules \
                 --without-ns \
                 --without-x \
@@ -52,6 +63,7 @@ configure.args  --disable-silent-rules \
                 --without-libotf \
                 --without-m17n-flt \
                 --without-tree-sitter \
+                --without-lcms2 \
                 --with-libgmp \
                 --with-gnutls \
                 --with-xml2 \
@@ -73,7 +85,7 @@ pre-configure {
     system -W ${worksrcpath} "sh ./autogen.sh"
 }
 
-depends_build-append   port:pkgconfig \
+depends_build-append   path:bin/pkg-config:pkgconfig \
                        port:texinfo
 depends_lib-append     port:gmp \
                        path:lib/pkgconfig/gnutls.pc:gnutls \
@@ -93,6 +105,12 @@ post-destroot {
         # avoid conflicts with xemacs
         move ${destroot}${prefix}/bin/etags ${destroot}${prefix}/bin/etags-emacs
         move ${destroot}${prefix}/share/man/man1/etags.1.gz ${destroot}${prefix}/share/man/man1/etags-emacs.1.gz
+
+        file mkdir ${destroot}${prefix}/share/emacs/site-lisp
+        file copy ${filespath}/site-start.el \
+            ${destroot}${prefix}/share/emacs/site-lisp/site-start.el
+        reinplace "s|__GCC_EXEC_PREFIX__|${prefix}/lib/gcc${gcc_v}/gcc/|g" \
+            ${destroot}${prefix}/share/emacs/site-lisp/site-start.el
     }
 }
 
@@ -112,14 +130,27 @@ platform darwin {
             configure.cflags-append -Wno-attributes
         }
     }
+
+    # aligned_alloc and posix_spawn_file_actions_addchdir_np are weakly linked
+    # in 10.15+ SDKs but absent at runtime before 10.15, so a build against a
+    # newer SDK aborts with "dyld: Symbol not found". Force the fallbacks.
+    # https://trac.macports.org/ticket/61406
+    if {${os.major} < 19} {
+        configure.env-append    ac_cv_func_aligned_alloc=no \
+                                ac_cv_have_decl_aligned_alloc=no \
+                                ac_cv_func_posix_spawn_file_actions_addchdir_np=no
+    }
 }
 
 if {$subport eq $name || $subport eq "emacs-app"} {
-    version         30.1
-    revision        1
-    checksums       rmd160  d84d527bb0db3d56d558e8f4bed80af5e3eddef3 \
-                    sha256  54404782ea5de37e8fcc4391fa9d4a41359a4ba9689b541f6bc97dd1ac283f6c \
-                    size    82678582
+    version         30.2
+    revision        14
+    checksums       rmd160  fefdd3fcd453d733114f609a3e122b2529cc7410 \
+                    sha256  1d79a4ba4d6596f302a7146843fe59cf5caec798190bcc07c907e7ba244b076d \
+                    size    83059014
+
+    # reported upstream as bug#81166
+    patchfiles-append   patch-gsettings-null-check.diff
 }
 
 patchfiles-append   patch-allow-powerpc.diff
@@ -129,17 +160,17 @@ if {$subport eq "emacs-devel" || $subport eq "emacs-app-devel"} {
 
     # do not forget to check that configure hasn't introduce some suprises via
     # git diff [old]..[new] -- '**/configure.ac'
-    github.setup    emacs-mirror emacs ae8522af41bb67bf417b94ed54146a43fe2150ec
+    github.setup    emacs-mirror emacs 2db5a145acbbe84042128806d8b2e333495cf70e
     github.tarball_from archive
     epoch           5
-    version         20250223
-    revision        1
+    version         20260602
+    revision        3
 
     master_sites    ${github.master_sites}
 
-    checksums       rmd160  a27dee7593339d1d16421f9ed8e60e1adc30aefd \
-                    sha256  8614111d9478bf3293ba0cf66bf5494a46b49fc6cc403fb0d445a6a69f5d620e \
-                    size    51933907
+    checksums       rmd160  e8e565e0518b40c77b309e78c1e30d09481e4adf \
+                    sha256  fd68bcb1d848d7267fda77d1fb84d2236c14941a0694d51d0f383ecdaa1f7c04 \
+                    size    53929116
 
     livecheck.type none
 
@@ -158,6 +189,7 @@ if {$subport eq $name || $subport eq "emacs-devel"} {
 
     variant x11 description {Builds emacs as a X11 program with Lucid widgets} {
         configure.args-delete   --without-x
+        configure.args-delete   --without-lcms2
         configure.args-append   --with-x-toolkit=lucid \
             --without-xaw3d \
             --without-imagemagick \
@@ -188,7 +220,7 @@ if {$subport eq $name || $subport eq "emacs-devel"} {
     variant motif requires x11 description {Builds emacs as an X11 program with Motif widgets} {
         configure.args-delete   --with-x-toolkit=lucid
         configure.args-append   --with-x-toolkit=motif
-        depends_lib-append      lib:libXm:openmotif
+        depends_lib-append      lib:libXm:motif
     }
 
     variant gtk requires x11 description {Builds emacs as an X11 program with GTK+3 widgets} {
@@ -242,7 +274,7 @@ if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
         --without-rsvg \
         --without-xaw3d \
 
-    configure.args-delete  --without-ns  --without-x
+    configure.args-delete  --without-ns  --without-x --without-lcms2
 
     depends_lib-append  port:lcms2
 
@@ -265,6 +297,20 @@ if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
             ${destroot}${applications_dir}/Emacs.app/Contents/Resources/site-lisp/site-start.el
         reinplace "s|__PREFIX__|${prefix}|g" \
             ${destroot}${applications_dir}/Emacs.app/Contents/Resources/site-lisp/site-start.el
+        reinplace "s|__APPLICATIONS_DIR__|${applications_dir}|g" \
+            ${destroot}${applications_dir}/Emacs.app/Contents/Resources/site-lisp/site-start.el
+        reinplace "s|__GCC_EXEC_PREFIX__|${prefix}/lib/gcc${gcc_v}/gcc/|g" \
+            ${destroot}${applications_dir}/Emacs.app/Contents/Resources/site-lisp/site-start.el
+
+        # Sequoia and later enforce code-signature validation so
+        # Emacs.app can't launch from the Finder without codesigning.
+        # This is only necessary on Intel because the ARM toolchain
+        # automatically codesigns, but it's harmless to rerun.
+        # See https://trac.macports.org/ticket/71232
+        if {${os.major} >= 24} {
+            system -W ${destroot}${applications_dir} \
+                "/usr/bin/codesign --force --deep --sign - Emacs.app"
+        }
     }
 
     variant imagemagick description {Use ImageMagick} {
@@ -286,20 +332,30 @@ if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
     default_variants-append +rsvg
 }
 
-variant nativecomp description {Builds emacs with native compilation support} {
-    set gcc_v                      14
-    depends_lib-append             port:gcc${gcc_v}
-    configure.args-replace         --with-native-compilation=no \
-                                   --with-native-compilation=aot
-    compiler.cpath-prepend         ${prefix}/include/gcc${gcc_v}
-    compiler.library_path-prepend  ${prefix}/lib/gcc${gcc_v}
-    lappend rpaths                 ${prefix}/lib/gcc${gcc_v}
+# JIT is not supported in gcc on i386 (configure fails), and on ppc the
+# +nativecomp build segfaults, so don't offer the variant on those archs.
+# https://trac.macports.org/ticket/68382
+if {${configure.build_arch} ni [list i386 ppc]} {
+    variant nativecomp description {Builds emacs with native compilation support} {
+        depends_lib-append             port:gcc${gcc_v}
+        configure.args-replace         --with-native-compilation=no \
+                                       --with-native-compilation=aot
+        compiler.cpath-prepend         ${prefix}/include/gcc${gcc_v}
+        compiler.library_path-prepend  ${prefix}/lib/gcc${gcc_v}
+        lappend rpaths                 ${prefix}/lib/gcc${gcc_v}
+    }
 }
 
 variant treesitter description {Builds emacs with tree-sitter support} {
     configure.args-delete   --without-tree-sitter
     configure.args-append   --with-tree-sitter
     depends_lib-append      port:tree-sitter
+
+    # TODO: This will become unnecessary in Emacs 31
+    if {$subport eq $name || $subport eq "emacs-app"} {
+        configure.cflags-append -Dts_language_version=ts_language_abi_version
+        patchfiles-append   patch-tree-sitter-0.26.diff
+    }
 
     if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
         lappend rpaths ${prefix}/lib
@@ -329,12 +385,16 @@ variant treesitter description {Builds emacs with tree-sitter support} {
         port:tree-sitter-heex \
         port:tree-sitter-elixir \
         port:tree-sitter-lua \
-        port:tree-sitter-php
+        port:tree-sitter-php \
+        port:tree-sitter-phpdoc
 
     if {$subport eq "emacs-devel" || $subport eq "emacs-app-devel"} {
         depends_run-append \
             port:tree-sitter-markdown \
-            port:tree-sitter-go-work
+            port:tree-sitter-go-work \
+            port:tree-sitter-jsdoc \
+            port:tree-sitter-gitattributes \
+            port:tree-sitter-liquid
     }
 
     notes-append "
@@ -346,8 +406,8 @@ etc/NEWS or the Emacs Lisp reference manual.
 
 default_variants-append     +treesitter
 
-# JIT not supported in gcc for i386, so configure will fail.
-# On ppc it is supported, but the build with +nativecomp segfaults.
+# Enable native compilation by default where the variant is available
+# (see the nativecomp variant definition above for the arch restriction).
 # https://trac.macports.org/ticket/69677
 if {${configure.build_arch} ni [list i386 ppc]} {
     default_variants-append +nativecomp

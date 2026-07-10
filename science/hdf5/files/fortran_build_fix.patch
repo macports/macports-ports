@@ -1,0 +1,570 @@
+From 5b044ac47c9d808baba25564baa34b4ac17cb148 Mon Sep 17 00:00:00 2001
+From: Scot Breitenfeld <brtnfld@hdfgroup.org>
+Date: Fri, 29 May 2026 16:07:46 -0500
+Subject: [PATCH] Fortran: simplify H5config_f.inc.cmake to use #cmakedefine
+ directly
+
+All #cmakedefine01 CMAKE_H5_* blocks used a five-line pattern:
+
+  #cmakedefine01 CMAKE_H5_HAVE_FOO
+  #if CMAKE_H5_HAVE_FOO == 0
+  #undef H5_HAVE_FOO
+  #else
+  #define H5_HAVE_FOO
+  #endif
+
+This is exactly what #cmakedefine H5_HAVE_FOO does: it emits
+#define H5_HAVE_FOO (no value) when the CMake variable is truthy and
+/* #undef H5_HAVE_FOO */ when falsy.  The CMAKE_H5_* intermediate
+variables in fortran/src/CMakeLists.txt were only needed to feed these
+blocks and are no longer required.
+
+Replace all such blocks with #cmakedefine H5_HAVE_FOO, using the H5_*
+variable directly.  MPI_LOGICAL_KIND retains its value via
+#cmakedefine H5_MPI_LOGICAL_KIND @H5_MPI_LOGICAL_KIND@.
+
+This also fixes a real bug: H5_FORTRAN_C_BOOL_IS_UNIQUE was emitted as
+#define H5_FORTRAN_C_BOOL_IS_UNIQUE 0 when C_BOOL and default LOGICAL
+are the same kind (e.g. Apple PowerPC ABI).  #ifdef only tests whether
+a macro is defined, not its value, so the guard in H5_test_buildiface.F90
+was always true and verify_c_bool was written into tf_gen.F90 regardless,
+causing an "Ambiguous interfaces" build failure on that platform.
+---
+ fortran/src/CMakeLists.txt              | 64 +-----------------
+ fortran/src/H5Dff.F90                   |  6 +-
+ fortran/src/H5_f.c                      |  4 +-
+ fortran/src/H5_ff.F90                   |  4 +-
+ fortran/src/H5config_f.inc.cmake        | 87 +++++--------------------
+ fortran/src/H5fort_type_defines.h.cmake |  6 +-
+ fortran/src/H5match_types.c             |  8 +--
+ fortran/test/tH5D.F90                   | 16 ++---
+ fortran/test/tH5T_F03.F90               | 12 ++--
+ hl/fortran/test/tstlite.F90             |  6 +-
+ src/H5pubconf.h.in                      |  2 +-
+ 11 files changed, 49 insertions(+), 166 deletions(-)
+
+diff --git fortran/src/CMakeLists.txt fortran/src/CMakeLists.txt
+index 7f8610f0afa..6a93643b946 100644
+--- fortran/src/CMakeLists.txt
++++ fortran/src/CMakeLists.txt
+@@ -8,12 +8,6 @@ cmake_minimum_required (VERSION 3.26)
+ project (HDF5_F90_SRC C Fortran)
+ 
+ #-----------------------------------------------------------------------------
+-if (H5_NO_DEPRECATED_SYMBOLS)
+-  set (CMAKE_NO_DEPRECATED_SYMBOLS 1)
+-else ()
+-  set (CMAKE_NO_DEPRECATED_SYMBOLS 0)
+-endif ()
+-
+ # configure def file for shared libs on windows
+ if (WIN32)
+   if (BUILD_SHARED_LIBS)
+@@ -34,64 +28,8 @@ if (WIN32)
+   endif ()
+ endif ()
+ 
+-if (H5_HAVE_MPI_F08) # MPI-3 module mpi_f08 supported
+-  set (CMAKE_H5_HAVE_MPI_F08 1)
+-else ()
++if (NOT H5_HAVE_MPI_F08) # MPI-3 module mpi_f08 supported
+   set (H5_NOMPI_F08 ";")
+-  set (CMAKE_H5_HAVE_MPI_F08 0)
+-endif ()
+-
+-if (H5_HAVE_DARWIN) # Used in testing
+-  set (CMAKE_H5_HAVE_DARWIN 1)
+-else ()
+-  set (CMAKE_H5_HAVE_DARWIN 0)
+-endif ()
+-
+-# configure for Fortran preprocessor
+-
+-# Define Parallel variable for passing to H5config_f.inc.cmake
+-set (CMAKE_H5_HAVE_PARALLEL 0)
+-set (CMAKE_H5_HAVE_SUBFILING_VFD 0)
+-if (H5_HAVE_PARALLEL)
+-  set (CMAKE_H5_HAVE_PARALLEL 1)
+-  if (H5_HAVE_SUBFILING_VFD)
+-    set (CMAKE_H5_HAVE_SUBFILING_VFD 1)
+-  endif ()
+-endif ()
+-
+-set (CMAKE_H5_HAVE_FLOAT128 0)
+-if (H5_HAVE_FLOAT128)
+-  set (CMAKE_H5_HAVE_FLOAT128 1)
+-endif ()
+-
+-set (CMAKE_H5_FORTRAN_HAVE_STORAGE_SIZE 0)
+-if (H5_FORTRAN_HAVE_STORAGE_SIZE)
+-  set (CMAKE_H5_FORTRAN_HAVE_STORAGE_SIZE 1)
+-endif ()
+-
+-set (CMAKE_H5_FORTRAN_HAVE_SIZEOF 0)
+-if (H5_FORTRAN_HAVE_SIZEOF)
+-  set (CMAKE_H5_FORTRAN_HAVE_SIZEOF 1)
+-endif ()
+-
+-set (CMAKE_H5_FORTRAN_HAVE_C_SIZEOF 0)
+-if (H5_FORTRAN_HAVE_C_SIZEOF)
+-  set (CMAKE_H5_FORTRAN_HAVE_C_SIZEOF 1)
+-endif ()
+-
+-set (CMAKE_H5_HAVE_ISO_FORTRAN_ENV 0)
+-if (H5_HAVE_ISO_FORTRAN_ENV)
+-  set (CMAKE_H5_HAVE_ISO_FORTRAN_ENV 1)
+-endif ()
+-
+-set (CMAKE_H5_FORTRAN_HAVE_CHAR_ALLOC 0)
+-if (H5_FORTRAN_HAVE_CHAR_ALLOC)
+-  set (CMAKE_H5_FORTRAN_HAVE_CHAR_ALLOC 1)
+-endif ()
+-
+-set (CMAKE_H5_MPI_LOGICAL_KIND 0)
+-if (H5_MPI_LOGICAL_KIND)
+-  set (CMAKE_H5_MPI_LOGICAL_KIND 1)
+ endif ()
+ 
+ configure_file (${HDF5_F90_SRC_SOURCE_DIR}/H5config_f.inc.cmake ${HDF5_F90_BINARY_DIR}/H5config_f.inc @ONLY)
+diff --git fortran/src/H5Dff.F90 fortran/src/H5Dff.F90
+index d597bcf306a..1b962d773b6 100644
+--- fortran/src/H5Dff.F90
++++ fortran/src/H5Dff.F90
+@@ -95,7 +95,7 @@ MODULE H5D
+   PRIVATE h5dwrite_reference_obj, h5dwrite_reference_dsetreg, h5dwrite_char_scalar, h5dwrite_ptr
+   PRIVATE h5dread_reference_obj, h5dread_reference_dsetreg, h5dread_char_scalar, h5dread_ptr
+   PRIVATE h5dfill_integer, h5dfill_c_float, h5dfill_c_double, h5dfill_char, h5dfill_ptr
+-#if H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE!=0
++#ifdef H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+   PRIVATE h5dfill_c_long_double
+ #endif
+ 
+@@ -180,7 +180,7 @@ END FUNCTION h5dread_f_c
+      MODULE PROCEDURE h5dfill_integer
+      MODULE PROCEDURE h5dfill_c_float
+      MODULE PROCEDURE h5dfill_c_double
+-#if H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE!=0
++#ifdef H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+      MODULE PROCEDURE h5dfill_c_long_double
+ #endif
+      MODULE PROCEDURE h5dfill_char
+@@ -2308,7 +2308,7 @@ SUBROUTINE h5dfill_c_double(fill_value, space_id, buf,  hdferr)
+ 
+   END SUBROUTINE h5dfill_c_double
+ 
+-#if H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE!=0
++#ifdef H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+   SUBROUTINE h5dfill_c_long_double(fill_value, space_id, buf,  hdferr)
+     IMPLICIT NONE
+     REAL(KIND=C_LONG_DOUBLE), INTENT(IN), TARGET :: fill_value
+diff --git fortran/src/H5_f.c fortran/src/H5_f.c
+index 4b5cd3c8b0f..9202c2e26c1 100644
+--- fortran/src/H5_f.c
++++ fortran/src/H5_f.c
+@@ -183,7 +183,7 @@ h5init_types_c(hid_t_f *types, hid_t_f *floatingtypes, hid_t_f *integertypes)
+     /*
+      * FIND H5T_NATIVE_REAL_C_LONG_DOUBLE
+      */
+-#if H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE != 0
++#ifdef H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+     if (sizeof(real_C_LONG_DOUBLE_f) == sizeof(float)) {
+         if ((types[13] = (hid_t_f)H5Tcopy(H5T_NATIVE_FLOAT)) < 0)
+             return ret_value;
+@@ -192,7 +192,7 @@ h5init_types_c(hid_t_f *types, hid_t_f *floatingtypes, hid_t_f *integertypes)
+         if ((types[13] = (hid_t_f)H5Tcopy(H5T_NATIVE_DOUBLE)) < 0)
+             return ret_value;
+     } /*end if */
+-#if H5_FORTRAN_HAVE_C_LONG_DOUBLE != 0
++#ifdef H5_FORTRAN_HAVE_C_LONG_DOUBLE
+     else if (sizeof(real_C_LONG_DOUBLE_f) == sizeof(long double)) {
+         if (H5_PAC_C_MAX_REAL_PRECISION >= H5_PAC_FC_MAX_REAL_PRECISION) {
+             if ((types[13] = (hid_t_f)H5Tcopy(H5T_NATIVE_LDOUBLE)) < 0)
+diff --git fortran/src/H5_ff.F90 fortran/src/H5_ff.F90
+index 2d398c518c8..b6a71db2fbe 100644
+--- fortran/src/H5_ff.F90
++++ fortran/src/H5_ff.F90
+@@ -997,7 +997,7 @@ INTEGER(HID_T) FUNCTION h5kind_to_type(ikind, flag) RESULT(h5_type)
+     INTEGER, INTENT(IN) :: flag
+     INTEGER :: i
+ 
+-!#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++!#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+ !    ! (1) The array index assumes INTEGER*16 the last integer in the series, and
+ !    ! (2) it should map to INTEGER*16 on most modern processors
+ !    H5T_NATIVE_INTEGER_KIND(H5_FORTRAN_NUM_INTEGER_KINDS)=SELECTED_INT_KIND(36)
+@@ -1016,7 +1016,7 @@ INTEGER(HID_T) FUNCTION h5kind_to_type(ikind, flag) RESULT(h5_type)
+           h5_type = H5T_NATIVE_REAL_C_FLOAT
+        ELSE IF(ikind.EQ.KIND(1.0_C_DOUBLE))THEN
+           h5_type = H5T_NATIVE_REAL_C_DOUBLE
+-#if H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE!=0
++#ifdef H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+        ELSE IF(ikind.EQ.KIND(1.0_C_LONG_DOUBLE))THEN
+           h5_type = H5T_NATIVE_REAL_C_LONG_DOUBLE
+ #endif
+diff --git fortran/src/H5config_f.inc.cmake fortran/src/H5config_f.inc.cmake
+index 88875cb0b9a..2f9d662db04 100644
+--- fortran/src/H5config_f.inc.cmake
++++ fortran/src/H5config_f.inc.cmake
+@@ -12,88 +12,43 @@
+ ! fortran/H5config_f.inc. Generated from fortran/src/H5config_f.inc.cmake by CMake
+ 
+ ! Define if there is parallel support
+-#cmakedefine01 CMAKE_H5_HAVE_PARALLEL
+-#if CMAKE_H5_HAVE_PARALLEL == 0
+-#undef H5_HAVE_PARALLEL
+-#else
+-#define H5_HAVE_PARALLEL
+-#endif
++#cmakedefine H5_HAVE_PARALLEL
+ 
+ ! Define if MPI supports mpi_f08 module
+-#cmakedefine01 CMAKE_H5_HAVE_MPI_F08
+-#if CMAKE_H5_HAVE_MPI_F08 == 0
+-#undef H5_HAVE_MPI_F08
+-#else
+-#define H5_HAVE_MPI_F08
+-#endif
++#cmakedefine H5_HAVE_MPI_F08
+ 
+ ! Define if there is subfiling support
+-#cmakedefine01 CMAKE_H5_HAVE_SUBFILING_VFD
+-#if CMAKE_H5_HAVE_SUBFILING_VFD == 0
+-#undef H5_HAVE_SUBFILING_VFD
+-#else
+-#define H5_HAVE_SUBFILING_VFD
+-#endif
++#cmakedefine H5_HAVE_SUBFILING_VFD
+ 
+ ! Define if on APPLE
+-#cmakedefine01 CMAKE_H5_HAVE_DARWIN
+-#if CMAKE_H5_HAVE_DARWIN == 0
+-#undef H5_HAVE_DARWIN
+-#else
+-#define H5_HAVE_DARWIN
+-#endif
++#cmakedefine H5_HAVE_DARWIN
+ 
+ ! Define if the intrinsic function STORAGE_SIZE exists
+-#cmakedefine01 CMAKE_H5_FORTRAN_HAVE_STORAGE_SIZE
+-#if CMAKE_H5_FORTRAN_HAVE_STORAGE_SIZE == 0
+-#undef H5_FORTRAN_HAVE_STORAGE_SIZE
+-#else
+-#define H5_FORTRAN_HAVE_STORAGE_SIZE
+-#endif
++#cmakedefine H5_FORTRAN_HAVE_STORAGE_SIZE
+ 
+ ! Define if the intrinsic function SIZEOF exists
+-#cmakedefine01 CMAKE_H5_FORTRAN_HAVE_SIZEOF
+-#if CMAKE_H5_FORTRAN_HAVE_SIZEOF == 0
+-#undef H5_FORTRAN_HAVE_SIZEOF
+-#else
+-#define H5_FORTRAN_HAVE_SIZEOF
+-#endif
++#cmakedefine H5_FORTRAN_HAVE_SIZEOF
+ 
+ ! Define if the intrinsic function C_SIZEOF exists
+-#cmakedefine01 CMAKE_H5_FORTRAN_HAVE_C_SIZEOF
+-#if CMAKE_H5_FORTRAN_HAVE_C_SIZEOF == 0
+-#undef H5_FORTRAN_HAVE_C_SIZEOF
+-#else
+-#define H5_FORTRAN_HAVE_C_SIZEOF
+-#endif
++#cmakedefine H5_FORTRAN_HAVE_C_SIZEOF
+ 
+ ! Define if allocatable character is supported
+-#define H5_FORTRAN_HAVE_CHAR_ALLOC @H5_FORTRAN_HAVE_CHAR_ALLOC@
++#cmakedefine H5_FORTRAN_HAVE_CHAR_ALLOC
+ 
+ ! Define if the intrinsic function C_LONG_DOUBLE exists
+-#define H5_FORTRAN_HAVE_C_LONG_DOUBLE @H5_FORTRAN_HAVE_C_LONG_DOUBLE@
++#cmakedefine H5_FORTRAN_HAVE_C_LONG_DOUBLE
+ 
+ ! Define if Fortran C_LONG_DOUBLE is different from C_DOUBLE
+-#define H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE @H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE@
++#cmakedefine H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+ 
+ ! Define if Fortran C_BOOL is different from default LOGICAL
+-#define H5_FORTRAN_C_BOOL_IS_UNIQUE @H5_FORTRAN_C_BOOL_IS_UNIQUE@
++#cmakedefine H5_FORTRAN_C_BOOL_IS_UNIQUE
+ 
+ ! Define  MPI Fortran KIND of LOGICAL
+-#cmakedefine01 CMAKE_H5_MPI_LOGICAL_KIND
+-#if CMAKE_H5_MPI_LOGICAL_KIND == 0
+-#undef H5_MPI_LOGICAL_KIND
+-#else
+-#define H5_MPI_LOGICAL_KIND @H5_MPI_LOGICAL_KIND@
+-#endif
++#cmakedefine H5_MPI_LOGICAL_KIND @H5_MPI_LOGICAL_KIND@
+ 
+ ! Define if Fortran supports ISO_FORTRAN_ENV (F08)
+-#cmakedefine01 CMAKE_H5_HAVE_ISO_FORTRAN_ENV
+-#if CMAKE_H5_HAVE_ISO_FORTRAN_ENV == 0
+-#undef H5_HAVE_ISO_FORTRAN_ENV
+-#else
+-#define H5_HAVE_ISO_FORTRAN_ENV
+-#endif
++#cmakedefine H5_HAVE_ISO_FORTRAN_ENV
+ 
+ ! Define the size of C's double
+ #define H5_SIZEOF_DOUBLE @H5_SIZEOF_DOUBLE@
+@@ -105,15 +60,10 @@
+ #define H5_PAC_FC_MAX_REAL_PRECISION @H5_PAC_FC_MAX_REAL_PRECISION@
+ 
+ ! If C has quad precision
+-#cmakedefine01 CMAKE_H5_HAVE_FLOAT128
+-#if CMAKE_H5_HAVE_FLOAT128 == 0
+-#undef H5_HAVE_FLOAT128
+-#else
+-#define H5_HAVE_FLOAT128
+-#endif
++#cmakedefine H5_HAVE_FLOAT128
+ 
+ ! Define if INTEGER*16 is available
+-#define H5_HAVE_Fortran_INTEGER_SIZEOF_16 @H5_HAVE_Fortran_INTEGER_SIZEOF_16@
++#cmakedefine H5_HAVE_Fortran_INTEGER_SIZEOF_16
+ 
+ ! Maximum decimal precision for C
+ #define H5_PAC_C_MAX_REAL_PRECISION @H5_PAC_C_MAX_REAL_PRECISION@
+@@ -137,12 +87,7 @@
+ #define H5_Fortran_COMPILER_ID @CMAKE_Fortran_COMPILER_ID@
+ 
+ ! Define if deprecated public API symbols are disabled
+-#cmakedefine01 CMAKE_NO_DEPRECATED_SYMBOLS
+-#if CMAKE_NO_DEPRECATED_SYMBOLS == 0
+-#undef H5_NO_DEPRECATED_SYMBOLS
+-#else
+-#define H5_NO_DEPRECATED_SYMBOLS
+-#endif
++#cmakedefine H5_NO_DEPRECATED_SYMBOLS
+ 
+ ! For major interface/format changes
+ #define H5_VERS_MAJOR @H5_VERS_MAJOR@
+diff --git fortran/src/H5fort_type_defines.h.cmake fortran/src/H5fort_type_defines.h.cmake
+index 02493d1f928..7e4a0e563d2 100644
+--- fortran/src/H5fort_type_defines.h.cmake
++++ fortran/src/H5fort_type_defines.h.cmake
+@@ -23,6 +23,6 @@
+ #define H5_FORTRAN_INTEGER_KINDS_SIZEOF @PAC_FC_ALL_INTEGER_KINDS_SIZEOF@
+ #define H5_FORTRAN_REAL_KINDS @PAC_FC_ALL_REAL_KINDS@
+ #define H5_FORTRAN_REAL_KINDS_SIZEOF @PAC_FC_ALL_REAL_KINDS_SIZEOF@
+-#define H5_HAVE_Fortran_INTEGER_SIZEOF_16 @H5_HAVE_Fortran_INTEGER_SIZEOF_16@
+-#define H5_FORTRAN_HAVE_C_LONG_DOUBLE @H5_FORTRAN_HAVE_C_LONG_DOUBLE@
+-#define H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE @H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE@
++#cmakedefine H5_HAVE_Fortran_INTEGER_SIZEOF_16
++#cmakedefine H5_FORTRAN_HAVE_C_LONG_DOUBLE
++#cmakedefine H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+diff --git fortran/src/H5match_types.c fortran/src/H5match_types.c
+index fef07a4a668..c882bca59c0 100644
+--- fortran/src/H5match_types.c
++++ fortran/src/H5match_types.c
+@@ -156,7 +156,7 @@ main(void)
+ 
+     int FORTRAN_NUM_INTEGER_KINDS = H5_FORTRAN_NUM_INTEGER_KINDS;
+     int H5_FORTRAN_NUM_REAL_KINDS;
+-#if H5_FORTRAN_HAVE_C_LONG_DOUBLE != 0
++#ifdef H5_FORTRAN_HAVE_C_LONG_DOUBLE
+     int found_long_double = 0;
+ #endif
+ 
+@@ -213,7 +213,7 @@ main(void)
+             writeTypedef("float", "double", RealKinds[i]);
+             strcpy(Real_C_TYPES[i], "C_DOUBLE");
+         }
+-#if H5_FORTRAN_HAVE_C_LONG_DOUBLE != 0
++#ifdef H5_FORTRAN_HAVE_C_LONG_DOUBLE
+         else if (sizeof(long double) == RealKinds_SizeOf[i] && found_long_double == 0) {
+             writeTypedef("float", "long double", RealKinds[i]);
+             strcpy(Real_C_TYPES[i], "C_LONG_DOUBLE");
+@@ -376,7 +376,7 @@ main(void)
+             return -1;
+     }
+     /* real_f */
+-#if H5_FORTRAN_HAVE_C_LONG_DOUBLE != 0
++#ifdef H5_FORTRAN_HAVE_C_LONG_DOUBLE
+     if (H5_FORTRAN_NATIVE_REAL_SIZEOF == sizeof(long double)) {
+         writeToFilesChr("float", "Fortran_REAL", "real_f", H5_FORTRAN_NATIVE_REAL_KIND, "C_LONG_DOUBLE");
+     }
+@@ -403,7 +403,7 @@ main(void)
+     }
+ 
+     /* double_f */
+-#if H5_FORTRAN_HAVE_C_LONG_DOUBLE != 0
++#ifdef H5_FORTRAN_HAVE_C_LONG_DOUBLE
+     if (H5_FORTRAN_NATIVE_DOUBLE_SIZEOF == sizeof(long double)) {
+         writeToFilesChr("float", "Fortran_DOUBLE", "double_f", H5_FORTRAN_NATIVE_DOUBLE_KIND,
+                         "C_LONG_DOUBLE");
+diff --git fortran/test/tH5D.F90 fortran/test/tH5D.F90
+index d5c5355c5d3..22c98cc84ee 100644
+--- fortran/test/tH5D.F90
++++ fortran/test/tH5D.F90
+@@ -645,7 +645,7 @@ SUBROUTINE test_dset_fill(cleanup, total_error)
+     INTEGER(KIND=int_kind_16), TARGET :: data0_i16 = 4
+     INTEGER, DIMENSION(1:DIM0) :: data_int
+     INTEGER, TARGET :: data0_int = 4
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+     INTEGER, PARAMETER :: int_kind_32 = SELECTED_INT_KIND(36) !should map to INTEGER*16 on most modern processors
+     INTEGER(KIND=int_kind_32), DIMENSION(1:DIM0), TARGET :: data_i32
+     INTEGER(KIND=int_kind_32), TARGET :: data0_i32 = 4
+@@ -656,7 +656,7 @@ SUBROUTINE test_dset_fill(cleanup, total_error)
+     REAL(KIND=real_kind_8), DIMENSION(1:DIM0), TARGET :: data_r8
+     REAL(KIND=real_kind_4) , TARGET :: data0_r4 = 4.0
+     REAL(KIND=real_kind_8), TARGET :: data0_r8 = 4.0
+-#if H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE!=0
++#ifdef H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+     INTEGER, PARAMETER :: real_kind_16 = C_LONG_DOUBLE
+     REAL(KIND=real_kind_16) , DIMENSION(1:DIM0), TARGET :: data_r16
+     REAL(KIND=real_kind_16) , TARGET :: data0_r16 = 4.0
+@@ -679,12 +679,12 @@ SUBROUTINE test_dset_fill(cleanup, total_error)
+     data_i4  = -2
+     data_i16 = -2
+     data_int = -2
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+     data_i32 = -2
+ #endif
+     data_r4  = -2.0_real_kind_4
+     data_r8 = -2.0_real_kind_8
+-#if H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE!=0
++#ifdef H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+     data_r16 = -2.0_real_kind_16
+ #endif
+     data_chr = "H"
+@@ -767,7 +767,7 @@ SUBROUTINE test_dset_fill(cleanup, total_error)
+        ENDIF
+     ENDDO
+ 
+-#if H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE!=0
++#ifdef H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+     CALL h5dfill_f(data0_r16, space_id, data_r16, error)
+     CALL check("h5dfill_f", error, total_error)
+     DO i = 1, DIM0
+@@ -792,7 +792,7 @@ SUBROUTINE test_dset_fill(cleanup, total_error)
+     data_i1  = -2
+     data_i4  = -2
+     data_i16 = -2
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+     data_i32 = -2
+ #endif
+     data_r4  = -2.0_real_kind_4
+@@ -867,7 +867,7 @@ SUBROUTINE test_dset_fill(cleanup, total_error)
+        ENDIF
+     ENDDO
+ 
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+ 
+     f_ptr1 = C_LOC(data0_i32)
+     f_ptr2 = C_LOC(data_i32(1))
+@@ -936,7 +936,7 @@ SUBROUTINE test_dset_fill(cleanup, total_error)
+        ENDIF
+     ENDDO
+ 
+-#if H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE!=0
++#ifdef H5_FORTRAN_C_LONG_DOUBLE_IS_UNIQUE
+     f_ptr1 = C_LOC(data0_r16)
+     f_ptr2 = C_LOC(data_r16(1))
+ 
+diff --git fortran/test/tH5T_F03.F90 fortran/test/tH5T_F03.F90
+index 632495cb90e..d066db87199 100644
+--- fortran/test/tH5T_F03.F90
++++ fortran/test/tH5T_F03.F90
+@@ -974,7 +974,7 @@ SUBROUTINE test_h5kind_to_type(total_error)
+     INTEGER, PARAMETER :: int_kind_4 = SELECTED_INT_KIND(4) !should map to INTEGER*2 on most modern processors
+     INTEGER, PARAMETER :: int_kind_8 = SELECTED_INT_KIND(9) !should map to INTEGER*4 on most modern processors
+     INTEGER, PARAMETER :: int_kind_16 = SELECTED_INT_KIND(18) !should map to INTEGER*8 on most modern processors
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+     INTEGER, PARAMETER :: int_kind_32 = SELECTED_INT_KIND(36) !should map to INTEGER*16 on most modern processors
+     INTEGER(int_kind_32), DIMENSION(1:4), TARGET :: dset_data_i32, data_out_i32
+     INTEGER(HID_T) :: dset_id32     ! Dataset identifier
+@@ -1052,7 +1052,7 @@ SUBROUTINE test_h5kind_to_type(total_error)
+        dset_data_i4(i)  = HUGE(0_int_kind_4)-INT(i,int_kind_4)
+        dset_data_i8(i)  = HUGE(0_int_kind_8)-INT(i,int_kind_8)
+        dset_data_i16(i) = HUGE(0_int_kind_16)-INT(i,int_kind_16)
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+        dset_data_i32(i) = HUGE(0_int_kind_32)-INT(i,int_kind_32)
+ #endif
+        dset_data_r(i) = 4.0*ATAN(1.0)-REAL(i-1)
+@@ -1080,7 +1080,7 @@ SUBROUTINE test_h5kind_to_type(total_error)
+     CALL check("H5Dcreate_f",error, total_error)
+     CALL H5Dcreate_f(file_id, dsetname8, h5kind_to_type(int_kind_16,H5_INTEGER_KIND), dspace_id, dset_id16, error)
+     CALL check("H5Dcreate_f",error, total_error)
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+     CALL H5Dcreate_f(file_id, dsetname16, h5kind_to_type(int_kind_32,H5_INTEGER_KIND), dspace_id, dset_id32, error)
+     CALL check("H5Dcreate_f",error, total_error)
+ #endif
+@@ -1107,7 +1107,7 @@ SUBROUTINE test_h5kind_to_type(total_error)
+     f_ptr = C_LOC(dset_data_i16(1))
+     CALL h5dwrite_f(dset_id16, h5kind_to_type(int_kind_16,H5_INTEGER_KIND), f_ptr, error)
+     CALL check("H5Dwrite_f",error, total_error)
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+     f_ptr = C_LOC(dset_data_i32(1))
+     CALL h5dwrite_f(dset_id32, h5kind_to_type(int_kind_32,H5_INTEGER_KIND), f_ptr, error)
+     CALL check("H5Dwrite_f",error, total_error)
+@@ -1151,7 +1151,7 @@ SUBROUTINE test_h5kind_to_type(total_error)
+     f_ptr = C_LOC(data_out_i16(1))
+     CALL h5dread_f(dset_id16, h5kind_to_type(int_kind_16,H5_INTEGER_KIND), f_ptr,  error)
+     CALL check("h5dread_f",error, total_error)
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+     f_ptr = C_LOC(data_out_i32(1))
+     CALL h5dread_f(dset_id32, h5kind_to_type(int_kind_32,H5_INTEGER_KIND), f_ptr,  error)
+     CALL check("h5dread_f",error, total_error)
+@@ -1175,7 +1175,7 @@ SUBROUTINE test_h5kind_to_type(total_error)
+        CALL verify("h5kind_to_type",dset_data_i8(i),data_out_i8(i),total_error)
+        CALL verify("h5kind_to_type",dset_data_i16(i),data_out_i16(i),total_error)
+ 
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+        CALL verify("h5kind_to_type",dset_data_i32(i),data_out_i32(i),total_error)
+ #endif
+        CALL verify("h5kind_to_type",dset_data_r(i),data_out_r(i),total_error)
+diff --git hl/fortran/test/tstlite.F90 hl/fortran/test/tstlite.F90
+index 9916c333625..9f405ce3b35 100644
+--- hl/fortran/test/tstlite.F90
++++ hl/fortran/test/tstlite.F90
+@@ -430,7 +430,7 @@ SUBROUTINE test_dataset3D()
+     INTEGER          :: type_class
+     INTEGER(SIZE_T)  :: type_size
+     TYPE(C_PTR) :: f_ptr
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+     INTEGER, PARAMETER :: int_kind_32 = SELECTED_INT_KIND(36) !should map to INTEGER*16 on most modern processors
+     INTEGER(int_kind_32), DIMENSION(DIM1,DIM2,DIM3), TARGET :: dset_data_i32, data_out_i32
+     CHARACTER(LEN=7), PARAMETER :: dsetname16a = "dset16a"     ! Dataset name
+@@ -458,7 +458,7 @@ SUBROUTINE test_dataset3D()
+              buf2(i,j,k) = INT(n)
+              buf3(i,j,k) = INT(n)
+              buf4(i,j,k) = INT(n)
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+              dset_data_i32(i,j,k) = HUGE(1_int_kind_32)-INT(n,int_kind_32)
+ #endif
+              n = n + 1
+@@ -612,7 +612,7 @@ SUBROUTINE test_dataset3D()
+     ! CHECKING NON-NATIVE INTEGER TYPES
+     !-------------------------------------------------------------------------
+ 
+-#if H5_HAVE_Fortran_INTEGER_SIZEOF_16!=0
++#ifdef H5_HAVE_Fortran_INTEGER_SIZEOF_16
+     ! (A) CHECKING INTEGER*16
+     !
+     !    (i.a) write dataset using F2003 interface
+diff --git src/H5pubconf.h.in src/H5pubconf.h.in
+index 041d5e96dca..f99ad797f4f 100644
+--- src/H5pubconf.h.in
++++ src/H5pubconf.h.in
+@@ -48,7 +48,7 @@
+ #define @H5_FC_FUNC_@
+ 
+ /* Define if Fortran C_BOOL is different from default LOGICAL */
+-#define H5_FORTRAN_C_BOOL_IS_UNIQUE @H5_FORTRAN_C_BOOL_IS_UNIQUE@
++#cmakedefine H5_FORTRAN_C_BOOL_IS_UNIQUE
+ 
+ /* Define if we have Fortran intrinsic C_SIZEOF */
+ #cmakedefine H5_FORTRAN_HAVE_C_SIZEOF @H5_FORTRAN_HAVE_C_SIZEOF@

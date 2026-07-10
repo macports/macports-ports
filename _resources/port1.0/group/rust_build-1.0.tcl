@@ -18,17 +18,17 @@ options     rust_build.version
 default     rust_build.version          {${version}}
 
 # possible versions of Rust binaries that can be used as stage0 compilers
-#     see https://github.com/rust-lang/rust/blob/${rust_build.version}/src/stage0.json
-# please make sure the versions are in descending order
-options     rust_build.stage0_versions
-
-if {${os.platform} eq "darwin" && ${os.major} > 16} {
-    # (CURRENT) macOS 10.13 and later
-    default     rust_build.stage0_versions  {1.85.0 1.84.0}
-} else {
-    # macOS 10.12 and earlier
-    default     rust_build.stage0_versions  {1.77.0 1.76.0}
-}
+#     see the upstream stage0 metadata for the target release
+# please make sure the versions are in descending order, and keep the checksum
+# blocks below in that same order for readability
+options     rust_build.current_stage0_versions \
+            rust_build.frozen_release \
+            rust_build.frozen_stage0_versions \
+            rust_build.stage0_versions
+default     rust_build.current_stage0_versions  {1.96.0 1.95.0}
+default     rust_build.frozen_release           {1.78.0}
+default     rust_build.frozen_stage0_versions   {1.77.0 1.76.0}
+default     rust_build.stage0_versions          {[rust_build.default_stage0_versions [option rust_build.version]]}
 
 # Rust components to be built
 options     rust_build.components
@@ -66,73 +66,122 @@ default     rust_build.llvm.ldflags     {[portconfigure::configure_get_ldflags] 
 
 namespace eval rust_build {}
 
-# TODO: move the MacPorts stage0 compilers to a better location
-if {${os.platform} eq "darwin" && ${os.major} > 16} {
-    # (CURRENT) macOS 10.13 and later
-    set rust_version_current 1.85.0
-} else {
-    # macOS 10.12 and earlier
-    set rust_version_current 1.78.0
+proc rust_build.default_stage0_versions {rust_version} {
+    if {[vercmp ${rust_version} [option rust_build.frozen_release]] <= 0} {
+        return [option rust_build.frozen_stage0_versions]
+    }
+    return [option rust_build.current_stage0_versions]
+}
+
+proc rust_build.stage0_versions_for_mdt {{mdt {}}} {
+    if {$mdt eq {}} {
+        set mdt [option macosx_deployment_target]
+    }
+    if {[option os.platform] eq "darwin" && [vercmp $mdt "10.12"] <= 0} {
+        return [option rust_build.frozen_stage0_versions]
+    }
+    return [option rust_build.stage0_versions]
+}
+
+proc rust_build.macports_release_for_mdt {{mdt {}}} {
+    if {$mdt eq {}} {
+        set mdt [option macosx_deployment_target]
+    }
+    if {[option os.platform] eq "darwin" && [vercmp $mdt "10.12"] <= 0} {
+        return [option rust_build.frozen_release]
+    }
+    if {[vercmp [option rust_build.version] [option rust_build.frozen_release]] <= 0} {
+        return [option rust_build.frozen_release]
+    }
+    return [option rust_build.version]
+}
+
+proc rust_build.macports_vendor_tag_for_release {release} {
+    return macports_[string map {. _} ${release}]_vendor
+}
+
+proc rust_build.stage0_vendor_tag {stage0_vendor {mdt {}}} {
+    if {${stage0_vendor} eq "macports"} {
+        return [rust_build.macports_vendor_tag_for_release [rust_build.macports_release_for_mdt $mdt]]
+    }
+    return ${stage0_vendor}_vendor
 }
 
 proc rust_build::callback {} {
-    global                      extract.suffix rust_version_current
+    global                      extract.suffix
 
-    master_sites-append         https://static.rust-lang.org/dist:apple_vendor \
-                                https://github.com/MarcusCalhoun-Lopez/rust/releases/download/${rust_version_current}:macports_vendor \
-                                file://[option prefix]/libexec/rust-bootstrap:transition_vendor
+    set macports_releases [list [rust_build.macports_release_for_mdt]]
+    if { [variant_exists mirror_all_architectures] && [variant_isset mirror_all_architectures] } {
+        foreach arch {arm64 i386 x86_64} {
+            if {$arch eq "arm64"} {
+                set mdts [list 11.0]
+            } else {
+                set mdts [list 10.5 10.6 10.7 10.12]
+            }
+            foreach mdt $mdts {
+                lappend macports_releases [rust_build.macports_release_for_mdt $mdt]
+            }
+        }
+    }
 
-    # 1.85.0
-    checksums-append            rust-std-1.85.0-aarch64-apple-darwin${extract.suffix} \
-                                rmd160  69dfec3fae5a2b9f44848ae6388b325d361cfae6 \
-                                sha256  b7ff9bc2cabc6277e2ec6d73ca5b3e5ea5e2a0582e5e5302ef9e354f348dab68 \
-                                size    42738512 \
-                                rust-std-1.85.0-x86_64-apple-darwin${extract.suffix} \
-                                rmd160  14f556252ae71deb6bcc48c3445626dabb0da8a6 \
-                                sha256  18a5b48cf5bdca82acf51a12e1e2dbd05b13279b1859d014e46b56eb10f3922e \
-                                size    45816331 \
-                                rustc-1.85.0-aarch64-apple-darwin${extract.suffix} \
-                                rmd160  971922a287636c66d34d7d92e4eb786582f8e145 \
-                                sha256  458d9ccfab76f4d98ab363bd8575d6ba7cb2b2e4e88ec247334962d416657b31 \
-                                size    94300473 \
-                                rustc-1.85.0-x86_64-apple-darwin${extract.suffix} \
-                                rmd160  bc15e40010c1edbf5069240ff282914376f6d5ff \
-                                sha256  3358fa99bbe7d70c3400700c093d6ca67efce694276f72ce8c4da43cd5a2235e \
-                                size    99307147 \
-                                cargo-1.85.0-aarch64-apple-darwin${extract.suffix} \
-                                rmd160  9055aeea30ee9ba080f044398aacbc9cb42f7922 \
-                                sha256  b280ffddaefd6ce6979390ccdadfbb222eebcb85d070286bff56c8fb016ada30 \
-                                size    10092345 \
-                                cargo-1.85.0-x86_64-apple-darwin${extract.suffix} \
-                                rmd160  db89f3f528797bc4d435b20d691867234634033d \
-                                sha256  05ecd058504cddf7458f2fc8ab9ebf3ae1a117359d242ae4275a22546d340ab8 \
-                                size    10776157
+    master_sites-append         https://static.rust-lang.org/dist:apple_vendor
+    foreach release [lsort -unique ${macports_releases}] {
+        set vendor_tag [rust_build.macports_vendor_tag_for_release ${release}]
+        master_sites-append     https://github.com/MarcusCalhoun-Lopez/rust/releases/download/${release}:${vendor_tag}
+    }
+    master_sites-append         file://[option prefix]/libexec/rust-bootstrap:transition_vendor
 
-    # 1.84.0
-    checksums-append            rust-std-1.84.0-aarch64-apple-darwin${extract.suffix} \
-                                rmd160  806a19d6ceb40d4b3878b99ce28f78bc376c9fee \
-                                sha256  0a0626661ac576a67da46af73e2e74d6e42d79cb2f54321b08ab81a86eab94a0 \
-                                size    42528105 \
-                                rustc-1.84.0-aarch64-apple-darwin${extract.suffix} \
-                                rmd160  2eae5f9d93dcde2538c31052c0bff7f360f0a627 \
-                                sha256  0b8a2d1856a95cc11b1ba4100aafec0fa5d07d2fbf4dd43461bd746633ba521c \
-                                size    99062347 \
-                                cargo-1.84.0-aarch64-apple-darwin${extract.suffix} \
-                                rmd160  ff73a36bfccf0ca433e6e96de1e2adb207b9530f \
-                                sha256  1dd13231219728dfb4c3eba59949362ff01a3d139a5f028242d2f5004137f08c \
-                                size    11101769 \
-                                rust-std-1.84.0-x86_64-apple-darwin${extract.suffix} \
-                                rmd160  374e5164b17c2f233dfee78ceac81555975ee759 \
-                                sha256  a77b82c6c6b0c32808cc812e100b1274cffc81818d25754b92d197409e5c12b9 \
-                                size    45716266 \
-                                rustc-1.84.0-x86_64-apple-darwin${extract.suffix} \
-                                rmd160  118669585129b8fd6ea6ebc3b1566e1d8de82b6d \
-                                sha256  8dd224e3b21a92e017c057c8e2c1d13de366896b3d876f8d64ebac6415a15928 \
-                                size    99356662 \
-                                cargo-1.84.0-x86_64-apple-darwin${extract.suffix} \
-                                rmd160  333c4d8cafc5135a5e59aa59928520ce7d1e0a36 \
-                                sha256  dfec6952d8ecfac1d8760a0b3dec0540f6fdbe9e1489df9aef5a172fc6415ecc \
-                                size    10789624
+    # 1.96.0
+    checksums-append            rust-std-1.96.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  61546aacff30e42f5b3c119b0b08a7dd7bb4013e \
+                                sha256  a5c160197236f68cc8627a573545fd883d4d98856fb654a6d6aa5883ff1bdcc7 \
+                                size    43094135 \
+                                rust-std-1.96.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  0d33aac06cd44ea4795119d4d11b795ddf417cdc \
+                                sha256  c5dfa11ccc724faec277e420ff6b33cfa6567b9ac6fa9e5d712a19c662d8c36c \
+                                size    46093207 \
+                                rustc-1.96.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  09b572ce1c559608ac7231000300591554417d1f \
+                                sha256  c1a23d0ac24da25eca730d87d74d7f6f771d48167fc93e45d79f0e12f486c8d9 \
+                                size    116049567 \
+                                rustc-1.96.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  053b678e3cf035fa4eda2dc4120e53013ce00109 \
+                                sha256  316060175a1dadca74cc8a16ed52c19c9a0d68c70c3937b33694f56c79bf1036 \
+                                size    136524031 \
+                                cargo-1.96.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  e53113d5555f5acc93295a125ef4abdca89a677e \
+                                sha256  178581665d8b3af41f3fe21cb8a48aa7eb65ab4c567f53f3661a3a6c9b182f2e \
+                                size    12958161 \
+                                cargo-1.96.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  ce46eb8cc6dce5ab672f30b7e7fd5b3e34189c40 \
+                                sha256  56229b6257f31496cdeabd3d734debc0e1bc16ac2926e497497a47a84ba9d048 \
+                                size    13348447
+
+    # 1.95.0
+    checksums-append            rust-std-1.95.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  1aed12d22737a4226a06fde7984df5861169db02 \
+                                sha256  c64f139c2a4f973b3d8b26482673909043545db14f0b1255ed743844e9f9ce99 \
+                                size    42858710 \
+                                rust-std-1.95.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  bd2f82a4b25d09b79d3c9520524e1daf58bedc16 \
+                                sha256  7c4812011f7b454344b62ded344b9b24102c15636c1d6aada6e5d5fcb4c4caa9 \
+                                size    45858677 \
+                                rustc-1.95.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  46b3ac2852ed526ddeb013e5783ab838d2429616 \
+                                sha256  64f20ce6864040b822b8fbdb7dbfd892e5b04828ca8cbd1e6accef9694da3ebb \
+                                size    115710488 \
+                                rustc-1.95.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  70c978cd75d2eabf417e38eee7588b59cada4321 \
+                                sha256  fc42cfed68f510ac1f251dbfcf66d7f95097a9d25ff462186da58148616066d3 \
+                                size    136146202 \
+                                cargo-1.95.0-aarch64-apple-darwin${extract.suffix} \
+                                rmd160  05be19d575c9d6948b784660dc3a1def55a3b21c \
+                                sha256  0421d71bd676f0d38e318bf3eb7cd1a9ca33cf5ccf70f49644950a91fa046de7 \
+                                size    12758395 \
+                                cargo-1.95.0-x86_64-apple-darwin${extract.suffix} \
+                                rmd160  8ab256f6e1edf5c0154819c90f942125322f6bcf \
+                                sha256  6d85c517eb793b1b11369b6b0b1f70d8cbb36ac590cc03733cbe84896e7fdd4a \
+                                size    13120076
 
     # 1.77.0
     checksums-append            rust-std-1.77.0-aarch64-apple-darwin${extract.suffix} \
@@ -326,9 +375,10 @@ proc rust_build::callback {} {
             }
 
             set binTag                  ${full_stage0_version}-[option triplet.cpu.${stage0_arch}]-${stage0_vendor}-[option triplet.os]${stage0_os_version}
+            set vendor_tag              [rust_build.stage0_vendor_tag ${stage0_vendor}]
             foreach component [option rust_build.components] {
-                distfiles-delete        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
-                distfiles-append        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
+                distfiles-delete        ${component}-${binTag}${extract.suffix}:${vendor_tag}
+                distfiles-append        ${component}-${binTag}${extract.suffix}:${vendor_tag}
             }
         }
     }
@@ -349,9 +399,10 @@ proc rust_build::callback {} {
                         set full_stage0_version ${stage0_version}
                     }
                     set binTag              ${full_stage0_version}-[option triplet.cpu.${stage0_arch}]-${stage0_vendor}-[option triplet.os]${stage0_os_version}
+                    set vendor_tag          [rust_build.stage0_vendor_tag ${stage0_vendor} ${mdt}]
                     foreach component [option rust_build.components] {
-                        distfiles-delete        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
-                        distfiles-append        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
+                        distfiles-delete        ${component}-${binTag}${extract.suffix}:${vendor_tag}
+                        distfiles-append        ${component}-${binTag}${extract.suffix}:${vendor_tag}
                     }
                 }
             }
@@ -407,7 +458,8 @@ proc rust_build.stage0_info {arch {mdt {}}} {
 
     # find a stage0 version older than the current Rust version
     set stage0_version ""
-    foreach v [option rust_build.stage0_versions] {
+    set target_stage0_versions [rust_build.stage0_versions_for_mdt $mdt]
+    foreach v ${target_stage0_versions} {
         if { [vercmp [join [lrange [split ${v} .] 0 1] .] < [join [lrange [split [option rust_build.version] .] 0 1] .]] } {
             set stage0_version  ${v}
             break
@@ -415,7 +467,7 @@ proc rust_build.stage0_info {arch {mdt {}}} {
     }
 
     if { ${stage0_version} eq "" } {
-        ui_warn "rust_build.version ([option rust_build.version]) must be newer than rust_build.stage0_versions ([option rust_build.stage0_versions])"
+        ui_warn "rust_build.version ([option rust_build.version]) must be newer than rust_build.stage0_versions (${target_stage0_versions})"
     }
 
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`

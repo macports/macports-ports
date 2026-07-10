@@ -3,11 +3,11 @@
 PortSystem          1.0
 PortGroup           github 1.0
 
-github.setup        macfuse macfuse 4.9.1 macfuse-
-revision            0
-name                macfuse
-conflicts           osxfuse
+github.setup        macfuse macfuse 5.2.0 macfuse-
+revision            1
+conflicts           macfuse4 osxfuse
 categories          fuse
+platforms           {darwin >= 21}
 supported_archs     arm64 x86_64
 license             Restrictive
 maintainers         {makr @mohd-akram} {ra1nb0w @ra1nb0w} openmaintainer
@@ -19,23 +19,13 @@ long_description    FUSE extends macOS by adding support for user space file \
 
 homepage            https://macfuse.github.io/
 
-github.tarball_from releases
-distname            ${name}-${version}
 use_dmg             yes
 
-checksums           rmd160  1ba35ff3036fe0a20613fdd0c760c5da7e22c44f \
-                    sha256  d73890b00bec8cf11add83ba5261fcbf3353af425b8f74dc28c5fd4782055a95 \
-                    size    6213801
+checksums           rmd160  8509bbf212fd26e728ad683f0257b612643fecaa \
+                    sha256  09a4b4c23c1930af45335fc119696797da41562dec1630602d2db637f4804f27 \
+                    size    13736858
 
-if {${os.platform} eq "darwin" && ${os.major} < 13} {
-    known_fail yes
-    pre-fetch {
-        ui_error "${name} is only supported on macOS 10.9 or later."
-        return -code error "unsupported platform version"
-    }
-}
-
-set pkg ${workpath}/pkg/Core.pkg
+set pkg             ${workpath}/pkg/Core.pkg
 
 post-extract {
     system -W ${worksrcpath} \
@@ -45,37 +35,63 @@ post-extract {
 
 use_configure       no
 
-build {
-    system -W ${pkg} "install_name_tool -id ${prefix}/lib/libfuse.2.dylib \
-        usr/local/lib/libfuse.2.dylib"
+set fs_dir          /Library/Filesystems
+set dir             ${fs_dir}/macfuse.fs
+set mfmount         ${dir}/Contents/Frameworks/MFMount.framework/Versions/A/MFMount
 
+build {
+    system -W ${pkg} "install_name_tool -id ${prefix}${mfmount} \
+        Library/Filesystems/macfuse.fs/Contents/Frameworks/MFMount.framework/Versions/A/MFMount"
+    system -W ${pkg} "install_name_tool -id ${prefix}/lib/libfuse.2.dylib \
+        -change ${mfmount} ${prefix}${mfmount} \
+        usr/local/lib/libfuse.2.dylib"
+    system -W ${pkg} "install_name_tool -id ${prefix}/lib/libfuse3.4.dylib \
+        -change ${mfmount} ${prefix}${mfmount} \
+        usr/local/lib/libfuse3.4.dylib"
     system -W ${pkg} "install_name_tool \
         -id ${prefix}/Library/Frameworks/macFUSE.framework/Versions/A/macFUSE \
         -change /usr/local/lib/libfuse.2.dylib ${prefix}/lib/libfuse.2.dylib \
         Library/Frameworks/macFUSE.framework/Versions/A/macFUSE"
-
     system -W ${pkg} "codesign -fs - \
         usr/local/lib/libfuse.2.dylib \
-        Library/Frameworks/macFUSE.framework/Versions/A/macFUSE"
+        usr/local/lib/libfuse3.4.dylib \
+        Library/Frameworks/macFUSE.framework/Versions/A/macFUSE \
+        Library/Filesystems/macfuse.fs/Contents/Frameworks/MFMount.framework/Versions/A/MFMount"
+    reinplace "s|/usr/local|${prefix}|g" {*}[glob ${pkg}/usr/local/lib/pkgconfig/*]
+    # remove FSKit extension on versions older than Tahoe
+    if {${os.major} < 25} {
+        delete ${pkg}${dir}/Contents/Resources/macfuse.app
+        delete ${pkg}${dir}/Contents/_CodeSignature
+    }
 }
-
-set dir /Library/Filesystems/macfuse.fs
 
 destroot {
-    copy ${pkg}/Library/Filesystems ${destroot}${prefix}/Library
+    copy ${pkg}${fs_dir} ${destroot}${prefix}/Library
     xinstall -W ${pkg}${dir}/Contents/Resources -m 4755 load_macfuse mount_macfuse \
         ${destroot}${prefix}${dir}/Contents/Resources
+
     copy {*}[glob ${pkg}/Library/Frameworks/*] ${destroot}${prefix}/Library/Frameworks
+
     copy {*}[glob ${pkg}/usr/local/include/*] ${destroot}${prefix}/include
-    copy {*}[glob ${pkg}/usr/local/lib/pkgconfig/*] ${destroot}${prefix}/lib/pkgconfig
-    reinplace "s|/usr/local|${prefix}|g" [glob ${destroot}${prefix}/lib/pkgconfig/*]
-    copy {*}[glob -type f ${pkg}/usr/local/lib/*] ${destroot}${prefix}/lib
-    # remove unwanted files like ._uninstall_macfuse.app
-    system "find  ${destroot}${prefix} -type f -iname '._*' -delete"
+    delete ${destroot}${prefix}/lib/pkgconfig
+    copy {*}[glob ${pkg}/usr/local/lib/*] ${destroot}${prefix}/lib
 }
 
-notes  "
+variant fs_link description "Link ${name} to a .fs bundle in /Library/Filesystems" {
+    post-destroot {
+        xinstall -d ${destroot}${fs_dir}
+        ln -sf ${prefix}${dir} ${destroot}${dir}
+    }
+
+    destroot.violate_mtree  yes
+}
+
+if {![variant_isset fs_link]} {
+    notes "
     Run the following before using macFUSE:
 
         sudo ln -fsn ${prefix}${dir} ${dir}
-"
+
+    Alternatively, use the +fs_link variant to automatically create this symlink.
+    "
+}

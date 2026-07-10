@@ -1,0 +1,199 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           active_variants 1.1
+PortGroup           app 1.1
+PortGroup           qt6 1.0
+
+github.setup        XiaoYouChR Ghost-Downloader-3 4.0.5 v
+github.tarball_from archive
+revision            0
+name                [string tolower [join [lrange [split ${github.project} -] 0 1] -]]
+categories          net python
+homepage            https://gd.xychr.com
+license             GPL-3
+maintainers         {i0ntempest @i0ntempest} openmaintainer
+
+description         AI-boost cross-platform multi-protocol fluent-design concurrent downloader\
+                    built with Python & Qt
+long_description    ${name} is an {*}${description}, supports HTTP(S), QUIC, BitTorrent, \
+                    eD2k, M3U8 downloads and more.
+
+checksums           rmd160  2a66384e11816957eac2177c0800e8a6ba580a25 \
+                    sha256  6dc2c9c45b0db27de56db86aa277d840e4ae3ea05a0d82a98cbb5be33fb02a57 \
+                    size    12591672
+
+set python_version  314
+set python_branch   [string index ${python_version} 0].[string range ${python_version} 1 end]
+
+depends_build-append \
+                    port:py${python_version}-nuitka
+
+# darkdetect[macos-listener] (1 extra dep)
+# aioftp[socks] (1 extra dep)
+# qrcode[png] (extra deps added its portfile)
+depends_lib-append  port:python${python_version} \
+                    port:py${python_version}-pyobjc \
+                    port:py${python_version}-desktop-notifier \
+                    port:libtorrent-rasterbar \
+                    port:py${python_version}-loguru \
+                    port:py${python_version}-wreq \
+                    port:py${python_version}-orjson \
+                    port:py${python_version}-pyside6 \
+                    port:py${python_version}-pyside6-fluent-widgets \
+                    port:py${python_version}-qrcode \
+                    port:py${python_version}-uvloop \
+                    port:py${python_version}-aioftp \
+                    port:py${python_version}-siosocks \
+                    port:py${python_version}-m3u8 \
+                    port:py${python_version}-mpegdash
+
+depends_run-append  port:python-ed2k-goed2kd
+
+qt6.depends_lib     qttranslations
+
+require_active_variants \
+                    port:libtorrent-rasterbar python${python_version}
+
+post-patch {
+    # We don't compile in standalone mode so sys.executable is the interpreter
+    reinplace "s|sys.executable|sys.argv\[0\]|g" ${worksrcpath}/app/config/paths.py
+    # change default yt-dlp directory
+    reinplace "s|{APP_DATA_DIR}/goed2kd|${prefix}/libexec/goed2kd|g" ${worksrcpath}/features/ed2k_pack/config.py
+}
+
+# Project does not have a typical Python project structure (pyproject.toml not usable for installation).
+# deploy.py compiles standalone bundle and packs everything with nuitka into one app bundle - 
+# avoid that, make our own bundle. We compile the main script and the `app` package only.
+use_configure       no
+
+build.cmd           ${prefix}/bin/python${python_branch} -m nuitka
+build.target        ${github.project}.py
+build.args          --verbose \
+                    --plugin-enable=pyside6 \
+                    --include-package=app \
+                    --static-libpython=no \
+                    --disable-ccache
+
+app.executable      ${worksrcpath}/${github.project}.bin
+app.icon            ${worksrcpath}/app/assets/logo.icns
+app.name            {*}[join [lrange [split ${github.project} -] 0 1] " "]
+app.identifier      io.github.[string tolower ${github.author}].[join [lrange [split ${github.project} -] 0 1] ""]
+app.retina          yes
+app.sign            yes
+app.signing_args    --deep
+app.manual_post_destroot \
+                    yes
+
+set dest_app ${destroot}${applications_dir}/${app.name}.app
+set dest_app_bin_dir ${dest_app}/Contents/MacOS/
+set dest_app_res_dir ${dest_app}/Contents/Resources/
+set dest_app_info_plist ${dest_app}/Contents/Info.plist
+# see MACOS_DOCUMENT_TYPES in deploy.py for supported file types
+set document_types [list \
+    [list "Torrent File"   "torrent.icns" "Viewer" "Alternate" [list "torrent"]] \
+    [list "M3U8 Playlist"  "m3u8.icns"    "Viewer" "Alternate" [list "m3u8" "m3u"]] \
+    [list "DASH List"      "m3u8.icns"    "Viewer" "Alternate" [list "mpd"]] \
+]
+# see deploy.py for supported URL schemes
+set url_types [list \
+    [list "${app.identifier}" [list "ghostdownloader"]] \
+]
+
+destroot {
+    copy ${worksrcpath}/features/ ${dest_app_bin_dir}
+    # see EXCLUDED_PACKS in deploy.py
+    set feature_pack_blacklist {jack_yao}
+    foreach pack ${feature_pack_blacklist} {
+        delete ${dest_app_bin_dir}/features/${pack}
+    }
+    set file_icons_dir ${worksrcpath}/app/assets/file_icons
+    set copied_icons [list]
+    foreach document_type ${document_types} {
+        lassign ${document_type} type_name icon_file type_role handler_rank extensions
+        if {[lsearch -exact ${copied_icons} ${icon_file}] < 0} {
+            xinstall -m 0644 \
+                ${file_icons_dir}/${icon_file} \
+                ${dest_app_res_dir}/${icon_file}
+            lappend copied_icons ${icon_file}
+        }
+    }
+
+    # dependencies
+    if {[variant_isset media]} {
+        xinstall -d ${dest_app_bin_dir}/deps/YtDlp
+        ln -s ${prefix}/bin/qjs ${dest_app_bin_dir}/deps/YtDlp
+        ln -s ${prefix}/Library/Frameworks/Python.framework/Versions/${python_branch}/lib/python${python_branch}/site-packages/yt_dlp/ ${dest_app_bin_dir}/deps/YtDlp
+    }
+}
+
+post-destroot {
+    app::post_destroot
+
+    # file associations
+    set plistbuddy /usr/libexec/PlistBuddy
+
+    exec ${plistbuddy} -c "Add :CFBundleDocumentTypes array" ${dest_app_info_plist}
+    set i 0
+    foreach document_type ${document_types} {
+        lassign ${document_type} type_name icon_file type_role handler_rank extensions
+
+        exec ${plistbuddy} -c "Add :CFBundleDocumentTypes:${i} dict" ${dest_app_info_plist}
+        exec ${plistbuddy} -c "Add :CFBundleDocumentTypes:${i}:CFBundleTypeExtensions array" ${dest_app_info_plist}
+
+        set j 0
+        foreach ext ${extensions} {
+            exec ${plistbuddy} -c "Add :CFBundleDocumentTypes:${i}:CFBundleTypeExtensions:${j} string ${ext}" ${dest_app_info_plist}
+            incr j
+        }
+
+        exec ${plistbuddy} -c "Add :CFBundleDocumentTypes:${i}:CFBundleTypeIconFile string ${icon_file}" ${dest_app_info_plist}
+        exec ${plistbuddy} -c "Add :CFBundleDocumentTypes:${i}:CFBundleTypeName string ${type_name}" ${dest_app_info_plist}
+        exec ${plistbuddy} -c "Add :CFBundleDocumentTypes:${i}:CFBundleTypeRole string ${type_role}" ${dest_app_info_plist}
+        exec ${plistbuddy} -c "Add :CFBundleDocumentTypes:${i}:LSHandlerRank string ${handler_rank}" ${dest_app_info_plist}
+
+        incr i
+    }
+
+    # URL scheme handlers
+    exec ${plistbuddy} -c "Add :CFBundleURLTypes array" ${dest_app_info_plist}
+    set i 0
+    foreach url_type ${url_types} {
+        lassign ${url_type} url_name url_schemes
+
+        exec ${plistbuddy} -c "Add :CFBundleURLTypes:${i} dict" ${dest_app_info_plist}
+        exec ${plistbuddy} -c "Add :CFBundleURLTypes:${i}:CFBundleURLName string ${url_name}" ${dest_app_info_plist}
+        exec ${plistbuddy} -c "Add :CFBundleURLTypes:${i}:CFBundleURLSchemes array" ${dest_app_info_plist}
+
+        set j 0
+        foreach scheme ${url_schemes} {
+            exec ${plistbuddy} -c "Add :CFBundleURLTypes:${i}:CFBundleURLSchemes:${j} string ${scheme}" ${dest_app_info_plist}
+            incr j
+        }
+
+        incr i
+    }
+    app::sign
+}
+
+variant media description {enable and install dependencies for media downloading and muxing support} {
+    set ::ffmpeg_ver \
+                    8
+    depends_run-append \
+                    port:ffmpeg${::ffmpeg_ver} \
+                    port:n-m3u8dl-re \
+                    port:yt-dlp \
+                    port:quickjs-ng
+
+    post-patch {
+        # change default ffmpeg directory
+        reinplace "s|{APP_DATA_DIR}/FFmpeg|${prefix}/libexec/ffmpeg${::ffmpeg_ver}|g" ${worksrcpath}/features/ffmpeg_pack/config.py
+        # change default n-m3u8dl-re directory
+        reinplace "s|{APP_DATA_DIR}/M3U8DL|${prefix}/bin|g" ${worksrcpath}/features/m3u8_pack/config.py
+        # change default youtube download runtime (yt-dlp source & qjs binary) directory
+        reinplace "s|f\"{APP_DATA_DIR}/YtDlp\"|str(Path(sys.argv\[0\]).resolve().parent / \"deps/YtDlp\")|g" ${worksrcpath}/features/yt_dlp_pack/config.py
+    }
+}
+
+default_variants    +media

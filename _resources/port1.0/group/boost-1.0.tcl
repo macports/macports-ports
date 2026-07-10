@@ -24,6 +24,7 @@ default boost_cache_cppflags      ""
 default boost_cache_cxxflags      ""
 default boost_cache_ldflags       ""
 default boost_cache_cmake_flags   ""
+default boost_cache_cmake_prefix  ""
 default boost_cache_env_vars      ""
 
 proc boost::default_version {} {
@@ -74,9 +75,9 @@ proc boost::cpp_flags {} {
 }
 
 proc boost::configure_build {} {
-    global cmake.build_dir meson.build_type
+    global cmake.prefix_path
     global boost_cache_version_nodot boost_cache_depends boost_cache_cxxflags
-    global boost_cache_ldflags boost_cache_cmake_flags boost_cache_cmake
+    global boost_cache_ldflags boost_cache_cmake_flags boost_cache_cmake_prefix
     global boost_cache_env_vars boost_cache_cpath boost_cache_cppflags
 
     ui_debug "boost PG: Configure build for boost [boost::version]"
@@ -148,6 +149,13 @@ proc boost::configure_build {} {
     # As we are appending to configure flags, need to check if cmake is in use
     # before appending the cmake specific flags
     if { [string match *cmake* [option configure.cmd] ] } {
+        if {[info exists cmake.prefix_path]} {
+            if { ${boost_cache_cmake_prefix} ne "" } {
+                cmake.prefix_path-delete    ${boost_cache_cmake_prefix}
+            }
+            set boost_cache_cmake_prefix    [boost::install_area]
+            cmake.prefix_path-append        ${boost_cache_cmake_prefix}
+        }
         if { ${boost_cache_cmake_flags} ne "" } {
             foreach flag ${boost_cache_cmake_flags} {
                 configure.args-delete ${flag}
