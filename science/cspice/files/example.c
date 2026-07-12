@@ -1,25 +1,24 @@
 // SPICE usage example
 // compile with:
-// cc example.c -I/opt/local/include -L/opt/local/lib -lcspice -lm
+// clang -I@PREFIX@/include -L@PREFIX@/lib -lcspice -o example example.c
 
 #include <stdio.h>
-#include <CSPICE/SpiceUsr.h>
+#include <cspice/SpiceUsr.h>
 
-int main() {
+int main(int argc, char* argv[]) {
+  char utcstr[64];
 
-char utcstr[64];
+  // load Leap Seconds kernel, needed for time conversion, get from
+  // https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls
+  furnsh_c("@PREFIX@/share/doc/cspice/naif0012.tls");
 
-// load Leap Seconds kernel, needed for time conversion, get from
-// http://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0011.tls
-furnsh_c("naif0011.tls");
+  // convert "0.0" to Julian Time
+  et2utc_c(0., "J", 14, 25, utcstr);
+  printf("%s\n", utcstr);
 
-// convert "0.0" to Julian Time
-et2utc_c(0., "J", 14, 25, utcstr);
-printf("%s\n",utcstr);
+  // convert "0.0" to ISOC (UTC) time string
+  et2utc_c(0., "ISOC", 14, 64, utcstr);
+  printf("%s\n", utcstr);
 
-// convert "0.0" to ISOC (UTC) time string
-et2utc_c(0., "ISOC", 14, 64, utcstr);
-printf("%s\n",utcstr);
-
+  return 0;
 }
-
