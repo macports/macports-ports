@@ -894,7 +894,7 @@ foreach phase {patch configure build destroot test} {
             if {![namespace exists $ns]} {
                 namespace eval $ns {}
             }
-            proc ${proc_name}_muniversal {{args ""}} "
+            proc ${proc_name}_muniversal {args} "
                 global worksrcpath UI_PREFIX subport muniversal.current_arch
 
                 foreach arch \"\[option configure.universal_archs\]\" {
@@ -925,7 +925,7 @@ foreach phase {patch configure build destroot test} {
                         option  \${phase_map}.cmd \[muniversal::map_phase \${save-worksrcpath} \[option worksrcpath\] \[option \${phase_map}.cmd\]\]
                     }
 
-                    ${proc_name}
+                    ${proc_name} {*}\${args}
 
                     if {\[option muniversal.arch_compiler\]} {
                         foreach tool {f77 f90 fc objc cc objcxx cxx} {
@@ -1003,7 +1003,7 @@ proc portextract::extract_finish {args} {
 # copy `destroot` to architecture-dependent version
 ditem_key ${org.macports.destroot} prerun portdestroot::destroot_start_muniversal
 proc portdestroot::destroot_start_muniversal {args} {
-    portdestroot::destroot_start ${args}
+    portdestroot::destroot_start {*}${args}
 
     foreach arch [option configure.universal_archs] {
         copy [option destroot] [option workpath]/destroot-${arch}
@@ -1063,7 +1063,7 @@ proc portdestroot::destroot_finish_muniversal {args} {
     muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatProc}
     muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatArmElse}
 
-    portdestroot::destroot_finish ${args}
+    portdestroot::destroot_finish {*}${args}
 }
 }
 }
