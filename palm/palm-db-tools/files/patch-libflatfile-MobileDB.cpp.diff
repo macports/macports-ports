@@ -1,0 +1,274 @@
+--- libflatfile/MobileDB.cpp.orig	2003-06-19 19:37:46.000000000 -0400
++++ libflatfile/MobileDB.cpp	2007-07-10 06:33:33.000000000 -0400
+@@ -213,7 +213,7 @@
+         if (field == 0xFF) break;
+ 
+         // Make sure that we don't go beyond the maximum number of fields.
+-        if (field >= getMaxNumOfFields())
++        if (field > getMaxNumOfFields()) // css: chaanged >= to >
+             throw PalmLib::error("maximum number of fields exceeded");
+ 
+         // Expand the fields vector if this field goes beyond the end
+@@ -302,7 +302,15 @@
+     // Extract the field labels record.
+     recNum = find_metadata_index(pdb, CATEGORY_FIELD_LABELS);
+     mdb_record_t names = parse_record(pdb.getRecord(recNum));
+-    numFields = names.size();
++
++    // css: Fields must have names, so zero-length field labels indicate
++    // fields that should be trimmed from the size.
++    int trim = 0;
++    for (mdb_record_t::reverse_iterator p = names.rbegin(); p < names.rend(); ++p) {
++        if ((*p).size() == 0)
++            ++trim;
++    }
++    numFields = names.size() - trim;
+ 
+     // Extract the data types record.
+     recNum = find_metadata_index(pdb, CATEGORY_DATA_TYPES);
+@@ -321,7 +329,41 @@
+     for (i = 0; i < numFields; ++i) {
+         unsigned width;
+ 
+-        appendField(names[i], Field::STRING);
++        // css: determine the field type
++        Field::FieldType fieldType;
++        switch (types[i][0]) {
++        case 's':
++        case 'T':
++        case 'P': // phone number
++        case 'M': // email address
++          fieldType = PalmLib::FlatFile::Field::STRING;
++          break;
++        case 'I':
++          fieldType = PalmLib::FlatFile::Field::INTEGER;
++          break;
++        case 'F':
++          fieldType = PalmLib::FlatFile::Field::FLOAT;
++          break;
++        case 'B':
++          fieldType = PalmLib::FlatFile::Field::BOOLEAN;
++          break;
++        case 'D':
++          fieldType = PalmLib::FlatFile::Field::DATE;
++          break;
++        case 'd':
++          fieldType = PalmLib::FlatFile::Field::TIME;
++          break;
++        case 'L':
++          fieldType = PalmLib::FlatFile::Field::LIST;
++          break;
++        case 'W':
++          fieldType = PalmLib::FlatFile::Field::LINK;
++          break;
++        default:
++          throw PalmLib::error("unknown field type");
++        }
++
++        appendField(names[i], fieldType);
+         StrOps::convert_string(widths[i], width);
+         lv.push_back(ListViewColumn(i, width));
+     }
+@@ -339,16 +381,64 @@
+ 
+         // Extract the fields from the record.
+         mdb_record_t fields = parse_record(pdb_record);
+-        if (fields.size() != getNumOfFields())
++        if (fields.size() > getNumOfFields()) // css changed != to >
+             throw PalmLib::error("data record has the wrong number of fields");
+ 
+         // Insert the fields into the flat-file record.
++        // css: iterate over the types too.
+         for (mdb_record_t::const_iterator p = fields.begin();
+              p != fields.end(); ++p) {
+             Field field;
+ 
+-            field.type = Field::STRING;
+-            field.v_string = (*p);
++            int fpos = p - fields.begin();
++            field.type = this->field_type(fpos);
++
++            switch (field.type) {
++            case Field::INTEGER:
++              StrOps::convert_string(*p, field.v_integer);
++              break;
++            case Field::FLOAT:
++              StrOps::convert_string(*p, field.v_float);
++              break;
++            case Field::DATE: {
++              pi_uint32_t daySince19040101 = 0;
++              StrOps::convert_string(*p, daySince19040101);
++              // Modified Julian to DMY calculation with an addition of 2415019
++              // http://www.codeproject.com/datetime/exceldmy.asp
++              // 2416481 is Julian Day for 1904-01-01
++              int l = daySince19040101 + 68569 + 2416481;
++              int n = int(( 4 * l ) / 146097);
++              l = l - int(( 146097 * n + 3 ) / 4);
++              int i = int(( 4000 * ( l + 1 ) ) / 1461001);
++              l = l - int(( 1461 * i ) / 4) + 31;
++              int j = int(( 80 * l ) / 2447);
++              int nDay = l - int(( 2447 * j ) / 80);
++              l = int(j / 11);
++              int nMonth = j + 2 - ( 12 * l );
++              int nYear = 100 * ( n - 49 ) + i + l;;
++              field.v_date.year = nYear;
++              field.v_date.month = nMonth;
++              field.v_date.day = nDay;
++              break;
++            }
++            case Field::TIME: {
++              pi_uint32_t seconds = 0;
++              StrOps::convert_string(*p, seconds);
++              field.v_time.hour = seconds / 3600;
++              field.v_time.minute = (seconds % 3600) / 60;
++              break;
++            }
++            case Field::BOOLEAN:
++              field.v_boolean = StrOps::string2boolean(*p);
++              break;
++            case Field::STRING:
++            case Field::LIST:
++            case Field::LINK:
++            default:
++              field.v_string = (*p);
++              break;
++            };
++
+             record.appendField(field);
+         }
+ 
+@@ -412,8 +502,40 @@
+     {
+         mdb_record_t v;
+ 
+-        for (i = 0; i < getMaxNumOfFields(); ++i)
+-            v.push_back(std::string("str"));
++        for (i = 0; i < getMaxNumOfFields(); ++i) {
++            // css: add support for other field types.
++            if (i < getNumOfFields()) {
++            switch (field_type(i)) {
++            case Field::INTEGER:
++              v.push_back(std::string("I"));
++              break;
++            case Field::FLOAT:
++              v.push_back(std::string("F"));
++              break;
++            case Field::DATE:
++              v.push_back(std::string("D"));
++              break;
++            case Field::TIME:
++              v.push_back(std::string("d"));
++              break;
++            case Field::BOOLEAN:
++              v.push_back(std::string("B"));
++              break;
++            case Field::LIST:
++              v.push_back(std::string("L"));
++              break;
++            case Field::LINK:
++              v.push_back(std::string("W"));
++              break;
++            case Field::STRING:
++            default:
++              v.push_back(std::string("T"));
++              break;
++            };
++            } else {
++                v.push_back(std::string("T"));
++            }
++        }
+         PalmLib::Record record(build_record(v));
+         record.category(CATEGORY_DATA_TYPES);
+         pdb.appendRecord(record);
+@@ -452,11 +574,74 @@
+         mdb_record_t v;
+ 
+         for (unsigned int j = 0; j < getNumOfFields(); j++) {
++            // css: add support for other field types.
++#ifdef __LIBSTDCPP_PARTIAL_SUPPORT__
++			const Field field = record.fields()[j];
++#else
++			const Field field = record.fields().at(j);
++#endif
++            switch (field.type) {
++            case Field::INTEGER:
++            {
++              std::ostrstream stream;
++              stream << field.v_integer << std::ends;
++              v.push_back(stream.str());
++              break;
++            }
++            case Field::FLOAT:
++            {
++              std::ostrstream stream;
++              stream << field.v_float << std::ends;
++              v.push_back(stream.str());
++              break;
++            }
++            case Field::DATE:
++            {
++              // http://quasar.as.utexas.edu/BillInfo/JulianDatesG.html
++              // http://www.codeproject.com/datetime/exceldmy.asp
++              pi_uint32_t daySince19040101 = 0;
++              pi_uint32_t y = field.v_date.year;
++              pi_uint32_t m = field.v_date.month;
++              pi_uint32_t d = field.v_date.day;
++              pi_uint32_t a = y /100;
++              pi_uint32_t b = a / 4;
++              pi_uint32_t c = 2 - a + b;
++              pi_uint32_t e = 365.25 * (y + 4716);
++              pi_uint32_t f = 30.6001 * (m + 1);
++              pi_uint32_t jd = c + d + e + f - 1524.5 - 2416481;
++              std::ostrstream stream;
++              stream << jd << std::ends;
++              v.push_back(stream.str());
++              break;
++            }
++            case Field::TIME:
++            {
++              std::ostrstream stream;
++              stream << ((field.v_time.hour * 3600) + (field.v_time.minute * 60)) << std::ends;
++              v.push_back(stream.str());
++              break;
++            }
++            case Field::BOOLEAN:
++            {
++              std::ostrstream stream;
++              stream << field.v_integer << std::ends;
++              v.push_back(field.v_boolean ? "1" : "0");
++              break;
++            }
++            case Field::LIST:
++            case Field::LINK:
++            case Field::STRING:
++            default:
++            {
++              v.push_back(field.v_string);
++              break;
++            }
+ #ifdef __LIBSTDCPP_PARTIAL_SUPPORT__
+-            v.push_back(record.fields()[j].v_string);
++//            v.push_back(record.fields()[j].v_string);
+ #else
+-            v.push_back(record.fields().at(j).v_string);
++//            v.push_back(record.fields().at(j).v_string);
+ #endif
++            }
+         }
+ 
+         PalmLib::Record pdb_record(build_record(v));
+@@ -476,6 +661,14 @@
+ {
+     switch (type) {
+     case Field::STRING:
++    // css: add support for other field types.
++    case Field::INTEGER:
++    case Field::FLOAT:
++    case Field::DATE:
++    case Field::TIME:
++    case Field::BOOLEAN:
++    case Field::LIST:
++    case Field::LINK:
+         return true;
+     default:
+         return false;

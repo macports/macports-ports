@@ -1,0 +1,194 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           waf 1.0
+PortGroup           python 1.0
+PortGroup           openssl 1.0
+PortGroup           legacysupport 1.1
+
+# clock_gettime(), clock_settime()
+legacysupport.newest_darwin_requires_legacy 15
+
+# Note:  Due to a bug in the ntpsec build procedure, the legacy-support library
+# is linked *after* libSystem.  This is undesirable in the general case, but
+# isn't believed to cause trouble with the specific functions used here.
+
+name                ntpsec
+version             1.2.4
+revision            0
+categories          sysutils net
+maintainers         {fwright.net:fw @fhgwright} openmaintainer
+description         A secure, hardened, and improved implementation of NTP
+license             Permissive
+long_description    A secure, hardened, and improved implementation of Network \
+                    Time Protocol derived from NTP Classic, Dave Mills’s original.
+homepage            https://www.ntpsec.org/
+
+conflicts           ntp openntpd
+
+master_sites        ftp://ftp.ntpsec.org/pub/releases/
+checksums           rmd160  455ed30dc803e83dd19a0ab28d8361459ce45eb1 \
+                    sha256  443e54a6149d1b0bf08677d17b18fced9028b101fc2ffd2c81e0834f87eebc7d \
+                    size    2736913
+
+# ntpsec requires Python 2.7 or 3.3+.
+# We skip 3.3, but keep 2.7 and 3.4+.
+# Some variants may force a more restricted list.
+#
+set pythons_suffixes {27 34 35 36 37 38 39 310 311 312 313 314}
+
+set pythons_ports {}
+foreach s ${pythons_suffixes} {
+    lappend pythons_ports python${s}
+}
+
+foreach s ${pythons_suffixes} {
+    set p python${s}
+    set v [string index ${s} 0].[string range ${s} 1 99]
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    variant ${p} description "Build ${name} to use Python ${v}" conflicts {*}${c} ""
+}
+
+# Default to +python312
+#
+# This is an "almost latest" version of Python, without the "bleeding edge"
+# issues of python313, including its current inability to build on all
+# platforms.  It can be requested explicitly, however.  Upgrades to existing
+# installs will preserve the current selection.
+#
+set pyver_no_dot "312"
+
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+default_variants +python${pyver_no_dot}
+
+# make sure some python variant is selected
+set pyver_no_dot ""
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+pre-fetch {
+    if {${pyver_no_dot} eq ""} {
+        ui_error "\n\nYou must select one of the Python variants (+pythonXY).\n"
+    return -code error "Invalid Python variant selection"
+    }
+}
+
+python.version          ${pyver_no_dot}
+
+# Avoid treating python311+ differently from earlier versions.
+# In particular, avoid clobbering destroot.target and adding superfluous
+# dependencies.
+python.pep517       no
+
+# Note that the new ffi-based Python client library doesn't work properly
+# on the Mac, so we use the old extension-based version.
+
+openssl.branch      3
+# NOTE: doesn't work with libressl
+
+depends_build-append port:bison port:pkgconfig
+depends_lib-append  port:python${pyver_no_dot}
+
+# Consolidated patchfile, based on GitLab/fhgwright/ntpsec
+#
+# This diff is from NTPsec_1_2_4 vs. macports-1_2_4
+#
+# The patches are reduced from earlier versions, based on using legacy-support
+# to provide some missing features.  Some patches are still needed, though,
+# to accommodate OS versions <10.13 (plus a Python 2 fix in ntpq).
+#
+patchfiles          patch-allfixes.diff
+
+# Some PGs used here bring in the unnecessary compiler_wrapper PG.
+# Disable it to reduce logfile clutter and obfuscation.
+#
+compwrap.compilers_to_wrap
+
+use_configure       yes
+configure.post_args-delete --nocache
+configure.args      --alltests \
+                    --define=CONFIG_FILE=${prefix}/etc/ntp.conf \
+                    --disable-manpage \
+                    --disable-mdns-registration \
+                    --python=${python.bin} \
+                    --enable-pylib=ext \
+                    --pyshebang=${python.bin} \
+                    --pythondir=${python.pkgd} \
+                    --pythonarchdir=${python.pkgd}
+
+# Make sure we use waf, not setup.py for build
+build.cmd           ${waf.python} ./waf
+destroot.cmd        ${build.cmd}
+
+# Although the normal build procedure includes the tests, we also allow
+# them separately so that "port test" works.
+test.run            yes
+# Avoid unnecessary dependency on pyXX-test
+python.test_framework
+# Override the python portgroup's inappropriate test.cmd
+test.cmd            ${build.cmd}
+test.target         check
+
+default_variants    +doc
+
+# ntpsec has issues with universal builds:
+# 1) It expects endianness to be single-valued at configure time.
+# 2) There are problems with Python compiled extensions and universality.
+universal_variant   no
+
+variant classic description {Enable classic mode} {
+    configure.args-append   --enable-classic-mode
+}
+variant doc description {Build manpages and HTML documentation} {
+    depends_build-append    port:asciidoctor
+    configure.args-append   --enable-doc --htmldir=${prefix}/share/doc/${name}
+    configure.args-delete   --disable-manpage
+}
+variant mdns description {Enable mDNS service discovery} {
+    depends_lib-append      port:avahi
+    configure.args-delete   --disable-mdns-registration
+}
+variant refclock description {Enable all reference clocks} {
+    configure.args-append   --refclock=all
+}
+variant smear description {Enable smearing of leap seconds} {
+    configure.args-append   --enable-leap-smear
+}
+
+post-destroot {
+    xinstall -o root -m 644 ${filespath}/ntp.conf \
+        ${destroot}${prefix}/etc/ntp.conf.dist
+    
+    xinstall -m 755 -d \
+        ${destroot}${prefix}/var/db \
+        ${destroot}${prefix}/var/run
+    destroot.keepdirs \
+        ${destroot}${prefix}/var/db \
+        ${destroot}${prefix}/var/run
+}
+post-activate {
+    if {![file exists ${prefix}/etc/ntp.conf]} {
+        file copy ${prefix}/etc/ntp.conf.dist ${prefix}/etc/ntp.conf
+    }
+}
+
+notes "See \"man 8 ntpd\" for documentation; \"man ntpd\" may reflect Apple's."
+notes-append "To replace Apple's ntpd,\
+             disable \"Set date and time automatically\"\
+             in the Date & Time Preferences."
+notes-append "Configuration is in ${prefix}/etc/ntp.conf."
+
+startupitem.create      yes
+startupitem.netchange   yes
+startupitem.executable  ${prefix}/sbin/ntpd -n -g -p ${prefix}/var/run/ntpd.pid -f ${prefix}/var/db/ntp.drift -c ${prefix}/etc/ntp.conf
+
+# Match most tarball patterns, but disallow versions with dashes to filter out
+# X.Y.Z-rcN, etc.
+livecheck.regex ${name}-(\[^-]+)\\.tar\\.gz

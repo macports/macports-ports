@@ -1,0 +1,181 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               meson 1.0
+PortGroup               conflicts_build 1.0
+PortGroup               muniversal 1.1
+PortGroup               legacysupport 1.0
+
+# timespec_get() and others
+legacysupport.newest_darwin_requires_legacy 17
+
+epoch                   1
+
+name                    mesa
+conflicts               gl-headers
+version                 26.1.4
+revision                0
+
+checksums               rmd160  93d89f16b33c8052eb695db3d67f68765c6db55b \
+                        sha256  072705caa9adf4740f1489194b13e278ad959166863b5271fe423a86353c9ab6 \
+                        size    77677128
+
+categories              x11 graphics
+maintainers             {jeremyhu @jeremyhu} openmaintainer
+license                 MIT
+description             Mesa 3D Graphics Library
+long_description        Mesa is an open-source implementation of the OpenGL specification, \
+                        a system for rendering interactive 3D graphics.
+
+homepage                https://www.mesa3d.org
+master_sites            https://archive.mesa3d.org
+use_xz                  yes
+
+# Disable unexpected download of subprojects
+meson.wrap_mode         nodownload
+
+set py_ver              3.14
+set py_ver_nodot        [string map {. {}} ${py_ver}]
+
+depends_build-append    path:bin/pkg-config:pkgconfig \
+                        port:flex \
+                        port:bison \
+                        port:python${py_ver_nodot} \
+                        port:py${py_ver_nodot}-mako \
+                        port:py${py_ver_nodot}-packaging \
+                        port:py${py_ver_nodot}-yaml \
+                        port:xorg-xorgproto \
+                        port:xorg-libXrandr
+
+depends_lib-append      port:expat \
+                        port:xorg-libxcb \
+                        port:xorg-libX11 \
+                        port:xorg-libXext \
+                        port:xorg-libXfixes \
+                        port:zlib \
+                        port:zstd
+
+patchfiles              patch-pre-10.8-scandir.diff \
+                        patch-fix-zink.diff
+
+# https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/32658
+patchfiles-append       patch-fix-32-bit.diff
+
+# https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/34718
+patchfiles-append       patch-missing-mach-init-include.patch
+
+# https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/39047
+# https://trac.macports.org/ticket/73334
+# https://trac.macports.org/ticket/73343
+patchfiles-append       patch-gallium_vl_csc_c.diff
+
+compiler.c_standard     2011
+compiler.cxx_standard   2017
+
+# Build issues on mac OS 10.10
+# ../mesa-22.1.7/src/util/compiler.h:90:7: error: builtin feature check macro requires a parenthesized identifier
+# #elif HAS_CLANG_FALLTHROUGH
+compiler.blacklist-append  {clang < 800}
+
+configure.args          -Degl=disabled \
+                        -Dgles1=disabled \
+                        -Dgles2=disabled
+
+set gallium_drivers     [list softpipe]
+set vulkan_drivers      [list]
+
+platform darwin {
+    if {${os.major} < 10} {
+          # avoid use of libunwind, which is not in the System on < darwin 10
+          # see https://trac.macports.org/ticket/65934
+          configure.args-append  -Dlibunwind=disabled
+    }
+
+    pre-configure {
+        if {${os.major} < 11} {
+            # https://trac.macports.org/ticket/25677
+            if { ![file exists /usr/lib/libXplugin.dylib] } {
+                ui_error "Detected a problem with your development environment.  Please work around it by executing:"
+                ui_error "sudo ln -s libXplugin.1.dylib /usr/lib/libXplugin.dylib"
+                return -code error "missing libXplugin.dylib"
+            }
+        }
+    }
+}
+
+if {[string match *gcc* ${configure.compiler}]} {
+    configure.ldflags-append -latomic
+
+    # https://github.com/macports/macports-ports/pull/16260#issuecomment-1268741658
+    configure.cxxflags-append -fpermissive
+}
+
+set llvm_ver            22
+meson.native.binaries   python3=${prefix}/bin/python${py_ver} \
+                        llvm-config=${prefix}/libexec/llvm-${llvm_ver}/bin/llvm-config
+
+variant llvmpipe description "enable the llvmpipe driver" {
+    depends_lib-append      port:llvm-${llvm_ver}
+    lappend gallium_drivers llvmpipe
+}
+
+# Does not work currently
+# https://github.com/KhronosGroup/MoltenVK/issues/2650
+variant zink description "enable the zink driver" {
+    platform darwin {
+        depends_build-append    port:MoltenVK
+        configure.args-append   -Dmoltenvk-dir=${prefix}
+    }
+    depends_run-append      port:vulkan-loader
+    lappend gallium_drivers zink
+}
+
+variant kosmickrisp description "enable the KosmicKrisp driver" {
+    depends_build-append    port:xorg-libxshmfence
+    depends_lib-append      port:llvm-${llvm_ver} \
+                            port:libclc-${llvm_ver} \
+                            port:spirv-tools
+    configure.pkg_config_path   ${prefix}/libexec/llvm-$llvm_ver/lib/pkgconfig \
+                                ${prefix}/libexec/llvm-$llvm_ver/share/pkgconfig
+    lappend vulkan_drivers  kosmickrisp
+}
+
+# Avoid enabling on macOS as it disables hardware acceleration
+# Temporarily enable for Tahoe - https://github.com/XQuartz/XQuartz/issues/446
+if {${os.platform} ne "darwin" || ${os.major} >= 25} {
+    default_variants        +llvmpipe
+}
+
+post-patch {
+    reinplace "s|\"libvulkan\\.1\\.dylib\"|\"${prefix}/lib/libvulkan.1.dylib\"|g" \
+        src/gallium/drivers/zink/zink_screen.c \
+        src/gfxstream/guest/platform/kumquat/vulkan-mapper/GfxStreamVulkanMapper.cpp
+}
+
+pre-configure {
+    configure.args-append   -Dgallium-drivers=[join $gallium_drivers ,] \
+                            -Dvulkan-drivers=[join $vulkan_drivers ,]
+}
+
+post-destroot {
+    # avoid conflict with ANGLE
+    move ${destroot}${prefix}/include/KHR/khrplatform.h \
+        ${destroot}${prefix}/include/KHR/khrplatform_mesa.h
+    reinplace "s|khrplatform\\.h|khrplatform_mesa.h|" \
+        ${destroot}${prefix}/include/GL/glcorearb.h \
+        ${destroot}${prefix}/include/GL/glext.h
+}
+
+variant tests description "build tests" {
+    # mesa uses its own internal gtest version and fails with newer
+    conflicts_build-append gtest
+    configure.args-replace -Dbuild-tests=false -Dbuild-tests=true
+}
+
+test.run                yes
+test.cmd                meson
+test.target             test
+
+livecheck.type          regex
+livecheck.url           ${homepage}
+livecheck.regex         {relnotes/([0-9.]+)\.html}

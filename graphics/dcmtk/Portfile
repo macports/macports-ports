@@ -1,0 +1,176 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               active_variants 1.1
+PortGroup               muniversal 1.0
+PortGroup               cmake 1.1
+PortGroup               github 1.0
+
+github.setup            DCMTK dcmtk 3.7.0 DCMTK-
+# Change github.tarball_from to 'releases' or 'archive' next update
+github.tarball_from     archive
+revision                1
+
+set unpatched_version   [lindex [split ${version} _] 0]
+set stripped_version    [string map {. ""} ${unpatched_version}]
+categories              graphics
+license                 {BSD Apache-2}
+
+maintainers             {eborisch @eborisch} \
+                        openmaintainer
+
+description             The DICOM Toolkit.
+long_description        DCMTK is a collection of libraries and applications    \
+                        implementing large parts the DICOM standard. It        \
+                        includes software for examining, constructing and      \
+                        converting DICOM image files, handling offline media,  \
+                        sending and receiving images over a network connection,\
+                        as well as demonstrative image storage and worklist    \
+                        servers. DCMTK is is written in a mixture of ANSI C    \
+                        and C++. It comes in complete source code and is made  \
+                        available as "open source" software.
+
+homepage                https://dicom.offis.de/en/dcmtk
+
+checksums \
+    rmd160  6e4f9a59fd09f069c240cf4e8a427b4ddeb50fb3 \
+    sha256  5bb3ec8317dc465788bed2ca789e76d03ae5848c9381cce3b14c1a3f8b6aca56 \
+    size    9446218
+
+compiler.cxx_standard   2011
+
+# avoid self-conflict
+patchfiles              install_path_fix_part2.patch
+
+configure.cppflags-replace -I${prefix}/include -isystem${prefix}/include
+
+depends_lib             path:include/turbojpeg.h:libjpeg-turbo \
+                        port:libiconv \
+                        port:libxml2 \
+                        port:libpng \
+                        port:tcp_wrappers \
+                        port:tiff \
+                        port:zlib
+
+depends_build-append    path:bin/pkg-config:pkgconfig
+
+configure.args-append   -DDCMTK_WITH_TIFF=ON \
+                        -DDCMTK_WITH_OPENJPEG=OFF \
+                        -DDCMTK_WITH_PNG=ON \
+                        -DDCMTK_WITH_OPENSSL=OFF \
+                        -DDCMTK_WITH_XML=ON \
+                        -DDCMTK_WITH_ICONV=ON \
+                        -DDCMTK_ENABLE_PRIVATE_TAGS=OFF \
+                        -DDCMTK_WITH_DOXYGEN=OFF \
+                        -DDCMTK_WITH_SNDFILE=OFF \
+                        -DDCMTK_WITH_WRAP=ON \
+                        -DCMAKE_CXX_STANDARD=11 \
+                        -DDCMTK_ENABLE_STL=ON
+
+subport                 dcmtk-static {}
+
+if {${name} ne ${subport}} {
+    depends_run-append      port:dcmtk
+    configure.args-append   -DBUILD_SHARED_LIBS:BOOL=OFF \
+                            -DBUILD_APPS:BOOL=OFF
+    long_description        Libraries to enable static-linking to dcmtk.
+
+    set actvar              ""
+    set inactvar            ""
+
+    pre-configure {
+        foreach variant {private sound ssl universal} {
+            if {[variant_isset ${variant}]} {
+                append actvar " " ${variant}
+            } else {
+                append inactvar " " ${variant}
+            }
+        }
+
+        if {![active_variants port:dcmtk "${actvar}" "${inactvar}"]} {
+            ui_error {dcmtk and dcmtk-static must have matching variants!}
+            return -code error
+        }
+    }
+
+    destroot {
+        xinstall -m 644 {*}[glob -directory ${cmake.build_dir}/lib/ *.a] \
+            ${destroot}${prefix}/lib/
+    }
+} else {
+    configure.args-append   -DBUILD_SHARED_LIBS=ON
+
+    variant doc description "Install documentation" {
+        depends_build-append    path:bin/doxygen:doxygen
+        build.target-append     DOXYGEN
+        configure.args-delete   -DDCMTK_WITH_DOXYGEN=OFF
+        configure.args-append   -DDCMTK_WITH_DOXYGEN=ON
+    }
+
+    if {[variant_isset doc]} {
+        post-destroot {
+            # Don't really want these man pages.
+            system -W ${destroot}${prefix}/share/man/man1 "rm -f *_${distname}_*"
+        }
+        set DOCDIR          file://${prefix}/share/doc/${name}/html/index.html
+        notes               "DCMTK documentation available at:\n  ${DOCDIR}"
+    }
+
+    destroot.args           docdir=${prefix}/share/doc/${name}
+}
+
+variant private description "Install private tags dictionary" {
+    configure.args-delete   -DDCMTK_ENABLE_PRIVATE_TAGS=OFF
+    configure.args-append   -DDCMTK_ENABLE_PRIVATE_TAGS=ON
+}
+
+variant sound description "Enable sndfile support" {
+    depends_lib-append      port:libsndfile
+    configure.args-delete   -DDCMTK_WITH_SNDFILE=OFF
+    configure.args-append   -DDCMTK_WITH_SNDFILE=ON
+}
+
+variant ssl description "Enable openssl support" {
+    depends_lib-append      path:lib/openssl-3/libssl.dylib:openssl3
+    configure.args-replace  -DDCMTK_WITH_OPENSSL=OFF -DDCMTK_WITH_OPENSSL=ON
+    configure.args-append   -DOPENSSL_ROOT_DIR=${prefix}/libexec/openssl3
+}
+
+# This variant makes sense only on macOS < 10.7.
+# While 10.6 x86 is fine with its native libdispatch,
+# libdispatch-legacy will work there. Eventually this
+# is supposed to become the default for all powerpc
+# as well as < 10.6 x86. For now, it is optional.
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    variant legacy_dispatch description "Enable dispatch via libdispatch-legacy port" {
+        depends_lib-append \
+                        port:libdispatch-legacy
+        configure.cppflags-append \
+                        -I${prefix}/libexec/dispatch/usr/include
+        configure.ldflags-append \
+                        ${prefix}/libexec/dispatch/usr/lib/libdispatch.a
+    }
+}
+
+if {${os.platform} eq "darwin" \
+    && (${os.major} < 10 || ${configure.build_arch} eq "ppc") \
+    && ![variant_isset legacy_dispatch]} {
+    # We do not really want this, but at the moment libdispatch-legacy
+    # builds and works only on 10.6 for ppc builds. Make sure
+    # this patch cannot be applied elsewhere, and also not used
+    # if legacy_dispatch is chosen.
+    patchfiles-append   0002-Revert-Fixed-OFSemaphore-for-macOS.patch
+}
+
+default_variants        +ssl
+
+# FIXME: on PowerPC quite a number of libiconv-related tests fail.
+# Everything else passes: 91% tests passed, 30 tests failed out of 341.
+# There is something wrong with how oficonv is built now.
+test.run                yes
+test.cmd                env DYLD_LIBRARY_PATH=${cmake.build_dir}/lib make
+test.target             -j 1 test
+
+livecheck.type          regex
+livecheck.url           https://dicom.offis.de/en/dcmtk/dcmtk-software-development/
+livecheck.regex         ${name}-(\[0-9._\]+)${extract.suffix}

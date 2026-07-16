@@ -1,0 +1,170 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+PortGroup           meson 1.0
+PortGroup           app 1.0
+
+name                virt-viewer
+version             11.0
+revision            4
+
+categories          emulators
+maintainers         {dports @drkp} \
+                    openmaintainer
+license             GPL-2+
+
+homepage            https://virt-manager.org
+master_sites        https://releases.pagure.org/virt-viewer/
+
+description         connects to VMs via VNC/SPICE and libvirt
+long_description    \
+    Virtual Machine Viewer provides a graphical console client for connecting \
+    to virtual machines. It uses the GTK-VNC or SPICE-GTK widgets to provide \
+    the display, and libvirt for looking up VNC/SPICE server details.
+
+use_xz              yes
+
+checksums           rmd160  d16895408be0b3fa29bbf7854d5e83030e845408 \
+                    sha256  a43fa2325c4c1c77a5c8c98065ac30ef0511a21ac98e590f22340869bad9abd0 \
+                    size    259772
+
+patchfiles          patch-data-meson-build.diff
+
+# Python version used at build time; meson.build invokes python3.
+set py_branch       3.14
+set py_version      [string map {. {}} ${py_branch}]
+
+depends_build       path:bin/pkg-config:pkgconfig \
+                    port:gettext \
+                    port:python${py_version}
+
+depends_lib         path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    port:libxml2 \
+                    port:libvirt \
+                    port:libvirt-glib \
+                    path:lib/pkgconfig/gtk+-3.0.pc:gtk3 \
+                    port:gtk-vnc \
+                    port:spice-gtk \
+                    port:spice-protocol
+
+# Pin every optional meson feature to avoid opportunistic dependencies.
+# spice-protocol is added above because spice-gtk's spice-client-glib-2.0.pc
+# requires it but only build-depends on it.
+# https://trac.macports.org/ticket/74206
+# ovirt is disabled because there is no govirt port to satisfy it.
+configure.args-append \
+                    -Dlibvirt=enabled \
+                    -Dvnc=enabled \
+                    -Dspice=enabled \
+                    -Dovirt=disabled \
+                    -Dvte=disabled \
+                    -Dbash_completion=disabled
+
+variant vte description {Support virtual machine serial/text consoles via VTE} {
+    depends_lib-append      port:vte
+    configure.args-replace  -Dvte=disabled -Dvte=enabled
+}
+
+variant bash_completion {
+    depends_build-append    port:bash-completion
+    configure.args-replace  -Dbash_completion=disabled -Dbash_completion=enabled
+}
+
+default_variants        +vte +bash_completion
+
+# meson.build looks up the unversioned "python3", which MacPorts provides only
+# via "port select"; point find_program at the versioned interpreter. The
+# reinplace works around upstream calling run_command() with the "python3"
+# string instead of the program found above.
+# https://trac.macports.org/ticket/71963
+meson.native.binaries-append \
+                    python3=${prefix}/bin/python${py_branch}
+post-patch {
+    reinplace "s|'python3', '-c'|python3, '-c'|g" ${worksrcpath}/meson.build
+}
+
+#
+# Build a MacOS app bundle that launches remote-viewer. This is a
+# little more complicated because we have to use an AppleScript
+# droplet suitable for registering as a handler for .vv connection
+# files. The AppleScript copies the file to a temporary directory in
+# case the original is in a quarantined location, and deletes the
+# original if delete-this-file is set (just like remote-viewer would
+# do).
+#
+app.name            Remote Viewer
+app.identifier      org.macports.remote-viewer
+app.executable      ${prefix}/bin/remote-viewer
+app.retina          yes
+app.use_launch_script no
+
+variant app_as_root description {Applet launches Remote Viewer with admin privileges (insecure, required for USB forwarding)} {}
+
+post-patch {
+    set scriptfile ${workpath}/RemoteViewer.applescript
+    copy ${filespath}/RemoteViewer.applescript ${scriptfile}
+
+    reinplace "s|@PREFIX@|${prefix}|g" ${scriptfile}
+
+    if {[variant_isset app_as_root]} {
+        reinplace "s|@PRIVILEGES@| with administrator privileges|g" ${scriptfile}
+    } else {
+        reinplace "s|@PRIVILEGES@||g" ${scriptfile}
+    }
+}
+
+post-build {
+    # Build an .icns icon from source PNGs.
+    set iconset ${workpath}/virt-viewer.iconset
+    file mkdir ${iconset}
+    foreach {size filename} {
+        16   icon_16x16.png
+        32   icon_16x16@2x.png
+        32   icon_32x32.png
+        48   icon_32x32@2x.png
+        256  icon_128x128@2x.png
+        256  icon_256x256.png
+    } {
+        set src ${worksrcpath}/icons/${size}x${size}/virt-viewer.png
+        if {[file exists ${src}]} {
+            copy ${src} ${iconset}/${filename}
+        }
+    }
+    system "/usr/bin/iconutil -c icns -o [shellescape ${workpath}/virt-viewer.icns] [shellescape ${iconset}]"
+}
+
+app.icon            ${workpath}/virt-viewer.icns
+
+post-destroot {
+    set app_root ${destroot}${applications_dir}/${app.name}.app
+    set applet ${workpath}/RemoteViewer-applet.app
+
+    # Compile the AppleScript into an applet.
+    if {[file exists ${applet}]} {
+        delete -force ${applet}
+    }
+    system "/usr/bin/osacompile -o [shellescape ${applet}] [shellescape ${workpath}/RemoteViewer.applescript]"
+
+    # Replace the app bundle payload with the compiled AppleScript applet.
+    delete -force ${app_root}/Contents/MacOS
+    copy ${applet}/Contents/MacOS ${app_root}/Contents/
+
+    delete -force ${app_root}/Contents/Resources
+    copy ${applet}/Contents/Resources ${app_root}/Contents/
+
+    # Copy the icon into Resources.
+    copy ${workpath}/virt-viewer.icns ${app_root}/Contents/Resources/virt-viewer.icns
+
+    # Replace plist with osacompile's (has proper applet keys), then customize.
+    delete -force ${app_root}/Contents/Info.plist
+    copy ${applet}/Contents/Info.plist ${app_root}/Contents/Info.plist
+
+    set plist ${app_root}/Contents/Info.plist
+    system "/usr/bin/plutil -replace CFBundleIdentifier -string [shellescape ${app.identifier}] [shellescape ${plist}]"
+    system "/usr/bin/plutil -replace CFBundleName -string [shellescape ${app.name}] [shellescape ${plist}]"
+    system "/usr/bin/plutil -replace CFBundleIconFile -string virt-viewer.icns [shellescape ${plist}]"
+    system "/usr/bin/plutil -replace CFBundleShortVersionString -string ${version} [shellescape ${plist}]"
+    system "/usr/bin/plutil -replace CFBundleDocumentTypes -xml '<array><dict><key>CFBundleTypeName</key><string>Virt Viewer Connection File</string><key>CFBundleTypeRole</key><string>Viewer</string><key>LSHandlerRank</key><string>Owner</string><key>LSItemContentTypes</key><array><string>${app.identifier}.vv</string></array></dict></array>' [shellescape ${plist}]"
+    system "/usr/bin/plutil -insert UTExportedTypeDeclarations -xml '<array><dict><key>UTTypeIdentifier</key><string>${app.identifier}.vv</string><key>UTTypeDescription</key><string>Virt Viewer Connection File</string><key>UTTypeConformsTo</key><array><string>public.data</string></array><key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>vv</string></array><key>public.mime-type</key><array><string>application/x-virt-viewer</string></array></dict></dict></array>' [shellescape ${plist}]"
+}

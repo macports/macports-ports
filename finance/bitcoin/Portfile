@@ -1,0 +1,204 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               boost 1.0
+PortGroup               legacysupport 1.1
+
+# On <10.15 built-in libc++ has no support for std::filesystem
+legacysupport.newest_darwin_requires_legacy \
+                        18
+legacysupport.use_mp_libcxx \
+                        yes
+
+name                    bitcoin
+categories              finance crypto
+version                 28.1
+revision                0
+license                 MIT
+maintainers             {easieste @easye} yopmail.com:sami.laine openmaintainer
+description             server daemon and client user interface for a peer-to-peer digital currency
+long_description        Bitcoin is a peer-to-peer digital currency. By peer-to-peer, \
+                        we mean that there is no central authority to issue \
+                        new Bitcoins or keep track of transactions. Instead, these \
+                        tasks are managed collectively by the Bitcoin protocol \
+                        operating through the nodes of the network.
+
+# https://trac.macports.org/ticket/69805
+# It builds normally against libstdc++ though.
+if {${configure.cxx_stdlib} eq "libc++"} {
+    platforms           {darwin >= 19}
+}
+
+homepage                https://bitcoincore.org/
+master_sites            ${homepage}bin/bitcoin-core-${version}/
+
+checksums               rmd160  d3ace8d36cdc5e9cae2dadfb7bec1b84b9e34e37 \
+                        sha256  c5ae2dd041c7f9d9b7c722490ba5a9d624f7e9a089c67090615e1ba4ad0883ba \
+                        size    12596371
+
+depends_build           port:autoconf \
+                        port:automake \
+                        port:libtool \
+                        path:bin/pkg-config:pkgconfig \
+                        port:python312
+
+depends_lib             port:libevent \
+                        port:miniupnpc \
+                        port:zmq
+
+configure.cmd           ./autogen.sh && ./configure
+
+configure.args          --disable-ccache \
+                        --disable-silent-rules \
+                        --disable-werror \
+                        --enable-tests \
+                        --disable-bench \
+                        --enable-zmq \
+                        --enable-man \
+                        --enable-largefile \
+                        --with-miniupnpc \
+                        --with-utils \
+                        --with-boost=[boost::install_area]
+
+compiler.cxx_standard   2020
+
+# pool.h:161:27: error: aligned allocation function
+# of type 'void *(std::size_t, std::align_val_t)'
+# is only available on macOS 10.13 or newer
+platform darwin {
+    if {${os.major} < 17 && [string match *clang* ${configure.compiler}]} {
+        configure.cxxflags-append \
+                        -fno-aligned-allocation
+    }
+}
+
+configure.args-append   --with-daemon=no
+configure.args-append   --with-gui=no
+configure.args-append   --enable-wallet=no
+
+# Bitcoin's configure adds -std=c++20 to the compiler name and then uses the
+# aforementioned name for both C++ and Objective-C++, the latter only if OBJCXX
+# is undefined. Macports defines OBJCXX, so undefining it solves the issue.
+configure.objcxx
+
+build.target            all
+
+test.run                yes
+test.target             check
+
+default_variants        +daemon +wallet
+
+set bitcoin_user        "bitcoin"
+set bitcoin_group       "${bitcoin_user}"
+set bitcoin_real_name   "Bitcoin Core"
+
+add_users               ${bitcoin_user} group=${bitcoin_group} realname="${bitcoin_real_name}"
+
+set daemon_path         "${prefix}/bin/bitcoind"
+set daemon_working_dir  "${prefix}/var/run/bitcoind/"
+set daemon_conf_file    "${prefix}/etc/bitcoin/bitcoin.conf"
+set daemon_data_dir     "${prefix}/var/lib/bitcoind/"
+set daemon_pid_file     "${prefix}/var/run/bitcoind/bitcoind.pid"
+
+set gui_app_name        "Bitcoin-Qt.app"
+set gui_app_path        "${applications_dir}/${gui_app_name}"
+set gui_conf_dir        "\$HOME/Library/Application Support/Bitcoin/"
+set gui_conf_file       "${gui_conf_dir}bitcoin.conf"
+set gui_data_dir        "${gui_conf_dir}"
+set gui_pid_file        "${gui_conf_dir}bitcoin.pid"
+
+set launchd_label               "org.macports.${name}"
+set launchd_plist_path          "${prefix}/etc/LaunchDaemons/${launchd_label}/${launchd_label}.plist"
+set launchd_plist_symlink_path  "/Library/LaunchDaemons/${launchd_label}.plist"
+
+variant daemon description {Build and install the daemon} {
+    configure.args-replace  --with-daemon=no --with-daemon=yes
+}
+
+variant gui description {Build the Qt5 GUI} {
+    PortGroup qt5 1.0
+
+    depends_lib-append port:qt5 port:qrencode
+    configure.args-replace  --with-gui=no --with-gui=qt5
+    configure.args-append   --with-qrencode --enable-gui-tests
+    build.target-replace all appbundle
+}
+
+variant wallet description {Build with support for wallet} {
+    depends_lib-append  port:db48 \
+                        port:sqlite3
+    configure.args-replace  --enable-wallet=no --enable-wallet=yes
+    configure.env-append \
+        BDB_CFLAGS=-I${prefix}/include/db48 \
+        "BDB_LIBS=-L${prefix}/lib/db48 -ldb_cxx-4.8"
+}
+
+post-destroot {
+    set config_args "-conf=\"${daemon_conf_file}\" -datadir=\"${daemon_data_dir}\" -pid=\"${daemon_pid_file}\""
+
+    if {[variant_isset daemon]} {
+        if { [tbool startupitem.install] } {
+            # Install launchd plist for daemon
+            xinstall -d [file dirname "${destroot}/${launchd_plist_path}"]
+            xinstall -m 644 "${filespath}/bitcoind.launchd.plist" "${destroot}/${launchd_plist_path}"
+            reinplace -E "
+                s|@@label@@|${launchd_label}|g;
+                s|@@user_name@@|${bitcoin_user}|g;
+                s|@@group_name@@|${bitcoin_group}|g;
+                s|@@program@@|\"${daemon_path}\" ${config_args}|g;
+                s|@@working_dir@@|${daemon_working_dir}|g;
+                " \
+                "${destroot}/${launchd_plist_path}"
+        }
+    }
+
+    if {[variant_isset gui]} {
+        # Install GUI app
+        copy "${worksrcpath}/${gui_app_name}" "${destroot}/${gui_app_path}"
+    }
+}
+
+post-activate {
+    if {[variant_isset daemon]} {
+        xinstall -d [file dirname "${daemon_conf_file}"]
+        xinstall -d -o ${bitcoin_user} -g ${bitcoin_group} "${daemon_data_dir}"
+        xinstall -d -o ${bitcoin_user} -g ${bitcoin_group} [file dirname "${daemon_pid_file}"]
+
+        xinstall -d [file dirname "${launchd_plist_symlink_path}"]
+        ln -sf "${launchd_plist_path}" "${launchd_plist_symlink_path}"
+    }
+}
+
+pre-deactivate {
+    if {[variant_isset daemon]} {
+        file delete "${launchd_plist_symlink_path}"
+    }
+}
+
+notes "
+
+1.  A launch daemon entry has been created for ${name}.
+    It is disabled by default. To enable and load the daemon:
+
+    sudo launchctl load -w \"${launchd_plist_symlink_path}\"
+
+2.  The files \"${daemon_conf_file}\" and
+    \"${gui_conf_file}\"
+    contain the daemon and GUI configuration, respectively.
+    Review them, and include the RPC credentials. See also
+
+    https://github.com/bitcoin/bitcoin/blob/master/doc/build-osx.md#running
+
+3.  To start the daemon manually in the background:
+
+    ${daemon_path} -daemon
+
+4.  View the logs with
+
+    tail -f \"${daemon_data_dir}debug.log\"
+    tail -f \"${gui_data_dir}debug.log\"
+"
+
+livecheck.type      regex
+livecheck.url       ${homepage}bin/
+livecheck.regex     ${name}-core-(\[0-9.\]+)/

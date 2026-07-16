@@ -1,0 +1,142 @@
+From 2efc0f237a7f3d05fe243dfb352c722432572a98 Mon Sep 17 00:00:00 2001
+From: Chris Rawnsley <566719+casr@users.noreply.github.com>
+Date: Mon, 6 Jul 2026 06:35:07 +0100
+Subject: [PATCH 3/3] Revert "fix(excmd): use realtime for v:starttime, :uptime
+ #39425"
+
+This revert can be removed once MacPort's libuv is upgraded equal to or
+beyond 1.45.0.
+
+Previous attempts to update MacPort's libuv version have been attempted
+in the past but nothing has been merged yet. See related links below.
+
+See: https://github.com/macports/macports-ports/pull/27671
+See: https://github.com/macports/macports-ports/pull/27670
+See: https://github.com/macports/macports-ports/pull/21329
+See: https://github.com/macports/macports-ports/pull/20421
+
+This reverts commit 822778f7e56bd6340a5d590056f35e93e4a02fa1.
+---
+ runtime/doc/news.txt                |  2 +-
+ runtime/doc/vvars.txt               |  4 ++--
+ runtime/lua/vim/_meta/vvars.gen.lua |  4 ++--
+ src/nvim/main.c                     |  2 +-
+ src/nvim/os/time.c                  | 19 -------------------
+ src/nvim/vvars.lua                  |  4 ++--
+ 6 files changed, 8 insertions(+), 27 deletions(-)
+
+diff --git a/runtime/doc/news.txt b/runtime/doc/news.txt
+index 1ab7346ff0..e4a8bc2070 100644
+--- a/runtime/doc/news.txt
++++ b/runtime/doc/news.txt
+@@ -453,7 +453,7 @@ VIMSCRIPT
+ • |v:vim_did_init| is set after sourcing |init.vim| but before |load-plugins|.
+ • |prompt_appendbuf()| appends text to prompt-buffer.
+ • |v:exitreason| is set before |QuitPre|.
+-• |v:starttime| is the process start time (nanoseconds since UNIX epoch).
++• |v:starttime| is the process start time (monotonic nanoseconds).
+ 
+ ==============================================================================
+ CHANGED FEATURES                                                 *news-changed*
+diff --git a/runtime/doc/vvars.txt b/runtime/doc/vvars.txt
+index e61bc78624..6a885f6a4f 100644
+--- a/runtime/doc/vvars.txt
++++ b/runtime/doc/vvars.txt
+@@ -635,11 +635,11 @@ v:stacktrace
+ 
+ 				*v:starttime* *starttime-variable*
+ v:starttime
+-		Timestamp (nanoseconds since UNIX epoch) when the Nvim process
++		Timestamp (monotonic nanoseconds) when the Nvim process
+ 		started.
+ 
+ 		To see the current "uptime": >lua
+-		  vim.print(('uptime: %d seconds'):format(os.time() - (vim.v.starttime / 1e9)))
++		  vim.print(('uptime: %d seconds'):format((vim.uv.hrtime() - vim.v.starttime) / 1e9))
+ <
+ 		Read-only.
+ 
+diff --git a/runtime/lua/vim/_meta/vvars.gen.lua b/runtime/lua/vim/_meta/vvars.gen.lua
+index 543d4169c1..7b5ca0e417 100644
+--- a/runtime/lua/vim/_meta/vvars.gen.lua
++++ b/runtime/lua/vim/_meta/vvars.gen.lua
+@@ -667,13 +667,13 @@ vim.v.shell_error = ...
+ --- @type table[]
+ vim.v.stacktrace = ...
+ 
+---- Timestamp (nanoseconds since UNIX epoch) when the Nvim process
++--- Timestamp (monotonic nanoseconds) when the Nvim process
+ --- started.
+ ---
+ --- To see the current "uptime":
+ ---
+ --- ```lua
+----   vim.print(('uptime: %d seconds'):format(os.time() - (vim.v.starttime / 1e9)))
++---   vim.print(('uptime: %d seconds'):format((vim.uv.hrtime() - vim.v.starttime) / 1e9))
+ --- ```
+ ---
+ --- Read-only.
+diff --git a/src/nvim/main.c b/src/nvim/main.c
+index bbd8db1ee9..dc957526f3 100644
+--- a/src/nvim/main.c
++++ b/src/nvim/main.c
+@@ -197,7 +197,7 @@ void early_init(mparm_T *paramp)
+   estack_init();
+   cmdline_init();
+   eval_init();          // init global variables
+-  set_vim_var_nr(VV_STARTTIME, (varnumber_T)os_realtime());
++  set_vim_var_nr(VV_STARTTIME, (varnumber_T)os_hrtime());
+   init_path(argv0 ? argv0 : "nvim");
+   init_normal_cmds();   // Init the table of Normal mode commands.
+   runtime_init();
+diff --git a/src/nvim/os/time.c b/src/nvim/os/time.c
+index 2e6bf3e56d..f243eda047 100644
+--- a/src/nvim/os/time.c
++++ b/src/nvim/os/time.c
+@@ -32,25 +32,6 @@ uint64_t os_hrtime(void)
+   return uv_hrtime();
+ }
+ 
+-/// Obtain the current system time from a high-resolution
+-/// real-time clock source.
+-///
+-/// The real-time clock counts from the UNIX epoch (1970-01-01)
+-/// and is subject to time adjustments; it can jump back in time.
+-///
+-/// @return Nanoseconds since epoch or 0
+-int64_t os_realtime(void)
+-  FUNC_ATTR_WARN_UNUSED_RESULT
+-{
+-  uv_timespec64_t ts = { 0 };
+-  int error_number;
+-  if ((error_number = uv_clock_gettime(UV_CLOCK_REALTIME, &ts)) != 0) {
+-    ELOG("uv_clock_gettime failed: %d %s", error_number, uv_err_name(error_number));
+-    return 0;
+-  }
+-  return ts.tv_sec * 1000000000L + ts.tv_nsec;
+-}
+-
+ /// Gets a millisecond-resolution, monotonically-increasing time relative to an
+ /// arbitrary time in the past.
+ ///
+diff --git a/src/nvim/vvars.lua b/src/nvim/vvars.lua
+index db87bcda28..648e5f1310 100644
+--- a/src/nvim/vvars.lua
++++ b/src/nvim/vvars.lua
+@@ -756,11 +756,11 @@ M.vars = {
+   starttime = {
+     type = 'integer',
+     desc = [=[
+-      Timestamp (nanoseconds since UNIX epoch) when the Nvim process
++      Timestamp (monotonic nanoseconds) when the Nvim process
+       started.
+ 
+       To see the current "uptime": >lua
+-        vim.print(('uptime: %d seconds'):format(os.time() - (vim.v.starttime / 1e9)))
++        vim.print(('uptime: %d seconds'):format((vim.uv.hrtime() - vim.v.starttime) / 1e9))
+       <
+       Read-only.
+     ]=],
+-- 
+2.55.0
+

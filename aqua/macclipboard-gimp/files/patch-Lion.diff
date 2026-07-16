@@ -1,0 +1,271 @@
+diff -uw macclipboard-gimp-0.7.orig/Makefile macclipboard-gimp-0.7/Makefile
+--- Makefile	2004-07-24 03:38:03.000000000 -0600
++++ Makefile	2012-05-28 18:19:34.000000000 -0600
+@@ -1,15 +1,17 @@
+-linkflags = -fnext-runtime -framework Cocoa -framework Carbon
++linkflags = -framework Cocoa -framework Carbon
++
++GIMPTOOL = gimptool-2.0
+ 
+ all : macclipboard
+ 
+ macclipboard : macclipboard.m clipboard_xfer.h
+-	gcc -I/sw/include `gimptool-2.0 --cflags` `gimptool-2.0 --libs` $(linkflags) macclipboard.m -o macclipboard
++	gcc `$(GIMPTOOL) --cflags` `$(GIMPTOOL) --libs` $(LDFLAGS) $(CFLAGS) $(linkflags) macclipboard.m -o macclipboard
+ 
+ install : macclipboard
+-	cp -p macclipboard $(HOME)/.gimp-2.0/plug-ins/
++	$(GIMPTOOL) --install-bin macclipboard
+ 
+ uninstall :
+-	rm -f $(HOME)/.gimp-2.0/plug-ins/macclipboard
++	$(GIMPTOOL) --uninstall-bin macclipboard
+ 
+ clean :
+ 	rm -f macclipboard
+diff -uw macclipboard-gimp-0.7.orig/macclipboard.m macclipboard-gimp-0.7/macclipboard.m
+--- macclipboard.m	2004-11-30 20:01:46.000000000 -0700
++++ macclipboard.m	2012-05-28 17:45:04.000000000 -0600
+@@ -32,7 +32,8 @@
+ /*
+ The Mac clipboard ('pasteboard' or 'scrap') can contain data in multiple
+ formats. The least common denominator for graphic data is 'PICT', a QuickDraw
+-picture.
++picture. However, QuickDraw, and by extension PICT, have been depricated and 
++aren't available under 64-bit code.
+ 
+ Cocoa apps prefer TIFF, which also lets us transfer alpha channel data
+ relatively reliably. When we post a TIFF, Cocoa does PICT translation for us.
+@@ -69,7 +70,18 @@
+ /* #include "config.h" */
+ 
+ #import <Cocoa/Cocoa.h>
++#ifdef __LP64__
++#define HAVE_QD_HEADERS 0
++#else
++#ifdef __MAC_10_7
++#define HAVE_QD_HEADERS 0
++#else
++#define HAVE_QD_HEADERS 1
++#endif
++#endif
++#if HAVE_QD_HEADERS
+ #include <Carbon/Carbon.h>
++#endif
+ 
+ #include <sys/types.h>
+ #include <sys/stat.h>
+@@ -117,7 +129,7 @@
+ static gboolean clipboard_paste_service    (gboolean         interactive,
+                                             NSString        *service);
+ 
+-
++#if HAVE_QD_HEADERS
+ /* PICT bits */
+ static gboolean clipboard_offscreen_pict   (PicHandle         pic,
+                                             guchar            fill,
+@@ -143,6 +155,7 @@
+                                             gint32            drawable_ID,
+                                             NSData           *data,
+                                             gint32           *image_out);
++#endif
+ 
+ /* Other image types */
+ static gboolean clipboard_paste_bitmap     (gboolean          interactive,
+@@ -173,8 +186,10 @@
+                                             gint32           drawable_ID,
+                                             NSData          *data);
+ 
++#if HAVE_QD_HEADERS
+ static gint32   clipboard_load_pict        (gboolean         interactive,
+                                             gchar            *filename);
++#endif
+ 
+ GimpPlugInInfo PLUG_IN_INFO =
+ {
+@@ -291,6 +306,7 @@
+                           1, 0,
+                           copy_args, NULL);
+ 
++#if HAVE_QD_HEADERS
+   gimp_install_procedure ("file_pict_load",
+                           "Loads files of Macintosh PICT file format",
+                           "Loads files of Macintosh PICT file format",
+@@ -308,6 +324,7 @@
+                                     "pict",
+                                     "",
+                                     "");
++#endif
+ }
+ 
+ static void
+@@ -324,7 +341,7 @@
+   int interactive = (GIMP_RUN_INTERACTIVE==run_mode);
+   int ok = FALSE;
+   
+-  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
++	NSAutoreleasePool *pool = [NSAutoreleasePool new];
+   
+   *nreturn_vals = 1;
+   *return_vals = values;
+@@ -348,6 +365,7 @@
+     ok = clipboard_paste_service (interactive, @"Grab/Selection");
+   else if (strcmp (name, "plug_in_clipboard_grab_timed") == 0)
+     ok = clipboard_paste_service (interactive, @"Grab/Timed Screen");
++#if HAVE_QD_HEADERS
+   else if (strcmp (name, "file_pict_load") == 0)
+     {
+       gint32 image = clipboard_load_pict (interactive, param[1].data.d_string);
+@@ -362,12 +380,13 @@
+   else
+     {
+       values[0].data.d_status = GIMP_PDB_CALLING_ERROR;
+-      [pool release];
++		[pool drain];
+       return;
+     }
++#endif
+   
+   values[0].data.d_status = ok ? GIMP_PDB_SUCCESS : GIMP_PDB_EXECUTION_ERROR;
+-  [pool release];
++	[pool drain];
+ }
+ 
+ /*
+@@ -523,10 +542,13 @@
+     {
+       [board setData: [bitmap TIFFRepresentation] forType: NSTIFFPboardType];
+ 
++#if HAVE_QD_HEADERS
+       /* Force conversion to PICT before we leave */
+       [board types];
+       [board dataForType: NSPICTPboardType];
++#endif
+     }
++	[bitmap release];
+ 
+   return TRUE;
+ }
+@@ -553,7 +575,7 @@
+ {
+   NSApplication *app = [NSApplication sharedApplication];
+   [app registerServicesMenuSendTypes: nil
+-       returnTypes: [NSArray arrayWithObjects: NSTIFFPboardType, nil]];
++						   returnTypes: [NSArray arrayWithObject: NSTIFFPboardType]];
+ 
+   NSPasteboard *board = [NSPasteboard pasteboardWithUniqueName];
+ 
+@@ -561,13 +583,10 @@
+   if (NSPerformService(service, board))
+     return clipboard_paste_board (interactive, IMAGE_NONE, IMAGE_NONE, board);
+ 
+-  g_message (_("Couldn't run system service %s"), [service cString]);
++	g_message (_("Couldn't run system service %s"), [service UTF8String]);
+   return FALSE;
+ }
+ 
+-
+-
+-
+ /*
+  * Find pasteable image(s) from a given pasteboard and um... paste them.
+  */
+@@ -582,7 +601,9 @@
+   NSString *type = [board availableTypeFromArray:
+     [NSArray arrayWithObjects:
+       NSTIFFPboardType,
++#if HAVE_QD_HEADERS
+       NSPICTPboardType,
++#endif
+       NSRTFDPboardType,
+       nil]];
+   if (type == nil)
+@@ -601,8 +622,10 @@
+   if ([type isEqualToString: NSTIFFPboardType])
+     return clipboard_paste_bitmap (interactive, image_ID, drawable_ID,
+       [NSBitmapImageRep imageRepWithData: data], NULL);
++#if HAVE_QD_HEADERS
+   else if ([type isEqualToString: NSPICTPboardType])
+     return clipboard_paste_pict (interactive, image_ID, drawable_ID, data, NULL);
++#endif
+   else if ([type isEqualToString: NSRTFDPboardType])
+     return clipboard_paste_rtfd (interactive, image_ID, drawable_ID, data);
+ 
+@@ -610,7 +633,7 @@
+   return FALSE;
+ }
+ 
+-
++#if HAVE_QD_HEADERS
+ /*
+  * Render a given PICT into a newly created offscreen 32-bit graphics
+  * world, returning some handy information about the bits.
+@@ -825,6 +848,7 @@
+   
+   return retval;
+ }
++#endif
+ 
+ static gboolean
+ clipboard_paste_image (gboolean       interactive,
+@@ -975,7 +999,7 @@
+       if (channels != (3 + alpha))
+         {
+           g_message (_("Don't understand %d-channel image in RGB image (%s; alpha: %s)"),
+-                     channels, [colorSpace cString], alpha ? "yes" : "no");
++					   channels, [colorSpace UTF8String], alpha ? "yes" : "no");
+           return FALSE;
+         }
+     }
+@@ -986,10 +1010,11 @@
+       if (channels != (1 + alpha))
+         {
+           g_message (_("Don't understand %d-channel image in grayscale image (%s; alpha: %s)"),
+-                     channels, [colorSpace cString], alpha ? "yes" : "no");
++					   channels, [colorSpace UTF8String], alpha ? "yes" : "no");
+           return FALSE;
+         }
+     }
++	/* Apparently black color spaces are depricated in Snow Leopard and later*/
+   else if ([colorSpace isEqualToString: NSCalibratedBlackColorSpace] ||
+            [colorSpace isEqualToString: NSDeviceBlackColorSpace])
+     {
+@@ -997,13 +1022,13 @@
+       if (channels != (1 + alpha))
+         {
+           g_message (_("Don't understand %d-channel image in grayscale image (%s; alpha: %s)"),
+-                     channels, [colorSpace cString], alpha ? "yes" : "no");
++					   channels, [colorSpace UTF8String], alpha ? "yes" : "no");
+           return FALSE;
+         }
+     }
+   else
+     {
+-      g_message (_("Unknown colorspace! %s"), [colorSpace cString]);
++		g_message (_("Unknown colorspace! %s"), [colorSpace UTF8String]);
+       return FALSE;
+     }
+ 
+@@ -1132,7 +1157,7 @@
+                                 [item regularFileContents]], NULL))
+                         numCopied++;
+                       else
+-                        NSLog (@"Not a TIFF: %s", [item filename]);
++							NSLog (@"Not a TIFF: %@", [item filename]);
+                     }
+                 }
+               if (numCopied == 0)
+@@ -1154,6 +1179,7 @@
+   return FALSE;
+ }
+ 
++#if HAVE_QD_HEADERS
+ static gint32
+ clipboard_load_pict (gboolean  interactive,
+                      gchar    *filename)
+@@ -1181,3 +1207,5 @@
+   g_message ("Could not open file %s", filename);
+   return -1;
+ }
++#endif
++

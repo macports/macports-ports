@@ -1,0 +1,338 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           java 1.0
+PortGroup           legacysupport 1.1
+
+legacysupport.use_static                    yes
+legacysupport.newest_darwin_requires_legacy 13
+
+epoch               1
+
+# List of all bazel sub-ports ( now obsolete )
+set bazel_subports {
+    bazel-6
+}
+
+set all_bazels ${bazel_subports}
+lappend all_bazels bazel
+
+# define ports and sub-ports
+name bazel
+foreach b ${bazel_subports} { subport $b {} }
+
+# The oldest Xcode version to use default Xcode compiler
+set bazel_min_xcode 9.0
+
+# Extra args for bazel command
+set extra_args "\
+--noincompatible_fix_package_group_reporoot_syntax \
+--noincompatible_validate_top_level_header_inclusions \
+"
+
+# Note bazel-3.{1,5,7} build on OSX10.11 but fail at runtime with
+# dyld: lazy symbol binding failed: Symbol not found: _os_log_create
+set min_darwin      16
+
+if { ${name} eq ${subport} } {
+
+    # Main port
+    github.setup    bazelbuild ${name} 8.5.1
+    revision        0
+    checksums       rmd160  29ce79c82fcd0cdd20d3eb42620f71627c58bd6a \
+                    sha256  bf66a1cbaaafec32e1e103d0e07343082f1f0f3f20ad4c6b66c4eda3f690ed4d \
+                    size    232801456
+
+    set bazel_min_xcode 10.3
+    compiler.blacklist-append {clang < 1000}
+    compiler.blacklist-append {macports-clang-[5-9].0}
+
+    # Required java version.
+    java.version    21
+    # LTS JDK port to install if required java not found
+    java.fallback   openjdk21
+
+} elseif { "bazel-6" eq ${subport} } {
+    PortGroup       obsolete 1.0
+
+    # Specific version for py-tensorflow - DO NOT CHANGE
+    github.setup    bazelbuild ${name} 6.5.0
+    revision        1
+
+    # Remove this obsolete subport after: 2027-03-01
+    replaced_by     bazel
+}
+
+# exclude pre-release versions
+github.livecheck.regex  {([0-9.]+)}
+
+# Check OS support
+if { ${os.platform} eq "darwin" && ${os.major} < ${min_darwin} } {
+    known_fail yes
+    # https://trac.macports.org/ticket/58518
+    pre-fetch {
+        ui_error "${subport} ${version} requires macOS 10.[expr ${min_darwin} - 4] (Darwin${min_darwin}) or newer"
+        return -code error "incompatible macOS version"
+    }
+}
+
+# JDK only needed at build time, but java PG sets lib dependency so
+# declare no conflict to allow redistribution of binaries.
+license_noconflict  ${java.fallback}
+
+github.tarball_from releases
+
+categories          devel
+
+maintainers         {tfmnet.com:mohamed.issa @missa-prime}  \
+                    {gmail.com:herby.gillot @herbygillot}   \
+                    openmaintainer
+
+description         A tool for automating builds and tests.
+long_description    {*}${description}
+
+license             Apache-2
+
+distname            ${distname}-dist
+
+use_zip             yes
+extract.mkdir       yes
+
+use_configure       no
+
+patch.pre_args-replace  -p0 -p1
+
+# By default, the Xcode Locator is built as arm64/x86_64.
+# For 10.15 and earlier, disable that behavior.
+if {${os.platform} eq "darwin" && ${os.major} < 20} {
+    ui_info "Adding patch to disable dual arm64/x86_64"
+    patchfiles-append patch-tools-osx-build-arch.diff
+}
+
+# Even though bazel can build without Xcode, mark use Xcode for now since it fails to
+# build with tracemode on latest master if both CLT and Xcode are available.
+# Better solution is to respect MacPorts environment configure.developer_dir
+use_xcode           yes
+
+compiler.cxx_standard 2011
+
+# Always force the use of the un-versioned SDK
+configure.sdk_version
+
+configure.ccache    no
+
+# Use Python 3
+set py3ver 3.13
+
+depends_lib-append  port:cctools
+
+depends_build-append \
+                    bin:zip:zip \
+                    port:python[string map {. {}} ${py3ver}]
+
+post-extract {
+    # Make dir with selected MP 'python2' and 'python3' and add to PATH during build below
+    file mkdir ${workpath}/bin
+    ln -s ${prefix}/bin/python${py3ver} ${workpath}/bin/python3
+    ln -s ${prefix}/bin/python${py3ver} ${workpath}/bin/python
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 16} {
+    # https://github.com/bazelbuild/bazel/issues/6188
+    depends_build-append  port:unzip
+}
+
+proc bazel_get_ccache_dir {} {
+    global portdbpath
+    return [file join $portdbpath build .ccache]
+}
+
+proc bazel_wrap_dir {} {
+    global workpath
+    return ${workpath}/bazelwrap
+}
+
+post-patch {
+    if       {[vercmp ${xcodeversion} 7.0] < 0} {
+        # Use hacked version that does not find anything.
+        # We use MacPorts compiler toolchain anyway so not a problem.
+        file copy -force ${filespath}/xcode_locator_fixes/Xcode6-xcode_locator.m ${worksrcpath}/tools/osx/xcode_locator.m
+    } elseif {[vercmp ${xcodeversion} 8.0] < 0} {
+        # Revert xcode-locator to an older version
+        # https://raw.githubusercontent.com/bazelbuild/bazel/7372c04d40d7ab45fa2649c8be002ee6909668d1/tools/osx/xcode_locator.m
+        file copy -force ${filespath}/xcode_locator_fixes/Xcode7-xcode_locator.m ${worksrcpath}/tools/osx/xcode_locator.m
+    } elseif {[vercmp ${xcodeversion} 9.0] < 0} {
+        # Revert xcode-locator to an older version
+        # From bazel 0.21.0
+        file copy -force ${filespath}/xcode_locator_fixes/Xcode8-xcode_locator.m ${worksrcpath}/tools/osx/xcode_locator.m
+    }
+
+    # Patch build files to enforce correct compiler
+    foreach f [ exec find ${worksrcpath}/ -name "configure" -or -name "configure.py" -or -name "compile.sh" -or -name "*.tpl" \
+                    -or -name "*.bzl" -or -name "CROSSTOOL" -or -name "configure.py" -or -name "MOCK_CROSSTOOL" ] {
+        foreach cmd {ar nm strip libtool ld objdump} {
+            reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
+        }
+        reinplace -q "s|/usr/bin/clang|${configure.cc}|g"       ${f}
+        reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"        ${f}
+        reinplace -q "s| clang | ${configure.cc} |g"            ${f}
+        reinplace -q "s|/usr/local/include|${prefix}/include|g" ${f}
+        reinplace -q "s|std=c++0x|std=c++11|g"                  ${f}
+        reinplace -q "s|std=c++1y|std=c++14|g"                  ${f}
+        reinplace -q "s|std=c++1z|std=c++17|g"                  ${f}
+    }
+
+    # Patch the wrapped clang code to use MP's compiler selection
+    set wrapdir [bazel_wrap_dir]
+    xinstall -m 0755 -d ${wrapdir}
+    foreach comp {cc cxx} {
+        set f [ open ${wrapdir}/${comp}_bazelwrap w 0755 ]
+        puts ${f} "#!/bin/bash"
+        puts ${f} "export CCACHE_DIR=[bazel_get_ccache_dir]"
+        set bzflags "\"\$\{\@\}\""
+        set bzcomp  "[set configure.${comp}]"
+        if { [option configure.ccache] && [file exists ${prefix}/bin/ccache] } {
+            set bzcomp "${prefix}/bin/ccache ${bzcomp}"
+        }
+        if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+            set bzflags "[legacysupport::get_cpp_flags] ${bzflags}"
+        }
+        puts ${f} "exec ${bzcomp} ${bzflags}"
+        close ${f}
+    }
+    foreach f [ exec find ${workpath}/ -name "wrapped_clang.cc" ] {
+        # Switch to selected compiler
+        reinplace -q "s|\"clang++\"|\"cxx_bazelwrap\"|g"     ${f}
+        reinplace -q "s|\"clang\"|\"cc_bazelwrap\"|g"        ${f}
+        # Bazel **really** doesn't want you changing stuff ;)
+        # https://stackoverflow.com/questions/47775668/bazel-how-to-skip-corrupt-installation-on-centos6
+        system "touch -m -t 210012120101 ${f}"
+    }
+}
+
+set wrapdir [bazel_wrap_dir]
+
+build.env-append  CC=${wrapdir}/cc_bazelwrap \
+                 CXX=${wrapdir}/cxx_bazelwrap \
+              TMPDIR=${workpath}/tmp \
+           JAVA_HOME=${java.home} \
+                PATH=${wrapdir}:$env(PATH)
+
+proc use_external_toolchain {} {
+    # global configure.compiler xcodeversion bazel_min_xcode os.major
+    # set is_mp_clang  [ expr { [ string match macports-clang-* ${configure.compiler} ] } ]
+    # set xcode_not_ok [ expr { ${xcodeversion} eq "none" || [ vercmp ${xcodeversion} ${bazel_min_xcode} ] < 0 } ]
+    # set use_legacy_s [ expr ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] ]
+    # return [ expr ${is_mp_clang} || ${xcode_not_ok} || ${use_legacy_s} ]
+    # Do not use above as seems to cause compilation failures. To be investigated.
+    #   src/main/native/unix_jni_darwin.cc:22:10: fatal error: 'os/log.h' file not found
+    #   #include <os/log.h>
+    return no
+}
+
+# Disable Xcode detection on older OSes, as we want the
+# MP provided commandline utilities to be used instead.
+if { [use_external_toolchain] } {
+    compiler.blacklist-append {clang}
+    set extra_args "--action_env=CC=${wrapdir}/cc --action_env=CXX=${wrapdir}/cxx ${extra_args}"
+    build.env-append     "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1"
+    configure.env-append "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1"
+}
+
+if { ${extra_args} ne "" } {
+    build.env-append "EXTRA_BAZEL_ARGS=${extra_args}"
+}
+
+variant bash_completion {
+    depends_build-append    bin:bash:bash
+}
+
+build {
+
+    # bazel cannot be built if gcc is 'port selected'
+    # https://trac.macports.org/ticket/58569
+    # Until it can be figured out how to stop bazel finding and using macports gcc
+    # just detect when this situation arises and error out...
+    if { [file exists ${prefix}/bin/gcc] } {
+        ui_error "${subport} cannot be built with 'port select gcc' active."
+        ui_error "Please run 'sudo port select gcc none' and try again."
+        ui_error "Once the build is complete, you can safely re-select your preferred gcc."
+        return -code error "build error"
+    }
+
+    # Build bazel
+    set bazel_cmd "PATH=${wrapdir}:${workpath}/bin:\$PATH JAVA_HOME=${java.home} VERBOSE=yes BAZEL_WRKDIR=${workpath} ./compile.sh"
+    # If using MP toolchain pass options to enforce this
+    if { [use_external_toolchain] } {
+        set bazel_cmd "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${bazel_cmd}"
+    }
+    if { ${extra_args} ne "" } {
+        set bazel_cmd "EXTRA_BAZEL_ARGS='${extra_args}' ${bazel_cmd}"
+    }
+    system -W ${worksrcpath} "${bazel_cmd}"
+
+    # Put executable in main working folder
+    xinstall -m 0755 -W ${worksrcpath}/output ${name} ${worksrcpath}
+
+    # Include bash completion support ?
+    if { [variant_isset bash_completion]} {
+
+        # Get ready to build the bash completion script
+        file delete -force /var/tmp/_${name}_root
+
+        # Build the bash completion script
+        system -W ${worksrcpath} "./${name} --max_idle_secs=30 --output_user_root=${workpath} build -s //scripts:${name}-complete.bash"
+
+    }
+}
+
+# Installation prefix. Specific to each bazel version.
+set myprefix ${prefix}/libexec/${subport}
+
+destroot {
+    # Copy compiled binary
+    set bindir ${myprefix}/bin
+    xinstall -d ${destroot}${bindir}
+    xinstall -m 0755 -W ${worksrcpath}/output ${name} ${destroot}${bindir}/
+    # Copy bash and zsh completion scripts to designated area for on-demand usage
+    if { [variant_isset bash_completion]} {
+        set bcompldir ${myprefix}/share/bash-completion/completions
+        xinstall -d ${destroot}${bcompldir}
+        xinstall -m 0755 ${worksrcpath}/${name}-bin/scripts/${name}-complete.bash ${destroot}${bcompldir}/${name}
+        set zcompldir ${myprefix}/share/zsh/site-functions
+        xinstall -d ${destroot}${zcompldir}
+        xinstall -m 0755 ${worksrcpath}/scripts/zsh_completion/_${name} ${destroot}${zcompldir}
+    }
+}
+
+post-destroot {
+    # Mark documentation and source directories
+    set docdir ${myprefix}/share/doc
+    set srcdir ${myprefix}/src
+    set bindir ${myprefix}/bin
+
+    # Copy documentation files
+    xinstall -d ${destroot}${docdir}
+    xinstall -m 0644 -W ${worksrcpath}  AUTHORS \
+                                        CHANGELOG.md \
+                                        CONTRIBUTING.md \
+                                        CONTRIBUTORS \
+                                        LICENSE \
+                                        README.md \
+                       ${destroot}${docdir}
+
+    # Copy source files
+    xinstall -d ${destroot}${srcdir}
+    file copy -force {*}[glob ${worksrcpath}/src/*] ${destroot}${srcdir}
+
+    # Link to binary in main prefix
+    ln -s ${bindir}/${name} ${destroot}${prefix}/bin/${subport}
+}
+
+notes "
+See http://bazel.build/docs/getting-started.html to start a new project!
+
+MacPorts bazel uses the compilers `cxx_bazelwrap` and `cc_bazelwrap`; set\
+these in the project path prior to building. See, e.g. PG bazel-1.0.tcl.
+"

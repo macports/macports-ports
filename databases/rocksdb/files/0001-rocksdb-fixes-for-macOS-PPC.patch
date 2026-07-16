@@ -1,0 +1,176 @@
+From bb8229f842aa1c8c407bcd0011b380f36a2908c9 Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Fri, 25 Nov 2022 16:43:29 +0800
+Subject: [PATCH] rocksdb: fixes for macOS PPC
+
+UPD 2024.01. For now, avoid -mcpu= on PowerPC, it may produce undesirable results.
+See: https://github.com/OpenMathLib/OpenBLAS/issues/4376
+
+---
+ CMakeLists.txt                                | 25 +++++++++++++++----
+ tools/db_bench_tool.cc                        |  6 +++++
+ .../range_tree/lib/portability/toku_atomic.h  | 15 +++++++++++
+ .../range_tree/lib/portability/toku_time.h    | 10 ++++++++
+ 4 files changed, 51 insertions(+), 5 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 1c716874a..f05495724 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -209,7 +209,7 @@ else()
+ endif()
+ 
+ include(CheckCCompilerFlag)
+-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64")
++if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64" AND NOT APPLE)
+   CHECK_C_COMPILER_FLAG("-mcpu=power9" HAS_POWER9)
+   if(HAS_POWER9)
+     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mcpu=power9 -mtune=power9")
+@@ -227,7 +227,21 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64")
+     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -maltivec")
+     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -maltivec")
+   endif(HAS_ALTIVEC)
+-endif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64")
++endif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64" AND NOT APPLE)
++
++if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc|powerpc64|ppc64)" AND APPLE)
++  CHECK_C_COMPILER_FLAG("-mtune=970" HAS_G5)
++  if(HAS_G5)
++    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mtune=970")
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mtune=970")
++  endif(HAS_G5)
++  CHECK_C_COMPILER_FLAG("-faltivec" HAS_ALTIVEC)
++  if(HAS_ALTIVEC)
++    message(STATUS " HAS_ALTIVEC yes")
++    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -faltivec")
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faltivec")
++  endif(HAS_ALTIVEC)
++endif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc|powerpc64|ppc64)" AND APPLE)
+ 
+ if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|AARCH64")
+         CHECK_C_COMPILER_FLAG("-march=armv8-a+crc+crypto" HAS_ARMV8_CRC)
+@@ -282,7 +296,7 @@ else()
+   else()
+     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^s390x" AND NOT HAS_S390X_MARCH_NATIVE)
+       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=z196")
+-    elseif(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64" AND NOT HAS_ARMV8_CRC)
++    elseif(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc|powerpc64|ppc64)" AND NOT HAS_ARMV8_CRC)
+       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+     endif()
+   endif()
+@@ -328,6 +342,7 @@ int main() {
+   if (NOT BUILTIN_ATOMIC)
+     #TODO: Check if -latomic exists
+     list(APPEND THIRDPARTY_LIBS atomic)
++    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -latomic")
+   endif()
+ endif()
+ 
+@@ -999,11 +1014,11 @@ if(HAVE_SSE42 AND NOT MSVC)
+     PROPERTIES COMPILE_FLAGS "-msse4.2 -mpclmul")
+ endif()
+ 
+-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64")
++if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64" AND NOT APPLE)
+   list(APPEND SOURCES
+     util/crc32c_ppc.c
+     util/crc32c_ppc_asm.S)
+-endif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64")
++endif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)64" AND NOT APPLE)
+ 
+ if(HAS_ARMV8_CRC)
+   list(APPEND SOURCES
+diff --git a/tools/db_bench_tool.cc b/tools/db_bench_tool.cc
+index 7182528b3..9304e6c32 100644
+--- a/tools/db_bench_tool.cc
++++ b/tools/db_bench_tool.cc
+@@ -2879,6 +2879,9 @@
+       fprintf(stderr, "CPUCache:   %s\n", cache_size.c_str());
+     }
+ #elif defined(__APPLE__)
++  #ifndef CPU_TYPE_ARM64 // Old macOS does not recognize arm64 and errs out.
++  #define CPU_TYPE_ARM64 CPU_TYPE_ARM
++  #endif
+     struct host_basic_info h;
+     size_t hlen = HOST_BASIC_INFO_COUNT;
+     if (host_info(mach_host_self(), HOST_BASIC_INFO, (host_info_t)&h,
+@@ -2897,6 +2900,9 @@
+         case CPU_TYPE_ARM64:
+           cpu_type = "arm64";
+           break;
++        case CPU_TYPE_POWERPC:
++          cpu_type = "powerpc";
++          break;
+         default:
+           break;
+       }
+diff --git a/utilities/transactions/lock/range/range_tree/lib/portability/toku_atomic.h b/utilities/transactions/lock/range/range_tree/lib/portability/toku_atomic.h
+index aaa2298fa..3b7b2a63d 100644
+--- a/utilities/transactions/lock/range/range_tree/lib/portability/toku_atomic.h
++++ b/utilities/transactions/lock/range/range_tree/lib/portability/toku_atomic.h
+@@ -77,25 +77,41 @@ template <typename T, typename U>
+ __attribute__((always_inline)) static inline T toku_sync_fetch_and_add(T *addr,
+                                                                        U diff) {
+   paranoid_invariant(!crosses_boundary(addr, sizeof *addr));
++#if defined(__APPLE__) && defined(__GNUC__)
++  return __atomic_fetch_add(addr, diff, __ATOMIC_SEQ_CST);
++#else
+   return __sync_fetch_and_add(addr, diff);
++#endif
+ }
+ template <typename T, typename U>
+ __attribute__((always_inline)) static inline T toku_sync_add_and_fetch(T *addr,
+                                                                        U diff) {
+   paranoid_invariant(!crosses_boundary(addr, sizeof *addr));
++#if defined(__APPLE__) && defined(__GNUC__)
++  return __atomic_add_fetch(addr, diff, __ATOMIC_SEQ_CST);
++#else
+   return __sync_add_and_fetch(addr, diff);
++#endif
+ }
+ template <typename T, typename U>
+ __attribute__((always_inline)) static inline T toku_sync_fetch_and_sub(T *addr,
+                                                                        U diff) {
+   paranoid_invariant(!crosses_boundary(addr, sizeof *addr));
++#if defined(__APPLE__) && defined(__GNUC__)
++  return __atomic_fetch_sub(addr, diff, __ATOMIC_SEQ_CST);
++#else
+   return __sync_fetch_and_sub(addr, diff);
++#endif
+ }
+ template <typename T, typename U>
+ __attribute__((always_inline)) static inline T toku_sync_sub_and_fetch(T *addr,
+                                                                        U diff) {
+   paranoid_invariant(!crosses_boundary(addr, sizeof *addr));
++#if defined(__APPLE__) && defined(__GNUC__)
++  return __atomic_sub_fetch(addr, diff, __ATOMIC_SEQ_CST);
++#else
+   return __sync_sub_and_fetch(addr, diff);
++#endif
+ }
+ template <typename T, typename U, typename V>
+ __attribute__((always_inline)) static inline T toku_sync_val_compare_and_swap(
+diff --git a/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h b/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h
+index 46111e7f0..7c5f3255f 100644
+--- a/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h
++++ b/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h
+@@ -133,6 +133,16 @@ static inline tokutime_t toku_time_now(void) {
+   return result;
+ #elif defined(__powerpc__)
+   return __ppc_get_timebase();
++#elif defined(__POWERPC__)
++  uint32_t upper, lower, tmp;
++  #define mftbu(r) __asm__ volatile("mftbu %0" : "=r"(r))
++  #define mftb(r)  __asm__ volatile("mftb  %0" : "=r"(r))
++  do {
++    mftbu(upper);
++    mftb(lower);
++    mftbu(tmp);
++  } while (tmp != upper);
++  return ((uint64_t)upper << 32) | lower;
+ #elif defined(__s390x__)
+   uint64_t result;
+   asm volatile("stckf %0" : "=Q"(result) : : "cc");
+-- 
+2.38.1
+

@@ -1,0 +1,162 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem      1.0
+PortGroup       meson 1.0
+PortGroup       muniversal 1.0
+
+name            dbus
+version         1.16.2
+revision        0
+
+checksums       rmd160  52ecba5b2bccc0802bb2e13f30e5b2f78765e32d \
+                sha256  0ba2a1a4b16afe7bceb2c07e9ce99a8c2c3508e5dec290dbb643384bd6beb7e2 \
+                size    1115644
+
+maintainers     {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
+categories      devel
+license         {AFL-2.1 GPL-2+}
+description     A message bus system, a simple way for applications to talk to one another.
+
+long_description \
+                {*}${description}
+
+homepage        https://www.freedesktop.org/wiki/Software/dbus/
+master_sites    https://dbus.freedesktop.org/releases/dbus/
+
+use_xz          yes
+
+patchfiles      patch-bus-system.conf.in.diff \
+                patch-dbus-server-launchd.diff
+
+# see https://bugs.freedesktop.org/show_bug.cgi?id=9449
+patchfiles-append   patch-org.freedesktop.dbus-session.plist.in.diff
+
+set py_ver          3.14
+set py_ver_nodot    [string map {. {}} ${py_ver}]
+
+depends_build   path:bin/pkg-config:pkgconfig \
+                port:python${py_ver_nodot}
+
+depends_lib     port:expat
+
+if {[getuid] != 0} {
+    set dbus_user     ${install.user}
+    set dbus_group    ${install.group}
+} else {
+    if {${os.platform} eq "darwin" && ${os.major} >= 9} {
+        set dbus_user     _messagebus
+    } else {
+        set dbus_user     messagebus
+    }
+    set dbus_group    ${dbus_user}
+    add_users         ${dbus_user} group=${dbus_group} realname=Message\ Bus
+}
+set daemon_uniquename   org.freedesktop.dbus-system
+set agent_uniquename    org.freedesktop.dbus-session
+
+startupitem.type    launchd
+startupitem.create  no
+startupitems        name        dbus-system \
+                    location    LaunchDaemons \
+                    uniquename  ${daemon_uniquename} \
+                    plist       ${daemon_uniquename}.plist \
+                    name        dbus-session \
+                    location    LaunchAgents \
+                    uniquename  ${agent_uniquename} \
+                    plist       ${agent_uniquename}.plist
+
+configure.python    ${prefix}/bin/python${py_ver}
+
+configure.args  -Ddoxygen_docs=disabled \
+                -Dxml_docs=disabled \
+                -Dducktype_docs=disabled \
+                -Dx11_autolaunch=disabled \
+                -Dlaunchd=enabled \
+                -Dlaunchd_agent_dir=${prefix}/etc/LaunchAgents/${agent_uniquename} \
+                -Ddbus_user=${dbus_user} \
+                -Dmodular_tests=disabled
+
+post-patch {
+    reinplace "s|#!/usr/bin/env python3|#!${configure.python}|" \
+        ${worksrcpath}/meson_post_install.py \
+        ${worksrcpath}/test/data/copy_data_for_tests.py
+    # Make agent initially disabled.
+    reinplace "s|</array>|</array>\\\n\\\n\\\t<key>Disabled</key>\\\n\\\t<true/>|" \
+        ${worksrcpath}/bus/org.freedesktop.dbus-session.plist.in
+}
+
+test.run        yes
+
+destroot.keepdirs \
+    ${destroot}${prefix}/share/dbus-1/services \
+    ${destroot}${prefix}/var/run/dbus \
+    ${destroot}${prefix}/etc/dbus-1/system.d \
+    ${destroot}${prefix}/etc/dbus-1/session.d
+
+# universal_archs_to_use might not be set before pre-fetch.
+pre-destroot {
+    global merger_dont_diff merger_configure_env
+
+    # PortGroup muniversal has difficulty merging three files.
+    if {[info exists universal_archs_to_use] && [llength ${universal_archs_to_use}] == 3} {
+        set merger_dont_diff "${prefix}/lib/dbus-1.0/include/dbus/dbus-arch-deps.h"
+    }
+}
+
+post-destroot {
+    # Simplify startup script over startupitem.install.
+    # See #15081
+    xinstall -d -m 0755 ${destroot}${prefix}/etc/LaunchDaemons/${daemon_uniquename}
+    set plist [open "${destroot}${prefix}/etc/LaunchDaemons/${daemon_uniquename}/${daemon_uniquename}.plist" w 0644]
+
+    puts ${plist} "<?xml version='1.0' encoding='UTF-8'?>"
+    puts ${plist} "<!DOCTYPE plist PUBLIC \"-//Apple Computer//DTD PLIST 1.0//EN\""
+    puts ${plist} "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\" >"
+    puts ${plist} "<plist version='1.0'>"
+    puts ${plist} "<dict>"
+
+    puts ${plist} "<key>Label</key><string>${daemon_uniquename}</string>"
+
+    puts ${plist} "<key>ProgramArguments</key>"
+    puts ${plist} "<array>"
+    puts ${plist} "\t<string>${prefix}/bin/dbus-daemon</string>"
+    puts ${plist} "\t<string>--system</string>"
+    puts ${plist} "\t<string>--nofork</string>"
+    puts ${plist} "</array>"
+
+    puts ${plist} "<key>KeepAlive</key><true/>"
+
+    puts ${plist} "<key>Disabled</key><true/>"
+
+    puts ${plist} "</dict>"
+    puts ${plist} "</plist>"
+
+    close ${plist}
+
+    if {${startupitem.install} && [geteuid] == 0} {
+        xinstall -d -m 0755 ${destroot}/Library/LaunchDaemons
+        xinstall -d -m 0755 ${destroot}/Library/LaunchAgents
+        ln -s ${prefix}/etc/LaunchDaemons/${daemon_uniquename}/${daemon_uniquename}.plist ${destroot}/Library/LaunchDaemons
+        ln -s ${prefix}/etc/LaunchAgents/${agent_uniquename}/${agent_uniquename}.plist ${destroot}/Library/LaunchAgents
+    } else {
+        ln -sf ${prefix}/etc/LaunchDaemons/${daemon_uniquename}/${daemon_uniquename}.plist ${destroot}${prefix}/etc/LaunchDaemons
+        ln -sf ${prefix}/etc/LaunchAgents/${agent_uniquename}/${agent_uniquename}.plist ${destroot}${prefix}/etc/LaunchAgents
+    }
+
+    system "env DYLD_LIBRARY_PATH=${destroot}${prefix}/lib ${destroot}${prefix}/bin/dbus-uuidgen --ensure=${destroot}${prefix}/var/lib/dbus/machine-id"
+}
+
+post-activate {
+    file attributes ${prefix}/var/run/dbus -group ${dbus_group} -owner ${dbus_user}
+    file attributes ${prefix}/libexec/dbus-daemon-launch-helper -group ${dbus_group}
+}
+
+variant test description {enable modular tests} {
+    configure.args-replace  -Dmodular_tests=disabled \
+                            -Dmodular_tests=enabled
+    depends_build-append    path:lib/pkgconfig/glib-2.0.pc:glib2
+}
+
+livecheck.type  regex
+livecheck.url   [lindex ${master_sites} 0]
+livecheck.regex {dbus-(\d+\.\d*[02468](\.\d+)*)\.tar}

@@ -1,0 +1,369 @@
+Upstream: https://gist.github.com/TingPing/2d88a875b50da15c352d/
+--- a/configure.in       (revision 30591)
++++ b/configure.in       (working copy)
+@@ -33,4 +33,5 @@
+ AC_PROG_CC
+ AC_PROG_CPP
++AC_PROG_OBJC
+ AC_PROG_INSTALL
+ AC_PROG_LN_S
+--- a/src/applespell/Makefile.am	2010-04-01 22:53:37.000000000 +0200
++++ b/src/applespell/Makefile.am	2012-01-11 22:42:13.000000000 +0100
+@@ -1,4 +1,13 @@
+-EXTRA_DIST=			\
+-	applespell_checker.h	\
+-	applespell_checker.mm	\
+-	AppleSpell.config
++target_lib = libenchant_applespell.la
++
++INCLUDES=-I$(top_srcdir)/src $(ENCHANT_CFLAGS) $(CC_WARN_CFLAGS) -DXP_TARGET_COCOA -xobjective-c -D_ENCHANT_BUILD=1
++
++applespell_LTLIBRARIES = $(target_lib)
++applespelldir= $(libdir)/enchant
++
++libenchant_applespell_la_LIBADD= $(ENCHANT_LIBS) -lobjc $(top_builddir)/src/libenchant.la
++libenchant_applespell_la_LDFLAGS = -module -avoid-version -no-undefined -framework Cocoa
++libenchant_applespell_la_SOURCES = applespell_provider.m
++libenchant_applespell_la_LIBTOOLFLAGS = --tag=CC
++
++libenchant_applespell_lalibdir=$(libdir)/enchant
+--- a/src/applespell/applespell_provider.m	2012-01-11 22:46:35.000000000 +0100
++++ b/src/applespell/applespell_provider.m	2012-01-11 22:39:17.000000000 +0100
+@@ -0,0 +1,337 @@
++/* vim: set sw=8: -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
++/* enchant
++ * Copyright (C) 2004 Remi Payette
++ * Copyright (C) 2004 Francis James Franklin
++ * 
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ * 
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ * 
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  
++ * 02110-1301, USA.
++ */
++
++#include <glib.h>
++#include <gmodule.h>
++#include <Cocoa/Cocoa.h>
++#include <AvailabilityMacros.h>
++
++#include "enchant-provider.h"
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++ENCHANT_MODULE_EXPORT (EnchantProvider *)
++init_enchant_provider (void);
++
++ENCHANT_MODULE_EXPORT (void)
++configure_enchant_provider (EnchantProvider *provider, const gchar *module_dir);
++
++#ifdef __cplusplus
++}
++#endif
++
++ENCHANT_PLUGIN_DECLARE("AppleSpell")
++
++typedef struct
++{
++	NSSpellChecker *checker;
++	NSString *language;
++} Dictionary;
++
++static Dictionary *
++dictionary_new (NSSpellChecker *checker,
++                NSString       *language)
++{
++	Dictionary *ret;
++
++	ret = g_slice_new (Dictionary);
++
++	ret->checker = checker;
++	ret->language = language;
++
++	return ret;
++}
++
++static void
++dictionary_free (Dictionary *dictionary)
++{
++	[dictionary->language release];
++	g_slice_free (Dictionary, dictionary);
++}
++
++static gchar **
++applespell_dict_suggest (EnchantDict         *dict,
++                         const gchar * const  word,
++                         size_t               len,
++                         size_t              *out_n_suggs)
++{
++	NSAutoreleasePool *pool;
++	gchar **ret = NULL;
++	NSString *str;
++	Dictionary *d;
++	NSArray *words;
++	NSRange range;
++	guint i = 0;
++
++	pool = [[NSAutoreleasePool alloc] init];
++
++	d = dict->user_data;
++
++	str = [[NSString alloc] initWithBytes:word length:len encoding:NSUTF8StringEncoding];
++
++	range.location = 0;
++	range.length = [str length];
++
++#if MAC_OS_X_VERSION_MIN_REQUIRED > MAC_OS_X_VERSION_10_5
++	words = [d->checker guessesForWordRange:range
++	                    inString:str
++	                    language:d->language
++	                    inSpellDocumentWithTag:0];
++#else
++	[d->checker setLanguage:d->language]; 
++	words = [d->checker guessesForWord:str];
++#endif
++
++	*out_n_suggs = [words count];
++
++	ret = g_new0 (gchar *, *out_n_suggs + 1);
++
++	for (i = 0; i < [words count]; ++i)
++	{
++		ret[i] = g_strdup ([[words objectAtIndex:i] UTF8String]);
++	}
++
++	[str release];
++	[pool release];
++
++	return ret;
++}
++
++static gint
++applespell_dict_check (EnchantDict         *dict,
++                       const gchar * const  word,
++                       size_t               len)
++{
++	NSAutoreleasePool *pool;
++	gint result = 0;
++	NSString *str;
++	Dictionary *d;
++	NSRange range;
++
++	pool = [[NSAutoreleasePool alloc] init];
++
++	d = dict->user_data;
++
++	str = [[NSString alloc] initWithBytes:word length:len encoding:NSUTF8StringEncoding];
++
++	range = [d->checker checkSpellingOfString:str
++	                    startingAt:0
++	                    language:d->language
++	                    wrap:true
++	                    inSpellDocumentWithTag:0
++	                    wordCount:NULL];
++
++	result = range.length > 0 ? 1 : 0;
++
++	[str release];
++	[pool release];
++
++	return result;
++}
++
++static EnchantDict *
++applespell_provider_request_dict (EnchantProvider    *provider,
++                                  const char * const  tag)
++{
++	NSAutoreleasePool *pool;
++	EnchantDict *dict;
++	NSString *str;
++
++	pool = [[NSAutoreleasePool alloc] init];
++	str = [[NSString alloc] initWithUTF8String:tag];
++
++	dict = g_new0 (EnchantDict, 1);
++
++	dict->check = applespell_dict_check;
++	dict->suggest = applespell_dict_suggest;
++
++	dict->user_data = dictionary_new (provider->user_data,
++	                                  str);
++
++	[str retain];
++
++	[pool release];
++	return dict;
++}
++
++static void
++applespell_provider_dispose_dict (EnchantProvider *provider,
++                                  EnchantDict     *dict)
++{
++	NSAutoreleasePool *pool;
++
++	pool = [[NSAutoreleasePool alloc] init];
++
++	dictionary_free (dict->user_data);
++	g_free (dict);
++
++	[pool release];
++}
++
++#if MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5
++static gchar const *available_languages[] = {
++	"en",
++	"en_GB",
++	"en_AU",
++	"de",
++	"fr",
++	"nl",
++	"pl",
++	NULL
++};
++
++#endif
++
++static gint
++applespell_provider_dictionary_exists (EnchantProvider     *provider,
++                                       const gchar * const  tag)
++{
++	NSAutoreleasePool *pool;
++	gint result = 0;
++	NSSpellChecker *checker;
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_5
++	NSArray *languages;
++	guint i;
++#else
++	gchar const **ptr;
++#endif
++
++	pool = [[NSAutoreleasePool alloc] init];
++
++	checker = provider->user_data;
++
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_5
++	languages = [checker availableLanguages];
++
++	for (i = 0; i < [languages count]; ++i)
++	{
++		if (g_strcmp0 (tag, [[languages objectAtIndex:i] UTF8String]) == 0)
++		{
++			result = 1;
++			break;
++		}
++	}
++#else
++	ptr = available_languages;
++	
++	while (ptr && *ptr)
++	{
++		if (g_strcmp0 (tag, *ptr) == 0)
++		{
++			result = 1;
++			break;
++		}
++		++ptr;
++	}
++#endif
++
++	[pool release];
++
++	return result;
++}
++
++static void
++applespell_provider_dispose (EnchantProvider *provider)
++{
++	g_free (provider);
++}
++
++static const gchar *
++applespell_provider_identify (EnchantProvider *provider)
++{
++	return "AppleSpell";
++}
++
++static const gchar *
++applespell_provider_describe (EnchantProvider *provider)
++{
++	return "AppleSpell Provider";
++}
++
++static gchar **
++applespell_provider_list_dicts (EnchantProvider *provider,
++                                size_t          *out_n_dicts)
++{
++	NSSpellChecker *checker;
++	NSAutoreleasePool *pool;
++	gchar **ret = NULL;
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_5
++	NSArray *languages;
++	guint i = 0;
++#endif
++
++	pool = [[NSAutoreleasePool alloc] init];
++
++	checker = provider->user_data;
++
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_5
++	languages = [checker availableLanguages];
++	*out_n_dicts = [languages count];
++
++	ret = g_new0 (gchar *, *out_n_dicts + 1);
++
++	for (i = 0; i < [languages count]; ++i)
++	{
++		ret[i] = g_strdup ([[languages objectAtIndex:i] UTF8String]);
++	}
++#else
++	ret = g_strdupv ((gchar **)available_languages);
++#endif
++
++	[pool release];
++
++	return ret;
++}
++
++ENCHANT_MODULE_EXPORT (EnchantProvider *)
++init_enchant_provider (void)
++{
++	NSAutoreleasePool *pool;
++	EnchantProvider *provider;
++
++	pool = [[NSAutoreleasePool alloc] init];
++
++	provider = g_new0 (EnchantProvider, 1);
++
++	provider->dispose = applespell_provider_dispose;
++	provider->request_dict = applespell_provider_request_dict;
++	provider->dispose_dict = applespell_provider_dispose_dict;
++	provider->dictionary_exists = applespell_provider_dictionary_exists;
++	provider->identify = applespell_provider_identify;
++	provider->describe = applespell_provider_describe;
++	provider->list_dicts = applespell_provider_list_dicts;
++
++	provider->user_data = [NSSpellChecker sharedSpellChecker];
++
++	[pool release];
++
++	return provider;
++}
++
++ENCHANT_MODULE_EXPORT (void)
++configure_enchant_provider (EnchantProvider *provider,
++                            const gchar     *module_dir)
++{
++	return;
++}

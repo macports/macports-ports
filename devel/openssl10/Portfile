@@ -1,0 +1,140 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           muniversal 1.0
+PortGroup           deprecated 1.0
+
+deprecated.eol_version yes
+
+set short_v         1.0
+name                openssl[string map {. {}} $short_v]
+version             ${short_v}.2u
+revision            4
+
+categories          devel security
+license             OpenSSL SSLeay
+maintainers         nomaintainer
+
+description         OpenSSL SSL/TLS cryptography library
+long_description    The OpenSSL Project is a collaborative effort to \
+                    develop a robust, commercial-grade, full-featured, \
+                    and Open Source toolkit implementing the Secure \
+                    Sockets Layer (SSL v2/v3) and Transport Layer \
+                    Security (TLS v1) protocols as well as \
+                    a full-strength general purpose cryptography \
+                    library.
+homepage            https://www.openssl.org
+
+depends_lib         port:zlib
+
+distname            openssl-${version}
+
+# See https://www.openssl.org/source/mirror.html
+master_sites        ${homepage}/source \
+                    ftp://gd.tuwien.ac.at/infosys/security/openssl/source/ \
+                    http://mirror.switch.ch/ftp/mirror/openssl/source/ \
+                    ftp://ftp.fi.muni.cz/pub/openssl/source/ \
+                    ftp://ftp.pca.dfn.de/pub/tools/net/openssl/source/ \
+                    http://artfiles.org/openssl.org/source/ \
+                    ftp://ftp.linux.hr/pub/openssl/source/ \
+                    ftp://guest.kuria.katowice.pl/pub/openssl/source/
+
+checksums           rmd160  b8e7e5df9582e29fdd00bd03d47e980a39ba11ab \
+                    sha256  ecd0c6ffb493dd06707d38b14bb4d8c2288bb7033735606569d8f90f89669d16 \
+                    size    5355412
+
+patchfiles          install-headers-HFS+.patch \
+                    parallel-building.patch \
+                    remove-duplicate-bn_print-doc.patch \
+                    darwin64-arm64-cc.patch
+
+set my_name         openssl-${short_v}
+set my_prefix       ${prefix}/libexec/${name}
+
+configure.ccache    no
+configure.perl      /usr/bin/perl
+configure.cmd       ./Configure
+configure.pre_args  --prefix=${my_prefix}
+configure.args     -L${prefix}/lib \
+                    no-krb5 \
+                  --openssldir=${my_prefix}/etc/openssl \
+                    shared \
+                    zlib
+
+# Use SDK if necessary.
+if {${configure.sdkroot} ne ""} {
+    configure.args-append   '-isysroot ${configure.sdkroot}' \
+                            -Wl,-syslibroot,${configure.sdkroot}
+}
+
+set merger_arch_compiler no
+array set merger_configure_args {
+    ppc     darwin-ppc-cc
+    i386    darwin-i386-cc
+    ppc64   darwin64-ppc-cc
+    x86_64  darwin64-x86_64-cc
+    arm64   darwin64-arm64-cc
+}
+platform darwin {
+    # Don't use i386 assembly on Tiger (#38015, #43303).
+    if {${os.major} <= 8} {
+        append merger_configure_args(i386) { no-asm}
+    }
+    # Don't use x86-64 assembly on Tiger or Leopard.
+    if {${os.major} <= 9} {
+        append merger_configure_args(x86_64) { no-asm}
+    }
+}
+# Don't pass --host to configure.
+array set merger_host {ppc {} i386 {} ppc64 {} x86_64 {} arm64 {}}
+
+if {(!${universal_possible} || ![variant_isset universal])
+        && [info exists merger_configure_args(${configure.build_arch})]} {
+    configure.args-append $merger_configure_args(${configure.build_arch})
+}
+configure.universal_args-delete --disable-dependency-tracking
+
+# Parallel builds don't quite work (#46719).
+use_parallel_build  no
+
+test.run            yes
+
+pre-destroot {
+    if {[variant_exists universal] && [variant_isset universal]} {
+        global merger_dont_diff
+        if {[llength ${universal_archs_to_use}] > 2} {
+            lappend merger_dont_diff ${my_prefix}/include/openssl/opensslconf.h
+            # Previous version/revisions got this wrong, but this situation
+            # is too obscure to justify revbumping the dependents.
+            notes-append "Universal dependents may need to be rebuilt."
+        }
+    }
+}
+
+post-destroot {
+    # Create some links to main prefix
+    xinstall -d ${destroot}${prefix}/include/${my_name}
+    xinstall -d ${destroot}${prefix}/lib/${my_name}
+    ln -s ${my_prefix}/include/openssl ${destroot}/${prefix}/include/${my_name}/
+    foreach l [glob -tails -directory ${destroot}${my_prefix}/lib *] {
+        ln -s ${my_prefix}/lib/${l} ${destroot}/${prefix}/lib/${my_name}/${l}
+    }
+    foreach b [glob -tails -directory ${destroot}${my_prefix}/bin *] {
+        ln -s ${my_prefix}/bin/${b} ${destroot}/${prefix}/bin/${b}-${short_v}
+    }
+    # shared/man dir seems to still end up in ${prefix} and not libexec...
+    move ${destroot}${prefix}/share/man ${destroot}/${my_prefix}/share/
+    # Create link to certs from curl-ca-bundle in install prefix
+    ln -s ${prefix}/share/curl/curl-ca-bundle.crt ${destroot}${my_prefix}/etc/openssl/cert.pem
+}
+
+destroot.destdir    INSTALL_PREFIX=${destroot}
+destroot.target     install_sw
+
+variant rfc3779 description {enable RFC 3779: X.509 Extensions for IP Addresses and AS Identifiers} {
+    configure.args-append   enable-rfc3779
+}
+
+livecheck.type      regex
+livecheck.url       https://www.openssl-library.org/source/old/1.0.2/
+livecheck.regex     openssl-(1.0.\[0-9.\]+\[a-z\]?)\\.tar\\.gz

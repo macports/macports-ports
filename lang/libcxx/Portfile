@@ -1,0 +1,227 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               active_variants 1.1
+
+name                    libcxx
+epoch                   1
+version                 5.0.1
+revision                5
+categories              lang
+license                 MIT NCSA
+maintainers             {jeremyhu @jeremyhu}
+description             libc++ is a new implementation of the C++ standard library with support for C++11 and portions of C++14.
+long_description        {*}${description} \
+                        Because objects cannot be passed between different versions of the C++ runtime, this port must \
+                        replace the host version in order to be used.  On Snow Leopard and earlier, this is done \
+                        automatically because there is no existing host version of this library.  On Lion and later, \
+                        users must build the port with +replacemnt_libcxx and install the root manually if they wish \
+                        to replace the existing host implementation.
+
+homepage                https://libcxx.llvm.org/
+
+master_sites            https://releases.llvm.org/${version}/
+dist_subdir             llvm
+
+if {[vercmp [macports_version] >= 2.12.99]} {
+    extract.add_deps    no
+}
+depends_extract         port:xz-bootstrap
+depends_skip_archcheck-append\
+                        xz-bootstrap
+extract.suffix          .tar.xz
+extract.cmd             ${prefix}/libexec/xz-bootstrap/bin/xz
+
+set libcxxabi_distname  libcxxabi-${version}.src
+set libcxx_distname     libcxx-${version}.src
+
+distfiles               ${libcxxabi_distname}${extract.suffix} \
+                        ${libcxx_distname}${extract.suffix}
+
+checksums               libcxxabi-5.0.1.src.tar.xz \
+                        rmd160  93b74a0644c1afd565938fba5e21b200b206c72a \
+                        sha256  5a25152cb7f21e3c223ad36a1022faeb8a5ac27c9e75936a5ae2d3ac48f6e854 \
+                        size    521504 \
+                        libcxx-5.0.1.src.tar.xz \
+                        rmd160  1e5a22e62515382488f232039e31f0b12c08ca4f \
+                        sha256  fa8f99dd2bde109daa3276d529851a3bce5718d46ce1c5d0806f46caa3e57c00 \
+                        size    1527852
+
+use_configure no
+
+set roots_path ${prefix}/var/system_roots/
+set root_name  ${name}-${version}-${revision}
+
+set libcxxabi_worksrcpath   [file join ${workpath} ${libcxxabi_distname}]
+set libcxx_worksrcpath      [file join ${workpath} ${libcxx_distname}]
+
+platform darwin {
+
+    if {${os.major} < 11} {
+        post-activate {
+            set dirs /
+            if {${os.subplatform} eq "macosx"} {
+                if {${os.major} == 8} {
+                    # The Tiger SDK has an u after the version number,
+                    set sdk_name MacOSX10.4u.sdk
+                } else {
+                    set sdk_name MacOSX${macos_version_major}.sdk
+                }
+                lappend dirs ${developer_dir}/SDKs/${sdk_name}
+            }
+            foreach d ${dirs} {
+                system -W ${d} "tar xzf ${roots_path}/${root_name}.tgz"
+            }
+        }
+    }
+}
+
+variant replacemnt_libcxx description {EXPERTS ONLY: Build a replacement libcxxabi and libcxx even if it is already part of the base OS.} {}
+
+if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
+
+    supported_archs i386 x86_64
+
+    if {${build_arch} in "i386 x86_64"} {
+        variant universal {}
+        default_variants +universal
+        configure.universal_archs i386 x86_64
+    }
+
+    # Use clang-11-bootstrap as bootstrap compiler
+    depends_build-append port:clang-11-bootstrap
+    depends_skip_archcheck-append \
+                        clang-11-bootstrap
+    configure.cc        ${prefix}/libexec/clang-11-bootstrap/bin/clang
+    configure.cxx       ${prefix}/libexec/clang-11-bootstrap/bin/clang++
+    configure.cxx_stdlib
+    configure.compiler.add_deps \
+                        no
+
+    if {${os.major} < 11} {
+        variant emulated_tls description {build libcxxabi and libcxx with support for emulated thread_local storage} {}
+
+        default_variants-append +emulated_tls
+    }
+
+    post-extract {
+        # delete cxa_noexception.cpp as we're not using the cmake build system
+        # cmake would choose either cxa_exceptions or cxa_noexceptions
+        # but the buildit script just builds every file in the src directory and you can't have both
+        delete ${libcxxabi_worksrcpath}/src/cxa_noexception.cpp
+
+        if {![variant_isset emulated_tls]} {
+            # cmake doesn't include this for darwin builds, so nuke it here as well
+            # however, this file is essential for emulated-tls to function
+            delete ${libcxxabi_worksrcpath}/src/cxa_thread_atexit.cpp
+        } else {
+            require_active_variants \
+                    port:clang-11-bootstrap emulated_tls
+        }
+
+        file mkdir ${workpath}/build
+        file copy ${filespath}/Makefile ${workpath}/build
+    }
+
+    patch.dir ${workpath}
+
+    # patches for libc++abi buildit
+    patchfiles-append \
+        0001-libcxxabi-Update-buildit-script-to-read-EXTRA_LDFLAGS-from-the.patch \
+        0002-libcxxabi-Define-_LIBCPP_BUILDING_LIBRARY-during-build-to-supp.patch \
+        0003-libcxxabi-buildit-Use-undefined-dynamic_lookup-when-linking.patch    \
+        0004-libcxxabi-buildit-add-nostdinc++.diff
+
+    if {[variant_isset emulated_tls]} {
+      # add emutls.c support for cxa_thread_atexit directly into libcxxabi
+      # these files were taken from clang-7.0's compiler-rt subproject
+      patchfiles-append \
+        0005-libcxxabi-add-emutls.patch                                           \
+        0006-libcxxabi-buildit-build-emutls.patch                                 \
+        0007-libcxxabi-include-expose-cxa-thread-atexit.patch                     \
+        0008-libcxxabi-cxa-thread-atexit-no-weak-atexit-impl.patch
+    }
+
+    # restore libc++ buildit and patches for libc++ buildit
+    patchfiles-append \
+        1001-Revert-Remove-the-buildit-and-testit-scripts-they-ha.patch          \
+        1002-libcxx-buildit-build-fix-for-Leopard.patch \
+        1003-libcxx-buildit-Set-compatibility-version-to-RC_ProjectSourc.patch \
+        1004-libcxx-MacPorts-Use-LIBCXXABI_PATH-for-path-to-build-time-l.patch \
+        1005-libcxx-buildit-Fix-CFLAGS-for-Leopard-and-Snow-Leopard-to-i.patch
+
+    # patches for libc++ include files
+    patchfiles-append \
+        2001-Fix-local-and-iterator-when-building-with-Lion-and-n.patch    \
+        2002-Fix-missing-long-long-math-prototypes-when-using-the.patch    \
+        2003-implement-atomic-using-mutex-lock_guard-for-64b-ops-.patch    \
+        2004-libcxx-includes-Fix-up-thread-constexpr-for-GCC-where-the-PPC-port-cant-do-longlong-constexpr.patch
+
+    post-patch {
+        system "chmod 755 ${libcxx_worksrcpath}/lib/buildit"
+
+
+        platform darwin 8 {
+            foreach header [glob ${workpath}/libcxx-${version}.src/include/*] {
+                reinplace "s|Availability.h|AvailabilityMacros.h|g" ${header}
+            }
+        }
+
+        if {${os.major} < 10} {
+            # debug symbols produced by clang-11-bootstrap cause a Bus error inside ld on Leopard
+            reinplace "s|-c -g|-c|g" \
+                ${libcxx_worksrcpath}/lib/buildit \
+                ${libcxxabi_worksrcpath}/lib/buildit
+        }
+    }
+
+    build.dir ${workpath}/build
+    build.env-append \
+        CC=${configure.cc} \
+        CXX=${configure.cxx} \
+        RC_XBS=1 \
+        RC_ProjectSourceVersion=${version} \
+        "RC_CFLAGS=[get_canonical_archflags] -I${libcxxabi_worksrcpath}/include -I${libcxx_worksrcpath}/include ${configure.optflags}" \
+        TRIPLE=-apple-darwin${os.major}
+    build.args-append \
+        LIBCXXABI_PATH=${libcxxabi_worksrcpath} \
+        LIBCXX_PATH=${libcxx_worksrcpath} \
+        LIBCXXABI_DYLIB_PATH=${build.dir}/libc++abi.dylib
+
+    # We want to use the host's libc++ everywhere because we want to ensure
+    # that only *ONE* copy of this library is in any process's address space.
+    # On Snow Leopard and earlier, this port provides this library in /usr for
+    # binary compatibility with Lion and later.
+    #
+    # On newer OS version, this port does not install the content to /usr and
+    # just leaves it to expert users who may want to replace their system
+    # runtime.
+
+    destroot {
+        xinstall -m 755 -d ${destroot}${roots_path}/${root_name}/usr/lib
+
+        xinstall -m 755 ${libcxxabi_worksrcpath}/lib/libc++abi.dylib ${destroot}${roots_path}/${root_name}/usr/lib
+
+        xinstall -m 755 ${libcxx_worksrcpath}/lib/libc++.1.dylib ${destroot}${roots_path}/${root_name}/usr/lib
+        ln -s libc++.1.dylib ${destroot}${roots_path}/${root_name}/usr/lib/libc++.dylib
+
+        xinstall -m 755 -d ${destroot}${roots_path}/${root_name}/usr/include
+        xinstall -m 755 ${libcxxabi_worksrcpath}/include/__cxxabi_config.h ${destroot}${roots_path}/${root_name}/usr/include
+        xinstall -m 755 ${libcxxabi_worksrcpath}/include/cxxabi.h ${destroot}${roots_path}/${root_name}/usr/include
+
+        system -W ${destroot}${roots_path}/${root_name} "tar czf ../${root_name}.tgz ."
+        delete ${destroot}${roots_path}/${root_name}
+    }
+} else {
+    supported_archs noarch
+    platforms       any
+    distfiles
+    depends_extract
+    build {}
+    destroot {
+        xinstall -d ${destroot}${prefix}/share/doc/${name}
+        system "echo ${name} is an empty port on this OS version because the functionality is already provided by the OS. > ${destroot}${prefix}/share/doc/${name}/README.txt"
+    }
+}
+
+livecheck.type none

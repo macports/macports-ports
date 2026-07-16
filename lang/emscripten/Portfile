@@ -1,0 +1,101 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem                  1.0
+PortGroup                   github 1.0
+PortGroup                   java   1.0
+
+github.setup                emscripten-core emscripten 6.0.2
+github.tarball_from         archive
+revision                    0
+
+categories                  lang devel
+license                     MIT NCSA
+maintainers                 {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
+homepage                    https://emscripten.org
+description                 open source compiler toolchain to WebAssembly
+long_description            Emscripten is a complete Open Source compiler toolchain to WebAssembly.
+
+checksums                   rmd160  41cd349f54c69cfc803334ce040f45fcce166199 \
+                            sha256  2d0c0bc0a9aa4b6ffd64e70504c4258438d691e0abb1254ff6bf92c90d83bad4 \
+                            size    31866596
+
+set python_branch           3.14
+configure.python            ${prefix}/bin/python${python_branch}
+set python_version          [string map {. {}} ${python_branch}]
+
+set install_loc             ${destroot}${prefix}/libexec/${name}
+
+if {${subport} eq ${name}} {
+
+    depends_lib-append      port:python${python_version}
+    depends_build-append    bin:npm:npm11
+
+    # for building cache libraries
+    depends_build-append    port:git \
+                            path:bin/cmake:cmake
+
+    # https://trac.macports.org/ticket/70561
+    # emscripten currently hardcodes EXPECTED_LLVM_VERSION = 23
+    set llvm_version        devel
+
+    depends_run-append      port:binaryen \
+                            port:clang-${llvm_version} \
+                            bin:node:nodejs24
+
+    destroot.env-append     PYTHON=${configure.python} \
+                            PATH=${frameworks_dir}/Python.framework/Versions/${python_branch}/bin:$env(PATH)
+
+    configure {
+        # replicate
+        #     cd ${worksrcpath} && ./emcc --generate-config
+        #     edit resulting .emscripten
+        xinstall        -m 0644 ${filespath}/emscripten                                         ${worksrcpath}/.emscripten
+        reinplace       "s|__MACPORTS_LLVM_ROOT__|${prefix}/libexec/llvm-${llvm_version}/bin|g" ${worksrcpath}/.emscripten
+        reinplace       "s|__MACPORTS_BINARYEN_ROOT__|${prefix}|g"                              ${worksrcpath}/.emscripten
+        reinplace       "s|__MACPORTS_NODE_JS__|${prefix}/bin/node|g"                           ${worksrcpath}/.emscripten
+        reinplace       "s|__MACPORTS_JAVA__|${java.home}/bin/java|g"                           ${worksrcpath}/.emscripten
+
+        system          -W ${worksrcpath}                                                       "${configure.python} tools/maint/create_entry_points.py"
+    }
+
+    build {}
+
+    # N.B. the install script calls npm, which downloads (and sometimes builds) external libraries.
+    # This should happen in the fetch and build phases, but it is not clear how to force npm to do this.
+    #
+    # Please check node_modules/ws/builderror.log for silent errors after destroot phase.
+
+    destroot.destdir    DESTDIR=${install_loc}
+
+    # see https://docs.npmjs.com/cli/commands/npm-install
+    destroot.env-append NODE_ENV=production
+
+    post-destroot {
+        # install the config file
+        xinstall -m 0644 ${worksrcpath}/.emscripten ${install_loc}
+
+        # put certain binaries where they can be found
+        foreach bin {em++ em-config emar embuilder emcc emcmake emconfigure emmake emranlib emrun emscons emsize} {
+            ln -s   ${prefix}/libexec/${name}/${bin}    ${destroot}${prefix}/bin/
+            ln -s   ${prefix}/libexec/${name}/${bin}.py ${destroot}${prefix}/bin/
+        }
+
+        # generate cache libraries
+        # options: SYSTEM USER MINIMAL ALL
+        #
+        # This process also seems to download and build, which should not happen in the destroot phase.
+        #
+        system  -W ${install_loc}  "env PATH=${frameworks_dir}/Python.framework/Versions/${python_branch}/bin:$env(PATH) ${configure.python} embuilder.py build MINIMAL"
+
+        # do not generate new cache libraries
+        # this must be done *after* running embuilder.py
+        reinplace   "s|# FROZEN_CACHE|FROZEN_CACHE|g"    ${install_loc}/.emscripten
+    }
+}
+
+#subport ${name}-man {
+    # man files have to be built separately
+#}
+
+#subport ${name}-docs {
+#}

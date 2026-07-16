@@ -1,0 +1,169 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           active_variants 1.1
+PortGroup           boost 1.0
+PortGroup           python 1.0
+
+name                py-graph-tool
+version             2.91
+revision            0
+epoch               20190711
+supported_archs     arm64 x86_64
+
+categories          python science
+license             LGPL-3
+maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
+
+description         ${python.rootname} is an efficient Python module for \
+                    manipulation and statistical analysis of graphs
+
+long_description    {*}${description}. The internal data structures and \
+                    most algorithms are implemented in C++ with the \
+                    Boost Graph Library.
+
+homepage            https://graph-tool.skewed.de
+master_sites        https://downloads.skewed.de/graph-tool/
+use_bzip2           yes
+
+checksums           rmd160  a8bbbc535313542edd9863c666cf185e74925cee \
+                    sha256  3c850e92b35efdd71ef2abd26d9fe5c0212ec2a07990fbe7323408e127a3fd02 \
+                    size    15344011
+
+# please ensure that this boost.version matches that specified in cgal5
+boost.version       1.81
+
+python.versions     310 311 312 313
+
+if {${os.major} <= 12 && ${os.platform} eq "darwin"} {
+    version         2.2.26
+    revision        1
+    master_sites    https://downloads.skewed.de/graph-tool/old/
+    checksums       rmd160  cd2e8506522821750d70a97b951254f0a133d218 \
+                    sha256  a8ba1f286704f2f54badcb262e6f56055a81f2d66ee1ccedfe31d5c494ee039d \
+                    size    29644168
+} else {
+    if {${name} ne ${subport}} {
+        compiler.cxx_standard   2017
+
+        # https://git.skewed.de/count0/graph-tool/-/issues/785
+        compiler.blacklist *macports-clang-19*
+
+        variant openmp description "Enable OpenMP" {
+            compiler.openmp_version 2.5
+            configure.args-append --enable-openmp
+        }
+
+        default_variants +openmp
+    }
+}
+
+if {${name} ne ${subport}} {
+    universal_variant   no
+
+    depends_build-append \
+                    port:pkgconfig
+
+    depends_lib-append \
+                    port:cairomm \
+                    port:cgal5 \
+                    port:expat \
+                    port:py${python.version}-cairo \
+                    port:py${python.version}-gobject3 \
+                    port:py${python.version}-numpy \
+                    port:py${python.version}-scipy
+
+    depends_lib-append \
+                    port:py${python.version}-matplotlib
+
+    # graph-tool relies on Boost.Python, so make sure it is installed.
+    require_active_variants boost[boost::version_nodot] python${python.version}
+
+    # remove after this issue is fixed:
+    # https://git.skewed.de/count0/graph-tool/-/issues/761
+    post-patch {
+        fs-traverse f ${worksrcpath}/src {
+            if { [file isfile ${f}]
+                && [regexp {\.(cc|hh)$} [file extension ${f}]] } {
+                reinplace -q -E \
+                    {s|:[[:space:]]+public[[:space:]]+std::unary_function<.+,.+>||} \
+                    ${f}
+            }
+        }
+    }
+
+    use_configure   yes
+    # parallel build starts swapping with 8GB of RAM.
+    #use_parallel_build no
+
+    # PYTHON_EXTRA_LDFLAGS is set to work around incorrect detection of
+    # link flags by configure
+    configure.env-append \
+                    PYTHON=${python.bin} \
+                    PYTHON_VERSION=${python.branch} \
+                    PYTHON_CPPFLAGS=-I${python.include} \
+                    "PYTHON_LDFLAGS=-L${python.libdir}/.. -lpython${python.branch}" \
+                    "PYTHON_EXTRA_LDFLAGS=-L${python.libdir}/.. -lpython${python.branch}"
+
+    # https://trac.macports.org/ticket/61583#comment:8
+    macosx_deployment_target
+
+    configure.cppflags-append -I${prefix}/include -I${python.include}/..
+    configure.ldflags-append -L${prefix}/lib
+    configure.args-append \
+                    --exec-prefix=${python.prefix} \
+                    --with-boost=[boost::install_area] \
+                    --with-cgal=${prefix} \
+                    --with-expat=yes \
+                    --with-expat-inc=${prefix}/include \
+                    --with-expat-lib="-L${prefix}/lib -lexpat"
+
+    # Suppress most Clang compilation warnings, which utterly pollute build log.
+    # Note: Likely due to project Makefile, which sets '-Wall' and '-Wextra'.
+    # TODO: Try removing this block, when updating to next release.
+    if {[string match *clang* ${configure.compiler}]} {
+        configure.cxxflags-append \
+                    -Wno-delete-non-abstract-non-virtual-dtor \
+                    -Wno-deprecated-copy \
+                    -Wno-deprecated-copy-with-user-provided-copy \
+                    -Wno-missing-field-initializers \
+                    -Wno-parentheses \
+                    -Wno-unused-parameter \
+                    -Wno-error=unknown-warning-option \
+                    -Wno-unknown-warning-option
+    }
+
+    # Clang uses the old libstc++ from gcc 4.2 before OS X 10.9. Boost doesn't
+    # include some of the tr1 headers in libstdc++ and defines its own tr1
+    # classes. This causes conflicts with sparsehash which insists on using
+    # the old tr1 headers.
+    if {[string match *gcc* ${configure.compiler}] ||
+        ${os.major} >= 13 && ${os.platform} eq "darwin"} {
+        depends_lib-append port:sparsehash
+    } else {
+        configure.args-append --disable-sparsehash
+    }
+    build.cmd       make
+    build.target    all
+
+    destroot.cmd    make
+    destroot.destdir \
+                    DESTDIR=${destroot}
+    destroot.target install
+
+    variant gtk3 description "Enable interactive drawing with gtk3" {
+        depends_lib-append \
+                    path:lib/pkgconfig/gtk+-3.0.pc:gtk3 \
+                    path:lib/pkgconfig/librsvg-2.0.pc:librsvg
+    }
+
+    post-destroot {
+        set doc_dir ${destroot}${prefix}/share/doc
+        move ${doc_dir}/graph-tool \
+            ${doc_dir}/py${python.version}-graph-tool
+    }
+} else {
+    livecheck.type  regex
+    livecheck.url   ${homepage}
+    livecheck.regex ${master_sites}${python.rootname}-(\[0-9.\]+)\\.tar
+}

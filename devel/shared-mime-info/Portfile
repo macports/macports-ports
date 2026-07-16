@@ -1,0 +1,151 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           gitlab 1.0
+PortGroup           meson 1.0
+PortGroup           legacysupport 1.1
+
+name                shared-mime-info
+
+version             2.5.1
+revision            0
+
+checksums           rmd160  8bcfef04e5e9cc5e59135ddf83582e67c0047d0f \
+                    sha256  b75b420da9b0be9a3d99b1bee6ed87957b56ab54583ac1a97fbd0dc98ddddb25 \
+                    size    8008103
+
+gitlab.instance     https://gitlab.freedesktop.org
+gitlab.setup        xdg ${name} ${version}
+
+platforms           darwin linux
+categories          devel
+license             GPL-2+
+maintainers         {mascguy @mascguy} openmaintainer
+
+description         Database of common types.
+long_description    The core database of common types and the \
+                    update-mime-database command used to extend it. \n\
+                    Installs and starts a watcher daemon that keeps the \
+                    cache up-to-date when other ports add or remove mime definitions.
+homepage            https://www.freedesktop.org/wiki/Software/shared-mime-info/
+
+installs_libs       no
+
+# Disable unexpected download of subprojects
+meson.wrap_mode     nodownload
+
+set script_orig     update-mime-database
+set script_real     update-mime-database-real
+
+set startupitem_file \
+                    org.macports.shared-mime-info-updater.plist
+
+post-extract {
+    copy ${filespath}/${startupitem_file} ${worksrcpath}
+    reinplace -locale C "s|@PREFIX@|${prefix}|g" \
+        ${worksrcpath}/${startupitem_file}
+}
+
+# Replace use of fdatasync(), with fsync()
+patchfiles-append \
+                patch-fdatasync-to-fsync.diff
+
+depends_build-append \
+                    port:gettext \
+                    port:itstool \
+                    port:pkgconfig \
+                    port:xmlto
+
+# Note: gettext only used at build time; lib dep for gettext-runtime not needed
+depends_lib-append \
+                    path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    port:libxml2
+
+if {${os.platform} eq "darwin"} {
+    # bash and coreutils needed for stub script
+    depends_run-append \
+                    path:bin/bash:bash \
+                    path:libexec/coreutils/libstdbuf.so:coreutils
+}
+
+configure.args-append \
+                    -Dbuild-tools=true \
+                    -Dwarning_level=0 \
+                    -Dupdate-mimedb=false
+
+compiler.cxx_standard 2017
+
+#std::filesystem
+legacysupport.newest_darwin_requires_legacy 18
+legacysupport.use_mp_libcxx                 yes
+
+if { [string match *clang* ${configure.compiler}] } {
+    configure.cxxflags-append \
+                -Wno-reserved-user-defined-literal \
+                -Wno-error=unknown-warning-option \
+                -Wno-unknown-warning-option
+}
+
+configure.args-append \
+                -Dbuild-tests=false \
+                -Dbuild-translations=true
+
+# add an entry for Objective C++
+# (https://bugs.freedesktop.org/show_bug.cgi?id=98823)
+# upstream bug #98823 mentioned here is still not resolved
+# now moved to current freedesktop.org Gitlab repo as shared-mime-info issue #52
+# (https://gitlab.freedesktop.org/xdg/shared-mime-info/-/issues/52)
+# patchfiles-append   patch-add-objc++-def.diff
+
+# post-destroot {
+#     xinstall -m 644 ${filespath}/ObjCpp.xml \
+#         ${destroot}${prefix}/share/mime/packages
+# }
+
+post-destroot {
+    set bin_dir ${destroot}${prefix}/bin
+
+    # Rename real updater script, to avoid inadvertent use
+    move ${bin_dir}/${script_orig} ${bin_dir}/${script_real}
+
+    if {${os.platform} eq "darwin"} {
+        # Copy in stub script, which initiates update by touching mime area
+        copy ${filespath}/${script_orig} ${bin_dir}
+
+        reinplace "s|@PREFIX@|${prefix}|g" \
+            ${bin_dir}/${script_orig}
+        reinplace "s|@SCRIPT_REAL@|${script_real}|g" \
+            ${bin_dir}/${script_orig}
+    } else {
+        # For non-Darwin, symlink stub to real script
+        ln -s ${prefix}/bin/${script_real} ${destroot}${prefix}/bin/${script_orig}
+    }
+}
+
+post-activate {
+    if {${os.platform} ne "darwin"} {
+        ui_msg "Updating MIME database..."
+        system "env XDG_DATA_DIRS=${prefix}/share ${prefix}/bin/${script_real} -V ${prefix}/share/mime"
+    }
+}
+
+post-deactivate {
+    # cleanup
+    foreach f [glob -nocomplain ${prefix}/share/mime/*] {
+        if {${f} ne "${prefix}/share/mime/packages"} {
+            file delete -force ${f}
+        }
+    }
+}
+
+startupitem.autostart    yes
+startupitem.custom_file  ${worksrcpath}/${startupitem_file}
+startupitem.name         ${name}-updater
+startupitem.type         launchd
+
+pre-pkg {
+    xinstall -m 0755     ${filespath}/postinstall ${package.scripts}/
+    reinplace -locale C  "s|@PREFIX@|${prefix}|g" ${package.scripts}/postinstall
+    long_description-append \
+                         "Install prefix: ${prefix}"
+}

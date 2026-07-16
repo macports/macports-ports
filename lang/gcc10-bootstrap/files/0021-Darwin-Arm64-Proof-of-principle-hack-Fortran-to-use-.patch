@@ -1,0 +1,142 @@
+From 8e567af99ed97f2a98d6ea04649ce3c82bb64285 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Fri, 16 Oct 2020 15:26:40 +0100
+Subject: [PATCH] Darwin, Arm64 : Proof-of-principle hack Fortran to use
+ descriptors for nested.
+
+This addresses Issue #32 by adjusting the nested function hack to use
+bit 1.
+
+NOTE: that Arm reserve both bits 0 and 1 for furture use, so that this
+is still a hack.
+
+(cherry picked from commit eb558326dace69781e48bedafe16fd79aa27ca8b)
+(cherry picked from commit 3422978e480e66623a25e757634d20da0e132c0b)
+Signed-off-by: Kirill A. Korinsky <kirill@korins.ky>
+---
+ gcc/c/c-lang.c               |  3 +++
+ gcc/config/aarch64/aarch64.c |  4 ++--
+ gcc/config/i386/darwin.h     | 10 ++++++++++
+ gcc/fortran/f95-lang.c       |  2 ++
+ gcc/fortran/trans-expr.c     |  7 +++++++
+ gcc/fortran/trans.c          | 11 +++++++++++
+ 6 files changed, 35 insertions(+), 2 deletions(-)
+
+diff --git gcc/c/c-lang.c gcc/c/c-lang.c
+index 5d52c42391c..21d6b9b5ebf 100644
+--- gcc/c/c-lang.c
++++ gcc/c/c-lang.c
+@@ -38,6 +38,9 @@ enum c_language_kind c_language = clk_c;
+ #undef LANG_HOOKS_INIT_TS
+ #define LANG_HOOKS_INIT_TS c_common_init_ts
+ 
++#undef LANG_HOOKS_CUSTOM_FUNCTION_DESCRIPTORS
++#define LANG_HOOKS_CUSTOM_FUNCTION_DESCRIPTORS true
++
+ #if CHECKING_P
+ #undef LANG_HOOKS_RUN_LANG_SELFTESTS
+ #define LANG_HOOKS_RUN_LANG_SELFTESTS selftest::run_c_tests
+diff --git gcc/config/aarch64/aarch64.c gcc/config/aarch64/aarch64.c
+index 07a8444ccec..e3fff8cde61 100644
+--- gcc/config/aarch64/aarch64.c
++++ gcc/config/aarch64/aarch64.c
+@@ -24211,9 +24211,9 @@ aarch64_libgcc_floating_mode_supported_p
+ #define TARGET_DWARF_POLY_INDETERMINATE_VALUE \
+   aarch64_dwarf_poly_indeterminate_value
+ 
+-/* The architecture reserves bits 0 and 1 so use bit 2 for descriptors.  */
++/* The architecture reserves bits 0 and 1 but hack 1 for now.  */
+ #undef TARGET_CUSTOM_FUNCTION_DESCRIPTORS
+-#define TARGET_CUSTOM_FUNCTION_DESCRIPTORS 4
++#define TARGET_CUSTOM_FUNCTION_DESCRIPTORS 2
+ 
+ #undef TARGET_HARD_REGNO_NREGS
+ #define TARGET_HARD_REGNO_NREGS aarch64_hard_regno_nregs
+diff --git gcc/config/i386/darwin.h gcc/config/i386/darwin.h
+index 2afec451058..0bdfce72270 100644
+--- gcc/config/i386/darwin.h
++++ gcc/config/i386/darwin.h
+@@ -331,3 +331,13 @@ along with GCC; see the file COPYING3.  If not see
+       = darwin_init_cfstring_builtins ((unsigned) (IX86_BUILTIN_CFSTRING)); \
+     darwin_rename_builtins ();						\
+   } while(0)
++
++/* Define the shadow offset for asan.  */
++#undef SUBTARGET_SHADOW_OFFSET
++#define SUBTARGET_SHADOW_OFFSET	\
++  (TARGET_LP64 ? HOST_WIDE_INT_1 << 44 : HOST_WIDE_INT_1 << 29)
++
++/* Make sure that any code we generate is compatible with the Fortran/Ada
++   function descriptor impl.  */
++#undef FUNCTION_BOUNDARY
++#define FUNCTION_BOUNDARY 16
+diff --git gcc/fortran/f95-lang.c gcc/fortran/f95-lang.c
+index 169c972f31b..8e936d128c0 100644
+--- gcc/fortran/f95-lang.c
++++ gcc/fortran/f95-lang.c
+@@ -169,6 +169,8 @@ static const struct attribute_spec gfc_attribute_table[] =
+ #define LANG_HOOKS_BUILTIN_FUNCTION	gfc_builtin_function
+ #define LANG_HOOKS_GET_ARRAY_DESCR_INFO	gfc_get_array_descr_info
+ #define LANG_HOOKS_ATTRIBUTE_TABLE	gfc_attribute_table
++#undef LANG_HOOKS_CUSTOM_FUNCTION_DESCRIPTORS
++#define LANG_HOOKS_CUSTOM_FUNCTION_DESCRIPTORS true
+ 
+ struct lang_hooks lang_hooks = LANG_HOOKS_INITIALIZER;
+ 
+diff --git gcc/fortran/trans-expr.c gcc/fortran/trans-expr.c
+index 7dfd19ffe10..01461a718bc 100644
+--- gcc/fortran/trans-expr.c
++++ gcc/fortran/trans-expr.c
+@@ -7147,6 +7147,8 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
+   arglist = retargs;
+ 
+   /* Generate the actual call.  */
++  bool is_proc_ptr_comp = gfc_is_proc_ptr_comp (expr);
++
+   if (base_object == NULL_TREE)
+     conv_function_val (se, sym, expr, args);
+   else
+@@ -7172,6 +7174,11 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
+ 
+   fntype = TREE_TYPE (TREE_TYPE (se->expr));
+   se->expr = build_call_vec (TREE_TYPE (fntype), se->expr, arglist);
++  tree ff = CALL_EXPR_FN (se->expr);
++  if (ff && INDIRECT_REF_P (ff))
++    ff = TREE_OPERAND (ff, 0);
++  if (is_proc_ptr_comp || !ff || VAR_P (ff) || TREE_CODE (ff) == PARM_DECL)
++    CALL_EXPR_BY_DESCRIPTOR (se->expr) = true;
+ 
+   /* Allocatable scalar function results must be freed and nullified
+      after use. This necessitates the creation of a temporary to
+diff --git gcc/fortran/trans.c gcc/fortran/trans.c
+index 4c197a0fbc1..065421ed640 100644
+--- gcc/fortran/trans.c
++++ gcc/fortran/trans.c
+@@ -288,6 +288,14 @@ gfc_build_addr_expr (tree type, tree t)
+   else
+     natural_type = build_pointer_type (base_type);
+ 
++  /* If this is a nested function that uses the static chain, or if
++     optimization is disabled (a static chain will be added automatically)
++     then call by descriptor.  */
++  bool fn_with_static_chain = false;
++  if (TREE_CODE (t) == FUNCTION_DECL
++      && (DECL_STATIC_CHAIN (t) || (!optimize && decl_function_context (t))))
++    fn_with_static_chain = true;
++
+   if (TREE_CODE (t) == INDIRECT_REF)
+     {
+       if (!type)
+@@ -306,6 +314,9 @@ gfc_build_addr_expr (tree type, tree t)
+   if (type && natural_type != type)
+     t = convert (type, t);
+ 
++  if (fn_with_static_chain)
++    FUNC_ADDR_BY_DESCRIPTOR (t) = true;
++
+   return t;
+ }
+ 
+-- 
+2.42.1
+

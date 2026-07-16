@@ -1,0 +1,218 @@
+PortSystem  1.0
+
+name            postfix
+version         3.11.5
+categories      mail
+license         {IBMPL-1 EPL-2}
+maintainers     {jmr @jmroot} openmaintainer
+description     Fast and robust mail transfer agent
+long_description    Postfix attempts to be fast, easy to administer, and \
+            secure, while at the same time being \
+            sendmail-compatible enough to not upset existing \
+            users. It also offers QMQP and VERP support to let \
+            Postfix act as delivery daemon for ezmlm-idx.
+homepage        http://www.postfix.org/
+checksums       rmd160 103cbac43082a3a708e39d4561abef156d31774d \
+                sha256 4a6ab3d0e9390989fa201fc6c446045fc702c4e16e7a247c3ae261c9e9bee610
+
+master_sites    https://archive.mgm51.com/mirrors/postfix-source/official/ \
+                http://de.postfix.org/ftpmirror/official/ \
+                ftp://ftp.its.cz/MIRRORS/ftp.porcupine.org/mirrors/postfix-release/official/ \
+                ftp://ftp.cuhk.edu.hk/pub/packages/mail-server/postfix/official/ \
+                http://mirror.postfix.jp/postfix-release/official/ \
+                http://postfix.bbnx.net/source/official/ \
+                http://cdn.postfix.johnriley.me/mirrors/postfix-release/official/
+
+patchfiles      patch-sys_defs.h patch-mail_params.h patch-postfix-install \
+                patch-makedefs patch-postfix-script
+
+post-patch {
+     reinplace -q "s|/etc/|${prefix}/etc/|g" \
+          {*}[glob ${worksrcpath}/man/man1/*] \
+          {*}[glob ${worksrcpath}/man/man5/*] \
+          {*}[glob ${worksrcpath}/man/man8/*]
+
+     reinplace "s|__PREFIX|${prefix}|g" ${worksrcpath}/src/util/sys_defs.h \
+                                        ${worksrcpath}/src/global/mail_params.h
+
+# Set main.cf default values
+     reinplace "s|#default_privs|default_privs|g" \
+          ${worksrcpath}/conf/main.cf
+     reinplace "s|/etc/postfix/network_table|${prefix}/etc/postfix/network_table|g" \
+          ${worksrcpath}/conf/main.cf
+     reinplace "s|/etc/postfix/relay_recipients|${prefix}/etc/postfix_relay_recipients|g" \
+          ${worksrcpath}/conf/main.cf
+     reinplace "s|/etc/postfix/header_checks|${prefix}/etc/postfix/header_checks|g" \
+          ${worksrcpath}/conf/main.cf
+     reinplace "s|PATH=/bin:/usr/bin|PATH=${prefix}/bin:/bin:/usr/bin|g" \
+          ${worksrcpath}/conf/main.cf
+
+    # Work around missing m4 binary
+    if {[vercmp $xcodecltversion >= 15.3.0] && [vercmp $xcodecltversion < 15.3.1]} {
+        reinplace "s/m4/gm4/" ${worksrcpath}/src/postconf/extract_cfg.sh
+    }
+}
+
+variant universal {}
+
+set CCARGS  [list -DNO_EAI -DNO_PCRE {*}[get_canonical_archflags cc]]
+set AUXLIBS [list -L${prefix}/lib {*}[get_canonical_archflags ld]]
+set pf_mail_owner _postfix
+set pf_setgid_group _postdrop
+set config_files [list main.cf master.cf access aliases canonical generic \
+                  header_checks relocated transport virtual]
+
+configure {
+    set config_cmd "${build.cmd} makefiles CC='${configure.cc}' \
+        OPT='${configure.optflags}' CCARGS='${CCARGS}' AUXLIBS='${AUXLIBS}'"
+    foreach aux [array names ::named_auxlibs] {
+        append config_cmd " ${aux}='$::named_auxlibs($aux)'"
+    }
+    system -W ${worksrcpath} ${config_cmd}
+}
+
+build.target
+
+startupitem.create      yes
+startupitem.start       "${prefix}/sbin/${name} start"
+startupitem.stop        "${prefix}/sbin/${name} stop"
+startupitem.pidfile     auto ${prefix}/var/spool/postfix/pid/master.pid
+
+destroot {
+    destroot.keepdirs ${destroot}${prefix}/var/spool/postfix/public \
+        ${destroot}${prefix}/var/spool/postfix/maildrop \
+        ${destroot}${prefix}/var/lib/postfix
+    system -W ${worksrcpath} "/bin/sh postfix-install -non-interactive \
+        install_root=${destroot} \
+        config_directory=${prefix}/etc/postfix \
+        queue_directory=${prefix}/var/spool/postfix \
+        command_directory=${prefix}/sbin \
+        daemon_directory=${prefix}/libexec/postfix \
+        data_directory=${prefix}/var/lib/postfix \
+        sendmail_path=${prefix}/sbin/sendmail \
+        newaliases_path=${prefix}/bin/newaliases \
+        mailq_path=${prefix}/bin/mailq \
+        etc_directory=${prefix}/etc/postfix \
+        share_directory=${prefix}/share/postfix \
+        manpage_directory=${prefix}/share/man \
+        sample_directory=${prefix}/share/postfix/sample \
+        readme_directory=${prefix}/share/postfix/readme \
+        mail_owner=${pf_mail_owner} \
+        setgid_group=${pf_setgid_group}"
+
+# add in future when shared libraries are enabled
+#shlib_directory=${prefix}/lib/postfix
+
+        # This makes sure we don't overwrite user cf files.
+        foreach f $config_files {
+            move ${destroot}${prefix}/etc/postfix/${f} \
+                 ${destroot}${prefix}/etc/postfix/${f}.sample
+        }
+
+        # Prevent 'postfix set-permissions' from messing with
+        # permissions on files managed by MacPorts.
+        system -W ${destroot}${prefix}/etc/postfix \
+            "patch -p0 < [shellescape ${filespath}/postfix-files.patch]"
+
+        if {[geteuid] == 0} {
+            system "chown -R ${pf_mail_owner} \
+                '${destroot}${prefix}/var/spool/postfix/public' \
+                '${destroot}${prefix}/var/lib/postfix'"
+        }
+}
+
+pre-install {
+        if {[geteuid] != 0} {
+            ui_msg "Insufficient privileges to chown files; you'll need to do this manually:"
+            ui_msg "sudo chown -R ${pf_mail_owner} ${prefix}/var/spool/postfix/public ${prefix}/var/lib/postfix"
+        }
+}
+
+post-activate {
+    foreach f $config_files {
+        if {![file exists ${prefix}/etc/postfix/${f}]} {
+            copy ${prefix}/etc/postfix/${f}.sample \
+                 ${prefix}/etc/postfix/${f}
+        }
+    }
+}
+
+# Tell the user about editing the sample configuration files.
+notes "To get postfix working, you need to edit the configuration files\
+(${prefix}/etc/postfix/*)."
+
+variant dovecot_sasl description "add Dovecot SASL support" {
+    lappend CCARGS  -DUSE_SASL_AUTH -DDEF_SERVER_SASL_TYPE="dovecot"
+}
+
+variant ldap description "add ldap support via openldap" {
+    depends_lib-append  path:lib/libldap.dylib:openldap
+    lappend CCARGS  -DHAS_LDAP
+    set ::named_auxlibs(AUXLIBS_LDAP) "-L${prefix}/lib -lldap -llber"
+}
+
+variant pcre conflicts pcre2 description "add pcre support (deprecated)" {
+    set CCARGS      [ldelete ${CCARGS} -DNO_PCRE]
+    lappend CCARGS  -DHAS_PCRE=1 -I${prefix}/include
+    set ::named_auxlibs(AUXLIBS_PCRE) "-L${prefix}/lib -lpcre"
+    depends_lib-append  port:pcre
+    notes-append    "The pcre variant is deprecated and will be removed in a\
+                     future update. Consider using pcre2 instead."
+}
+
+variant pcre2 conflicts pcre description "add pcre2 support" {
+    set CCARGS      [ldelete ${CCARGS} -DNO_PCRE]
+    lappend CCARGS  -DHAS_PCRE=2 -I${prefix}/include
+    set ::named_auxlibs(AUXLIBS_PCRE) "-L${prefix}/lib -lpcre2-8"
+    depends_lib-append  port:pcre2
+}
+
+variant sasl description "add sasl support via cyrus-sasl2" {
+    depends_lib-append  port:cyrus-sasl2
+    lappend CCARGS  -DUSE_CYRUS_SASL -DUSE_SASL_AUTH -I${prefix}/include/sasl
+    lappend AUXLIBS -lsasl2
+}
+
+variant smtputf8 description "add support for UTF-8 email addresses and headers (EAI) via icu" {
+    depends_lib-append path:lib/pkgconfig/icu-uc.pc:icu
+    set CCARGS      [ldelete ${CCARGS} -DNO_EAI]
+    lappend CCARGS  -I${prefix}/include
+}
+
+variant tls description "add tls support via openssl" {
+    depends_lib-append  path:lib/libssl.dylib:openssl
+    lappend CCARGS  -DUSE_TLS -DHAS_SSL -I${prefix}/include
+    lappend AUXLIBS -lssl -lcrypto
+}
+
+set mysql_ports {mariadb-10.5 mariadb-10.6 mariadb-10.11 mariadb-11.4 mysql8}
+set mysql_names [lmap p $mysql_ports {string map {- ""} $p}]
+foreach mysql_name $mysql_names mysql_port $mysql_ports {
+    variant $mysql_name conflicts {*}[ldelete $mysql_names $mysql_name] \
+            description "add MySQL support via $mysql_port" "
+        depends_lib-append port:${mysql_port}
+        lappend CCARGS  -DHAS_MYSQL -I${prefix}/include/${mysql_port}/mysql
+        set ::named_auxlibs(AUXLIBS_MYSQL) \"-L${prefix}/lib/${mysql_port}/mysql -lmysqlclient -lz -lm\"
+    "
+}
+
+set pg_vers {13 14 15 16 17 18}
+set pg_names [lmap v $pg_vers {string cat postgresql${v}}]
+foreach pg_name $pg_names {
+    variant $pg_name conflicts {*}[ldelete $pg_names $pg_name] \
+            description "add postgresql support via $pg_name" "
+        depends_lib-append port:${pg_name}
+        lappend CCARGS  -DHAS_PGSQL -I${prefix}/include/${pg_name}
+        set ::named_auxlibs(AUXLIBS_PGSQL) \"-L${prefix}/lib/${pg_name} -lpq\"
+    "
+}
+
+# Remove after 2027-03-07
+variant postgresql12 requires postgresql14 description "Legacy compatibility variant" {}
+
+# remove after 2026-07-12
+variant mariadb10.4 requires mariadb10.6 description "Legacy compatibility variant" {}
+
+livecheck.type  regex
+livecheck.url   ftp://ftp.porcupine.org/mirrors/postfix-release/official/
+livecheck.regex ${name}-(\[0-9.\]+)${extract.suffix}

@@ -1,0 +1,161 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               active_variants 1.1
+PortGroup               cmake           1.1
+PortGroup               compilers       1.0
+PortGroup               github          1.0
+PortGroup               linear_algebra  1.0
+
+github.setup            NGSolve ngsolve 6.2.2307 v
+revision                0
+categories              math
+license                 LGPL-2
+maintainers             {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
+description             NGSolve Finite Element Library
+long_description        NGSolve is a general purpose Finite Element Library \
+                        on top of Netgen. With the basic library one can solve \
+                        heat flow equations, Maxwell equations, and solid \
+                        mechanical problems. Several add-ons are available for \
+                        particular application classes.
+homepage                https://ngsolve.org/
+
+checksums               rmd160  5f872b64c2fadbf9e810e35c13de6d55aaf760f1 \
+                        sha256  d67681b341e9c33c409d19303238a72b1da35f3739c6f53693af75b36888af12 \
+                        size    19512935
+github.tarball_from     archive
+
+compiler.cxx_standard   2017
+
+# Build fails with gcc-13 and Apple clang.
+# clang-17 on aarch64 and gcc-12 on powerpc are confirmed to work.
+
+# https://github.com/NGSolve/ngsolve/issues/68
+compiler.blacklist-append \
+                        macports-gcc-13
+# https://github.com/NGSolve/ngsolve/issues/69
+compiler.blacklist-append \
+                        {clang}
+
+compilers.choose        cc cxx
+compilers.setup
+
+# avoid conflict with atlas
+# avoid adding -linterface to link flags
+patchfiles-append       patch-clapack.h.diff
+
+post-extract {
+    move    ${worksrcpath}/basiclinalg/clapack.h \
+            ${worksrcpath}/basiclinalg/ng_clapack.h
+}
+
+# allow the use of other LAPACK libraries
+patchfiles-append       patch-find-lapack.diff
+
+depends_lib-append      port:SuiteSparse_AMD \
+                        port:SuiteSparse_CCOLAMD \
+                        port:SuiteSparse_CHOLMOD \
+                        port:SuiteSparse_UMFPACK \
+                        port:SuiteSparse_config \
+                        path:include/turbojpeg.h:libjpeg-turbo \
+                        port:netgen \
+                        port:zlib
+
+configure.args-append   -DNETGEN_DIR=${prefix} \
+                        -DBUILD_UMFPACK=NO \
+                        -DUSE_NATIVE_ARCH=NO \
+                        -DUSE_PYTHON=OFF \
+                        -DUSE_SUPERBUILD=OFF
+
+# avoid depends_lib-append port:bash
+configure.args-append   -DBASH=/bin/bash
+
+if {[string match *gcc* ${configure.compiler}] && ${configure.build_arch} in [list arm i386 ppc]} {
+    # https://github.com/NGSolve/ngsolve/issues/67
+    configure.ldflags-append \
+                        -latomic
+}
+
+veclibfort              no
+pre-configure {
+    configure.args-append ${cmake_linalglib}
+}
+
+set pythonversions      {3.10 3.11}
+set any_python          no
+foreach pdv ${pythonversions} {
+    set pv [join [lrange [split ${pdv} .] 0 1] ""]
+    set conflist ""
+    foreach v ${pythonversions} {
+        if {${v} ne ${pdv}} {
+            set vv [join [lrange [split ${v} .] 0 1] ""]
+            set conflist "${conflist} python${vv}"
+        }
+    }
+    variant python${pv} conflicts {*}${conflist} description "Add bindings for Python ${pdv}" {}
+    if {[variant_isset python${pv}]} {
+        set any_python  yes
+    }
+}
+if {!${any_python}} {
+    default_variants    +python311
+}
+set any_python          no
+foreach pdv ${pythonversions} {
+    set pv [join [lrange [split ${pdv} .] 0 1] ""]
+    if {[variant_isset python${pv}]} {
+        depends_lib-append      port:python${pv}
+        depends_build-append    port:pybind11 \
+                                port:py${pv}-pybind11-stubgen
+
+        configure.args-replace  -DUSE_PYTHON=OFF \
+                                -DUSE_PYTHON=ON
+
+        # for reasons that are not entirely clear, stub files break the build
+        # see https://ngsolve.org/forum/ngspy-forum/1655-ngsolve-stubs-cmake-error
+        configure.args-append   -DBUILD_STUB_FILES=OFF
+
+        destroot.args-append    DYLD_LIBRARY_PATH=${destroot}${prefix}/lib \
+                                PYTHONPATH=${destroot}${prefix}/lib/python${pdv}/site-packages
+
+        set any_python          yes
+        require_active_variants netgen python${pv}
+
+        post-destroot {
+            xinstall    -d -m 0755 \
+                        ${destroot}${frameworks_dir}/Python.framework/Versions/${pdv}/lib
+            move        ${destroot}${prefix}/lib/python${pdv} \
+                        ${destroot}${frameworks_dir}/Python.framework/Versions/${pdv}/lib
+        }
+        break
+    }
+}
+if {!${any_python}} {
+    foreach pdv ${pythonversions} {
+        set pv [join [lrange [split ${pdv} .] 0 1] ""]
+        require_active_variants netgen "" python${pv}
+    }
+}
+
+post-destroot {
+    delete ${destroot}${prefix}/Netgen.icns
+    if {[file exists ${destroot}${prefix}/bin/pde_tester]} {
+        # if no Python variant exists, extra binary is installed
+        delete ${destroot}${prefix}/bin/pde_tester
+    }
+}
+
+variant tests description {Enable tests} {
+    test.run                yes
+    configure.args-append   -DENABLE_UNIT_TESTS=ON
+    test.args-append        DYLD_LIBRARY_PATH=${cmake.build_dir}/solve:${cmake.build_dir}/comp:${cmake.build_dir}/fem:${cmake.build_dir}/linalg:${cmake.build_dir}/basiclinalg:${cmake.build_dir}/ngstd
+
+    if {${any_python}} {
+        # tests fail
+        # see https://github.com/NGSolve/netgen/issues/77
+
+        # this is not good, but it is unclear what PYTHONPATH should be if destroot has not run
+        target_requires     ${org.macports.test} main fetch checksum extract patch configure build destroot
+        test.args-append    PYTHONPATH=${destroot}${frameworks_dir}/Python.framework/Versions/${pdv}/lib/python${pdv}/site-packages
+    }
+}

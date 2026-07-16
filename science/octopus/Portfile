@@ -1,0 +1,193 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           mpi 1.0
+PortGroup           linear_algebra 1.0
+
+name                octopus
+version             12.1
+revision            1
+categories          science
+platforms           darwin
+license             GPL-2+
+maintainers         {dstrubbe @dstrubbe}
+
+description         A real-space (time-dependent) density-functional theory code.
+long_description    Octopus is a scientific program aimed at ab initio virtual experimentation \
+                    on a hopefully ever-increasing range of system types. \
+                    Electrons are described quantum-mechanically within density-functional \
+                    theory (DFT), in its time-dependent form (TDDFT) when doing simulations \
+                    in time. Nuclei are described classically as point particles. Electron-nucleus \
+                    interaction is described within the pseudopotential approximation.
+homepage            https://octopus-code.org
+master_sites        ${homepage}/download/${version}
+
+checksums           rmd160  a44b0b1311950dc10cd07b4c0d62e0ea073bdc14 \
+                    sha256  e2214e958f1e9631dbe6bf020c39f1fe4d71ab0b6118ea9bd8dc38f6d7a7959a \
+                    size    59224351
+
+compilers.choose    fc cc cxx
+mpi.setup           require_fortran -g95 -clang -gfortran
+#-clang33 -clang34 -clang38
+# not clear if clang33 and clang34 work; clang38 gives cxx11 error as does default clang.
+# clang fails in tests, relating to pseudopotentials and XML
+
+# this incorrectly passes if libxc +gcc5, octopus +mpich, mpich-default +gcc49
+compilers.enforce_fortran libxc4
+compilers.enforce_some_fortran fftw-3
+
+depends_lib         port:libxc4 port:fftw-3 port:gsl
+
+configure.args      --with-libxc-prefix=${prefix} --with-fftw-prefix=${prefix} \
+                    --disable-gdlib --without-sparskit --with-netcdf-prefix=no \
+                    --with-etsf-io-prefix=no --with-berkeleygw-prefix=no \
+                    --with-arpack=no --with-parpack=no --with-feast=no \
+                    --with-isf-prefix=no --with-pnfft-prefix=no --with-metis-prefix=no \
+                    --with-parmetis-prefix=no --with-libfm=no --with-pfft-prefix=no \
+                    --with-pspio-prefix=no --with-nfft=no --with-blacs=no \
+                    --with-scalapack=no
+# configure will find and use these other libraries unless they are explicitly disabled
+configure.optflags  -O3
+configure.fcflags-append  -ffree-line-length-none
+
+# gfortran -> gfortran5?
+
+if {[mpi_variant_isset]} {
+    configure.args-delete  --disable-mpi
+    configure.args-append  --enable-mpi
+}
+
+# avoid gcc10 compilation type mismatch errors in basic/io_binary_f_inc.F90
+compilers.allow_arguments_mismatch yes
+
+pre-configure {
+    configure.args-append --with-blas="-L${prefix}/lib ${linalglib}"
+    configure.cxx_stdlib libstdc++
+
+    if {![gcc_variant_isset]} {
+        # needed for clang; clang_variant_isset would miss case of default clang compiler.
+        configure.cxxflags-append "-std=c++11"
+    }
+
+    if {[gcc_variant_isset]} {
+        # avoid BOZ literal constant error in math/fft.F90
+        configure.fcflags-append "-fallow-invalid-boz"
+    }
+
+    # not necessary unless mixing clang++ and gfortran;
+    # found automatically when using MPI wrappers
+    if {![gcc_variant_isset] && ![mpi_variant_isset]} {
+        configure.ldflags-append "-lc++"
+    }
+}
+
+# libxc does not have universal variant, so octopus cannot either
+universal_variant   no
+
+test.run            yes
+test.target         check
+
+pre-test {
+    if {[mpi_variant_isset]} {
+        test.env-append MPIEXEC=${prefix}/bin/${mpi.exec}
+    }
+
+    # test infrastructure uses /bin/ps for job parallelism which is forbidden by sandboxing
+    append portsandbox_profile " (allow process-exec (literal \"/bin/ps\") (with no-profile))"
+}
+
+variant threads description {Build with OpenMP and threaded libraries} {
+    configure.args-append --enable-openmp
+}
+
+variant netcdf description {Build with support for NetCDF output} {
+    configure.args-delete   --with-netcdf-prefix=no
+    configure.args-append   --with-netcdf-prefix=${prefix}
+    depends_lib-append      port:netcdf-fortran
+    require_active_variants netcdf-fortran {} universal
+    compilers.enforce_fortran netcdf-fortran
+}
+
+variant etsf_io requires netcdf description {Build with support for ETSF_IO output} {
+    configure.args-delete   --with-etsf-io-prefix=no
+    configure.args-append   --with-etsf-io-prefix=${prefix}
+    depends_lib-append      port:etsf_io
+    compilers.enforce_fortran etsf_io
+}
+
+variant sparskit description {Build with support for SPARSKIT propagators} {
+    configure.args-delete   --without-sparskit
+    configure.args-append   --with-sparskit=${prefix}/lib/libskit.a
+    depends_lib-append      port:sparskit
+}
+
+variant gdlib description {Build with support for definition of domain by 2D image} {
+    configure.args-delete   --disable-gdlib
+    depends_lib-append      port:gd2
+}
+
+variant scalapack description {Build with ScaLAPACK for parallel linear algebra} {
+    configure.args-delete   --with-blacs=no
+    configure.args-delete   --with-scalapack=no
+    configure.args-append   --with-blacs=${prefix}/lib/libscalapack.dylib
+    depends_lib-append      port:scalapack
+    mpi.enforce_variant     scalapack
+}
+
+# temporarily disabled: causing test failures where used.
+#variant pfft description {Build with PFFT} {
+#    depends_lib-append      port:pfft
+#    configure.args-delete   --with-pfft-prefix=no
+#    configure.args-append   --with-pfft-prefix=${prefix} --with-mpifftw-prefix=${prefix}
+#    mpi.enforce_variant     pfft
+#}
+
+variant arpack description {Build with ARPACK for complex-scaling calculations} {
+    depends_lib-append      port:arpack
+    configure.args-delete   --with-arpack=no
+    configure.args-append   --with-arpack=${prefix}/lib/libarpack.dylib
+}
+
+variant parpack requires arpack description {Build with PARPACK for complex-scaling calculations} {
+    configure.args-delete   --with-parpack=no
+    configure.args-append   --with-parpack=${prefix}/lib/libparpack.dylib
+    mpi.enforce_variant     parpack
+}
+
+# there is not much value in having a stand-alone metis variant, since it is a built-in library in octopus
+variant parmetis description {Build with ParMETIS for parallel domain decomposition calculation} {
+    depends_lib-append      port:parmetis
+    require_active_variants metis single
+    configure.args-delete   --with-metis-prefix=no
+    configure.args-delete   --with-parmetis-prefix=no
+    configure.args-append   --with-metis-prefix=${prefix} --with-parmetis-prefix=${prefix}
+    mpi.enforce_variant     parmetis
+}
+
+variant berkeleygw description {Build with BerkeleyGW output support} {
+    depends_lib-append      port:berkeleygw
+    configure.args-delete   --with-berkeleygw-prefix=no
+    configure.args-append   --with-berkeleygw-prefix=${prefix}
+    compilers.enforce_fortran berkeleygw
+    # FIXME: actually, it is ok if berkeleygw does not have MPI and Octopus does
+    mpi.enforce_variant     berkeleygw
+}
+
+variant everything_serial requires arpack etsf_io netcdf sparskit gdlib berkeleygw \
+    description {Build with all available serial optional dependencies} { }
+
+variant everything requires everything_serial parpack scalapack parmetis \
+    description {Build with all available optional dependencies} { }
+
+variant maxdim4 description {Build with support for 4D calculations} {
+    configure.args-append  --with-max-dim=4
+}
+
+post-destroot {
+    # FIXME upstream: shouldn't install this either
+    delete ${destroot}${prefix}/include/yaml.h
+}
+
+livecheck.type      regex
+livecheck.url       ${homepage}/wiki/Main_Page
+livecheck.regex     (\[0-9.\]+)</a> released

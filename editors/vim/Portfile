@@ -1,0 +1,279 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+
+# The vim port should always follow the patch level used in the MacVim port. This
+# is because they both share the same set of configuration files and ensures
+# that the user's configuration files will always work with both.
+set vim_version     9.2
+set vim_patchlevel  0321
+github.setup        vim vim ${vim_version}.${vim_patchlevel} v
+github.tarball_from archive
+revision            2
+categories          editors
+platforms           darwin freebsd
+license             Vim GPL-2+
+maintainers         {raimue @raimue}
+
+description         Vi \"workalike\" with many additional features
+long_description    Vim is an advanced text editor that seeks to provide \
+                    the power of the de-facto Unix editor 'Vi', with a more \
+                    complete feature set.
+
+homepage            https://www.vim.org
+
+checksums           rmd160  3e3f550f18dea2265a1b824ca5a053d6d5c564b2 \
+                    sha256  a67118ddab396c993411d7c9b2ab8390a051d625a47f2d2c3a7879c44dd36a88 \
+                    size    19868654
+
+depends_lib-append  port:gettext \
+                    port:libiconv \
+                    port:ncurses
+
+# Backport fixes for stray 'p' characters in some terminals
+patchfiles-append   patch-9.2.0387.diff \
+                    patch-9.2.0389.diff \
+                    patch-9.2.0456.diff
+
+post-patch {
+    set features [open ${worksrcpath}/src/feature.h a+]
+    puts $features "#define SYS_VIMRC_FILE \"${prefix}/etc/vimrc\""
+    close $features
+}
+
+autoconf.cmd make autoconf
+autoconf.pre_args
+autoconf.args
+autoconf.dir ${worksrcpath}/src
+
+configure.args-append \
+                    --disable-gui \
+                    --without-x \
+                    --without-local-dir \
+                    --disable-gpm \
+                    --disable-canberra \
+                    --disable-libsodium \
+                    --mandir=${prefix}/share/man \
+                    --with-tlib=ncurses \
+                    --enable-multibyte \
+                    --with-developer-dir=${configure.developer_dir} \
+                    --enable-fail-if-missing \
+                    --with-compiledby="MacPorts"
+
+post-destroot {
+    ln -s ${prefix}/bin/vim ${destroot}${prefix}/bin/vi
+}
+
+test.run            yes
+# vim's testdir/Makefile uses a shared "vimcmd" file that multiple parallel
+# test processes race to delete; force serial execution to avoid spurious failures
+# Upstream fix: https://github.com/vim/vim/pull/20082
+patchfiles-append   patch-src_testdir_Makefile.diff
+# Several tests are skipped in the MacPorts build environment (TEST_SKIP_PAT uses
+# vim very-magic regex; \v makes | alternation without backslash):
+# - Test_zip_*: zip plugin causes vim to exit abnormally on macOS at 9.2.0321,
+#   corrupting the Makefile suffix rule; all zip tests pass at HEAD
+#   (remove this skip on the next version bump)
+# - Test_modeline_default: expects vim to disable 'modeline' for root; port test
+#   runs as root, but 9.2.0321 does not enforce this yet (check on next version bump)
+# - Test_opt_set_keycode, Test_set_completion: build environment termcap lacks the
+#   t_k9 (F9) key; tests fail with E522 "Not found in termcap"
+# - Test_popup_opacity_wide_char_overlap: wide-char screen dump differs from reference
+#   in headless build environment; flaky (retries 10x, wasting ~25s)
+# - Test_stdin_no_newline: terminal test times out in headless build sandbox;
+#   flaky (retries 10x, wasting ~2min)
+# - Test_terminal_sync_shell_dir: expects /private/opt (resolved macOS symlink)
+#   but gets /opt; macOS /opt is a symlink to /private/opt
+test.env            "TEST_SKIP_PAT=\\vTest_zip_|Test_modeline_default|Test_opt_set_keycode|Test_set_completion|Test_popup_opacity_wide_char_overlap|Test_stdin_no_newline|Test_terminal_sync_shell_dir"
+
+if {![variant_isset tiny] && ![variant_isset small] && ![variant_isset big] && ![variant_isset huge]} {
+    default_variants +huge
+}
+
+variant x11 description {Build CLI version with X support} {
+    configure.args-delete   --without-x
+    configure.args-append   --with-x --x-includes=${prefix}/include --x-libraries=${prefix}/lib
+    depends_lib-append      port:xorg-libXt
+}
+
+variant athena description {Build GUI version using Athena widgets} requires x11 conflicts gtk2 gtk3 motif {
+    configure.args-delete   --disable-gui
+    configure.args-append   --enable-gui=athena --disable-darwin
+    depends_lib-append      port:xorg-libXaw
+}
+variant gtk2 description {Build GUI version using GTK 2.x widgets} requires x11 conflicts athena gtk3 motif {
+    configure.args-delete   --disable-gui
+    configure.args-append   --enable-gui=gtk2 --disable-darwin
+    depends_lib-append      path:lib/pkgconfig/gtk+-2.0.pc:gtk2
+    depends_build-append    port:pkgconfig
+}
+variant gtk3 description {Build GUI version using GTK 3.x widgets} requires x11 conflicts athena gtk2 motif {
+    configure.args-delete   --disable-gui
+    configure.args-append   --enable-gui=gtk3 --disable-darwin
+    depends_lib-append      path:lib/pkgconfig/gtk+-3.0.pc:gtk3
+    depends_build-append    port:pkgconfig
+}
+variant motif description {Build GUI version with Motif widgets} requires x11 conflicts athena gtk2 gtk3 {
+    configure.args-delete   --disable-gui
+    configure.args-append   --enable-gui=motif --disable-darwin
+    depends_lib-append      lib:libXm:motif
+}
+
+configure.args-append --with-features=normal
+set levels {tiny small big huge}
+foreach level ${levels} {
+    variant ${level} description "Build ${level} feature set" conflicts {*}[lsearch -inline -all -not -exact $levels $level] "
+        configure.args-replace --with-features=normal --with-features=$level
+    "
+}
+
+variant xim description {Build with support for X Input Method} {
+    configure.args-append   --enable-xim
+}
+
+variant perl description {Enable Perl scripting} {
+    configure.args-append   --enable-perlinterp
+    depends_lib-append      path:bin/perl:perl5
+}
+
+set pythons_suffixes {27 310 311 312 313 314}
+
+set pythons_ports {}
+foreach s ${pythons_suffixes} {
+    lappend pythons_ports python${s}
+}
+
+foreach s ${pythons_suffixes} {
+    set p python${s}
+    set major [string index ${s} 0]
+    set v ${major}.[string range ${s} 1 end]
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    variant ${p} description "Enable Python scripting" conflicts {*}${c} "
+        if {${major} == 2} {
+            configure.args-append   --enable-pythoninterp --with-python-command=${prefix}/bin/python${v}
+            patchfiles-append       patch-python.diff
+        } else {
+            configure.args-append   --enable-python3interp --with-python3-command=${prefix}/bin/python${v}
+        }
+        depends_lib-append      port:${p}
+        use_autoconf yes
+        # overwriting autoconf.cmd above removes dependency, add it again
+        depends_build-append    port:autoconf
+    "
+}
+
+variant ruby requires ruby18 description {Compatibility variant, requires +ruby18} {}
+variant ruby18 conflicts ruby19 ruby20 ruby21 ruby22 ruby23 ruby24 ruby25 ruby30 ruby31 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby1.8
+    depends_lib-append      port:ruby
+}
+variant ruby19 conflicts ruby18 ruby20 ruby21 ruby22 ruby23 ruby24 ruby25 ruby30 ruby31 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby1.9
+    depends_lib-append      port:ruby19
+}
+variant ruby20 conflicts ruby18 ruby19 ruby21 ruby22 ruby23 ruby24 ruby25 ruby30 ruby31 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby2.0
+    depends_lib-append      port:ruby20
+}
+variant ruby21 conflicts ruby18 ruby19 ruby20 ruby22 ruby23 ruby24 ruby25 ruby30 ruby31 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby2.1
+    depends_lib-append      port:ruby21
+}
+variant ruby22 conflicts ruby18 ruby19 ruby20 ruby21 ruby23 ruby24 ruby25 ruby30 ruby31 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby2.2
+    depends_lib-append      port:ruby22
+}
+variant ruby23 conflicts ruby18 ruby19 ruby20 ruby21 ruby22 ruby24 ruby25 ruby30 ruby31 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby2.3
+    depends_lib-append      port:ruby23
+}
+variant ruby24 conflicts ruby18 ruby19 ruby20 ruby21 ruby22 ruby23 ruby25 ruby30 ruby31 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby2.4
+    depends_lib-append      port:ruby24
+}
+variant ruby25 conflicts ruby18 ruby19 ruby20 ruby21 ruby22 ruby23 ruby24 ruby30 ruby31 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby2.5
+    depends_lib-append      port:ruby25
+}
+variant ruby30 conflicts ruby18 ruby19 ruby20 ruby21 ruby22 ruby23 ruby24 ruby25 ruby31 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby3.0
+    depends_lib-append      port:ruby30
+}
+variant ruby31 conflicts ruby18 ruby19 ruby20 ruby21 ruby22 ruby23 ruby24 ruby25 ruby30 ruby32 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby3.1
+    depends_lib-append      port:ruby31
+    # Ruby itself uses a modern gcc or clang, so building this with old Xcode gcc fails:
+    # /opt/local/include/ruby-3.1.4/ruby/defines.h:55:23: error: stdalign.h: No such file or directory
+    compiler.blacklist-append \
+                            *gcc-4.0 *gcc-4.2
+}
+variant ruby32 conflicts ruby18 ruby19 ruby20 ruby21 ruby22 ruby23 ruby24 ruby25 ruby30 ruby31 ruby33 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby3.2
+    depends_lib-append      port:ruby32
+    compiler.blacklist-append \
+                            *gcc-4.0 *gcc-4.2
+}
+variant ruby33 conflicts ruby18 ruby19 ruby20 ruby21 ruby22 ruby23 ruby24 ruby25 ruby30 ruby31 ruby32 ruby34 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby3.3
+    depends_lib-append      port:ruby33
+    compiler.blacklist-append \
+                            *gcc-4.0 *gcc-4.2
+}
+variant ruby34 conflicts ruby18 ruby19 ruby20 ruby21 ruby22 ruby23 ruby24 ruby25 ruby30 ruby31 ruby32 ruby33 description {Enable Ruby scripting} {
+    configure.args-append   --enable-rubyinterp
+    configure.args-append   --with-ruby-command=${prefix}/bin/ruby3.4
+    depends_lib-append      port:ruby34
+    compiler.blacklist-append \
+                            *gcc-4.0 *gcc-4.2
+}
+
+variant tcl description {Enable Tcl scripting} {
+    configure.args-append   --enable-tclinterp \
+                            --with-tclsh=${prefix}/bin/tclsh
+    patchfiles-append       patch-tcl.diff
+    depends_lib-append      port:tcl
+
+    use_autoconf yes
+    # Overwriting autoconf.cmd above removes dependency, add it again
+    depends_build-append    port:autoconf
+}
+
+variant lua description {Enable Lua scripting} {
+    PortGroup               lua 1.0
+
+    configure.args-append   --enable-luainterp \
+                            --with-lua-prefix=${lua.dir}
+}
+
+variant cscope description {Enable source code browsing with cscope} {
+    configure.args-append   --enable-cscope
+}
+
+variant sodium description {Enable libsodium encryption} {
+    depends_lib-append      port:libsodium
+    depends_build-append    path:bin/pkg-config:pkgconfig
+    configure.args-replace  --disable-libsodium --enable-libsodium
+}
+
+# Disable Cocoa on PureDarwin, as well as on < 10.6
+# or when building for powerpc, since it fails to build there:
+# os_macosx.m:74: error: ‘NSPasteboardTypeString’ undeclared (first use in this function)
+# os_macosx.m:264: error: ‘DISPATCH_TIME_FOREVER’ undeclared (first use in this function)
+if {${os.platform} eq "puredarwin" || ${configure.build_arch} eq "ppc" \
+    || (${os.platform} eq "darwin" && ${os.major} < 10)} {
+    configure.args-append   --disable-darwin
+}
