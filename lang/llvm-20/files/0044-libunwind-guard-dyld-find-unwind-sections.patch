@@ -1,0 +1,147 @@
+--- a/libunwind/src/AddressSpace.hpp
++++ b/libunwind/src/AddressSpace.hpp
+@@ -64,7 +64,16 @@
+   };
+ 
+   // In 10.7.0 or later, libSystem.dylib implements this function.
++#if !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) || \
++    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1070
+   extern "C" bool _dyld_find_unwind_sections(void *, dyld_unwind_sections *);
++#endif
++
++#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && \
++    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 1070
++#include <mach-o/dyld.h>
++#include <mach-o/loader.h>
++#endif
+ 
+ namespace libunwind {
+   bool findDynamicUnwindSections(void *, unw_dynamic_unwind_sections *);
+@@ -487,9 +496,113 @@
+ #endif  // defined(_LIBUNWIND_USE_DL_ITERATE_PHDR)
+ 
+ 
++
++#if defined(__APPLE__) && defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && \
++    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 1070
++static bool checkAddrInSegment(const struct segment_command *seg,
++                               uintptr_t slide, uintptr_t targetAddr) {
++  uintptr_t begin = (uintptr_t)seg->vmaddr + slide;
++  uintptr_t end = begin + seg->vmsize;
++  return (seg->vmsize != 0) && (begin <= targetAddr) && (targetAddr < end);
++}
++
++static bool checkAddrInSegment(const struct segment_command_64 *seg,
++                               uintptr_t slide, uintptr_t targetAddr) {
++  uintptr_t begin = (uintptr_t)seg->vmaddr + slide;
++  uintptr_t end = begin + seg->vmsize;
++  return (seg->vmsize != 0) && (begin <= targetAddr) && (targetAddr < end);
++}
++
++static void recordSection(const struct section *sect, uintptr_t slide,
++                          UnwindInfoSections &info) {
++  if (strncmp(sect->segname, "__TEXT", 16) != 0 || sect->size == 0)
++    return;
++#if defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
++  if (strncmp(sect->sectname, "__eh_frame", 16) == 0) {
++    info.dwarf_section = (uintptr_t)sect->addr + slide;
++    info.dwarf_section_length = (size_t)sect->size;
++  }
++#endif
++  if (strncmp(sect->sectname, "__unwind_info", 16) == 0) {
++    info.compact_unwind_section = (uintptr_t)sect->addr + slide;
++    info.compact_unwind_section_length = (size_t)sect->size;
++  }
++}
++
++static void recordSection(const struct section_64 *sect, uintptr_t slide,
++                          UnwindInfoSections &info) {
++  if (strncmp(sect->segname, "__TEXT", 16) != 0 || sect->size == 0)
++    return;
++#if defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
++  if (strncmp(sect->sectname, "__eh_frame", 16) == 0) {
++    info.dwarf_section = (uintptr_t)sect->addr + slide;
++    info.dwarf_section_length = (size_t)sect->size;
++  }
++#endif
++  if (strncmp(sect->sectname, "__unwind_info", 16) == 0) {
++    info.compact_unwind_section = (uintptr_t)sect->addr + slide;
++    info.compact_unwind_section_length = (size_t)sect->size;
++  }
++}
++
++template <typename SegmentCommand, typename Section>
++static bool findUnwindSectionsInSegment(const SegmentCommand *seg,
++                                        uintptr_t slide, uintptr_t targetAddr,
++                                        UnwindInfoSections &info) {
++  bool foundTarget = checkAddrInSegment(seg, slide, targetAddr);
++  const Section *sect = (const Section *)((const char *)seg + sizeof(*seg));
++  for (uint32_t i = 0; i < seg->nsects; ++i)
++    recordSection(&sect[i], slide, info);
++  return foundTarget;
++}
++
++static bool findMachOUnwindSections(uintptr_t targetAddr,
++                                    UnwindInfoSections &info) {
++  uint32_t imageCount = _dyld_image_count();
++  for (uint32_t i = 0; i < imageCount; ++i) {
++    const struct mach_header *mh = _dyld_get_image_header(i);
++    if (mh == nullptr)
++      continue;
++
++    uintptr_t slide = (uintptr_t)_dyld_get_image_vmaddr_slide(i);
++    const struct load_command *cmd = (const struct load_command *)((const char *)mh +
++        ((mh->magic == MH_MAGIC_64) ? sizeof(struct mach_header_64) : sizeof(struct mach_header)));
++    bool foundTarget = false;
++
++    info.dso_base = (uintptr_t)mh;
++#if defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
++    info.dwarf_section = 0;
++    info.dwarf_section_length = 0;
++#endif
++    info.compact_unwind_section = 0;
++    info.compact_unwind_section_length = 0;
++
++    for (uint32_t j = 0; j < mh->ncmds; ++j) {
++      if (cmd->cmd == LC_SEGMENT)
++        foundTarget |= findUnwindSectionsInSegment<struct segment_command, struct section>(
++            (const struct segment_command *)cmd, slide, targetAddr, info);
++      else if (cmd->cmd == LC_SEGMENT_64)
++        foundTarget |= findUnwindSectionsInSegment<struct segment_command_64, struct section_64>(
++            (const struct segment_command_64 *)cmd, slide, targetAddr, info);
++      cmd = (const struct load_command *)((const char *)cmd + cmd->cmdsize);
++    }
++
++    if (foundTarget && (info.compact_unwind_section != 0
++#if defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
++                        || info.dwarf_section != 0
++#endif
++                        ))
++      return true;
++  }
++  return false;
++}
++#endif
++
+ inline bool LocalAddressSpace::findUnwindSections(pint_t targetAddr,
+                                                   UnwindInfoSections &info) {
+ #ifdef __APPLE__
++#if !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) || \
++    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1070
+   dyld_unwind_sections dyldInfo;
+   if (_dyld_find_unwind_sections((void *)targetAddr, &dyldInfo)) {
+     info.dso_base                      = (uintptr_t)dyldInfo.mh;
+@@ -501,6 +614,13 @@
+     info.compact_unwind_section_length = (size_t)dyldInfo.compact_unwind_section_length;
+     return true;
+   }
++#endif
++
++#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && \
++    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 1070
++  if (findMachOUnwindSections((uintptr_t)targetAddr, info))
++    return true;
++#endif
+ 
+   unw_dynamic_unwind_sections dynamicUnwindSectionInfo;
+   if (findDynamicUnwindSections((void *)targetAddr,
