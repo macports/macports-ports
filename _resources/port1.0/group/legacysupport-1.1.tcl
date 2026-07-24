@@ -38,9 +38,6 @@ default legacysupport.redirect_bins     {}
 options legacysupport.use_mp_libcxx
 default legacysupport.use_mp_libcxx     no
 
-options legacysupport.disable_function_wrap
-default legacysupport.disable_function_wrap no
-
 if {[exists makefile.override]} {
     pre-configure {
         ui_error "The legacysupport PG must be included *before* the makefile PG"
@@ -61,11 +58,7 @@ proc legacysupport::get_library_name {} {
 proc legacysupport::get_cpp_flags {} {
     global os.platform os.major prefix
     if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy]} {
-        if { [option legacysupport.disable_function_wrap] } {
-            return "-isystem${prefix}/include/LegacySupport -D__DISABLE_MP_LEGACY_SUPPORT_REALPATH_WRAP__=1 -D__DISABLE_MP_LEGACY_SUPPORT_SYSCONF_WRAP__=1"
-        } else {
-            return  -isystem${prefix}/include/LegacySupport
-        }
+        return  -isystem${prefix}/include/LegacySupport
     } else {
         return ""
     }
