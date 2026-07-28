@@ -1,0 +1,307 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+#
+# This PortGroup does two things:
+#
+#   1. It records which Go releases upstream supports on which versions of
+#      macOS, and answers questions about that (go_toolchain.ceiling,
+#      go_toolchain.satisfies). Including the PortGroup on its own has no side
+#      effects, so other PortGroups and ports may include it just to ask.
+#
+#   2. It builds a versioned Go toolchain port, when a Portfile calls
+#      go_toolchain.setup. See "Building a versioned toolchain" below.
+#
+# Upstream's requirements, from https://go.dev/wiki/MinimumRequirements and the
+# per-release notes:
+#
+#   Go 1.17  requires macOS 10.13 High Sierra  (darwin 17)
+#   Go 1.21  requires macOS 10.15 Catalina     (darwin 19)
+#   Go 1.23  requires macOS 11  Big Sur        (darwin 20)
+#   Go 1.25  requires macOS 12  Monterey       (darwin 21)
+#   Go 1.27  requires macOS 13  Ventura        (darwin 22)
+#
+# These are hard runtime limits, not merely build limits. From Go 1.25 the
+# darwin runtime resolves Security.framework symbols such as
+# _SecTrustCopyCertificateChain via //go:cgo_import_dynamic even when CGO is
+# disabled, so a too-new Go aborts under dyld on an older system no matter how
+# it was produced. The 1.25 binaries are the first to carry that undefined
+# symbol, and the first built with a minimum of macOS 12.
+# See https://trac.macports.org/ticket/73086.
+#
+# Building a versioned toolchain
+# ------------------------------
+#
+# PortGroup             go_toolchain 1.0
+#
+# go_toolchain.setup    1.23.12
+#
+# checksums             ...
+#
+# go_toolchain.setup derives the port name (go-1.23), the platform the port is
+# allowed on, and the whole build. It installs GOROOT into
+# ${prefix}/lib/go-1.23 and the commands as ${prefix}/bin/go-1.23 and
+# ${prefix}/bin/gofmt-1.23, so versioned toolchains never collide with each
+# other or with the main `go` port.
+
+# The minimum darwin major version each Go minor release runs on. This is the
+# single source of truth; everything else here is derived from it.
+#
+# This is a record of upstream's requirements, not a list of the toolchains
+# MacPorts packages. An entry is needed here when either
+#
+#   * a versioned port exists for it, since go_toolchain.setup looks up the
+#     release to decide which platforms the port is allowed on, or
+#   * it is the newest release usable on some macOS version, since that is what
+#     go_toolchain.ceiling reports for that system.
+#
+# Those are independent: 1.23 and 1.25 have ports but decide no ceiling, since
+# 11 Big Sur can run 1.24 and 12 Monterey can run 1.26. The remaining entries (1.18, 1.19, 1.21) do neither;
+# they are kept only so this table stays a complete record of the releases in
+# range, and so that adding a port for one later needs no new data.
+set go_toolchain.min_darwin(1.17)   8   ;# 10.4  Tiger         (see below)
+set go_toolchain.min_darwin(1.18)   17  ;# 10.13 High Sierra
+set go_toolchain.min_darwin(1.19)   17  ;# 10.13 High Sierra
+set go_toolchain.min_darwin(1.20)   17  ;# 10.13 High Sierra
+set go_toolchain.min_darwin(1.21)   19  ;# 10.15 Catalina
+set go_toolchain.min_darwin(1.22)   19  ;# 10.15 Catalina
+set go_toolchain.min_darwin(1.23)   20  ;# 11    Big Sur
+set go_toolchain.min_darwin(1.24)   20  ;# 11    Big Sur
+set go_toolchain.min_darwin(1.25)   21  ;# 12    Monterey
+set go_toolchain.min_darwin(1.26)   21  ;# 12    Monterey
+set go_toolchain.min_darwin(1.27)   22  ;# 13    Ventura
+
+# The 1.17 entry is the one value here that is not upstream's. Upstream also
+# requires 10.13 for Go 1.17, but MacPorts has long built 1.17.13 from source
+# down to 10.6 with legacysupport, and the main `go` port still ships it there.
+# The 8 keeps this table agreeing with that existing behaviour rather than
+# describing an upstream guarantee.
+
+# The newest Go minor release this table knows about. A system that can run it
+# is not capped at all.
+proc go_toolchain._newest {} {
+    global go_toolchain.min_darwin
+
+    set newest {}
+    foreach minor [array names go_toolchain.min_darwin] {
+        if {${newest} eq "" || [vercmp ${minor} > ${newest}]} {
+            set newest ${minor}
+        }
+    }
+    return ${newest}
+}
+
+# Return the minimum darwin major version for a Go release, given either a
+# minor version ("1.23") or a full version ("1.23.12").
+proc go_toolchain.min_darwin {go_version} {
+    global go_toolchain.min_darwin
+
+    set minor [go_toolchain._minor ${go_version}]
+    if {![info exists go_toolchain.min_darwin(${minor})]} {
+        return -code error "go_toolchain: unknown Go release ${go_version}"
+    }
+    return [set go_toolchain.min_darwin(${minor})]
+}
+
+# Reduce a version to its "1.NN" minor form.
+proc go_toolchain._minor {go_version} {
+    return [join [lrange [split ${go_version} .] 0 1] .]
+}
+
+# Return the newest Go minor version supported on this platform, or {} when
+# this platform can run the newest release. Non-darwin platforms are never
+# capped.
+#
+# Careful: the result is a version string, not a number. Do not pass it through
+# expr (including an expr ternary), because Tcl will renormalise "1.20" to
+# "1.2", which then fails to match anything. Compare it with vercmp and
+# interpolate it directly into strings.
+proc go_toolchain.ceiling {} {
+    global os.platform os.major go_toolchain.min_darwin
+
+    if {${os.platform} ne "darwin"} {
+        return {}
+    }
+
+    set best {}
+    foreach {minor min_darwin} [array get go_toolchain.min_darwin] {
+        if {${os.major} >= ${min_darwin}} {
+            if {${best} eq "" || [vercmp ${minor} > ${best}]} {
+                set best ${minor}
+            }
+        }
+    }
+
+    if {${best} eq "" || [vercmp ${best} >= [go_toolchain._newest]]} {
+        return {}
+    }
+    return ${best}
+}
+
+# Return 1 when the given minimum Go version can be satisfied on this platform.
+# An empty minimum is always satisfiable.
+proc go_toolchain.satisfies {minimum} {
+    if {${minimum} eq ""} {
+        return 1
+    }
+
+    set ceiling [go_toolchain.ceiling]
+    if {${ceiling} eq ""} {
+        return 1
+    }
+
+    return [vercmp ${minimum} <= ${ceiling}]
+}
+
+options go_toolchain.version go_toolchain.minor go_toolchain.goroot_final \
+        go_toolchain.suffix go_toolchain.bootstrap_path
+
+# Configure this Portfile as a versioned Go toolchain port.
+proc go_toolchain.setup {go_version} {
+    global prefix workpath worksrcpath configure.build_arch os.platform \
+           extract.suffix extract.cmd extract.pre_args extract.post_args \
+           distpath subport \
+           go_toolchain.version go_toolchain.minor go_toolchain.goroot_final \
+           go_toolchain.suffix go_toolchain.bootstrap_path
+
+    set minor [go_toolchain._minor ${go_version}]
+
+    set go_toolchain.version        ${go_version}
+    set go_toolchain.minor          ${minor}
+    set go_toolchain.suffix         -${minor}
+    set go_toolchain.goroot_final   ${prefix}/lib/go-${minor}
+    set go_toolchain.bootstrap_path ${workpath}/go_prebuilt
+
+    name                go-${minor}
+    version             ${go_version}
+    categories          lang
+    license             BSD
+    homepage            https://go.dev
+
+    maintainers         {gmail.com:herby.gillot @herbygillot} \
+                        openmaintainer
+
+    description         compiled, garbage-collected, concurrent programming \
+                        language developed by Google Inc.
+
+    long_description    \
+        The Go programming language is an open source project to make \
+        programmers more productive. This port provides Go ${minor} \
+        specifically, installed alongside any other Go toolchain, as \
+        go-${minor} and gofmt-${minor}. It is intended for building software \
+        that requires this particular release, and for systems that cannot run \
+        a newer one.
+
+    # The oldest macOS this release is supported on.
+    platforms           "darwin >= [go_toolchain.min_darwin ${go_version}]"
+
+    # Go dropped darwin/386 well before any release packaged here.
+    supported_archs     arm64 x86_64
+
+    master_sites        [option homepage]/dl/
+    distfiles           go${go_version}.src${extract.suffix}
+    extract.only        go${go_version}.src${extract.suffix}
+    worksrcdir          go
+
+    use_configure       no
+    use_parallel_build  no
+
+    # build.cmd is a shell script that runs make itself, so stop the port
+    # system adding a -j flag.
+    build.jobs          -1
+    build.dir           ${worksrcpath}/src
+    build.cmd           ./make.bash
+    build.target
+
+    switch ${configure.build_arch} {
+        arm64   { set goarch arm64 }
+        x86_64  { set goarch amd64 }
+        default { set goarch {} }
+    }
+
+    # Bootstrap from the official prebuilt toolchain of the same release. That
+    # binary's own minimum macOS version is never newer than the release's
+    # stated floor, so it runs anywhere this port is allowed to build.
+    switch ${configure.build_arch} {
+        arm64   { set bootstrap_dist go${go_version}.darwin-arm64${extract.suffix} }
+        default { set bootstrap_dist go${go_version}.darwin-amd64${extract.suffix} }
+    }
+    distfiles-append    ${bootstrap_dist}
+
+    build.env           GOROOT=${worksrcpath} \
+                        GOARCH=${goarch} \
+                        GOOS=darwin \
+                        GOROOT_FINAL=${go_toolchain.goroot_final} \
+                        GOROOT_BOOTSTRAP=${go_toolchain.bootstrap_path}/go \
+                        CC=[option configure.cc]
+
+    post-extract {
+        xinstall -d ${go_toolchain.bootstrap_path}
+        system -W ${go_toolchain.bootstrap_path} \
+            "${extract.cmd} ${extract.pre_args} ${distpath}/[go_toolchain._bootstrap_dist] ${extract.post_args}"
+    }
+
+    post-build {
+        system "find ${worksrcpath} -type d -name .hg* -print0 | xargs -0 rm -rf"
+        delete ${worksrcpath}/pkg/bootstrap
+    }
+
+    destroot {
+        # Contains a deliberately malformed Mach-O file that upsets destroot.
+        delete ${worksrcpath}/src/cmd/vendor/github.com/google/pprof/internal/binutils/testdata/malformed_macho
+
+        set grfdir ${destroot}${go_toolchain.goroot_final}
+        set docdir ${destroot}${prefix}/share/doc/${subport}
+
+        xinstall -d ${grfdir}
+        xinstall -d ${docdir}
+
+        # go.env only exists from Go 1.21 onwards, and the layout has varied
+        # in other ways between releases, so only copy what this one ships.
+        foreach f {api bin lib misc pkg src test VERSION go.env} {
+            if {[file exists ${worksrcpath}/${f}]} {
+                copy ${worksrcpath}/${f} ${grfdir}
+            }
+        }
+
+        foreach f {go gofmt} {
+            ln -s ../lib/go-${go_toolchain.minor}/bin/${f} \
+                ${destroot}${prefix}/bin/${f}${go_toolchain.suffix}
+        }
+
+        foreach f {CONTRIBUTING.md LICENSE PATENTS SECURITY.md VERSION} {
+            if {[file exists ${worksrcpath}/${f}]} {
+                xinstall -m 0644 -W ${worksrcpath} ${f} ${docdir}
+            }
+        }
+    }
+
+    notes "
+        This port installs Go ${minor} as go-${minor} and gofmt-${minor}, so it
+        does not interfere with the main `go` port. Use it directly, or point a
+        build at ${prefix}/lib/go-${minor} as GOROOT.
+    "
+
+    # Match only this branch, so a versioned toolchain is not reported as
+    # outdated against whatever the current Go release happens to be.
+    livecheck.type      regex
+    livecheck.url       [option homepage]/dl/
+    livecheck.regex     [go_toolchain._livecheck_regex ${minor}]
+}
+
+# The bootstrap distfile for this build, recomputed at phase time so the
+# post-extract block does not need a captured local.
+proc go_toolchain._bootstrap_dist {} {
+    global configure.build_arch extract.suffix go_toolchain.version
+
+    switch ${configure.build_arch} {
+        arm64   { set arch darwin-arm64 }
+        default { set arch darwin-amd64 }
+    }
+    return go[option go_toolchain.version].${arch}${extract.suffix}
+}
+
+# Match only patch releases of this port's own branch, so that a versioned port
+# is not reported as outdated against a newer branch.
+proc go_toolchain._livecheck_regex {minor} {
+    set esc [string map {. {\.}} ${minor}]
+    return [subst -nocommands -nobackslashes {go(${esc}\.[0-9.]+)\.src\.tar\.gz}]
+}
