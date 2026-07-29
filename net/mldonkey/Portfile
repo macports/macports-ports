@@ -6,7 +6,7 @@ PortGroup           github 1.0
 
 github.setup        ygrek mldonkey 3-2-1 release-
 version             [string map {- .} ${github.version}]
-revision            0
+revision            2
 categories          net p2p
 maintainers         nomaintainer
 license             GPL-2+
@@ -51,6 +51,7 @@ depends_lib-append  port:bzip2 \
                     port:miniupnpc \
                     port:ocaml \
                     port:ocaml-camlp4 \
+                    port:ocaml-camlp-streams \
                     port:ocaml-num \
                     port:xorg-libX11 \
                     port:zlib
@@ -61,6 +62,88 @@ require_active_variants lablgtk2 rsvg
 # finding lablgtk2 via ocamlfind.
 # https://github.com/ygrek/mldonkey/issues/107
 patchfiles-append   patch-lablgtk.diff
+
+# Fix build with OCaml 5: Stream and Genlex moved to camlp-streams library.
+# https://github.com/ygrek/mldonkey/issues/120
+patchfiles-append   patch-ocaml5-camlp-streams.diff \
+                    patch-ocaml5-printf-precision.diff \
+                    patch-ocaml5-napigator-lower.diff \
+                    patch-ocaml5-misc2-map-file.diff \
+                    patch-ocaml5-c-headers.diff
+
+post-patch {
+    # OCaml 5 removed deprecated String/Char case functions and Pervasives module.
+    # LC_ALL=C is required for BSD sed to handle non-UTF-8 source files.
+    system -W ${worksrcpath} {find src -type f \( \
+        -name "*.ml" -o -name "*.mli" -o -name "*.ml4" \
+        -o -name "*.mly" -o -name "*.mll" -o -name "*.mlcpp" \) -print0 | xargs -0 \
+        env LC_ALL=C sed -i '' -E \
+        -e 's/String\.lowercase([^_a-zA-Z0-9])/String.lowercase_ascii\1/g' \
+        -e 's/String\.uppercase([^_a-zA-Z0-9])/String.uppercase_ascii\1/g' \
+        -e 's/String\.capitalize([^_a-zA-Z0-9])/String.capitalize_ascii\1/g' \
+        -e 's/String\.uncapitalize([^_a-zA-Z0-9])/String.uncapitalize_ascii\1/g' \
+        -e 's/String\.create([^_a-zA-Z0-9])/Bytes.create\1/g' \
+        -e 's/String\.fill([^_a-zA-Z0-9])/Bytes.fill\1/g' \
+        -e 's/String\.copy //g' \
+        -e 's/Char\.lowercase([^_a-zA-Z0-9])/Char.lowercase_ascii\1/g' \
+        -e 's/Char\.uppercase([^_a-zA-Z0-9])/Char.uppercase_ascii\1/g' \
+        -e 's/Pervasives\./Stdlib./g' \
+        -e '/^module Stdlib = Pervasives$/d' \
+        -e 's/ or / || /g' \
+        -e 's/Lazy\.lazy_is_val/Lazy.is_val/g' \
+        -e 's/Lazy\.lazy_from_val/Lazy.from_val/g' \
+        -e 's/Lazy\.force_val/Lazy.force/g' \
+        -e 's/%-s/%s/g' \
+        -e 's/"unix_lseek_64"/"caml_unix_lseek_64"/g' \
+        -e 's/%([0-9]*)\.([a-zA-Z])/%\1.0\2/g'}
+    # OCaml 5 removed .[i] <- mutation syntax; use Bytes.set instead.
+    # Handle md4.ml special cases before the general replacement:
+    # 1. table.[int_of_char base64tbl.[i]] <- ... (nested brackets thwart general pattern)
+    # 2. digest.[i*8 + (7-j)] <- \n  (expr) (value on next line)
+    system -W ${worksrcpath} {LC_ALL=C sed -i '' -E \
+        -e 's/table\.\[int_of_char base64tbl\.\[i\]\] <- char_of_int i/Bytes.set table (int_of_char base64tbl.[i]) (char_of_int i)/g' \
+        -e 's/digest\.\[i\*8 \+ \(7-j\)\] <-/Bytes.set digest (i*8 + (7-j))/g' \
+        src/utils/lib/md4.ml}
+    # OCaml 5 removed unprefixed C runtime API aliases; add caml_ prefix.
+    system -W ${worksrcpath} {find src -type f -name "*.c" -print0 | xargs -0 \
+        env LC_ALL=C sed -i '' -E \
+        -e 's/([^_a-zA-Z])copy_string([^_a-zA-Z])/\1caml_copy_string\2/g' \
+        -e 's/([^_a-zA-Z])alloc_string([^_a-zA-Z])/\1caml_alloc_string\2/g' \
+        -e 's/([^_a-zA-Z])alloc_small([^_a-zA-Z])/\1caml_alloc_small\2/g' \
+        -e 's/([^_a-zA-Z])alloc_tuple([^_a-zA-Z])/\1caml_alloc_tuple\2/g' \
+        -e 's/([^_a-zA-Z])failwith([^_a-zA-Z])/\1caml_failwith\2/g' \
+        -e 's/([^_a-zA-Z])invalid_argument([^_a-zA-Z])/\1caml_invalid_argument\2/g' \
+        -e 's/([^_a-zA-Z])raise_sys_error([^_a-zA-Z])/\1caml_raise_sys_error\2/g' \
+        -e 's/([^_a-zA-Z])raise_constant([^_a-zA-Z])/\1caml_raise_constant\2/g' \
+        -e 's/([^_a-zA-Z])raise_not_found([^_a-zA-Z])/\1caml_raise_not_found\2/g' \
+        -e 's/([^_a-zA-Z])raise_with_string([^_a-zA-Z])/\1caml_raise_with_string\2/g' \
+        -e 's/([^_a-zA-Z])raise_out_of_memory([^_a-zA-Z])/\1caml_raise_out_of_memory\2/g' \
+        -e 's/([^_a-zA-Z])alloc_custom([^_a-zA-Z])/\1caml_alloc_custom\2/g' \
+        -e 's/([^_a-zA-Z])mlraise([^_a-zA-Z])/\1caml_raise\2/g' \
+        -e 's/([^_a-zA-Z])string_length([^_a-zA-Z])/\1caml_string_length\2/g' \
+        -e 's/([^_a-zA-Z])enter_blocking_section([^_a-zA-Z])/\1caml_enter_blocking_section\2/g' \
+        -e 's/([^_a-zA-Z])leave_blocking_section([^_a-zA-Z])/\1caml_leave_blocking_section\2/g' \
+        -e 's/([^_a-zA-Z])copy_int64([^_a-zA-Z])/\1caml_copy_int64\2/g' \
+        -e 's/([^_a-zA-Z])copy_int32([^_a-zA-Z])/\1caml_copy_int32\2/g' \
+        -e 's/([^_a-zA-Z/])alloc\(/\1caml_alloc(/g' \
+        -e 's/alloc_inet_addr/caml_unix_alloc_inet_addr/g' \
+        -e 's/([^_a-zA-Z])uerror([^_a-zA-Z])/\1caml_uerror\2/g' \
+        -e 's/([^_a-zA-Z])unix_error([^_a-zA-Z])/\1caml_unix_error\2/g' \
+        -e 's/([^_a-zA-Z])really_putblock([^_a-zA-Z])/\1caml_really_putblock\2/g' \
+        -e 's/Store_field\(job_v, 1, addr_list_of_job\(\)\)$/Store_field(job_v, 1, addr_list_of_job());/'}
+    # General rule: x.[i] <- v  ->  Bytes.set x (i) (v).
+    # Double-quoted expression allows apostrophe in identifier class (e.g. s').
+    # [^;]* for value stops before any trailing ; statement on the same line.
+    system -W ${worksrcpath} {find src -type f \( \
+        -name "*.ml" -o -name "*.mli" -o -name "*.ml4" \
+        -o -name "*.mly" -o -name "*.mll" -o -name "*.mlcpp" \) -print0 | xargs -0 \
+        env LC_ALL=C sed -i '' -E \
+        -e "s/([a-zA-Z_][a-zA-Z0-9_'.]*)\\.\\[([^]]*)] *<- *([^;]*)/Bytes.set \\1 (\\2) (\\3)/g" \
+        -e 's/\(([^)]+) in\)$/(\1) in/g'}
+}
+
+# Some C source files have CRLF line endings; -l ignores trailing whitespace.
+patch.args-append   -l
 
 compiler.blacklist-append \
                     *gcc-4.0 *gcc-4.2

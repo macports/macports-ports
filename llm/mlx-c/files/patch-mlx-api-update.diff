@@ -1,0 +1,1751 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 43dc249..fcf4ea7 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -35,7 +35,7 @@ else()
+   FetchContent_Declare(
+     mlx
+     GIT_REPOSITORY "https://github.com/ml-explore/mlx.git"
+-    GIT_TAG v0.31.1)
++    GIT_TAG v0.31.2)
+   FetchContent_MakeAvailable(mlx)
+ endif()
+ 
+@@ -53,6 +53,7 @@ set(mlxc-src
+     ${CMAKE_CURRENT_LIST_DIR}/mlx/c/export.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/mlx/c/fast.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/mlx/c/fft.cpp
++    ${CMAKE_CURRENT_LIST_DIR}/mlx/c/graph_utils.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/mlx/c/io.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/mlx/c/io_types.cpp
+     ${CMAKE_CURRENT_LIST_DIR}/mlx/c/linalg.cpp
+diff --git a/examples/CMakeLists.txt b/examples/CMakeLists.txt
+index ba83e5b..7cbacf3 100644
+--- a/examples/CMakeLists.txt
++++ b/examples/CMakeLists.txt
+@@ -20,3 +20,9 @@ target_link_libraries(example-closure PUBLIC mlxc)
+ 
+ add_executable(example-export ${CMAKE_CURRENT_LIST_DIR}/example-export.c)
+ target_link_libraries(example-export PUBLIC mlxc)
++
++add_executable(example-gguf ${CMAKE_CURRENT_LIST_DIR}/example-gguf.c)
++target_link_libraries(example-gguf PUBLIC mlxc)
++
++add_executable(example-graph ${CMAKE_CURRENT_LIST_DIR}/example-graph.c)
++target_link_libraries(example-graph PUBLIC mlxc)
+diff --git a/examples/example-gguf.c b/examples/example-gguf.c
+new file mode 100644
+index 0000000..5193f01
+--- /dev/null
++++ b/examples/example-gguf.c
+@@ -0,0 +1,106 @@
++/* Copyright © 2023-2024 Apple Inc. */
++
++#include <stdio.h>
++#include "mlx/c/mlx.h"
++
++char default_filename[] = "test.gguf";
++const char* dtype_strs[] = {
++    "MLX_BOOL",
++    "MLX_UINT8",
++    "MLX_UINT16",
++    "MLX_UINT32",
++    "MLX_UINT64",
++    "MLX_INT8",
++    "MLX_INT16",
++    "MLX_INT32",
++    "MLX_INT64",
++    "MLX_FLOAT16",
++    "MLX_FLOAT32",
++    "MLX_FLOAT64",
++    "MLX_BFLOAT16",
++    "MLX_COMPLEX64",
++};
++
++void add_zero_array_to_gguf(
++    mlx_io_gguf gguf,
++    const char* key,
++    const int* shape,
++    int ndim,
++    mlx_dtype dtype,
++    const char* metadata,
++    mlx_stream s) {
++  mlx_array arr = mlx_array_new();
++  mlx_zeros(&arr, shape, ndim, dtype, s);
++  mlx_io_gguf_set_array(gguf, key, arr);
++  if (metadata) {
++    mlx_io_gguf_set_metadata_string(gguf, key, metadata);
++  }
++  mlx_array_free(arr);
++}
++
++int main(int argc, char* argv[]) {
++  mlx_stream stream = mlx_default_cpu_stream_new();
++
++  char* filename = default_filename;
++  if (argc > 1) {
++    filename = argv[1];
++  } else {
++    mlx_io_gguf gguf = mlx_io_gguf_new();
++    add_zero_array_to_gguf(
++        gguf, "array3D", (int[]){3, 4, 5}, 3, MLX_FLOAT16, NULL, stream);
++    add_zero_array_to_gguf(
++        gguf,
++        "array2D",
++        (int[]){6, 7},
++        2,
++        MLX_FLOAT32,
++        "a 6x7 zero array",
++        stream);
++    mlx_save_gguf(filename, gguf);
++    mlx_io_gguf_free(gguf);
++  }
++
++  mlx_io_gguf gguf = mlx_io_gguf_new();
++  mlx_load_gguf(&gguf, filename, stream);
++  mlx_vector_string keys = mlx_vector_string_new();
++  mlx_io_gguf_get_keys(&keys, gguf);
++
++  char* key;
++  bool flag;
++  mlx_array value = mlx_array_new();
++  for (int i = 0; i < mlx_vector_string_size(keys); i++) {
++    mlx_vector_string_get(&key, keys, i);
++    printf("%s ", key);
++    mlx_io_gguf_get_array(&value, gguf, key);
++    const int* shape = mlx_array_shape(value);
++    for (int d = 0; d < mlx_array_ndim(value); d++) {
++      if (d != 0) {
++        printf("x");
++      }
++      printf("%d", shape[d]);
++    }
++    printf(" %s", dtype_strs[mlx_array_dtype(value)]);
++
++    mlx_io_gguf_has_metadata_array(&flag, gguf, key);
++    if (flag) {
++      printf(" [array]");
++    }
++    mlx_io_gguf_has_metadata_string(&flag, gguf, key);
++    if (flag) {
++      printf(" [string]");
++    }
++    mlx_io_gguf_has_metadata_vector_string(&flag, gguf, key);
++    if (flag) {
++      printf(" [vector string]");
++    }
++
++    printf("\n");
++  }
++
++  mlx_array_free(value);
++  mlx_vector_string_free(keys);
++  mlx_io_gguf_free(gguf);
++  mlx_stream_free(stream);
++
++  return 0;
++}
+diff --git a/examples/example-graph.c b/examples/example-graph.c
+new file mode 100644
+index 0000000..bda0e85
+--- /dev/null
++++ b/examples/example-graph.c
+@@ -0,0 +1,34 @@
++/* Copyright © 2023-2024 Apple Inc. */
++
++#include <stdio.h>
++#include "mlx/c/mlx.h"
++
++int main(void) {
++  mlx_stream stream = mlx_default_cpu_stream_new();
++  float data[] = {1, 2, 3, 4, 5, 6};
++  int shape[] = {2, 3};
++  mlx_array res = mlx_array_new();
++  mlx_array val = mlx_array_new_data(data, shape, 2, MLX_FLOAT32);
++  mlx_array two = mlx_array_new_int(2);
++  mlx_divide(&res, val, two, stream);
++  mlx_log(&res, res, stream);
++
++  mlx_node_namer namer = mlx_node_namer_new();
++  mlx_node_namer_set_name(namer, val, "inputs");
++  mlx_node_namer_set_name(namer, res, "result");
++  mlx_vector_array vec = mlx_vector_array_new();
++  mlx_vector_array_append_value(vec, val);
++  mlx_vector_array_append_value(vec, two);
++  mlx_vector_array_append_value(vec, res);
++
++  mlx_export_to_dot(stdout, namer, vec);
++
++  mlx_array_free(val);
++  mlx_array_free(two);
++  mlx_array_free(res);
++  mlx_vector_array_free(vec);
++  mlx_node_namer_free(namer);
++  mlx_stream_free(stream);
++
++  return 0;
++}
+diff --git a/mlx/c/compile.h b/mlx/c/compile.h
+index 04567fb..2892a1f 100644
+--- a/mlx/c/compile.h
++++ b/mlx/c/compile.h
+@@ -34,6 +34,7 @@ typedef enum mlx_compile_mode_ {
+   MLX_COMPILE_MODE_NO_FUSE,
+   MLX_COMPILE_MODE_ENABLED
+ } mlx_compile_mode;
++
+ int mlx_compile(mlx_closure* res, const mlx_closure fun, bool shapeless);
+ int mlx_detail_compile(
+     mlx_closure* res,
+diff --git a/mlx/c/distributed_group.cpp b/mlx/c/distributed_group.cpp
+index a662ec6..d0db5d5 100644
+--- a/mlx/c/distributed_group.cpp
++++ b/mlx/c/distributed_group.cpp
+@@ -6,6 +6,41 @@
+ #include "mlx/c/error.h"
+ #include "mlx/c/private/mlx.h"
+ 
++extern "C" mlx_distributed_group mlx_distributed_group_new(void) {
++  try {
++    return mlx_distributed_group_new_();
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return {nullptr};
++  }
++}
++
++extern "C" int mlx_distributed_group_free(mlx_distributed_group group) {
++  try {
++    mlx_distributed_group_free_(group);
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++  return 0;
++}
++
++extern "C" int
++mlx_distributed_init(mlx_distributed_group* res, bool strict, const char* bk) {
++  try {
++    if (bk) {
++      mlx_distributed_group_set_(
++          *res, mlx::core::distributed::init(strict, bk));
++    } else {
++      mlx_distributed_group_set_(*res, mlx::core::distributed::init(strict));
++    }
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++
+ extern "C" int mlx_distributed_group_rank(mlx_distributed_group group) {
+   try {
+     return mlx_distributed_group_get_(group).rank();
+@@ -24,14 +59,18 @@ extern "C" int mlx_distributed_group_size(mlx_distributed_group group) {
+   }
+ }
+ 
+-extern "C" mlx_distributed_group
+-mlx_distributed_group_split(mlx_distributed_group group, int color, int key) {
++extern "C" int mlx_distributed_group_split(
++    mlx_distributed_group* res,
++    mlx_distributed_group group,
++    int color,
++    int key) {
+   try {
+-    return mlx_distributed_group_new_(
+-        mlx_distributed_group_get_(group).split(color, key));
++    mlx_distributed_group_set_(
++        *res, mlx_distributed_group_get_(group).split(color, key));
++    return 0;
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+-    return mlx_distributed_group_new_();
++    return 1;
+   }
+ }
+ 
+@@ -47,19 +86,3 @@ extern "C" bool mlx_distributed_is_available(const char* bk) {
+     return false;
+   }
+ }
+-
+-extern "C" mlx_distributed_group mlx_distributed_init(
+-    bool strict,
+-    const char* bk) {
+-  try {
+-    if (bk) {
+-      return mlx_distributed_group_new_(
+-          mlx::core::distributed::init(strict, bk));
+-    } else {
+-      return mlx_distributed_group_new_(mlx::core::distributed::init(strict));
+-    }
+-  } catch (std::exception& e) {
+-    mlx_error(e.what());
+-    return mlx_distributed_group_new_();
+-  }
+-}
+diff --git a/mlx/c/distributed_group.h b/mlx/c/distributed_group.h
+index 43aa2ae..bfbaa80 100644
+--- a/mlx/c/distributed_group.h
++++ b/mlx/c/distributed_group.h
+@@ -23,6 +23,24 @@ typedef struct mlx_distributed_group_ {
+   void* ctx;
+ } mlx_distributed_group;
+ 
++/**
++ * Create an empty group.
++ */
++mlx_distributed_group mlx_distributed_group_new(void);
++
++/**
++ * Free the group.
++ */
++int mlx_distributed_group_free(mlx_distributed_group group);
++
++/**
++ * Initialize distributed.
++ */
++int mlx_distributed_init(
++    mlx_distributed_group* res,
++    bool strict,
++    const char* bk /* may be null */);
++
+ /**
+  * Get the rank.
+  */
+@@ -36,21 +54,17 @@ int mlx_distributed_group_size(mlx_distributed_group group);
+ /**
+  * Split the group.
+  */
+-mlx_distributed_group
+-mlx_distributed_group_split(mlx_distributed_group group, int color, int key);
++int mlx_distributed_group_split(
++    mlx_distributed_group* res,
++    mlx_distributed_group group,
++    int color,
++    int key);
+ 
+ /**
+  * Check if distributed is available.
+  */
+ bool mlx_distributed_is_available(const char* bk /* may be null */);
+ 
+-/**
+- * Initialize distributed.
+- */
+-mlx_distributed_group mlx_distributed_init(
+-    bool strict,
+-    const char* bk /* may be null */);
+-
+ /**@}*/
+ 
+ #ifdef __cplusplus
+diff --git a/mlx/c/fft.cpp b/mlx/c/fft.cpp
+index cd63ccb..c65cd43 100644
+--- a/mlx/c/fft.cpp
++++ b/mlx/c/fft.cpp
+@@ -13,11 +13,17 @@ extern "C" int mlx_fft_fft(
+     const mlx_array a,
+     int n,
+     int axis,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+         *res,
+-        mlx::core::fft::fft(mlx_array_get_(a), n, axis, mlx_stream_get_(s)));
++        mlx::core::fft::fft(
++            mlx_array_get_(a),
++            n,
++            axis,
++            mlx_fft_norm_to_cpp(norm),
++            mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+     return 1;
+@@ -31,6 +37,7 @@ extern "C" int mlx_fft_fft2(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+@@ -39,6 +46,7 @@ extern "C" int mlx_fft_fft2(
+             mlx_array_get_(a),
+             mlx::core::Shape(n, n + n_num),
+             std::vector<int>(axes, axes + axes_num),
++            mlx_fft_norm_to_cpp(norm),
+             mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+@@ -46,6 +54,16 @@ extern "C" int mlx_fft_fft2(
+   }
+   return 0;
+ }
++extern "C" int
++mlx_fft_fftfreq(mlx_array* res, int n, double d, const mlx_stream s) {
++  try {
++    mlx_array_set_(*res, mlx::core::fft::fftfreq(n, d, mlx_stream_get_(s)));
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++  return 0;
++}
+ extern "C" int mlx_fft_fftn(
+     mlx_array* res,
+     const mlx_array a,
+@@ -53,6 +71,7 @@ extern "C" int mlx_fft_fftn(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+@@ -61,6 +80,7 @@ extern "C" int mlx_fft_fftn(
+             mlx_array_get_(a),
+             mlx::core::Shape(n, n + n_num),
+             std::vector<int>(axes, axes + axes_num),
++            mlx_fft_norm_to_cpp(norm),
+             mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+@@ -92,11 +112,17 @@ extern "C" int mlx_fft_ifft(
+     const mlx_array a,
+     int n,
+     int axis,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+         *res,
+-        mlx::core::fft::ifft(mlx_array_get_(a), n, axis, mlx_stream_get_(s)));
++        mlx::core::fft::ifft(
++            mlx_array_get_(a),
++            n,
++            axis,
++            mlx_fft_norm_to_cpp(norm),
++            mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+     return 1;
+@@ -110,6 +136,7 @@ extern "C" int mlx_fft_ifft2(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+@@ -118,6 +145,7 @@ extern "C" int mlx_fft_ifft2(
+             mlx_array_get_(a),
+             mlx::core::Shape(n, n + n_num),
+             std::vector<int>(axes, axes + axes_num),
++            mlx_fft_norm_to_cpp(norm),
+             mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+@@ -132,6 +160,7 @@ extern "C" int mlx_fft_ifftn(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+@@ -140,6 +169,7 @@ extern "C" int mlx_fft_ifftn(
+             mlx_array_get_(a),
+             mlx::core::Shape(n, n + n_num),
+             std::vector<int>(axes, axes + axes_num),
++            mlx_fft_norm_to_cpp(norm),
+             mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+@@ -171,11 +201,17 @@ extern "C" int mlx_fft_irfft(
+     const mlx_array a,
+     int n,
+     int axis,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+         *res,
+-        mlx::core::fft::irfft(mlx_array_get_(a), n, axis, mlx_stream_get_(s)));
++        mlx::core::fft::irfft(
++            mlx_array_get_(a),
++            n,
++            axis,
++            mlx_fft_norm_to_cpp(norm),
++            mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+     return 1;
+@@ -189,6 +225,7 @@ extern "C" int mlx_fft_irfft2(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+@@ -197,6 +234,7 @@ extern "C" int mlx_fft_irfft2(
+             mlx_array_get_(a),
+             mlx::core::Shape(n, n + n_num),
+             std::vector<int>(axes, axes + axes_num),
++            mlx_fft_norm_to_cpp(norm),
+             mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+@@ -211,6 +249,7 @@ extern "C" int mlx_fft_irfftn(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+@@ -219,6 +258,7 @@ extern "C" int mlx_fft_irfftn(
+             mlx_array_get_(a),
+             mlx::core::Shape(n, n + n_num),
+             std::vector<int>(axes, axes + axes_num),
++            mlx_fft_norm_to_cpp(norm),
+             mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+@@ -231,11 +271,17 @@ extern "C" int mlx_fft_rfft(
+     const mlx_array a,
+     int n,
+     int axis,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+         *res,
+-        mlx::core::fft::rfft(mlx_array_get_(a), n, axis, mlx_stream_get_(s)));
++        mlx::core::fft::rfft(
++            mlx_array_get_(a),
++            n,
++            axis,
++            mlx_fft_norm_to_cpp(norm),
++            mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+     return 1;
+@@ -249,6 +295,7 @@ extern "C" int mlx_fft_rfft2(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+@@ -257,6 +304,7 @@ extern "C" int mlx_fft_rfft2(
+             mlx_array_get_(a),
+             mlx::core::Shape(n, n + n_num),
+             std::vector<int>(axes, axes + axes_num),
++            mlx_fft_norm_to_cpp(norm),
+             mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+@@ -264,6 +312,16 @@ extern "C" int mlx_fft_rfft2(
+   }
+   return 0;
+ }
++extern "C" int
++mlx_fft_rfftfreq(mlx_array* res, int n, double d, const mlx_stream s) {
++  try {
++    mlx_array_set_(*res, mlx::core::fft::rfftfreq(n, d, mlx_stream_get_(s)));
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++  return 0;
++}
+ extern "C" int mlx_fft_rfftn(
+     mlx_array* res,
+     const mlx_array a,
+@@ -271,6 +329,7 @@ extern "C" int mlx_fft_rfftn(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s) {
+   try {
+     mlx_array_set_(
+@@ -279,6 +338,7 @@ extern "C" int mlx_fft_rfftn(
+             mlx_array_get_(a),
+             mlx::core::Shape(n, n + n_num),
+             std::vector<int>(axes, axes + axes_num),
++            mlx_fft_norm_to_cpp(norm),
+             mlx_stream_get_(s)));
+   } catch (std::exception& e) {
+     mlx_error(e.what());
+diff --git a/mlx/c/fft.h b/mlx/c/fft.h
+index 779803e..7140b60 100644
+--- a/mlx/c/fft.h
++++ b/mlx/c/fft.h
+@@ -28,11 +28,18 @@ extern "C" {
+  */
+ /**@{*/
+ 
++typedef enum mlx_fft_norm_ {
++  MLX_FFT_NORM_BACKWARD,
++  MLX_FFT_NORM_ORTHO,
++  MLX_FFT_NORM_FORWARD
++} mlx_fft_norm;
++
+ int mlx_fft_fft(
+     mlx_array* res,
+     const mlx_array a,
+     int n,
+     int axis,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ int mlx_fft_fft2(
+     mlx_array* res,
+@@ -41,7 +48,9 @@ int mlx_fft_fft2(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s);
++int mlx_fft_fftfreq(mlx_array* res, int n, double d, const mlx_stream s);
+ int mlx_fft_fftn(
+     mlx_array* res,
+     const mlx_array a,
+@@ -49,6 +58,7 @@ int mlx_fft_fftn(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ int mlx_fft_fftshift(
+     mlx_array* res,
+@@ -61,6 +71,7 @@ int mlx_fft_ifft(
+     const mlx_array a,
+     int n,
+     int axis,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ int mlx_fft_ifft2(
+     mlx_array* res,
+@@ -69,6 +80,7 @@ int mlx_fft_ifft2(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ int mlx_fft_ifftn(
+     mlx_array* res,
+@@ -77,6 +89,7 @@ int mlx_fft_ifftn(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ int mlx_fft_ifftshift(
+     mlx_array* res,
+@@ -89,6 +102,7 @@ int mlx_fft_irfft(
+     const mlx_array a,
+     int n,
+     int axis,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ int mlx_fft_irfft2(
+     mlx_array* res,
+@@ -97,6 +111,7 @@ int mlx_fft_irfft2(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ int mlx_fft_irfftn(
+     mlx_array* res,
+@@ -105,12 +120,14 @@ int mlx_fft_irfftn(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ int mlx_fft_rfft(
+     mlx_array* res,
+     const mlx_array a,
+     int n,
+     int axis,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ int mlx_fft_rfft2(
+     mlx_array* res,
+@@ -119,7 +136,9 @@ int mlx_fft_rfft2(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s);
++int mlx_fft_rfftfreq(mlx_array* res, int n, double d, const mlx_stream s);
+ int mlx_fft_rfftn(
+     mlx_array* res,
+     const mlx_array a,
+@@ -127,6 +146,7 @@ int mlx_fft_rfftn(
+     size_t n_num,
+     const int* axes,
+     size_t axes_num,
++    mlx_fft_norm norm,
+     const mlx_stream s);
+ 
+ /**@}*/
+diff --git a/mlx/c/graph_utils.cpp b/mlx/c/graph_utils.cpp
+new file mode 100644
+index 0000000..e8cb807
+--- /dev/null
++++ b/mlx/c/graph_utils.cpp
+@@ -0,0 +1,81 @@
++/* Copyright © 2023-2024 Apple Inc.                   */
++/*                                                    */
++/* This file is auto-generated. Do not edit manually. */
++/*                                                    */
++
++#include "mlx/c/graph_utils.h"
++#include "mlx/c/error.h"
++#include "mlx/c/private/mlx.h"
++#include "mlx/graph_utils.h"
++
++extern "C" mlx_node_namer mlx_node_namer_new() {
++  try {
++    return mlx_node_namer_new_(mlx::core::NodeNamer());
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++  }
++  return {nullptr};
++}
++extern "C" int mlx_node_namer_free(mlx_node_namer namer) {
++  try {
++    mlx_node_namer_free_(namer);
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++extern "C" int mlx_node_namer_set_name(
++    mlx_node_namer namer,
++    const mlx_array arr,
++    const char* name) {
++  try {
++    mlx_node_namer_get_(namer).set_name(mlx_array_get_(arr), name);
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++extern "C" int mlx_node_namer_get_name(
++    const char** name,
++    mlx_node_namer namer,
++    const mlx_array arr) {
++  try {
++    *name = mlx_node_namer_get_(namer).get_name(mlx_array_get_(arr)).c_str();
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++extern "C" int mlx_export_to_dot(
++    FILE* os,
++    const mlx_node_namer namer,
++    const mlx_vector_array outputs) {
++  try {
++    mlx::core::export_to_dot(
++        CFileOutputStream::as_lvalue(CFileOutputStream(os)),
++        mlx_node_namer_get_(namer),
++        mlx_vector_array_get_(outputs));
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++  return 0;
++}
++extern "C" int mlx_print_graph(
++    FILE* os,
++    const mlx_node_namer namer,
++    const mlx_vector_array outputs) {
++  try {
++    mlx::core::print_graph(
++        CFileOutputStream::as_lvalue(CFileOutputStream(os)),
++        mlx_node_namer_get_(namer),
++        mlx_vector_array_get_(outputs));
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++  return 0;
++}
+diff --git a/mlx/c/graph_utils.h b/mlx/c/graph_utils.h
+new file mode 100644
+index 0000000..81eec7a
+--- /dev/null
++++ b/mlx/c/graph_utils.h
+@@ -0,0 +1,61 @@
++/* Copyright © 2023-2024 Apple Inc.                   */
++/*                                                    */
++/* This file is auto-generated. Do not edit manually. */
++/*                                                    */
++
++#ifndef MLX_GRAPH_UTILS_H
++#define MLX_GRAPH_UTILS_H
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++
++#include "mlx/c/array.h"
++#include "mlx/c/closure.h"
++#include "mlx/c/distributed_group.h"
++#include "mlx/c/io_types.h"
++#include "mlx/c/map.h"
++#include "mlx/c/stream.h"
++#include "mlx/c/string.h"
++#include "mlx/c/vector.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * \defgroup graph_utils Graph Utils
++ */
++/**@{*/
++
++typedef struct mlx_node_namer_ {
++  void* ctx;
++} mlx_node_namer;
++
++mlx_node_namer mlx_node_namer_new();
++int mlx_node_namer_free(mlx_node_namer namer);
++int mlx_node_namer_set_name(
++    mlx_node_namer namer,
++    const mlx_array arr,
++    const char* name);
++int mlx_node_namer_get_name(
++    const char** name,
++    mlx_node_namer namer,
++    const mlx_array arr);
++
++int mlx_export_to_dot(
++    FILE* os,
++    const mlx_node_namer namer,
++    const mlx_vector_array outputs);
++int mlx_print_graph(
++    FILE* os,
++    const mlx_node_namer namer,
++    const mlx_vector_array outputs);
++
++/**@}*/
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/mlx/c/io.cpp b/mlx/c/io.cpp
+index 9ba7063..24e8093 100644
+--- a/mlx/c/io.cpp
++++ b/mlx/c/io.cpp
+@@ -30,6 +30,18 @@ extern "C" int mlx_load(mlx_array* res, const char* file, const mlx_stream s) {
+   }
+   return 0;
+ }
++extern "C" int
++mlx_load_gguf(mlx_io_gguf* gguf, const char* file, const mlx_stream s) {
++  try {
++    auto cpp_gguf = mlx::core::load_gguf(file, mlx_stream_get_(s));
++    mlx_io_gguf_set_(*gguf, std::move(cpp_gguf));
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++
+ extern "C" int mlx_load_safetensors_reader(
+     mlx_map_string_to_array* res_0,
+     mlx_map_string_to_string* res_1,
+@@ -84,6 +96,17 @@ extern "C" int mlx_save(const char* file, const mlx_array a) {
+   }
+   return 0;
+ }
++extern "C" int mlx_save_gguf(const char* file, mlx_io_gguf gguf) {
++  try {
++    auto cpp_gguf = mlx_io_gguf_get_(gguf);
++    mlx::core::save_gguf(file, cpp_gguf.first, cpp_gguf.second);
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++
+ extern "C" int mlx_save_safetensors_writer(
+     mlx_io_writer in_stream,
+     const mlx_map_string_to_array param,
+diff --git a/mlx/c/io.h b/mlx/c/io.h
+index 6eb205c..e1a0c0a 100644
+--- a/mlx/c/io.h
++++ b/mlx/c/io.h
+@@ -33,6 +33,9 @@ int mlx_load_reader(
+     mlx_io_reader in_stream,
+     const mlx_stream s);
+ int mlx_load(mlx_array* res, const char* file, const mlx_stream s);
++
++int mlx_load_gguf(mlx_io_gguf* gguf, const char* file, const mlx_stream s);
++
+ int mlx_load_safetensors_reader(
+     mlx_map_string_to_array* res_0,
+     mlx_map_string_to_string* res_1,
+@@ -45,6 +48,8 @@ int mlx_load_safetensors(
+     const mlx_stream s);
+ int mlx_save_writer(mlx_io_writer out_stream, const mlx_array a);
+ int mlx_save(const char* file, const mlx_array a);
++int mlx_save_gguf(const char* file, mlx_io_gguf gguf);
++
+ int mlx_save_safetensors_writer(
+     mlx_io_writer in_stream,
+     const mlx_map_string_to_array param,
+diff --git a/mlx/c/io_types.cpp b/mlx/c/io_types.cpp
+index 6a6668e..1a054a6 100644
+--- a/mlx/c/io_types.cpp
++++ b/mlx/c/io_types.cpp
+@@ -83,3 +83,165 @@ extern "C" int mlx_io_writer_tostring(mlx_string* str_, mlx_io_writer io) {
+     return 1;
+   }
+ }
++
++extern "C" mlx_io_gguf mlx_io_gguf_new(void) {
++  try {
++    return mlx_io_gguf_new_(mlx::core::GGUFLoad());
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return mlx_io_gguf({nullptr});
++  }
++}
++
++extern "C" int mlx_io_gguf_free(mlx_io_gguf io) {
++  try {
++    mlx_io_gguf_free_(io);
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++
++extern "C" int mlx_io_gguf_get_keys(mlx_vector_string* keys, mlx_io_gguf io) {
++  try {
++    auto& cpp_map = mlx_io_gguf_get_(io).first;
++    std::vector<std::string> cpp_keys;
++    cpp_keys.reserve(cpp_map.size());
++    for (const auto& [key, value] : cpp_map) {
++      cpp_keys.push_back(key);
++    }
++    mlx_vector_string_set_(*keys, cpp_keys);
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++
++extern "C" int
++mlx_io_gguf_get_array(mlx_array* arr, mlx_io_gguf io, const char* key) {
++  try {
++    auto& cpp_map = mlx_io_gguf_get_(io).first;
++    auto it = cpp_map.find(key);
++    if (it != cpp_map.end()) {
++      mlx_array_set_(*arr, it->second);
++    } else {
++      return 2; // not found
++    }
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++
++#define IMPLEMENT_GGUF_GET_METADATA(CNAME, CPPTYPE)                \
++  extern "C" int mlx_io_gguf_get_metadata_##CNAME(                 \
++      mlx_##CNAME* res, mlx_io_gguf io, const char* key) {         \
++    try {                                                          \
++      auto& cpp_map = mlx_io_gguf_get_(io).second;                 \
++      auto it = cpp_map.find(key);                                 \
++      if (it != cpp_map.end()) {                                   \
++        if (std::holds_alternative<CPPTYPE>(it->second)) {         \
++          mlx_##CNAME##_set_(*res, std::get<CPPTYPE>(it->second)); \
++        } else {                                                   \
++          return 3; /* found key, wrong value type */              \
++        }                                                          \
++      } else {                                                     \
++        return 2; /* not found */                                  \
++      }                                                            \
++      return 0;                                                    \
++    } catch (std::exception & e) {                                 \
++      mlx_error(e.what());                                         \
++      return 1;                                                    \
++    }                                                              \
++  }
++
++IMPLEMENT_GGUF_GET_METADATA(array, mlx::core::array);
++IMPLEMENT_GGUF_GET_METADATA(string, std::string);
++IMPLEMENT_GGUF_GET_METADATA(vector_string, std::vector<std::string>);
++
++#define IMPLEMENT_GGUF_HAS_METADATA(CNAME, CPPTYPE)        \
++  extern "C" int mlx_io_gguf_has_metadata_##CNAME(         \
++      bool* flag, mlx_io_gguf io, const char* key) {       \
++    try {                                                  \
++      auto& cpp_map = mlx_io_gguf_get_(io).second;         \
++      auto it = cpp_map.find(key);                         \
++      if (it != cpp_map.end()) {                           \
++        if (std::holds_alternative<CPPTYPE>(it->second)) { \
++          *flag = true;                                    \
++        } else {                                           \
++          *flag = false;                                   \
++        }                                                  \
++        return 0;                                          \
++      } else {                                             \
++        *flag = false;                                     \
++        return 2; /* not found */                          \
++      }                                                    \
++      return 0;                                            \
++    } catch (std::exception & e) {                         \
++      *flag = false;                                       \
++      mlx_error(e.what());                                 \
++      return 1;                                            \
++    }                                                      \
++  }
++
++IMPLEMENT_GGUF_HAS_METADATA(array, mlx::core::array);
++IMPLEMENT_GGUF_HAS_METADATA(string, std::string);
++IMPLEMENT_GGUF_HAS_METADATA(vector_string, std::vector<std::string>);
++
++extern "C" int
++mlx_io_gguf_set_array(mlx_io_gguf io, const char* key, const mlx_array arr) {
++  try {
++    auto& cpp_map = mlx_io_gguf_get_(io).first;
++    cpp_map.insert(std::make_pair(std::string(key), mlx_array_get_(arr)));
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++
++extern "C" int mlx_io_gguf_set_metadata_array(
++    mlx_io_gguf io,
++    const char* key,
++    const mlx_array marr) {
++  try {
++    auto& cpp_map = mlx_io_gguf_get_(io).second;
++    cpp_map.insert(std::make_pair(std::string(key), mlx_array_get_(marr)));
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++
++extern "C" int mlx_io_gguf_set_metadata_string(
++    mlx_io_gguf io,
++    const char* key,
++    const char* mstr) {
++  try {
++    auto& cpp_map = mlx_io_gguf_get_(io).second;
++    cpp_map.insert(std::make_pair(std::string(key), std::string(mstr)));
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++
++extern "C" int mlx_io_gguf_set_metadata_vector_string(
++    mlx_io_gguf io,
++    const char* key,
++    const mlx_vector_string mvstr) {
++  try {
++    auto& cpp_map = mlx_io_gguf_get_(io).second;
++    cpp_map.insert(
++        std::make_pair(std::string(key), mlx_vector_string_get_(mvstr)));
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
+diff --git a/mlx/c/io_types.h b/mlx/c/io_types.h
+index 88349b5..5382e73 100644
+--- a/mlx/c/io_types.h
++++ b/mlx/c/io_types.h
+@@ -95,6 +95,52 @@ int mlx_io_writer_tostring(mlx_string* str_, mlx_io_writer io);
+  */
+ int mlx_io_writer_free(mlx_io_writer io);
+ 
++/**
++ * A MLX GGUF object.
++ */
++typedef struct mlx_io_gguf_ {
++  void* ctx;
++} mlx_io_gguf;
++
++mlx_io_gguf mlx_io_gguf_new(void);
++int mlx_io_gguf_free(mlx_io_gguf io);
++int mlx_io_gguf_get_keys(mlx_vector_string* keys, mlx_io_gguf io);
++int mlx_io_gguf_get_array(mlx_array* arr, mlx_io_gguf io, const char* key);
++int mlx_io_gguf_get_metadata_array(
++    mlx_array* arr,
++    mlx_io_gguf io,
++    const char* key);
++int mlx_io_gguf_get_metadata_string(
++    mlx_string* str,
++    mlx_io_gguf io,
++    const char* key);
++int mlx_io_gguf_get_metadata_vector_string(
++    mlx_vector_string* vstr,
++    mlx_io_gguf io,
++    const char* key);
++int mlx_io_gguf_has_metadata_array(bool* flag, mlx_io_gguf io, const char* key);
++int mlx_io_gguf_has_metadata_string(
++    bool* flag,
++    mlx_io_gguf io,
++    const char* key);
++int mlx_io_gguf_has_metadata_vector_string(
++    bool* flag,
++    mlx_io_gguf io,
++    const char* key);
++int mlx_io_gguf_set_array(mlx_io_gguf io, const char* key, const mlx_array arr);
++int mlx_io_gguf_set_metadata_array(
++    mlx_io_gguf io,
++    const char* key,
++    const mlx_array marr);
++int mlx_io_gguf_set_metadata_string(
++    mlx_io_gguf io,
++    const char* key,
++    const char* mstr);
++int mlx_io_gguf_set_metadata_vector_string(
++    mlx_io_gguf io,
++    const char* key,
++    const mlx_vector_string mvstr);
++
+ /**@}*/
+ 
+ #ifdef __cplusplus
+diff --git a/mlx/c/mlx.h b/mlx/c/mlx.h
+index ffadac8..2aa9077 100644
+--- a/mlx/c/mlx.h
++++ b/mlx/c/mlx.h
+@@ -14,6 +14,7 @@
+ #include "mlx/c/export.h"
+ #include "mlx/c/fast.h"
+ #include "mlx/c/fft.h"
++#include "mlx/c/graph_utils.h"
+ #include "mlx/c/half.h"
+ #include "mlx/c/io.h"
+ #include "mlx/c/io_types.h"
+diff --git a/mlx/c/ops.cpp b/mlx/c/ops.cpp
+index f5eac1b..40b5a0c 100644
+--- a/mlx/c/ops.cpp
++++ b/mlx/c/ops.cpp
+@@ -3221,6 +3221,114 @@ extern "C" int mlx_slice_update_dynamic(
+   }
+   return 0;
+ }
++extern "C" int mlx_slice_update_add(
++    mlx_array* res,
++    const mlx_array src,
++    const mlx_array update,
++    const int* start,
++    size_t start_num,
++    const int* stop,
++    size_t stop_num,
++    const int* strides,
++    size_t strides_num,
++    const mlx_stream s) {
++  try {
++    mlx_array_set_(
++        *res,
++        mlx::core::slice_update_add(
++            mlx_array_get_(src),
++            mlx_array_get_(update),
++            mlx::core::Shape(start, start + start_num),
++            mlx::core::Shape(stop, stop + stop_num),
++            mlx::core::Shape(strides, strides + strides_num),
++            mlx_stream_get_(s)));
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++  return 0;
++}
++extern "C" int mlx_slice_update_max(
++    mlx_array* res,
++    const mlx_array src,
++    const mlx_array update,
++    const int* start,
++    size_t start_num,
++    const int* stop,
++    size_t stop_num,
++    const int* strides,
++    size_t strides_num,
++    const mlx_stream s) {
++  try {
++    mlx_array_set_(
++        *res,
++        mlx::core::slice_update_max(
++            mlx_array_get_(src),
++            mlx_array_get_(update),
++            mlx::core::Shape(start, start + start_num),
++            mlx::core::Shape(stop, stop + stop_num),
++            mlx::core::Shape(strides, strides + strides_num),
++            mlx_stream_get_(s)));
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++  return 0;
++}
++extern "C" int mlx_slice_update_min(
++    mlx_array* res,
++    const mlx_array src,
++    const mlx_array update,
++    const int* start,
++    size_t start_num,
++    const int* stop,
++    size_t stop_num,
++    const int* strides,
++    size_t strides_num,
++    const mlx_stream s) {
++  try {
++    mlx_array_set_(
++        *res,
++        mlx::core::slice_update_min(
++            mlx_array_get_(src),
++            mlx_array_get_(update),
++            mlx::core::Shape(start, start + start_num),
++            mlx::core::Shape(stop, stop + stop_num),
++            mlx::core::Shape(strides, strides + strides_num),
++            mlx_stream_get_(s)));
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++  return 0;
++}
++extern "C" int mlx_slice_update_prod(
++    mlx_array* res,
++    const mlx_array src,
++    const mlx_array update,
++    const int* start,
++    size_t start_num,
++    const int* stop,
++    size_t stop_num,
++    const int* strides,
++    size_t strides_num,
++    const mlx_stream s) {
++  try {
++    mlx_array_set_(
++        *res,
++        mlx::core::slice_update_prod(
++            mlx_array_get_(src),
++            mlx_array_get_(update),
++            mlx::core::Shape(start, start + start_num),
++            mlx::core::Shape(stop, stop + stop_num),
++            mlx::core::Shape(strides, strides + strides_num),
++            mlx_stream_get_(s)));
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++  return 0;
++}
+ extern "C" int mlx_softmax_axes(
+     mlx_array* res,
+     const mlx_array a,
+diff --git a/mlx/c/ops.h b/mlx/c/ops.h
+index 64d70e2..44fc09c 100644
+--- a/mlx/c/ops.h
++++ b/mlx/c/ops.h
+@@ -1004,6 +1004,50 @@ int mlx_slice_update_dynamic(
+     const int* axes,
+     size_t axes_num,
+     const mlx_stream s);
++int mlx_slice_update_add(
++    mlx_array* res,
++    const mlx_array src,
++    const mlx_array update,
++    const int* start,
++    size_t start_num,
++    const int* stop,
++    size_t stop_num,
++    const int* strides,
++    size_t strides_num,
++    const mlx_stream s);
++int mlx_slice_update_max(
++    mlx_array* res,
++    const mlx_array src,
++    const mlx_array update,
++    const int* start,
++    size_t start_num,
++    const int* stop,
++    size_t stop_num,
++    const int* strides,
++    size_t strides_num,
++    const mlx_stream s);
++int mlx_slice_update_min(
++    mlx_array* res,
++    const mlx_array src,
++    const mlx_array update,
++    const int* start,
++    size_t start_num,
++    const int* stop,
++    size_t stop_num,
++    const int* strides,
++    size_t strides_num,
++    const mlx_stream s);
++int mlx_slice_update_prod(
++    mlx_array* res,
++    const mlx_array src,
++    const mlx_array update,
++    const int* start,
++    size_t start_num,
++    const int* stop,
++    size_t stop_num,
++    const int* strides,
++    size_t strides_num,
++    const mlx_stream s);
+ int mlx_softmax_axes(
+     mlx_array* res,
+     const mlx_array a,
+diff --git a/mlx/c/private/enums.h b/mlx/c/private/enums.h
+index 098709c..59a1e78 100644
+--- a/mlx/c/private/enums.h
++++ b/mlx/c/private/enums.h
+@@ -5,6 +5,7 @@
+ 
+ #include "mlx/c/array.h"
+ #include "mlx/c/compile.h"
++#include "mlx/c/fft.h"
+ #include "mlx/mlx.h"
+ 
+ namespace {
+@@ -73,6 +74,18 @@ inline mlx::core::Device::DeviceType mlx_device_type_to_cpp(
+       mlx::core::Device::DeviceType::cpu, mlx::core::Device::DeviceType::gpu};
+   return map[(int)type];
+ }
++inline mlx_fft_norm mlx_fft_norm_to_c(mlx::core::fft::FFTNorm norm) {
++  static mlx_fft_norm map[] = {
++      MLX_FFT_NORM_BACKWARD, MLX_FFT_NORM_ORTHO, MLX_FFT_NORM_FORWARD};
++  return map[(int)norm];
++}
++inline mlx::core::fft::FFTNorm mlx_fft_norm_to_cpp(mlx_fft_norm norm) {
++  static mlx::core::fft::FFTNorm map[] = {
++      mlx::core::fft::FFTNorm::Backward,
++      mlx::core::fft::FFTNorm::Ortho,
++      mlx::core::fft::FFTNorm::Forward};
++  return map[(int)norm];
++}
+ } // namespace
+ 
+ #endif
+diff --git a/mlx/c/private/gguf.h b/mlx/c/private/gguf.h
+new file mode 100644
+index 0000000..58b087c
+--- /dev/null
++++ b/mlx/c/private/gguf.h
+@@ -0,0 +1,41 @@
++/* Copyright © 2023-2024 Apple Inc.                   */
++/*                                                    */
++/* This file is auto-generated. Do not edit manually. */
++/*                                                    */
++
++#ifndef MLX_IO_TYPES_PRIVATE_H
++#define MLX_IO_TYPES_PRIVATE_H
++
++#include "mlx/c/io_types.h"
++#include "mlx/mlx.h"
++
++inline mlx_io_gguf mlx_io_gguf_new_() {
++  return mlx_io_gguf({nullptr});
++}
++
++inline mlx_io_gguf mlx_io_gguf_new_(mlx::core::GGUFLoad&& s) {
++  return mlx_io_gguf({new mlx::core::GGUFLoad(std::move(s))});
++}
++
++inline mlx_io_gguf& mlx_io_gguf_set_(mlx_io_gguf& d, mlx::core::GGUFLoad&& s) {
++  if (d.ctx) {
++    delete static_cast<mlx::core::GGUFLoad*>(d.ctx);
++  }
++  d.ctx = new mlx::core::GGUFLoad(std::move(s));
++  return d;
++}
++
++inline mlx::core::GGUFLoad& mlx_io_gguf_get_(mlx_io_gguf d) {
++  if (!d.ctx) {
++    throw std::runtime_error("expected a non-empty mlx_io_gguf");
++  }
++  return *static_cast<mlx::core::GGUFLoad*>(d.ctx);
++}
++
++inline void mlx_io_gguf_free_(mlx_io_gguf d) {
++  if (d.ctx) {
++    delete static_cast<mlx::core::GGUFLoad*>(d.ctx);
++  }
++}
++
++#endif
+diff --git a/mlx/c/private/graph_utils.h b/mlx/c/private/graph_utils.h
+new file mode 100644
+index 0000000..a9def07
+--- /dev/null
++++ b/mlx/c/private/graph_utils.h
+@@ -0,0 +1,43 @@
++/* Copyright © 2023-2024 Apple Inc.                   */
++/*                                                    */
++/* This file is auto-generated. Do not edit manually. */
++/*                                                    */
++
++#ifndef MLX_GRAPH_UTILS_PRIVATE_H
++#define MLX_GRAPH_UTILS_PRIVATE_H
++
++#include "mlx/c/graph_utils.h"
++#include "mlx/graph_utils.h"
++
++inline mlx_node_namer mlx_node_namer_new_() {
++  return mlx_node_namer({nullptr});
++}
++
++inline mlx_node_namer mlx_node_namer_new_(mlx::core::NodeNamer&& s) {
++  return mlx_node_namer({new mlx::core::NodeNamer(std::move(s))});
++}
++
++inline mlx_node_namer& mlx_node_namer_set_(
++    mlx_node_namer& d,
++    mlx::core::NodeNamer&& s) {
++  if (d.ctx) {
++    delete static_cast<mlx::core::NodeNamer*>(d.ctx);
++  }
++  d.ctx = new mlx::core::NodeNamer(std::move(s));
++  return d;
++}
++
++inline mlx::core::NodeNamer& mlx_node_namer_get_(mlx_node_namer d) {
++  if (!d.ctx) {
++    throw std::runtime_error("expected a non-empty mlx_node_namer");
++  }
++  return *static_cast<mlx::core::NodeNamer*>(d.ctx);
++}
++
++inline void mlx_node_namer_free_(mlx_node_namer d) {
++  if (d.ctx) {
++    delete static_cast<mlx::core::NodeNamer*>(d.ctx);
++  }
++}
++
++#endif
+diff --git a/mlx/c/private/io.h b/mlx/c/private/io.h
+index fc99f89..574f172 100644
+--- a/mlx/c/private/io.h
++++ b/mlx/c/private/io.h
+@@ -2,6 +2,8 @@
+ #define MLX_IO_PRIVATE_H
+ 
+ #include <iostream>
++#include <streambuf>
++
+ #include "mlx/mlx.h"
+ 
+ namespace {
+@@ -139,6 +141,43 @@ inline void mlx_io_writer_free_(mlx_io_writer io) {
+   }
+ }
+ 
++class CFileStreamBuf : public std::streambuf {
++ public:
++  explicit CFileStreamBuf(FILE* file) : file_(file) {}
++
++ protected:
++  int_type overflow(int_type c) override {
++    if (c != traits_type::eof()) {
++      if (std::fputc(c, file_) == EOF) {
++        return traits_type::eof();
++      }
++    }
++    return c;
++  }
++  std::streamsize xsputn(const char* s, std::streamsize n) override {
++    return std::fwrite(s, 1, n, file_);
++  }
++  int sync() override {
++    return std::fflush(file_) == 0 ? 0 : -1;
++  }
++
++ private:
++  FILE* file_;
++};
++
++class CFileOutputStream : public std::ostream {
++ public:
++  explicit CFileOutputStream(FILE* file) : std::ostream(&buf_), buf_(file) {}
++
++  template <typename T>
++  static T& as_lvalue(T&& t) {
++    return t;
++  }
++
++ private:
++  CFileStreamBuf buf_;
++};
++
+ } // namespace
+ 
+ #endif
+diff --git a/mlx/c/private/mlx.h b/mlx/c/private/mlx.h
+index 496ddd0..c3f929f 100644
+--- a/mlx/c/private/mlx.h
++++ b/mlx/c/private/mlx.h
+@@ -7,6 +7,8 @@
+ #include "mlx/c/private/distributed_group.h"
+ #include "mlx/c/private/enums.h"
+ #include "mlx/c/private/export.h"
++#include "mlx/c/private/gguf.h"
++#include "mlx/c/private/graph_utils.h"
+ #include "mlx/c/private/io.h"
+ #include "mlx/c/private/map.h"
+ #include "mlx/c/private/stream.h"
+diff --git a/python/c.py b/python/c.py
+index 079dfa3..ece443b 100644
+--- a/python/c.py
++++ b/python/c.py
+@@ -9,7 +9,9 @@ import mlxvariants as variants
+ 
+ 
+ def to_snake_letters(name):
+-    name = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
++    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
++    name = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", name)
++    name = name.lower()
+     return name
+ 
+ 
+@@ -123,6 +125,7 @@ extern "C" {
+             decl.append(c_typename)
+             decl.append(";")
+             print(" ".join(decl))
++            print()
+ 
+     for f in sorted_funcs:
+         if "variant" in f:
+diff --git a/python/mlxhooks.py b/python/mlxhooks.py
+index 701ca5b..4fc3698 100644
+--- a/python/mlxhooks.py
++++ b/python/mlxhooks.py
+@@ -392,3 +392,117 @@ mlx_fast_metal_kernel mlx_fast_metal_kernel_new(
+     bool atomic_outputs);
+         """
+     __implement_mlx_fast_custom_kernel("metal", custom_code, implementation)
++
++
++def mlx_load_gguf(f, implementation):
++    if not implementation:
++        print(
++            """
++int mlx_load_gguf(mlx_io_gguf* gguf, const char* file, const mlx_stream s);
++        """
++        )
++    else:
++        print(
++            """\
++extern "C" int mlx_load_gguf(mlx_io_gguf* gguf, const char* file, const mlx_stream s) {
++  try {
++    auto cpp_gguf = mlx::core::load_gguf(file, mlx_stream_get_(s));
++    mlx_io_gguf_set_(*gguf, std::move(cpp_gguf));
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}"""
++        )
++
++
++def mlx_save_gguf(f, implementation):
++    if not implementation:
++        print(
++            """\
++int mlx_save_gguf(const char* file, mlx_io_gguf gguf);"""
++        )
++    else:
++        print(
++            """\
++extern "C" int mlx_save_gguf(const char* file, mlx_io_gguf gguf) {
++  try {
++    auto cpp_gguf = mlx_io_gguf_get_(gguf);
++        mlx::core::save_gguf(file, cpp_gguf.first, cpp_gguf.second);
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}"""
++        )
++
++
++def mlx_export_to_dot(f, implementation):
++    if not implementation:
++        print(
++            """\
++typedef struct mlx_node_namer_ {
++  void* ctx;
++} mlx_node_namer;
++
++mlx_node_namer mlx_node_namer_new();
++int mlx_node_namer_free(mlx_node_namer namer);
++int mlx_node_namer_set_name(
++    mlx_node_namer namer,
++    const mlx_array arr,
++    const char* name);
++int mlx_node_namer_get_name(
++    const char** name,
++    mlx_node_namer namer,
++    const mlx_array arr);
++"""
++        )
++    else:
++        print(
++            """\
++extern "C" mlx_node_namer mlx_node_namer_new() {
++  try {
++    return mlx_node_namer_new_(mlx::core::NodeNamer());
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++  }
++  return {nullptr};
++}
++extern "C" int mlx_node_namer_free(mlx_node_namer namer) {
++  try {
++    mlx_node_namer_free_(namer);
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++extern "C" int mlx_node_namer_set_name(
++    mlx_node_namer namer,
++    const mlx_array arr,
++    const char* name) {
++  try {
++    mlx_node_namer_get_(namer).set_name(mlx_array_get_(arr), name);
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}
++extern "C" int mlx_node_namer_get_name(
++    const char** name,
++    mlx_node_namer namer,
++    const mlx_array arr) {
++  try {
++    *name = mlx_node_namer_get_(namer).get_name(mlx_array_get_(arr)).c_str();
++    return 0;
++  } catch (std::exception& e) {
++    mlx_error(e.what());
++    return 1;
++  }
++}"""
++        )
++        pass
++    return True
+diff --git a/python/mlxtypes.py b/python/mlxtypes.py
+index 47535aa..66f52d7 100644
+--- a/python/mlxtypes.py
++++ b/python/mlxtypes.py
+@@ -31,6 +31,11 @@ for t in [
+         "mlx::core::distributed::Group",
+         "Group",
+     ],
++    [
++        "mlx_node_namer",
++        "mlx::core::NodeNamer",
++        "NodeNamer",
++    ],
+     [
+         "mlx_closure",
+         "std::function<std::vector<array>(std::vector<array>)>",
+@@ -411,6 +416,22 @@ types.append(
+     }
+ )
+ 
++types.append(
++    {
++        "cpp": "mlx::core::fft::FFTNorm",
++        "alt": "FFTNorm",
++        "c": "mlx_fft_norm",
++        "c_to_cpp": lambda s: "mlx_fft_norm_to_cpp(" + s + ")",
++        "c_arg": lambda s, untyped=False: s if untyped else "mlx_fft_norm " + s,
++        "c_return_arg": lambda s, untyped=False: (
++            s if untyped else "mlx_fft_norm* " + s
++        ),
++        "c_new": lambda s: "mlx_fft_norm " + s,
++        "free": lambda s: "",
++        "c_assign_from_cpp": lambda d, s: d + " = " + "mlx_fft_norm_to_c(" + s + ")",
++    }
++)
++
+ types.append(
+     {
+         "cpp": "std::string",
+@@ -440,6 +461,16 @@ types.append(
+     }
+ )
+ 
++types.append(
++    {
++        "cpp": "std::ostream",
++        "c_to_cpp": lambda s: "CFileOutputStream::as_lvalue(CFileOutputStream("
++        + s
++        + "))",
++        "c_arg": lambda s, untyped=False: s if untyped else "FILE* " + s,
++    }
++)
++
+ for ctype in ["int", "size_t", "float", "double", "bool", "uint64_t", "uintptr_t"]:
+     types.append(
+         {
+diff --git a/python/type_private_generator.py b/python/type_private_generator.py
+index 5f271b1..6df496c 100644
+--- a/python/type_private_generator.py
++++ b/python/type_private_generator.py
+@@ -90,6 +90,7 @@ if __name__ == "__main__":
+     parser.add_argument("--cpptype", type=str)
+     parser.add_argument("--no-copy", default=False, action="store_true")
+     parser.add_argument("--include", default="", type=str)
++    parser.add_argument("--mlx-include", default="mlx/mlx.h", type=str)
+     parser.add_argument("--using", default="", type=str)
+     args = parser.parse_args()
+ 
+@@ -106,7 +107,7 @@ if __name__ == "__main__":
+     print("#define MLX_" + short_ctype.upper() + "_PRIVATE_H")
+     print()
+     print('#include "mlx/c/' + short_ctype + '.h"')
+-    print('#include "mlx/mlx.h"')
++    print('#include "' + args.mlx_include + '"')
+     ctypes = args.ctype.split(";")
+     cpptypes = args.cpptype.split(";")
+     usings = args.using.split(";")

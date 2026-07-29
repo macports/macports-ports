@@ -226,7 +226,11 @@ proc texlive.texmfport {} {
                     switch [lindex $splitline 0] {
                         "texmf"      {lset splitline 0 ${texlive_texmfmain}}
                         "texmf-dist" {lset splitline 0 ${texlive_texmfdist}}
-                        default { ui_debug "warning: unknown file destination: $line" }
+                        default {
+                            # The file has no destination we know about, skip it.
+                            ui_debug "skipping file with unknown destination: $line"
+                            continue
+                        }
                     }
                     set dstfile [join $splitline "/"]
 

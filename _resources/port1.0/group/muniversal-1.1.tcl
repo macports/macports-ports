@@ -802,8 +802,8 @@ proc get_canonical_archflags {{tool cc}} {
 
 # make use of architecture dependent variations of patch files
 # N.B.: this is a candidate for inclusion in the base code
-rename portpatch::patch_main portpatch::patch_main_real
-proc portpatch::patch_main {args} {
+ditem_key ${org.macports.patch} procedure portpatch::patch_main_muniversal
+proc portpatch::patch_main_muniversal {args} {
     global UI_PREFIX
 
     set patches [list]
@@ -886,16 +886,15 @@ variant universal {
 
 foreach phase {patch configure build destroot test} {
     foreach part {pre procedure post} {
-
+        set override_procs [list]
         # wrap procedures (either user defined or MacPorts) with architecture specific code
-        foreach p [ditem_key [set org.macports.${phase}] ${part}] {
-            if {[info procs user${p}] ne ""} {
-                set proc_name user${p}
-            } else {
-                set proc_name ${p}
+        foreach proc_name [ditem_key [set org.macports.${phase}] ${part}] {
+            lappend override_procs ${proc_name}_muniversal
+            set ns [namespace qualifiers $proc_name]
+            if {![namespace exists $ns]} {
+                namespace eval $ns {}
             }
-            rename ${proc_name} ${proc_name}_orig
-            proc ${proc_name} {{args ""}} "
+            proc ${proc_name}_muniversal {args} "
                 global worksrcpath UI_PREFIX subport muniversal.current_arch
 
                 foreach arch \"\[option configure.universal_archs\]\" {
@@ -926,7 +925,7 @@ foreach phase {patch configure build destroot test} {
                         option  \${phase_map}.cmd \[muniversal::map_phase \${save-worksrcpath} \[option worksrcpath\] \[option \${phase_map}.cmd\]\]
                     }
 
-                    ${proc_name}_orig
+                    ${proc_name} {*}\${args}
 
                     if {\[option muniversal.arch_compiler\]} {
                         foreach tool {f77 f90 fc objc cc objcxx cxx} {
@@ -947,9 +946,10 @@ foreach phase {patch configure build destroot test} {
                 muniversal.build_arch
             "
         }
+        ditem_key [set org.macports.${phase}] ${part} ${override_procs}
     }
 }
-unset phase part p
+unset phase part proc_name override_procs
 
 # copy `worksrcpath` to architecture-dependent version
 # rename portextract::extract_finish portextract::extract_finish_real
@@ -1001,9 +1001,9 @@ proc portextract::extract_finish {args} {
 }
 
 # copy `destroot` to architecture-dependent version
-rename portdestroot::destroot_start portdestroot::destroot_start_real
-proc portdestroot::destroot_start {args} {
-    portdestroot::destroot_start_real ${args}
+ditem_key ${org.macports.destroot} prerun portdestroot::destroot_start_muniversal
+proc portdestroot::destroot_start_muniversal {args} {
+    portdestroot::destroot_start {*}${args}
 
     foreach arch [option configure.universal_archs] {
         copy [option destroot] [option workpath]/destroot-${arch}
@@ -1012,8 +1012,8 @@ proc portdestroot::destroot_start {args} {
 }
 
 # merge architecture-dependent versions of `destroot`
-rename portdestroot::destroot_finish portdestroot::destroot_finish_real
-proc portdestroot::destroot_finish {args} {
+ditem_key ${org.macports.destroot} postrun portdestroot::destroot_finish_muniversal
+proc portdestroot::destroot_finish_muniversal {args} {
     global  workpath \
             muniversal.dont_diff \
             muniversal.combine \
@@ -1063,7 +1063,7 @@ proc portdestroot::destroot_finish {args} {
     muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatProc}
     muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatArmElse}
 
-    portdestroot::destroot_finish_real ${args}
+    portdestroot::destroot_finish {*}${args}
 }
 }
 }
