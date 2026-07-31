@@ -178,15 +178,15 @@ options go.bin go.vendors go.toolchain_min
 default go.toolchain_min {}
 option_proc go.toolchain_min go._handle_toolchain_min
 
-# Holds the minimum when this system cannot meet it, for the message below.
-set go.toolchain_unmet  {}
-
 # Where no Go release runs at all, nothing built with this PortGroup can be
 # either, whatever it does or does not declare. That needs no annotation to
 # decide, so it is settled here rather than per port.
 if {[go_toolchain.ceiling] eq "none"} {
     known_fail yes
 }
+
+# Holds the minimum when this system cannot meet it, for the message below.
+set go.toolchain_unmet  {}
 
 proc go._handle_toolchain_min {option action args} {
     global go.toolchain_unmet
@@ -197,19 +197,21 @@ proc go._handle_toolchain_min {option action args} {
 
     set minimum [lindex ${args} 0]
 
-    # Reduce to a series and check it against what go_toolchain describes. A
-    # value above the newest series it knows is either a typo, which would
-    # otherwise silently skip the port everywhere, or a real new release whose
-    # macOS floor has not been recorded yet; neither can be gated correctly.
-    set series [go_toolchain._minor ${minimum}]
-    if {[vercmp ${series} > [go_toolchain._newest]]} {
-        return -code error "go.toolchain_min ${minimum}: Go ${series} is newer\
-            than any release go_toolchain knows about. If it is real, add it to\
-            go_toolchain.min_darwin with the oldest darwin it runs on."
-    }
-    if {[vercmp ${series} < [go_toolchain._oldest]]} {
-        ui_warn "go.toolchain_min ${minimum} is older than any release MacPorts\
-                 packages, so it can never gate this port; it may be dropped."
+    # A value above every series go_toolchain records is either a typo, which
+    # would otherwise skip the port everywhere without a word, or a real
+    # release whose macOS floor has not been recorded; neither can be gated
+    # correctly. One below them all can never gate anything.
+    switch [go_toolchain.range ${minimum}] {
+        newer {
+            return -code error "go.toolchain_min ${minimum} is newer than any\
+                Go release go_toolchain records. If it is real, add it to\
+                go_toolchain.min_darwin with the oldest darwin it runs on."
+        }
+        older {
+            ui_warn "go.toolchain_min ${minimum} is older than every Go release\
+                     go_toolchain records, so it is below every ceiling and can\
+                     never gate this port; it may be dropped."
+        }
     }
 
     if {[go_toolchain.satisfies ${minimum}]} {

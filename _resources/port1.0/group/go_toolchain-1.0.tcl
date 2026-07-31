@@ -3,9 +3,11 @@
 # This PortGroup provides two things:
 #
 #   * The mapping from Go release to the oldest macOS it runs on, and the
-#     queries over it: go_toolchain.ceiling, go_toolchain.satisfies and
-#     go_toolchain.wrapped. Including the PortGroup has no side effects, so a
-#     port or another PortGroup may include it purely to ask.
+#     queries over it: go_toolchain.min_darwin, go_toolchain.ceiling,
+#     go_toolchain.satisfies, go_toolchain.range, go_toolchain.wrapped,
+#     go_toolchain.oldest_packaged and go_toolchain.floor. Including the
+#     PortGroup has no side effects, so a port or another PortGroup may include
+#     it purely to ask.
 #
 #   * The build of a versioned Go toolchain port, via go_toolchain.setup.
 #
@@ -43,6 +45,10 @@
 #      table to decide what each system can run, so a series missing from it
 #      leaves systems that cannot run the new release still reporting that they
 #      can, and ports are then built against a Go that will not start.
+#
+#      This step comes first for a second reason: the golang PortGroup refuses
+#      a go.toolchain_min naming a series newer than anything recorded here, so
+#      no port can declare the new release until it is listed.
 #
 #   2. go_toolchain.packaged: add the series if a go-1.NN port is created for
 #      it. setup refuses a version-named port whose series is absent here.
@@ -111,7 +117,7 @@ set go_toolchain.min_darwin(1.27)   22  ;# 13    Ventura
 # the toolchain's own Portfile.
 set go_toolchain.packaged {1.17 1.20 1.22 1.23 1.24 1.25 1.26}
 
-# The newest and oldest series in go_toolchain.packaged.
+# The newest series MacPorts packages.
 proc go_toolchain._newest_packaged {} {
     global go_toolchain.packaged
 
@@ -124,7 +130,8 @@ proc go_toolchain._newest_packaged {} {
     return ${newest}
 }
 
-proc go_toolchain._oldest_packaged {} {
+# The oldest series MacPorts packages.
+proc go_toolchain.oldest_packaged {} {
     global go_toolchain.packaged
 
     set oldest {}
@@ -134,6 +141,12 @@ proc go_toolchain._oldest_packaged {} {
         }
     }
     return ${oldest}
+}
+
+# The oldest darwin major version on which any packaged Go runs. Below this no
+# Go is available at all, and the `go` port is not offered.
+proc go_toolchain.floor {} {
+    return [go_toolchain.min_darwin [go_toolchain.oldest_packaged]]
 }
 
 # The series the `go` port should provide here, or {} when no packaged release
@@ -249,6 +262,28 @@ proc go_toolchain.ceiling {} {
         return {}
     }
     return ${best}
+}
+
+# Where a version sits relative to the series this table records:
+#
+#   older   below every series recorded, and so below every ceiling
+#   known   within the recorded range
+#   newer   above every series recorded
+#
+# A caller validating a declared minimum should treat "newer" as an error:
+# either the value is wrong, or it names a release whose macOS floor has not
+# been recorded here, and neither can be gated correctly. "older" means the
+# value can never gate anything.
+proc go_toolchain.range {version} {
+    set series [go_toolchain._minor ${version}]
+
+    if {[vercmp ${series} > [go_toolchain._newest]]} {
+        return newer
+    }
+    if {[vercmp ${series} < [go_toolchain._oldest]]} {
+        return older
+    }
+    return known
 }
 
 # Whether a minimum Go version can be satisfied on this platform.
