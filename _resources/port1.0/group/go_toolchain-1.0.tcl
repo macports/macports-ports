@@ -101,9 +101,13 @@ proc go_toolchain.min_darwin {go_version} {
     return [set go_toolchain.min_darwin(${minor})]
 }
 
-# Reduce a version to its "1.NN" minor form.
+# Reduce a version to its "1.NN" release series. Prereleases carry a suffix on
+# the minor component (1.27rc2), so this cannot simply split on ".".
 proc go_toolchain._minor {go_version} {
-    return [join [lrange [split ${go_version} .] 0 1] .]
+    if {![regexp {^([0-9]+\.[0-9]+)} ${go_version} -> series]} {
+        return -code error "go_toolchain: cannot read a release series from ${go_version}"
+    }
+    return ${series}
 }
 
 # Return the newest Go minor version supported on this platform, or {} when
@@ -151,26 +155,41 @@ proc go_toolchain.satisfies {minimum} {
     return [vercmp ${minimum} <= ${ceiling}]
 }
 
-options go_toolchain.version go_toolchain.minor go_toolchain.goroot_final \
-        go_toolchain.suffix go_toolchain.bootstrap_path
+options go_toolchain.version go_toolchain.minor go_toolchain.label \
+        go_toolchain.goroot_final go_toolchain.suffix \
+        go_toolchain.bootstrap_path
 
 # Configure this Portfile as a versioned Go toolchain port.
-proc go_toolchain.setup {go_version} {
+#
+# The label names the port and its commands, and defaults to the release
+# series, giving go-1.23 with bin/go-1.23. Pass one explicitly for a toolchain
+# that is not named after its version, such as the prerelease port:
+#
+#   go_toolchain.setup  1.27rc2 devel   -> go-devel, bin/go-devel
+#
+# Everything else is derived from the version either way, so a labelled port
+# still gets the platform floor, bootstrap and build of the release it tracks.
+proc go_toolchain.setup {go_version {label ""}} {
     global prefix workpath worksrcpath configure.build_arch os.platform \
            extract.suffix extract.cmd extract.pre_args extract.post_args \
            distpath subport \
-           go_toolchain.version go_toolchain.minor go_toolchain.goroot_final \
-           go_toolchain.suffix go_toolchain.bootstrap_path
+           go_toolchain.version go_toolchain.minor go_toolchain.label \
+           go_toolchain.goroot_final go_toolchain.suffix \
+           go_toolchain.bootstrap_path
 
     set minor [go_toolchain._minor ${go_version}]
+    if {${label} eq ""} {
+        set label ${minor}
+    }
 
     set go_toolchain.version        ${go_version}
     set go_toolchain.minor          ${minor}
-    set go_toolchain.suffix         -${minor}
-    set go_toolchain.goroot_final   ${prefix}/lib/go-${minor}
+    set go_toolchain.label          ${label}
+    set go_toolchain.suffix         -${label}
+    set go_toolchain.goroot_final   ${prefix}/lib/go-${label}
     set go_toolchain.bootstrap_path ${workpath}/go_prebuilt
 
-    name                go-${minor}
+    name                go-${label}
     version             ${go_version}
     categories          lang
     license             BSD
@@ -184,11 +203,10 @@ proc go_toolchain.setup {go_version} {
 
     long_description    \
         The Go programming language is an open source project to make \
-        programmers more productive. This port provides Go ${minor} \
+        programmers more productive. This port provides Go ${go_version} \
         specifically, installed alongside any other Go toolchain, as \
-        go-${minor} and gofmt-${minor}. It is intended for building software \
-        that requires this particular release, and for systems that cannot run \
-        a newer one.
+        go-${label} and gofmt-${label}. It is intended for building software \
+        that requires this particular release.
 
     # The oldest macOS this release is supported on.
     platforms           "darwin >= [go_toolchain.min_darwin ${go_version}]"
@@ -263,7 +281,7 @@ proc go_toolchain.setup {go_version} {
         }
 
         foreach f {go gofmt} {
-            ln -s ../lib/go-${go_toolchain.minor}/bin/${f} \
+            ln -s ../lib/go-${go_toolchain.label}/bin/${f} \
                 ${destroot}${prefix}/bin/${f}${go_toolchain.suffix}
         }
 
@@ -275,16 +293,21 @@ proc go_toolchain.setup {go_version} {
     }
 
     notes "
-        This port installs Go ${minor} as go-${minor} and gofmt-${minor}, so it
-        does not interfere with the main `go` port. Use it directly, or point a
-        build at ${prefix}/lib/go-${minor} as GOROOT.
+        This port installs Go ${go_version} as go-${label} and gofmt-${label},
+        so it does not interfere with the main `go` port. Use it directly, or
+        point a build at ${prefix}/lib/go-${label} as GOROOT.
     "
 
-    # Match only this branch, so a versioned toolchain is not reported as
-    # outdated against whatever the current Go release happens to be.
     livecheck.type      regex
     livecheck.url       [option homepage]/dl/
-    livecheck.regex     [go_toolchain._livecheck_regex ${minor}]
+    if {[regexp {^[0-9.]+$} ${go_version}]} {
+        # Match only this branch, so a versioned toolchain is not reported as
+        # outdated against whatever the current Go release happens to be.
+        livecheck.regex [go_toolchain._livecheck_regex ${minor}]
+    } else {
+        # A prerelease tracks whatever is newest, betas and rcs included.
+        livecheck.regex {go([0-9.A-z]+)\.src\.tar\.gz}
+    }
 }
 
 # The bootstrap distfile for this build, recomputed at phase time so the
