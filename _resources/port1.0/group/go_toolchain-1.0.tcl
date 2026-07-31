@@ -317,6 +317,13 @@ proc go_toolchain.setup {go_version {label ""}} {
                 xinstall -m 0644 -W ${worksrcpath} ${f} ${docdir}
             }
         }
+
+        # The release's own doc/ tree, which carries the language spec among
+        # other things. Its contents vary by release, so copy whatever is
+        # there.
+        if {[file exists ${worksrcpath}/doc]} {
+            copy {*}[glob -directory ${worksrcpath}/doc *] ${docdir}
+        }
     }
 
     notes "
