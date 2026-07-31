@@ -305,8 +305,11 @@ proc go_toolchain.setup {go_version {label ""}} {
         # outdated against whatever the current Go release happens to be.
         livecheck.regex [go_toolchain._livecheck_regex ${minor}]
     } else {
-        # A prerelease tracks whatever is newest, betas and rcs included.
-        livecheck.regex {go([0-9.A-z]+)\.src\.tar\.gz}
+        # A prerelease port tracks the newest prerelease, in whatever series
+        # it happens to be. It must not match a stable release: those sort
+        # above a prerelease of the same series, so a plain version pattern
+        # would pull the port onto a stable release the moment one shipped.
+        livecheck.regex {go([0-9.]+(?:beta|rc)[0-9]+)\.src\.tar\.gz}
     }
 }
 
