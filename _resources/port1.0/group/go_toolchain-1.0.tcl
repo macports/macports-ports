@@ -56,6 +56,10 @@
 #   3. lang/go-1.NN/Portfile: call go_toolchain.setup with the full version,
 #      and give the checksums.
 #
+# Steps 2 and 3 belong in the same change. A series listed without a port leaves
+# `go` depending on a toolchain that does not exist on every system that selects
+# it; a port whose series is unlisted is refused outright.
+#
 # Nothing else needs touching. The `go` port follows the newest series each
 # system can run, and every ceiling recomputes from the table.
 #
@@ -149,11 +153,16 @@ proc go_toolchain.floor {} {
     return [go_toolchain.min_darwin [go_toolchain.oldest_packaged]]
 }
 
-# The series the `go` port should provide here, or {} when no packaged release
-# runs on this system at all.
+# The series the `go` port should provide here, or {} when no Go release runs
+# on this system at all.
 #
 # A capped system gets the newest release it can run, an uncapped one the
 # newest packaged. Both are the newest usable Go, which is what `go` means.
+#
+# A system capped at a series that is not packaged is a fault in the two tables
+# rather than a property of the system, so it is an error and not another empty
+# answer: `go` would otherwise be offered here, since the floor is below us,
+# while depending on a toolchain that does not exist.
 proc go_toolchain.wrapped {} {
     global go_toolchain.packaged
 
@@ -165,7 +174,10 @@ proc go_toolchain.wrapped {} {
         return [go_toolchain._newest_packaged]
     }
     if {[lsearch -exact ${go_toolchain.packaged} ${ceiling}] < 0} {
-        return {}
+        return -code error "go_toolchain: this system is capped at Go\
+            ${ceiling}, which go_toolchain.packaged does not list. Package that\
+            series, or drop it from go_toolchain.min_darwin if it should not be\
+            a ceiling."
     }
     return ${ceiling}
 }
