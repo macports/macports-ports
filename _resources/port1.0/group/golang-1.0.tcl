@@ -53,6 +53,7 @@
 
 PortGroup legacysupport    1.1
 PortGroup compiler_wrapper 1.0
+PortGroup go_toolchain     1.0
 
 options go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix go.offline_build
 
@@ -139,6 +140,22 @@ proc go._translate_package_id {package_id} {
 
 proc go._strip_gopkg_version {str} {
     return [regsub -- \\..*$ ${str} ""]
+}
+
+# Upstream raises Go's minimum macOS version regularly, and an old enough
+# system is left with no Go release it can run at all. Nothing built with this
+# PortGroup can be built there either, so say so once here rather than letting
+# every port discover it by failing.
+if {[go_toolchain.ceiling] eq "none"} {
+    known_fail yes
+}
+
+pre-fetch {
+    if {[go_toolchain.ceiling] eq "none"} {
+        ui_error "No Go release runs on this version of macOS, so ${subport}\
+                  cannot be built here."
+        return -code error "no Go toolchain is available on this platform"
+    }
 }
 
 options go.bin go.vendors
