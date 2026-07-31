@@ -83,6 +83,56 @@ set go_toolchain.min_darwin(1.27)   22  ;# 13    Ventura
 # on 10.7 through 10.12, and fail on 10.6, whose dsymutil aborts on the debug
 # information Go's linker emits. See lang/go-1.17.
 
+# The Go series MacPorts packages as go-1.NN ports. This cannot be derived from
+# the table above, which lists the releases that exist rather than the ones
+# shipped. A list of series and not of versions, so that a patch update to a
+# toolchain touches only that port's own Portfile.
+set go_toolchain.packaged {1.17 1.20 1.22 1.23 1.24 1.25 1.26}
+
+# The newest and oldest series in go_toolchain.packaged.
+proc go_toolchain._newest_packaged {} {
+    global go_toolchain.packaged
+
+    set newest {}
+    foreach series ${go_toolchain.packaged} {
+        if {${newest} eq "" || [vercmp ${series} > ${newest}]} {
+            set newest ${series}
+        }
+    }
+    return ${newest}
+}
+
+proc go_toolchain._oldest_packaged {} {
+    global go_toolchain.packaged
+
+    set oldest {}
+    foreach series ${go_toolchain.packaged} {
+        if {${oldest} eq "" || [vercmp ${series} < ${oldest}]} {
+            set oldest ${series}
+        }
+    }
+    return ${oldest}
+}
+
+# The series the `go` port should provide here, or {} when no packaged release
+# runs on this system at all. A capped system gets the newest release it can
+# run, an uncapped one the newest packaged.
+proc go_toolchain.wrapped {} {
+    global go_toolchain.packaged
+
+    set ceiling [go_toolchain.ceiling]
+    if {${ceiling} eq "none"} {
+        return {}
+    }
+    if {${ceiling} eq ""} {
+        return [go_toolchain._newest_packaged]
+    }
+    if {[lsearch -exact ${go_toolchain.packaged} ${ceiling}] < 0} {
+        return {}
+    }
+    return ${ceiling}
+}
+
 # The newest Go minor release this table knows about. A system that can run it
 # is not capped at all.
 proc go_toolchain._newest {} {
@@ -133,7 +183,14 @@ proc go_toolchain._minor {go_version} {
 # "1.2", which then fails to match anything. Compare it with vercmp and
 # interpolate it directly into strings.
 proc go_toolchain.ceiling {} {
-    global os.platform os.major go_toolchain.min_darwin
+    global os.platform os.major go_toolchain.min_darwin \
+           go_toolchain.ceiling_override
+
+    # Set to simulate a capped system when testing on one that is not.
+    if {[info exists go_toolchain.ceiling_override]
+            && ${go_toolchain.ceiling_override} ne ""} {
+        return ${go_toolchain.ceiling_override}
+    }
 
     if {${os.platform} ne "darwin"} {
         return {}
@@ -200,6 +257,7 @@ proc go_toolchain.setup {go_version {label ""}} {
     global prefix workpath worksrcpath configure.build_arch os.platform \
            extract.suffix extract.cmd extract.pre_args extract.post_args \
            distpath subport \
+           go_toolchain.packaged \
            go_toolchain.version go_toolchain.minor go_toolchain.label \
            go_toolchain.goroot_final go_toolchain.suffix \
            go_toolchain.bootstrap_path
@@ -207,6 +265,15 @@ proc go_toolchain.setup {go_version {label ""}} {
     set minor [go_toolchain._minor ${go_version}]
     if {${label} eq ""} {
         set label ${minor}
+    }
+
+    # A port named after its version must appear in go_toolchain.packaged, so
+    # that a toolchain cannot be added or removed in only one of the two
+    # places. A labelled port, such as the prerelease, is exempt.
+    if {${label} eq ${minor}
+            && [lsearch -exact ${go_toolchain.packaged} ${minor}] < 0} {
+        return -code error "go_toolchain: ${minor} is not in\
+            go_toolchain.packaged; add it there as well"
     }
 
     set go_toolchain.version        ${go_version}
