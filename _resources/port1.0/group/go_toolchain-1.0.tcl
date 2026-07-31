@@ -170,6 +170,19 @@ proc go_toolchain._newest {} {
     return ${newest}
 }
 
+# The oldest series in go_toolchain.min_darwin.
+proc go_toolchain._oldest {} {
+    global go_toolchain.min_darwin
+
+    set oldest {}
+    foreach minor [array names go_toolchain.min_darwin] {
+        if {${oldest} eq "" || [vercmp ${minor} < ${oldest}]} {
+            set oldest ${minor}
+        }
+    }
+    return ${oldest}
+}
+
 # The oldest darwin major version a release runs on. Accepts either a series
 # ("1.23") or a full version ("1.23.12").
 proc go_toolchain.min_darwin {go_version} {
