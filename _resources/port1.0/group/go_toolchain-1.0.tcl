@@ -54,10 +54,11 @@
 #     go_toolchain.ceiling reports for that system.
 #
 # Those are independent: 1.23 and 1.25 have ports but decide no ceiling, since
-# 11 Big Sur can run 1.24 and 12 Monterey can run 1.26. The remaining entries (1.18, 1.19, 1.21) do neither;
-# they are kept only so this table stays a complete record of the releases in
-# range, and so that adding a port for one later needs no new data.
-set go_toolchain.min_darwin(1.17)   8   ;# 10.4  Tiger         (see below)
+# 11 Big Sur can run 1.24 and 12 Monterey can run 1.26. The remaining entries
+# (1.18, 1.19, 1.21) do neither; they are kept only so this table stays a
+# complete record of the releases in range, and so that adding a port for one
+# later needs no new data.
+set go_toolchain.min_darwin(1.17)   11  ;# 10.7  Lion          (see below)
 set go_toolchain.min_darwin(1.18)   17  ;# 10.13 High Sierra
 set go_toolchain.min_darwin(1.19)   17  ;# 10.13 High Sierra
 set go_toolchain.min_darwin(1.20)   17  ;# 10.13 High Sierra
@@ -69,11 +70,14 @@ set go_toolchain.min_darwin(1.25)   21  ;# 12    Monterey
 set go_toolchain.min_darwin(1.26)   21  ;# 12    Monterey
 set go_toolchain.min_darwin(1.27)   22  ;# 13    Ventura
 
-# The 1.17 entry is the one value here that is not upstream's. Upstream also
-# requires 10.13 for Go 1.17, but MacPorts has long built 1.17.13 from source
-# down to 10.6 with legacysupport, and the main `go` port still ships it there.
-# The 8 keeps this table agreeing with that existing behaviour rather than
-# describing an upstream guarantee.
+# The 1.17 entry is the one value here that is not upstream's. Upstream
+# requires 10.13 for Go 1.17, but MacPorts builds it from source below that
+# with legacysupport, which is what makes a Go toolchain available at all on
+# those systems.
+#
+# 11 is where that actually reaches, not a guess: the buildbots build 1.17.13
+# on 10.7 through 10.12, and fail on 10.6, whose dsymutil aborts on the debug
+# information Go's linker emits. See lang/go-1.17.
 
 # The newest Go minor release this table knows about. A system that can run it
 # is not capped at all.
@@ -110,9 +114,15 @@ proc go_toolchain._minor {go_version} {
     return ${series}
 }
 
-# Return the newest Go minor version supported on this platform, or {} when
-# this platform can run the newest release. Non-darwin platforms are never
-# capped.
+# Return the newest Go minor version supported on this platform:
+#
+#   {}      no cap; this platform can run the newest release in the table
+#   none    no release in the table runs here at all
+#   1.NN    the newest release that runs here
+#
+# The first two are not the same thing and must not be conflated: a system
+# below every floor can run no Go at all, which is the opposite of uncapped.
+# Non-darwin platforms are never capped.
 #
 # Careful: the result is a version string, not a number. Do not pass it through
 # expr (including an expr ternary), because Tcl will renormalise "1.20" to
@@ -134,21 +144,25 @@ proc go_toolchain.ceiling {} {
         }
     }
 
-    if {${best} eq "" || [vercmp ${best} >= [go_toolchain._newest]]} {
+    if {${best} eq ""} {
+        return none
+    }
+    if {[vercmp ${best} >= [go_toolchain._newest]]} {
         return {}
     }
     return ${best}
 }
 
 # Return 1 when the given minimum Go version can be satisfied on this platform.
-# An empty minimum is always satisfiable.
+# An empty minimum is satisfiable wherever any Go runs at all, and nothing is
+# satisfiable where none does.
 proc go_toolchain.satisfies {minimum} {
-    if {${minimum} eq ""} {
-        return 1
-    }
-
     set ceiling [go_toolchain.ceiling]
-    if {${ceiling} eq ""} {
+
+    if {${ceiling} eq "none"} {
+        return 0
+    }
+    if {${minimum} eq "" || ${ceiling} eq ""} {
         return 1
     }
 
