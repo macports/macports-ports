@@ -2,8 +2,8 @@
 #
 # This PortGroup does two things:
 #
-#   1. It records which Go releases upstream supports on which versions of
-#      macOS, and answers questions about that (go_toolchain.ceiling,
+#   1. It records which Go releases are usable on which versions of macOS, and
+#      answers questions about that (go_toolchain.ceiling,
 #      go_toolchain.satisfies). Including the PortGroup on its own has no side
 #      effects, so other PortGroups and ports may include it just to ask.
 #
@@ -37,16 +37,20 @@
 # checksums             ...
 #
 # go_toolchain.setup derives the port name (go-1.23), the platform the port is
-# allowed on, and the whole build. It installs GOROOT into
+# allowed on, and the whole build. A second argument names the port when it
+# should not be named after its version; see go_toolchain.setup below. It
+# installs GOROOT into
 # ${prefix}/lib/go-1.23 and the commands as ${prefix}/bin/go-1.23 and
 # ${prefix}/bin/gofmt-1.23, so versioned toolchains never collide with each
 # other or with the main `go` port.
 
-# The minimum darwin major version each Go minor release runs on. This is the
-# single source of truth; everything else here is derived from it.
+# The minimum darwin major version each Go minor release is usable on. This is
+# the single source of truth; everything else here is derived from it.
 #
-# This is a record of upstream's requirements, not a list of the toolchains
-# MacPorts packages. An entry is needed here when either
+# The values are upstream's requirements, except where MacPorts extends a
+# release below them with legacysupport; see the 1.17 note below. This is not a
+# list of the toolchains MacPorts packages: an entry is needed here when
+# either
 #
 #   * a versioned port exists for it, since go_toolchain.setup looks up the
 #     release to decide which platforms the port is allowed on, or
@@ -154,6 +158,15 @@ proc go_toolchain.ceiling {} {
 }
 
 # Return 1 when the given minimum Go version can be satisfied on this platform.
+#
+# The comparison is by release series, because that is what a ceiling names. A
+# go.mod may ask for a patch release, and roughly half of them do ("go 1.24.0"),
+# but MacPorts ships the newest patch of every series it packages, so 1.24.3 is
+# satisfied wherever the 1.24 series is. Comparing the two directly would be
+# wrong in exactly the boundary case that matters: vercmp ranks 1.24.3, and
+# even 1.24.0, above 1.24, so a port asking for the very series a system is
+# capped at would be judged unsatisfiable.
+#
 # An empty minimum is satisfiable wherever any Go runs at all, and nothing is
 # satisfiable where none does.
 proc go_toolchain.satisfies {minimum} {
@@ -166,7 +179,7 @@ proc go_toolchain.satisfies {minimum} {
         return 1
     }
 
-    return [vercmp ${minimum} <= ${ceiling}]
+    return [vercmp [go_toolchain._minor ${minimum}] <= ${ceiling}]
 }
 
 options go_toolchain.version go_toolchain.minor go_toolchain.label \
