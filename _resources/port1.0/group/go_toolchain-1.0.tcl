@@ -412,9 +412,8 @@ proc go_toolchain.setup {go_version {label ""}} {
     }
 
     notes "
-        This port installs Go ${go_version} as go-${label} and gofmt-${label},
-        so it does not interfere with the main `go` port. Use it directly, or
-        point a build at ${prefix}/lib/go-${label} as GOROOT.
+        Installed as go-${label} and gofmt-${label}, with GOROOT at
+        ${prefix}/lib/go-${label}.
     "
 
     livecheck.type      regex
