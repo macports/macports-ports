@@ -50,9 +50,36 @@
 # The list of vendors can be found in the go.sum, Gopkg.lock, glide.lock,
 # etc. file in the upstream source code. The go2port tool (install via MacPorts)
 # can be used to generate a skeleton portfile with precomputed go.vendors.
+#
+# A port that cannot be built with an arbitrarily old Go should say so:
+#
+# go.toolchain_min  1.24
+#
+# Upstream raises Go's minimum macOS version regularly, so an older system is
+# capped at an older Go, and a port needing something newer cannot be built
+# there by any means. Declaring the minimum lets such a port be marked
+# known_fail on those systems rather than being fetched, built and failed every
+# time it is tried. A port that does not declare one is never gated.
+#
+# The value may be written however go.mod writes it, "1.24" or "1.24.0"; only
+# the series is compared, since MacPorts ships the newest patch release of each
+# series it packages.
+#
+# Where to get the value depends on how the port builds:
+#
+#   * With go.offline_build no, the build runs in module mode and Go reads
+#     go.mod, so its `go` directive is enforced and is exactly the minimum.
+#     Copy it.
+#
+#   * Otherwise the build runs in GOPATH mode, where go.mod is not consulted at
+#     all. The directive is then only an upper bound on what the source really
+#     needs, and may be well above it. Declare a minimum for such a port only
+#     when it is known to be needed, or the port will be skipped on systems
+#     where it would have built.
 
 PortGroup legacysupport    1.1
 PortGroup compiler_wrapper 1.0
+PortGroup go_toolchain     1.0
 
 options go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix go.offline_build
 
@@ -141,7 +168,77 @@ proc go._strip_gopkg_version {str} {
     return [regsub -- \\..*$ ${str} ""]
 }
 
-options go.bin go.vendors
+options go.bin go.vendors go.toolchain_min
+
+# The oldest Go this port can be built with. Unset means the port states no
+# minimum and is never gated. See the header for where to get the value.
+#
+# Evaluated as soon as a Portfile sets it, so that known_fail is in place for
+# anything that reads it.
+default go.toolchain_min {}
+option_proc go.toolchain_min go._handle_toolchain_min
+
+# Where no Go release runs at all, nothing built with this PortGroup can be
+# either, whatever it does or does not declare. That needs no annotation to
+# decide, so it is settled here rather than per port.
+if {[go_toolchain.ceiling] eq "none"} {
+    known_fail yes
+}
+
+# Holds the minimum when this system cannot meet it, for the message below.
+set go.toolchain_unmet  {}
+
+proc go._handle_toolchain_min {option action args} {
+    global go.toolchain_unmet
+
+    if {${action} ne "set"} {
+        return
+    }
+
+    set minimum [lindex ${args} 0]
+
+    # A value above every series go_toolchain records is either a typo, which
+    # would otherwise skip the port everywhere without a word, or a real
+    # release whose macOS floor has not been recorded; neither can be gated
+    # correctly. One below them all can never gate anything.
+    switch [go_toolchain.range ${minimum}] {
+        newer {
+            return -code error "go.toolchain_min ${minimum} is newer than any\
+                Go release go_toolchain records. If it is real, add it to\
+                go_toolchain.min_darwin with the oldest darwin it runs on."
+        }
+        older {
+            ui_warn "go.toolchain_min ${minimum} is older than every Go release\
+                     go_toolchain records, so it is below every ceiling and can\
+                     never gate this port; it may be dropped."
+        }
+    }
+
+    if {[go_toolchain.satisfies ${minimum}]} {
+        set go.toolchain_unmet {}
+        return
+    }
+
+    set go.toolchain_unmet ${minimum}
+    known_fail yes
+}
+
+pre-fetch {
+    global go.toolchain_unmet
+
+    set ceiling [go_toolchain.ceiling]
+
+    if {${ceiling} eq "none"} {
+        ui_error "No Go release runs on this version of macOS, so ${subport}\
+                  cannot be built here."
+        return -code error "no Go toolchain is available on this platform"
+    }
+    if {${go.toolchain_unmet} ne ""} {
+        ui_error "${subport} needs Go ${go.toolchain_unmet} or newer, but this\
+                  version of macOS runs nothing newer than Go ${ceiling}."
+        return -code error "Go ${go.toolchain_unmet} is not available on this platform"
+    }
+}
 
 default go.bin          {${prefix}/bin/go}
 default go.vendors      {}

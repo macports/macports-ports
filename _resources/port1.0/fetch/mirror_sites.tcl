@@ -215,7 +215,6 @@ set sites(gentoo) {
     http://gentoo.aditsu.net:8000/distfiles/:nosubdir
     http://gentoo.c3sl.ufpr.br/distfiles/:nosubdir
     http://gentoo.cs.utah.edu/distfiles/:nosubdir
-    http://gentoo.gossamerhost.com/distfiles/:nosubdir
     http://gentoo.mirror.web4u.cz/distfiles/:nosubdir
     http://gentoo.mirrors.ovh.net/gentoo-distfiles/distfiles/:nosubdir
     http://gentoo.mirrors.tera-byte.com/distfiles/:nosubdir

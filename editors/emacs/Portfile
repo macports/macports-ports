@@ -26,6 +26,10 @@ master_sites    gnu
 
 set rpaths [list]
 
+# GCC version used for the nativecomp variant's libgccjit; also used to point
+# native compilation at the gcc toolchain via GCC_EXEC_PREFIX (see site-start).
+set gcc_v   15
+
 if {$subport eq $name} {
     conflicts   emacs-devel
 }
@@ -105,6 +109,8 @@ post-destroot {
         file mkdir ${destroot}${prefix}/share/emacs/site-lisp
         file copy ${filespath}/site-start.el \
             ${destroot}${prefix}/share/emacs/site-lisp/site-start.el
+        reinplace "s|__GCC_EXEC_PREFIX__|${prefix}/lib/gcc${gcc_v}/gcc/|g" \
+            ${destroot}${prefix}/share/emacs/site-lisp/site-start.el
     }
 }
 
@@ -124,11 +130,21 @@ platform darwin {
             configure.cflags-append -Wno-attributes
         }
     }
+
+    # aligned_alloc and posix_spawn_file_actions_addchdir_np are weakly linked
+    # in 10.15+ SDKs but absent at runtime before 10.15, so a build against a
+    # newer SDK aborts with "dyld: Symbol not found". Force the fallbacks.
+    # https://trac.macports.org/ticket/61406
+    if {${os.major} < 19} {
+        configure.env-append    ac_cv_func_aligned_alloc=no \
+                                ac_cv_have_decl_aligned_alloc=no \
+                                ac_cv_func_posix_spawn_file_actions_addchdir_np=no
+    }
 }
 
 if {$subport eq $name || $subport eq "emacs-app"} {
     version         30.2
-    revision        11
+    revision        14
     checksums       rmd160  fefdd3fcd453d733114f609a3e122b2529cc7410 \
                     sha256  1d79a4ba4d6596f302a7146843fe59cf5caec798190bcc07c907e7ba244b076d \
                     size    83059014
@@ -148,7 +164,7 @@ if {$subport eq "emacs-devel" || $subport eq "emacs-app-devel"} {
     github.tarball_from archive
     epoch           5
     version         20260602
-    revision        0
+    revision        3
 
     master_sites    ${github.master_sites}
 
@@ -283,6 +299,18 @@ if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
             ${destroot}${applications_dir}/Emacs.app/Contents/Resources/site-lisp/site-start.el
         reinplace "s|__APPLICATIONS_DIR__|${applications_dir}|g" \
             ${destroot}${applications_dir}/Emacs.app/Contents/Resources/site-lisp/site-start.el
+        reinplace "s|__GCC_EXEC_PREFIX__|${prefix}/lib/gcc${gcc_v}/gcc/|g" \
+            ${destroot}${applications_dir}/Emacs.app/Contents/Resources/site-lisp/site-start.el
+
+        # Sequoia and later enforce code-signature validation so
+        # Emacs.app can't launch from the Finder without codesigning.
+        # This is only necessary on Intel because the ARM toolchain
+        # automatically codesigns, but it's harmless to rerun.
+        # See https://trac.macports.org/ticket/71232
+        if {${os.major} >= 24} {
+            system -W ${destroot}${applications_dir} \
+                "/usr/bin/codesign --force --deep --sign - Emacs.app"
+        }
     }
 
     variant imagemagick description {Use ImageMagick} {
@@ -304,14 +332,18 @@ if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
     default_variants-append +rsvg
 }
 
-variant nativecomp description {Builds emacs with native compilation support} {
-    set gcc_v                      15
-    depends_lib-append             port:gcc${gcc_v}
-    configure.args-replace         --with-native-compilation=no \
-                                   --with-native-compilation=aot
-    compiler.cpath-prepend         ${prefix}/include/gcc${gcc_v}
-    compiler.library_path-prepend  ${prefix}/lib/gcc${gcc_v}
-    lappend rpaths                 ${prefix}/lib/gcc${gcc_v}
+# JIT is not supported in gcc on i386 (configure fails), and on ppc the
+# +nativecomp build segfaults, so don't offer the variant on those archs.
+# https://trac.macports.org/ticket/68382
+if {${configure.build_arch} ni [list i386 ppc]} {
+    variant nativecomp description {Builds emacs with native compilation support} {
+        depends_lib-append             port:gcc${gcc_v}
+        configure.args-replace         --with-native-compilation=no \
+                                       --with-native-compilation=aot
+        compiler.cpath-prepend         ${prefix}/include/gcc${gcc_v}
+        compiler.library_path-prepend  ${prefix}/lib/gcc${gcc_v}
+        lappend rpaths                 ${prefix}/lib/gcc${gcc_v}
+    }
 }
 
 variant treesitter description {Builds emacs with tree-sitter support} {
@@ -374,8 +406,8 @@ etc/NEWS or the Emacs Lisp reference manual.
 
 default_variants-append     +treesitter
 
-# JIT not supported in gcc for i386, so configure will fail.
-# On ppc it is supported, but the build with +nativecomp segfaults.
+# Enable native compilation by default where the variant is available
+# (see the nativecomp variant definition above for the arch restriction).
 # https://trac.macports.org/ticket/69677
 if {${configure.build_arch} ni [list i386 ppc]} {
     default_variants-append +nativecomp
