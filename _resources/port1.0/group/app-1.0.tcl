@@ -285,7 +285,7 @@ platform macosx {
     post-destroot {
         if {[tbool app.create]} {
             # Ensure app.identifier is valid.
-            if {[regexp -nocase {[^a-z0-9.-]} ${app.identifier}]} {
+            if {[regexp -nocase {[^a-z0-9._-]} ${app.identifier}]} {
                 return -code error "app.identifier ${app.identifier} contains illegal characters"
             }
             if {[llength [split ${app.identifier} "."]] < 3} {
