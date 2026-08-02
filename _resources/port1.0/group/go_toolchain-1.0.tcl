@@ -174,16 +174,14 @@ set go_toolchain.min_darwin(1.27)   22  ;# 13    Ventura      (see below)
 # built and used below its old floor and `go` picks it up on the next rebuild;
 # nothing else changes.
 #
-# The four below are the series min_darwin moved to darwin 17 on the strength
-# of their imports. That argument says they load on 10.13, not that the
-# toolchain behaves, and the buildbots have never built them that low.
-# Widening min_darwin alone puts go-1.22, go-1.23 and go-1.24 on the 10.13,
-# 10.14 and 10.15 builders for the first time, which is what settles it, while
-# `go` keeps handing those systems what it hands them today.
-set go_toolchain.min_default(1.21)  19  ;# 10.15 Catalina
-set go_toolchain.min_default(1.22)  19  ;# 10.15 Catalina
-set go_toolchain.min_default(1.23)  20  ;# 11    Big Sur
-set go_toolchain.min_default(1.24)  20  ;# 11    Big Sur
+# The table is empty, which is the state to expect between series. It last
+# held 1.21 through 1.24 at darwin 19 and 20 while min_darwin claimed 17 on
+# the strength of their imports. The buildbots have since built go-1.22,
+# go-1.23 and go-1.24 on 10.13, 10.14 and 10.15, so the claim is no longer
+# only an argument and the entries are gone.
+#
+# Add one when a series' floor is lowered ahead of any evidence for it, which
+# is the cautious default. Nothing outside this file needs to know.
 
 # 1.17 is not a load-time limit but MacPorts' own. Upstream supports 10.13 and
 # ships no binary that runs below it; MacPorts builds 1.17.13 from source with
@@ -208,6 +206,14 @@ set go_toolchain.min_default(1.24)  20  ;# 11    Big Sur
 #
 # A list of series rather than of versions, so that a patch update touches only
 # the toolchain's own Portfile.
+#
+# Packaging a series does not mean `go` ever selects it. `go` takes the newest
+# series a system is offered, so a series is only ever chosen where no newer
+# packaged series is offered as well -- which means one sharing a floor with a
+# newer series is never what `go` provides. Today that is 1.20, 1.22, 1.23 and
+# 1.25; they are packaged so that a build can pin them, not because anything
+# reaches them by default. This recomputes from the tables and is worth
+# rechecking whenever a floor moves.
 set go_toolchain.packaged {1.17 1.20 1.22 1.23 1.24 1.25 1.26}
 
 # The newest series MacPorts packages.
