@@ -409,14 +409,27 @@ proc go_toolchain.range {version} {
 #
 # An empty minimum is satisfiable wherever any Go runs, and nothing is
 # satisfiable where none does.
+#
+# An uncapped system is not a system that can satisfy anything. Every recorded
+# series runs there, but `go` can only hand over one that go_toolchain.packaged
+# lists, so the comparison is against the newest of those -- which is exactly
+# what wrapped returns there.
+#
+# 1.27 is the case in point. It is recorded, and lang/go-devel builds it, but
+# a labelled port is not a packaged series and `go` never selects it. Without
+# this, a port declaring go.toolchain_min 1.27 is reported satisfiable on
+# darwin 22 and later and then built against the 1.26 that `go` provides.
 proc go_toolchain.satisfies {minimum} {
     set ceiling [go_toolchain.ceiling]
 
     if {${ceiling} eq "none"} {
         return 0
     }
-    if {${minimum} eq "" || ${ceiling} eq ""} {
+    if {${minimum} eq ""} {
         return 1
+    }
+    if {${ceiling} eq ""} {
+        set ceiling [go_toolchain._newest_packaged]
     }
 
     return [vercmp [go_toolchain._minor ${minimum}] <= ${ceiling}]
