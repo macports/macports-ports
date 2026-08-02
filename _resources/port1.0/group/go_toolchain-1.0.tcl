@@ -3,11 +3,18 @@
 # This PortGroup provides two things:
 #
 #   * The mapping from Go release to the oldest macOS it runs on, and the
-#     queries over it: go_toolchain.min_darwin, go_toolchain.ceiling,
-#     go_toolchain.satisfies, go_toolchain.range, go_toolchain.wrapped,
-#     go_toolchain.oldest_packaged and go_toolchain.floor. Including the
-#     PortGroup has no side effects, so a port or another PortGroup may include
-#     it purely to ask.
+#     queries over it: go_toolchain.min_darwin, go_toolchain.min_default,
+#     go_toolchain.ceiling, go_toolchain.satisfies, go_toolchain.range,
+#     go_toolchain.wrapped, go_toolchain.oldest_packaged and
+#     go_toolchain.floor. Including the PortGroup has no side effects, so a
+#     port or another PortGroup may include it purely to ask.
+#
+#     Two floors, not one. min_darwin is where a release loads, and decides
+#     where its toolchain port may be installed. min_default is where a
+#     release may become the default `go`, and is the same thing unless a
+#     series is deliberately held back. Keeping them apart is what allows a
+#     toolchain to be built and tried on a system before users there are
+#     moved onto it.
 #
 #   * The build of a versioned Go toolchain port, via go_toolchain.setup.
 #
@@ -39,7 +46,10 @@
 # ----------------------
 #
 #   1. go_toolchain.min_darwin: add the series with the oldest darwin major
-#      version upstream supports it on.
+#      version its binaries still load on. Read that off the release rather
+#      than off upstream's supported-macOS floor -- see "How far back a Go
+#      release runs" below, which gives the symbols to look at and why the two
+#      answers differ.
 #
 #      Required even when no port is added. go_toolchain.ceiling reads this
 #      table to decide what each system can run, so a series missing from it
@@ -50,13 +60,18 @@
 #      a go.toolchain_min naming a series newer than anything recorded here, so
 #      no port can declare the new release until it is listed.
 #
-#   2. go_toolchain.packaged: add the series if a go-1.NN port is created for
+#   2. go_toolchain.min_default: add the series only if it should not yet be
+#      offered as `go` everywhere it loads, which is the cautious default for
+#      a series whose floor is lower than upstream's. Omit the entry and the
+#      release is offered wherever it runs.
+#
+#   3. go_toolchain.packaged: add the series if a go-1.NN port is created for
 #      it. setup refuses a version-named port whose series is absent here.
 #
-#   3. lang/go-1.NN/Portfile: call go_toolchain.setup with the full version,
+#   4. lang/go-1.NN/Portfile: call go_toolchain.setup with the full version,
 #      and give the checksums.
 #
-# Steps 2 and 3 belong in the same change. A series listed without a port leaves
+# Steps 3 and 4 belong in the same change. A series listed without a port leaves
 # `go` depending on a toolchain that does not exist on every system that selects
 # it; a port whose series is unlisted is refused outright.
 #
@@ -65,16 +80,17 @@
 #
 # Retiring a series is the reverse: drop it from go_toolchain.packaged and
 # delete the port. Its go_toolchain.min_darwin entry can stay, since that table
-# records what upstream requires rather than what is shipped.
+# records what each release requires rather than what is shipped.
 #
 # A patch update, say 1.26.5 to 1.26.6, is a change to that port's own Portfile
 # and nothing here.
 #
 #
-# Upstream's macOS requirements
-# -----------------------------
+# How far back a Go release runs
+# ------------------------------
 #
-# From https://go.dev/wiki/MinimumRequirements and the per-release notes:
+# Upstream publishes a supported floor per release, from
+# https://go.dev/wiki/MinimumRequirements and the per-release notes:
 #
 #   Go 1.17   macOS 10.13 High Sierra   (darwin 17)
 #   Go 1.21   macOS 10.15 Catalina      (darwin 19)
@@ -82,34 +98,94 @@
 #   Go 1.25   macOS 12    Monterey      (darwin 21)
 #   Go 1.27   macOS 13    Ventura       (darwin 22)
 #
-# These are runtime limits rather than build limits. From Go 1.25 the darwin
-# runtime resolves Security.framework symbols such as
-# _SecTrustCopyCertificateChain through //go:cgo_import_dynamic even when CGO
-# is disabled, so a too-new Go aborts under dyld however it was produced.
+# Those are statements of what upstream supports. The table below records
+# something narrower and testable instead: the oldest macOS on which the
+# release's binaries still start. The two agree for 1.18 through 1.20 and
+# again from 1.25; they part company for 1.21 through 1.24, where following
+# the support floor would cost three versions of macOS a usable Go for no
+# reason they would ever observe. 1.17 is a case of its own, noted below.
+#
+# What ends a Go binary is an unresolved symbol. crypto/x509 reaches
+# Security.framework through //go:cgo_import_dynamic even when CGO is
+# disabled, and the resulting imports are non-lazy, so dyld has to bind every
+# one a binary references before it runs. The directives are in
+# src/crypto/x509/internal/macos/security.go, which is where to look when a
+# new series appears.
+#
+# 1.20 through 1.24 declare an identical set, and 10.13 satisfies all of it.
+# Its newest member is SecTrustEvaluateWithError, which the SDK marks
+# macos(10.14); it nonetheless resolves on 10.13, as it must, since 1.20
+# imports it too and upstream supports 1.20 down there.
+#
+# 1.25 drops SecTrustGetCertificateAtIndex and SecTrustGetCertificateCount,
+# deprecated in macOS 12, for SecTrustCopyCertificateChain, which arrives in
+# macOS 12. Anywhere older dyld cannot bind it and the process aborts before
+# main. That substitution is the entire cliff, and it falls between 1.24 and
+# 1.25.
+#
+# LC_BUILD_VERSION is not the limit. Go 1.24.8 declares minos 11.0 yet ran on
+# 10.13 through 11 for the nine months MacPorts shipped it, because macOS dyld
+# loads a binary whose minos is newer than the running system. Only the
+# missing symbol is fatal, which is why this table follows the imports.
+#
 # See https://trac.macports.org/ticket/73086.
 
 # The oldest darwin major version each Go series runs on.
 #
-# The values are upstream's requirements, with the exception of 1.17 noted
-# below. An entry is needed for any series that has a port, and for any series
-# that is the newest runnable on some version of macOS.
+# An entry is needed for any series that has a port, and for any series that
+# is the newest runnable on some version of macOS. 1.17 and 1.27 are the two
+# values not established by the imports above; both are noted below.
 set go_toolchain.min_darwin(1.17)   11  ;# 10.7  Lion          (see below)
 set go_toolchain.min_darwin(1.18)   17  ;# 10.13 High Sierra
 set go_toolchain.min_darwin(1.19)   17  ;# 10.13 High Sierra
 set go_toolchain.min_darwin(1.20)   17  ;# 10.13 High Sierra
-set go_toolchain.min_darwin(1.21)   19  ;# 10.15 Catalina
-set go_toolchain.min_darwin(1.22)   19  ;# 10.15 Catalina
-set go_toolchain.min_darwin(1.23)   20  ;# 11    Big Sur
-set go_toolchain.min_darwin(1.24)   20  ;# 11    Big Sur
+set go_toolchain.min_darwin(1.21)   17  ;# 10.13 High Sierra
+set go_toolchain.min_darwin(1.22)   17  ;# 10.13 High Sierra
+set go_toolchain.min_darwin(1.23)   17  ;# 10.13 High Sierra
+set go_toolchain.min_darwin(1.24)   17  ;# 10.13 High Sierra
 set go_toolchain.min_darwin(1.25)   21  ;# 12    Monterey
 set go_toolchain.min_darwin(1.26)   21  ;# 12    Monterey
-set go_toolchain.min_darwin(1.27)   22  ;# 13    Ventura
+set go_toolchain.min_darwin(1.27)   22  ;# 13    Ventura      (see below)
 
-# 1.17 is the one value above that is not upstream's. Upstream requires 10.13;
-# MacPorts builds 1.17.13 from source below that with legacysupport, which is
-# what makes any Go available on those systems. 10.7 is the limit of that:
-# 10.6 cannot build it, because its dsymutil aborts on the debug information
-# Go's linker emits. See lang/go-1.17.
+# The oldest darwin major version from which a series may be chosen as the
+# default Go.
+#
+# Where this is absent the answer is go_toolchain.min_darwin, which is the
+# usual case: a release that runs somewhere is the release to offer there.
+# An entry holds a series back from systems it loads on but has not been
+# exercised on, so that a toolchain can be built and tried in the field
+# before every user of those systems is moved onto it.
+#
+# Entries are temporary by intent. Delete one once its series has been built
+# and used on the systems below its old floor, and `go` picks it up on the
+# next rebuild. Nothing else has to change.
+#
+# The four here are the series whose floors this table moved to darwin 17 on
+# the strength of their imports. That reasoning says they load on 10.13; it
+# does not say the toolchain behaves, and the buildbots have never built them
+# below these values. Widening min_darwin puts go-1.22, go-1.23 and go-1.24
+# on the 10.13, 10.14 and 10.15 builders for the first time, which is what
+# answers that -- while `go` keeps handing those systems what it hands them
+# today.
+set go_toolchain.min_default(1.21)  19  ;# 10.15 Catalina
+set go_toolchain.min_default(1.22)  19  ;# 10.15 Catalina
+set go_toolchain.min_default(1.23)  20  ;# 11    Big Sur
+set go_toolchain.min_default(1.24)  20  ;# 11    Big Sur
+
+# 1.17 is not a load-time limit but MacPorts' own. Upstream supports 10.13 and
+# ships no binary that runs below it; MacPorts builds 1.17.13 from source with
+# legacysupport, which is what makes any Go available on older systems. 10.7
+# is the limit of that: 10.6 cannot build it, because its dsymutil aborts on
+# the debug information Go's linker emits. See lang/go-1.17.
+#
+# 1.27 is upstream's support floor, carried over unchecked. Its imports have
+# not been read, and on the evidence above its real floor may well be darwin
+# 21, the same as 1.25 and 1.26.
+#
+# The value is not idle in the meantime: setup derives go-devel's platforms
+# from it, so go-devel is offered only on 13 Ventura and later. It is never
+# returned as a ceiling, being the newest series here, so nothing else is
+# affected. Read the imports before packaging a go-1.27.
 
 # The series MacPorts packages as go-1.NN ports.
 #
@@ -220,6 +296,18 @@ proc go_toolchain.min_darwin {go_version} {
     return [set go_toolchain.min_darwin(${minor})]
 }
 
+# The oldest darwin major version from which a release may be the default Go,
+# which is its load-time floor unless go_toolchain.min_default holds it back.
+proc go_toolchain.min_default {go_version} {
+    global go_toolchain.min_default
+
+    set minor [go_toolchain._minor ${go_version}]
+    if {[info exists go_toolchain.min_default(${minor})]} {
+        return [set go_toolchain.min_default(${minor})]
+    }
+    return [go_toolchain.min_darwin ${go_version}]
+}
+
 # The release series of a version. Prereleases carry a suffix on the minor
 # component (1.27rc2), so this cannot simply split on ".".
 proc go_toolchain._minor {go_version} {
@@ -259,8 +347,8 @@ proc go_toolchain.ceiling {} {
     }
 
     set best {}
-    foreach {minor min_darwin} [array get go_toolchain.min_darwin] {
-        if {${os.major} >= ${min_darwin}} {
+    foreach minor [array names go_toolchain.min_darwin] {
+        if {${os.major} >= [go_toolchain.min_default ${minor}]} {
             if {${best} eq "" || [vercmp ${minor} > ${best}]} {
                 set best ${minor}
             }
