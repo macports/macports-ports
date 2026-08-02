@@ -1,0 +1,271 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem                  1.0
+PortGroup                   linear_algebra 1.0
+PortGroup                   mpi 1.0
+PortGroup                   muniversal 1.0
+
+name                        petsc
+version                     3.22.1
+revision                    1
+categories                  math science
+maintainers                 {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
+license                     BSD
+description                 Portable, Extensible Toolkit for Scientific Computation
+long_description            PETSc, pronounced PET-see (the S is silent), is a suite \
+                            of data structures and routines for the scalable (parallel) solution \
+                            of scientific applications modeled by partial differential equations. \
+                            It employs the MPI standard for all message-passing communication.
+
+homepage                    https://www.mcs.anl.gov/petsc/
+
+master_sites                https://web.cels.anl.gov/projects/petsc/download/release-snapshots/
+
+checksums                   rmd160  adbf4c988532d4828e2ef355041376b6e7f315af \
+                            sha256  7117d3ae6827f681ed9737939d4e86896b4751e27cca941bb07e5703f19a0a7b \
+                            size    16752281
+
+if {${os.platform} eq "darwin" && ${os.arch} eq "powerpc"} {
+    mpi.setup               require require_fortran \
+                            -clang -fortran
+} else {
+    mpi.setup               default
+}
+
+use_parallel_build          no
+
+set python_ver_dot          3.11
+set python.version          [string map {. ""} $python_ver_dot]
+
+depends_build-append        port:sowing \
+                            port:python${python.version} \
+                            port:c2html
+
+# SUNDIALS requires SuiteSparse
+patchfiles-append           patch-sundials.py.diff
+
+# allow later versions of SUNDIALS version 2 to satisfy dependency
+patchfiles-append           patch-sundials_version.diff
+
+# API change https://github.com/xiaoyeli/superlu_dist/issues/59
+patchfiles-append           patch-src-mat-impls-aij-mpi-superlu_dist-superlu_dist.c.diff
+
+# allow configure script to find MacPorts Python
+configure.env-append        PATH=${frameworks_dir}/Python.framework/Versions/${python_ver_dot}/bin:$env(PATH)
+
+pre-configure {
+    configure.args-append   COPTFLAGS="${configure.optflags}" \
+                            CXXOPTFLAGS="${configure.optflags}" \
+                            FOPTFLAGS="${configure.optflags}" \
+                            PETSC_ARCH="arch-macports"
+
+    # avoid duplication of optflags
+    configure.optflags
+
+    if {[mpi_variant_isset]} {
+        configure.args-delete --with-mpi=0 \
+                              --with-fc=0
+        configure.args-append --with-mpiexec=${mpi.exec}
+    } elseif {[fortran_variant_isset]} {
+        configure.args-delete --with-fc=0
+    }
+
+    configure.universal_args-delete --disable-dependency-tracking
+}
+
+post-build {
+    if {![variant_exists universal] || ![variant_isset universal]} {
+        set archs {""}
+    } else {
+        set archs ""
+        foreach arch ${configure.universal_archs} {
+            lappend archs -${arch}
+        }
+    }
+    foreach arch ${archs} {
+        # see https://trac.macports.org/ticket/51707 for a similar issue
+        reinplace -E \
+            "s|-L${prefix}/lib/gcc\[0-9\]/\[^ \]+ ||g" \
+            ${worksrcpath}${arch}/arch-macports/lib/pkgconfig/PETSc.pc \
+            ${worksrcpath}${arch}/arch-macports/include/petscmachineinfo.h \
+            ${worksrcpath}${arch}/arch-macports/lib/petsc/conf/petscvariables
+        reinplace -E \
+            "s|-Wl,-rpath,${prefix}/lib/gcc\[0-9\]/\[^ \]+ ||g" \
+            ${worksrcpath}${arch}/arch-macports/lib/petsc/conf/petscvariables
+    }
+}
+
+if {${universal_possible} && [variant_isset universal]} {
+    merger-post-destroot {
+        foreach arch ${configure.universal_archs} {
+            if {${arch} ne ${build_arch}} {
+                xinstall -d -m 0755 ${destroot}-${arch}${prefix}/lib/${arch}
+                fs-traverse fl ${destroot}-${arch}${prefix}/lib/petsc {
+                    set trg [string map "${destroot}-${arch}${prefix}/lib/petsc ${prefix}/lib/petsc" ${fl}]
+                    set sfl [string map "${destroot}-${arch}${prefix}/lib/petsc ${destroot}-${arch}${prefix}/lib/${arch}" ${fl}]
+                    if {[file isdir ${fl}]} {
+                        xinstall -d -m 0755 ${sfl}
+                    } elseif {[file extension ${fl}] eq ".pc"} {
+                        # do nothing
+                    } elseif {[file extension ${fl}] eq ".mod"} {
+                        move ${fl} ${sfl}
+                    } elseif {[file tail ${fl}] eq "petscvariables"} {
+                        reinplace -E \
+                            "s|${prefix}/lib/petsc|${prefix}/lib/petsc/${arch}|g" \
+                            ${fl}
+                        move ${fl} ${sfl}
+                    } elseif {[file tail ${fl}] eq "variables"} {
+                        reinplace -E \
+                            "s|${prefix}/lib/petsc/lib/petsc/conf/petscvariables|${prefix}/lib/petsc/${arch}/lib/petsc/conf/petscvariables|g" \
+                            ${fl}
+                        move ${fl} ${sfl}
+                    } else {
+                        ln -s ${trg} ${sfl}
+                    }
+                }
+                move \
+                    ${destroot}-${arch}${prefix}/lib/${arch} \
+                    ${destroot}-${arch}${prefix}/lib/petsc/
+            }
+        }
+    }
+}
+
+notes                       "Add the following line to your .bash_profile if you plan to use\
+                            the PETSC makefile rules in ${prefix}/lib/petsc/conf: \n\
+                            \texport PETSC_DIR=${prefix}/lib/${name}"
+
+configure.pre_args          --prefix=${prefix}/lib/${name}
+
+configure.args              --with-environment-variables=1 \
+                            --with-valgrind=0 \
+                            --with-mpi=0 \
+                            --with-fc=0 \
+                            --with-shared-libraries \
+                            --with-debugging=0 \
+                            --with-c2html-dir=${prefix} \
+                            --without-x
+
+post-destroot {
+    ln -s ${prefix}/lib/${name}/lib/pkgconfig/PETSc.pc ${destroot}${prefix}/lib/pkgconfig/PETSc.pc
+}
+
+pre-configure {
+    configure.args-append   --with-blas-lapack-lib="-L${prefix}/lib ${linalglib}"
+}
+
+variant complex description {Build with support for complex numbers} conflicts sundials hwloc {
+    configure.args-append   --with-scalar-type=complex
+    configure.args-append   --with-clanguage=C++
+}
+
+variant hwloc description {Build with hwloc} conflicts complex {
+    depends_lib-append  port:hwloc
+    configure.args-append   --with-hwloc-dir=${prefix}
+}
+
+variant suitesparse description {Build with CHOLMOD and UMFPACK} {
+    depends_lib-append      port:SuiteSparse_AMD \
+                            port:SuiteSparse_BTF \
+                            port:SuiteSparse_CAMD \
+                            port:SuiteSparse_CCOLAMD \
+                            port:SuiteSparse_CHOLMOD \
+                            port:SuiteSparse_COLAMD \
+                            port:SuiteSparse_KLU \
+                            port:SuiteSparse_UMFPACK \
+                            port:SuiteSparse_config
+    configure.args-append   --with-suitesparse-dir=${prefix}
+}
+
+variant sundials description {Build with CVODE interface for TS} requires suitesparse {
+    set sundials_ver        2
+    set sundials_base       ${prefix}/libexec/sundials${sundials_ver}
+
+    depends_lib-append      port:sundials${sundials_ver}
+    configure.args-append   --with-sundials-dir=${sundials_base}
+    mpi.enforce_variant     sundials${sundials_ver}
+}
+
+variant superlu description {Build with SuperLU interface for a serial direct solver} {
+    depends_lib-append      port:superlu
+    configure.args-append   --with-superlu-dir=${prefix}
+}
+
+variant mumps description {Build with MUMPS interface for a parallel direct solver} requires parmetis {
+    depends_lib-append      port:mumps
+    configure.args-append   --with-scalapack-dir=${prefix} \
+                            --with-mumps-dir=${prefix}
+    mpi.enforce_variant     mumps
+}
+
+variant superlu_dist description {Build with SuperLU_DIST interface for a parallel direct solver} requires parmetis {
+    depends_lib-append      port:superlu_dist
+    configure.args-append   --with-superlu_dist-lib=-lsuperlu_dist \
+                            --with-superlu_dist-include=${prefix}/include/superlu_dist
+    mpi.enforce_variant     superlu_dist
+}
+
+variant ml description {Build with ML interface for a sparse parallel solver} {
+    depends_lib-append      port:ml
+    configure.args-append   --with-ml-dir=${prefix}
+    mpi.enforce_variant     ml
+}
+
+variant hypre description {Build with HYPRE interface for a sparse parallel solver} {
+    depends_lib-append      port:hypre
+    configure.args-append   --with-hypre-dir=${prefix}
+    mpi.enforce_variant     hypre
+}
+
+variant parmetis description {Build with ParMetis interface for parallel graph partitioning} {
+    depends_lib-append      port:metis \
+                            port:parmetis
+    configure.args-append   --with-metis-dir=${prefix} \
+                            --with-parmetis-dir=${prefix}
+    mpi.enforce_variant     parmetis
+}
+
+variant hdf5 description {Build with HDF5 interface for parallel file io} {
+    depends_lib-append      port:hdf5
+    configure.args-append   --with-hdf5-dir=${prefix}
+
+    mpi.enforce_variant     hdf5
+}
+
+variant netcdf description {Build with NetCDF interface for parallel file io} requires hdf5 {
+    depends_lib-append      port:netcdf
+    configure.args-append   --with-netcdf-dir=${prefix}
+    mpi.enforce_variant     netcdf
+}
+
+variant fftw description {Build with FFTW interface (requires MPI)} {
+    depends_lib-append      port:fftw-3
+    configure.args-append   --with-fftw-dir=${prefix}
+    mpi.enforce_variant     fftw-3
+}
+
+variant yaml description {Build with YAML interface for option reading} {
+    depends_lib-append      port:libyaml
+    configure.args-append   --with-yaml-dir=${prefix}
+}
+
+variant valgrind description {Build with valgrind support} {
+    depends_lib-append    port:valgrind
+    configure.args-replace  --with-valgrind=0 \
+                            --with-valgrind-dir=${prefix}
+}
+
+variant sprng description {Build with SPRNG interface for a sparse random number generator} {
+    depends_lib-append      port:sprng
+    configure.args-append   --with-sprng-dir=${prefix}
+    mpi.enforce_variant     sprng
+}
+
+variant debug description {Build with debug support} {
+    configure.args-replace  --with-debugging=0 \
+                            --with-debugging=1
+}
+
+if {![variant_isset complex]} {
+    default_variants +hwloc
+}

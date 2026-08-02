@@ -1,0 +1,171 @@
+--- blink/blinkenlights.c
++++ blink/blinkenlights.c
+@@ -3559,9 +3559,11 @@ static void GetOpts(int argc, char *argv[]) {
+   FLAG_nolinear = !wantunsafe;
+ }
+ 
++#ifdef HAVE_JIT
+ static void AddPath_StartOp_Tui(P) {
+   Jitter(m, rde, 0, 0, "qc", StartOp_Tui);
+ }
++#endif
+ 
+ static bool FileExists(const char *path) {
+   return !VfsAccess(AT_FDCWD, path, F_OK, 0);
+@@ -3606,7 +3608,7 @@ int VirtualMachine(int argc, char *argv[]) {
+         tty = VfsOpen(AT_FDCWD, "/dev/tty", O_RDWR | O_NOCTTY, 0);
+       }
+       if (tty != -1) {
+-        tty = VfsFcntl(tty, F_DUPFD_CLOEXEC, kMinBlinkFd);
++        tty = VfsFcntl(tty, F_DUPFD, kMinBlinkFd);
+       }
+       if (tty == -1) {
+         WriteErrorString("failed to open /dev/tty\n");
+--- blink/demangle.c
++++ blink/demangle.c
+@@ -139,10 +139,20 @@ static void SpawnCxxFilt(void) {
+   }
+   unassert(!close(pipefds[0][1]));
+   unassert(!close(pipefds[1][0]));
++#ifndef F_DUPFD_CLOEXEC
++  g_cxxfilt.reader = fcntl(pipefds[0][0], F_DUPFD, kMinBlinkFd);
++  fcntl(g_cxxfilt.reader, F_SETFD, FD_CLOEXEC);
++#else
+   g_cxxfilt.reader = fcntl(pipefds[0][0], F_DUPFD_CLOEXEC, kMinBlinkFd);
++#endif
+   unassert(g_cxxfilt.reader != -1);
+   unassert(!close(pipefds[0][0]));
++#ifndef F_DUPFD_CLOEXEC
++  g_cxxfilt.writer = fcntl(pipefds[1][1], F_DUPFD, kMinBlinkFd);
++  fcntl(g_cxxfilt.writer, F_SETFD, FD_CLOEXEC);
++#else
+   g_cxxfilt.writer = fcntl(pipefds[1][1], F_DUPFD_CLOEXEC, kMinBlinkFd);
++#endif
+   unassert(g_cxxfilt.writer != -1);
+   unassert(!close(pipefds[1][1]));
+   unassert(!atexit(CloseCxxFilt));
+--- blink/errfd.c
++++ blink/errfd.c
+@@ -48,6 +48,11 @@ int WriteError(int fd, const char *buf, int len) {
+ 
+ void WriteErrorInit(void) {
+   if (g_errfd) return;
++#ifndef F_DUPFD_CLOEXEC
++  g_errfd = fcntl(2, F_DUPFD, kMinBlinkFd);
++  fcntl(g_errfd, F_SETFD, FD_CLOEXEC);
++#else
+   g_errfd = fcntl(2, F_DUPFD_CLOEXEC, kMinBlinkFd);
++#endif
+   if (g_errfd == -1) exit(200);
+ }
+--- blink/log.c
++++ blink/log.c
+@@ -120,7 +120,12 @@ static void OpenLog(void) {
+       return;
+     }
+   }
++#ifndef F_DUPFD_CLOEXEC
++  unassert((g_log.fd = fcntl(fd, F_DUPFD, kMinBlinkFd)) != -1);
++  unassert(fcntl(g_log.fd, F_SETFL, FD_CLOEXEC) != -1);
++#else
+   unassert((g_log.fd = fcntl(fd, F_DUPFD_CLOEXEC, kMinBlinkFd)) != -1);
++#endif
+   unassert(!close(fd));
+ }
+ 
+--- blink/path.c
++++ blink/path.c
+@@ -156,7 +156,7 @@ void(SetupCod)(struct Machine *m) {
+   DisLoadElf(&g_dis, &m->system->elf);
+   g_cod = VfsOpen(AT_FDCWD_LINUX, "/tmp/blink.s",
+                   O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+-  g_cod = VfsFcntl(g_cod, F_DUPFD_CLOEXEC, kMinBlinkFd);
++  g_cod = VfsFcntl(g_cod, F_DUPFD, kMinBlinkFd);
+ #endif
+ }
+ 
+--- blink/syscall.c
++++ blink/syscall.c
+@@ -1409,8 +1409,18 @@ static int SysDup3(struct Machine *m, i32 fildes, i32 newfildes, i32 flags) {
+ static int SysDupf(struct Machine *m, i32 fildes, i32 minfildes, int cmd) {
+   struct Fd *fd;
+   int lim, oflags, newfildes;
++  int cmdnative = cmd;
+   if (minfildes >= (lim = GetFileDescriptorLimit(m->system))) return emfile();
+-  if ((newfildes = VfsFcntl(fildes, cmd, minfildes)) != -1) {
++  if (cmd == F_DUPFD_LINUX) {
++    cmdnative = F_DUPFD;
++  } else if (cmd == F_DUPFD_CLOEXEC_LINUX) {
++#ifndef F_DUPFD_CLOEXEC
++    cmdnative = F_DUPFD;
++#else
++    cmdnative = F_DUPFD_CLOEXEC;
++#endif
++  }
++  if ((newfildes = VfsFcntl(fildes, cmdnative, minfildes)) != -1) {
+     if (newfildes >= lim) {
+       VfsClose(newfildes);
+       return emfile();
+@@ -1418,7 +1428,7 @@ static int SysDupf(struct Machine *m, i32 fildes, i32 minfildes, int cmd) {
+     LOCK(&m->system->fds.lock);
+     unassert(fd = GetFd(&m->system->fds, fildes));
+     oflags = fd->oflags & ~O_CLOEXEC;
+-    if (cmd == F_DUPFD_CLOEXEC) {
++    if (cmd == F_DUPFD_CLOEXEC_LINUX) {
+       oflags |= O_CLOEXEC;
+     }
+     unassert(ForkFd(&m->system->fds, fd, newfildes, oflags));
+@@ -3241,10 +3251,8 @@ static int SysFcntlGetownEx(struct Machine *m, i32 fildes, i64 addr) {
+ static int SysFcntl(struct Machine *m, i32 fildes, i32 cmd, i64 arg) {
+   int rc, fl;
+   struct Fd *fd;
+-  if (cmd == F_DUPFD_LINUX) {
+-    return SysDupf(m, fildes, arg, F_DUPFD);
+-  } else if (cmd == F_DUPFD_CLOEXEC_LINUX) {
+-    return SysDupf(m, fildes, arg, F_DUPFD_CLOEXEC);
++  if (cmd == F_DUPFD_LINUX || cmd == F_DUPFD_CLOEXEC_LINUX) {
++    return SysDupf(m, fildes, arg, cmd);
+   }
+   if (!(fd = GetAndLockFd(m, fildes))) return -1;
+   if (cmd == F_GETFD_LINUX) {
+--- blink/vfs.c
++++ blink/vfs.c
+@@ -1733,7 +1733,11 @@ int VfsFcntl(int fd, int cmd, ...) {
+   }
+   va_start(ap, cmd);
+   // CLOEXEC is already handled by the syscall layer.
++#ifndef F_DUPFD_CLOEXEC
++  if (cmd == F_DUPFD) {
++#else
+   if (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC) {
++#endif
+     if (info->device->ops->Dup) {
+       ret = info->device->ops->Dup(info, &newinfo);
+       if (ret != -1) {
+--- blink/xlat.h
++++ blink/xlat.h
+@@ -8,6 +8,7 @@
+ #include <sys/stat.h>
+ #include <sys/statvfs.h>
+ #include <sys/time.h>
++#include <sys/types.h>
+ #include <termios.h>
+ 
+ #include "blink/linux.h"
+--- configure
++++ configure
+@@ -295,12 +295,12 @@ replace() {
+ 
+ comment() {
+   hassstr "$1"
+-  replace "$1" "// $1"
++  replace "$1\$" "// $1"
+ }
+ 
+ uncomment() {
+   hassstr "$1"
+-  replace "// $1" "$1"
++  replace "// $1\$" "$1"
+ }
+ 
+ for x; do

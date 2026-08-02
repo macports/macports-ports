@@ -1,0 +1,167 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                subversion
+version             1.14.5
+revision            0
+
+categories          devel
+maintainers         nomaintainer
+license             Apache-2
+
+description         subversion (svn) -- a version control system designed to be a better cvs
+long_description    Subversion (svn) is a version control system designed to be as similar to \
+                    cvs(1) as possible, while fixing many outstanding problems with cvs(1).
+
+homepage            https://subversion.apache.org/
+
+master_sites        apache:subversion
+use_bzip2           yes
+
+checksums           rmd160  6e2047376878c8225ab644a513e74150fa8128fe \
+                    sha256  e78a29e7766b8b7b354497d08f71a55641abc53675ce1875584781aae35644a1 \
+                    size    8675355
+
+depends_build-append \
+                    port:pkgconfig \
+                    port:gettext
+
+depends_lib-append  port:apr \
+                    port:apr-util \
+                    port:cyrus-sasl2 \
+                    port:db48 \
+                    port:expat \
+                    port:gettext-runtime \
+                    port:libmagic \
+                    port:libutf8proc \
+                    port:lz4 \
+                    port:serf1 \
+                    port:sqlite3 \
+                    port:zlib
+
+depends_run-append  path:share/curl/curl-ca-bundle.crt:curl-ca-bundle
+
+test.run            yes
+test.target         check
+test.env            CLEANUP=true
+
+patchfiles          config_impl.h.patch \
+                    dynamic_lookup-11.patch
+
+post-patch {
+    reinplace "s|__PREFIX__|${prefix}|" ${worksrcpath}/subversion/libsvn_subr/config_impl.h
+}
+
+configure.args-append \
+                    --with-berkeley-db=:${prefix}/include/db48:${prefix}/lib/db48:db-4.8 \
+                    --without-apxs \
+                    --without-gnome-keyring \
+                    --without-boost
+
+build.target        all tools
+destroot.target-append install-tools
+
+pre-test {
+    set x {}
+    fs-traverse dir ${worksrcpath}/subversion {
+        if {[file tail ${dir}] == ".libs" && [file isdirectory ${dir}]} {
+            lappend x ${dir}
+            continue
+        }
+    }
+
+    #- System Integrity Protection breaks this :(
+    #- you can run tests after install, but since libsvn_test-1.0.dylib isn't
+    #- installed, many of them fail
+    #- see also http://openradar.appspot.com/22807197
+    #- http://apple.stackexchange.com/questions/215030/el-capitan-make-check-dyld-library-path
+    test.env-append DYLD_LIBRARY_PATH=[join ${x} ":"]
+}
+
+pre-configure {
+    reinplace "s|hardcode_direct=yes|hardcode_direct=no|g" \
+        ${worksrcpath}/configure
+}
+
+post-configure {
+    reinplace "s|need_relink=yes|need_relink=no|g" \
+        ${worksrcpath}/libtool
+}
+
+post-destroot {
+    # install global config file so curl-ca-bundle certs are used
+    xinstall -d ${destroot}${prefix}/etc/subversion
+    xinstall -m 0644 ${filespath}/servers.default ${destroot}${prefix}/etc/subversion
+
+    # install bash completion file
+    xinstall -d ${destroot}${prefix}/etc/bash_completion.d
+    copy ${worksrcpath}/tools/client-side/bash_completion ${destroot}${prefix}/etc/bash_completion.d/subversion
+}
+
+post-activate {
+    if {![file exists ${prefix}/etc/subversion/servers]} {
+        copy ${prefix}/etc/subversion/servers.default ${prefix}/etc/subversion/servers
+    }
+}
+
+variant mod_dav_svn description {Install the subversion apache module (mod_dav_svn)} {
+    depends_build-append    path:bin/apxs:apache2
+    configure.args-append   --with-apxs=${prefix}/bin/apxs \
+                            --disable-mod-activation
+    configure.args-delete --without-apxs
+}
+
+variant no_bdb description {Build without support for BerkeleyDB repositories} {
+    depends_lib-delete      port:db48
+    configure.args-delete   --with-berkeley-db=:${prefix}/include/db48:${prefix}/lib/db48:db-4.8
+    configure.args-append   --without-berkeley-db
+}
+
+variant mac_os_x_server_mod_dav_svn description {Unsupported - attempt to build the subversion apache module with apple supplied apache2} {
+    configure.args-append   --with-apxs=/opt/apache2/bin/apxs \
+                            --disable-mod-activation
+    configure.args-delete   --without-apxs
+
+    destroot.violate_mtree yes
+
+    post-install {
+        ui_warn "This variant (+mac_os_x_server_mod_dav_svn) builds against the Apple-supplied apache2 in /opt/apache2 and thus may have problems that the normal variant (+mod_dav_svn) which builds against the macports supplied apache2 will not have."
+    }
+}
+
+variant tools description {Install some optional extra subversion tools} {
+    post-destroot {
+        xinstall -d -m 0755 ${destroot}${prefix}/share/${name}
+        copy ${worksrcpath}/tools ${destroot}${prefix}/share/${name}/tools
+        delete ${destroot}${prefix}/share/${name}/tools/diff/
+        delete ${destroot}${prefix}/share/${name}/tools/server-side/mod_dontdothat
+        delete {*}[glob ${destroot}${prefix}/share/${name}/tools/server-side/*{.o,.lo,.c}]
+        delete ${destroot}${prefix}/share/${name}/tools/server-side/fsfs-stats
+        delete ${destroot}${prefix}/share/${name}/tools/server-side/svn-populate-node-origins-index
+        delete ${destroot}${prefix}/share/${name}/tools/server-side/svn-rep-sharing-stats
+        delete ${destroot}${prefix}/share/${name}/tools/server-side/svnauthz-validate
+    }
+}
+
+# see http://subversion.tigris.org/issues/show_bug.cgi?id=2464
+variant unicode_path description {Installs a hack to workaround Mac OS X unicode path issues} {
+    patchfiles-append patch-osx_unicode_precomp.diff
+
+    post-install {
+        ui_warn "This variant (+unicode_path) implements a hack to deal with composed/decomposed unicode handling on Mac OS X which is different from linux and windows. It is an implementation of solution 1 from https://svn.apache.org/repos/asf/subversion/trunk/notes/unicode-composition-for-filenames which _WILL_ break some setups. Please be sure you understand what you are asking for when you install this variant."
+        }
+}
+
+variant disable_keychain description {Disables support for the Mac OS X Keychain} {
+    configure.args-append   --disable-keychain
+}
+
+# CarbonCore/MacTypes.h: No such file or directory
+platform puredarwin {
+    configure.args-append   --disable-keychain
+}
+
+livecheck.type  regex
+livecheck.url   https://svn.apache.org/repos/asf/subversion/tags/
+livecheck.regex "(\\d+\\.\\d+\\.\\d+)/"

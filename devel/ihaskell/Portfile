@@ -1,0 +1,259 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+
+github.setup        IHaskell IHaskell 0b15e3918069b5d321d0d3057d99f89a7c82e958
+name                [string tolower ${github.project}]
+# current version in https://github.com/gibiansky/IHaskell/blob/master/ihaskell.cabal
+version             20251124
+revision            0
+github.tarball_from archive
+
+categories          devel haskell
+license             MIT
+maintainers         nomaintainer
+
+description         A Haskell kernel for IPython.
+long_description    IHaskell is a kernel for the Jupyter project, \
+                    which allows you to use Haskell inside Jupyter \
+                    frontends (including the console and \
+                    notebook). For a tour of some IHaskell features, \
+                    check out the demo Notebook at \
+                    http://nbviewer.ipython.org/github/gibiansky/IHaskell/blob/master/notebooks/IHaskell.ipynb. More \
+                    example notebooks are available on the wiki at \
+                    https://github.com/gibiansky/IHaskell/wiki. The \
+                    wiki also has more extensive documentation of \
+                    IHaskell features.
+
+checksums           rmd160  b369871b17c9a1fc89a33ba8f17320bb0129fc0a \
+                    sha256  1fa6f95e2b4398fbdd0227c3ad7fc0be9b9a48537f7e17382e3fa314f1dff3d2 \
+                    size    804380
+
+# use these to specify python versions, python3 required
+# use ${prefix}/var/macports/sources/rsync.macports.org/macports/release/tarballs/ports/_resources/port1.0/group/python-1.0.tcl
+set python3_version 313
+set python3_branch [string index ${python3_version} 0].[string range ${python3_version} 1 end]
+
+# See https://github.com/gibiansky/IHaskell#mac,
+# https://github.com/gibiansky/IHaskell/blob/master/requirements.txt
+depends_lib-append  \
+                    path:lib/pkgconfig/pango.pc:pango \
+                    port:ghc \
+                    port:libmagic \
+                    port:python${python3_version} \
+                    port:py${python3_version}-cairo \
+                    port:py${python3_version}-ipykernel \
+                    port:py${python3_version}-ipywidgets \
+                    port:py${python3_version}-jupyter \
+                    port:py${python3_version}-jupyter_client \
+                    port:py${python3_version}-jupyter_core \
+                    port:py${python3_version}-magic \
+                    port:py${python3_version}-nbformat \
+                    port:py${python3_version}-pkgconfig \
+                    port:py${python3_version}-widgetsnbextension \
+                    port:zmq
+
+depends_run-append  \
+                    port:hlint
+
+# relative paths to ${prefix}
+set ihaskell_libdir ${prefix}/lib/${name}
+set ihaskell_datadir \
+                    share/${name}
+set jupyter_dir     share/jupyter
+set hlint_datadir   share/hlint
+
+post-extract {
+    xinstall -d \
+        ${destroot}${ihaskell_libdir} \
+        ${destroot}${prefix}/${ihaskell_datadir}/html \
+        ${destroot}${prefix}/${ihaskell_datadir}/jupyterlab-ihaskell/labextension \
+        ${destroot}${prefix}/${jupyter_dir}
+
+    destroot.keepdirs-append \
+        ${destroot}${prefix}/${ihaskell_datadir}/jupyterlab-ihaskell/labextension
+
+    # Fix for cabal data-files hardcoded path in binary
+    # See:
+    # https://github.com/commercialhaskell/stack/issues/848
+    # https://github.com/commercialhaskell/stack/issues/4857
+    # https://github.com/haskell/cabal/issues/462
+    # https://github.com/haskell/cabal/issues/3586
+    xinstall -m 0644 -W ${worksrcpath} \
+        ${filespath}/Paths_NAME.hs ./src/Paths_${name}.hs
+
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${worksrcpath}/src/Paths_${name}.hs
+    reinplace "s|@NAME@|${name}|g" \
+        ${worksrcpath}/src/Paths_${name}.hs
+    reinplace -E "s|(Version\[\[:space:]]+)\\\[\[\[:digit:]]+(,\[\[:digit:]]+){1,4}\\]|\\1\[[join [split ${version} .] ,]]|" \
+        ${worksrcpath}/src/Paths_${name}.hs
+}
+
+# no jupyter_select yet, so hack PATH to find `which jupyter`:
+# https://trac.macports.org/ticket/50608
+# note: this command does not change the destroot PATH environment, so export
+# PATH explicitly in the necessary system command below
+pre-destroot {
+    destroot.env-append \
+        "PATH=$env(PATH):${frameworks_dir}/Python.framework/Versions/${python3_branch}/bin" \
+        ${name}_datadir=${destroot}${prefix}/${ihaskell_datadir} \
+}
+
+variant stack \
+    description {Use stack to build.} {}
+
+if { [variant_isset "stack"] } {
+    PortGroup       haskell_stack 1.0
+
+    post-extract {
+        # append configure-options to stack.yaml
+        reinplace "\$ a\\
+\\
+# Avoid MacPorts iconv link error\\
+# See https://github.com/commercialhaskell/stack/issues/825\\
+extra-lib-dirs:\\
+\\ \\ - /usr/lib\\
+\\ \\ - ${prefix}/lib\\
+extra-include-dirs:\\
+\\ \\ - ${prefix}/include\\
+" \
+                    stack.yaml
+    }
+
+    post-destroot {
+        # install the data-files into destroot (see ${name}.cabal)
+        fs-traverse f ${worksrcpath}/.stack-work/install {
+            if { [file isfile ${f}] } {
+                foreach datafile {
+                    html/kernel.js
+                    html/logo-64x64.svg
+                } {
+                    if { [string match "*/${datafile}" ${f}] } {
+                        xinstall -m 0644 ${f} \
+                            ${destroot}${prefix}/${ihaskell_datadir}/${datafile}
+                    }
+                }
+            }
+        }
+
+        # run ihaskell to install the IPython files into destroot
+        set ghc_libdir [exec sh -c "env ${destroot.env} ghc --print-libdir"]
+        system -W ${worksrcpath} \
+            "env ${destroot.env} \
+                    ${destroot}${prefix}/bin/ihaskell install \
+                        --ghclib=${ghc_libdir} \
+                        --prefix=${destroot}${prefix}"
+
+        shared_library_chase \
+                    ${destroot}${prefix}/bin/ihaskell \
+                    ${ihaskell_libdir} \
+                    {@rpath/libHS.+\.dylib}
+
+        # delete any destroot path appearing in text or json files
+        set stack_ghc [glob -nocomplain ${haskell_stack.stack_root}/programs/*/ghc-*/lib/ghc-*]
+        set ghc_version [exec sh -c "ghc --version | sed -E 's|^.+version (\[\[:digit:]])|\\1|'"]
+        fs-traverse f ${destroot}${prefix} {
+            if {[file isfile ${f}]} {
+                set file_mime_type \
+                    [lindex [exec /usr/bin/file --mime-type ${f}] end]
+                if {[string match "text/*" ${file_mime_type}]
+                    || [string match "application/json" ${file_mime_type}]} {
+                    reinplace -q "s|${destroot}||g" ${f}
+                    reinplace -q "s|${stack_ghc}|${prefix}/lib/ghc-${ghc_version}/lib|g" ${f}
+                }
+            }
+        }
+    }
+
+    # Remove hlint_datadir instructions after this cabal issue is fixed:
+    # https://github.com/haskell/cabal/issues/6234
+    notes "
+
+The environment variable `hlint_datadir` must be set before running the
+Jupyter notebook (due to a Cabal path issue):
+
+        export hlint_datadir=${prefix}/${hlint_datadir}
+        jupyter-${python3_branch} notebook-${python3_branch}
+"
+} else {
+    PortGroup       haskell_cabal 1.0
+
+    build.target    exe:${name}
+
+    post-destroot {
+        # install the data-files into destroot (see ${name}.cabal)
+        foreach datafile [glob ${worksrcpath}/html/*] {
+            xinstall -m 0644 ${datafile} \
+                    ${destroot}${prefix}/${ihaskell_datadir}/html
+        }
+
+        # run ihaskell to install the IPython files into destroot
+        set ghc_libdir [exec sh -c "env ${destroot.env} ghc --print-libdir"]
+        system -W ${worksrcpath} \
+            "env ${destroot.env} \
+                    ${destroot}${prefix}/bin/ihaskell install \
+                        --ghclib=${ghc_libdir} \
+                        --prefix=${destroot}${prefix}"
+
+        # delete any destroot path appearing in text or json files
+        fs-traverse f ${destroot}${prefix} {
+            if {[file isfile ${f}]} {
+                set file_mime_type \
+                    [lindex [exec /usr/bin/file --mime-type ${f}] end]
+                if {[string match "text/*" ${file_mime_type}]
+                    || [string match "application/json" ${file_mime_type}]} {
+                    reinplace -q "s|${destroot}||g" ${f}
+                }
+            }
+        }
+    }
+
+    post-activate {
+        # install the jupyter kernel
+        system -W ${worksrcpath} \
+            "env ${destroot.env} \
+                    jupyter-${python3_branch} kernelspec-${python3_branch} \
+                        install ${prefix}/${jupyter_dir}/kernels/haskell"
+    }
+}
+
+# get the objdump rpath names that match ${workpath} in the binary
+proc get_workpath_list { binname } {
+    global workpath
+    return [exec bash -c "otool -l \"${binname}\" 2>/dev/null \
+        | grep -E -A 2 -e '\[\[:space:]]+cmd\[\[:space:]]+LC_RPATH' \
+        | grep -E -e '\[\[:space:]]+path\[\[:space:]]+' \
+        | grep -E -o -e '(${workpath}\[^ ]+)' || true"]
+}
+
+# install the DAG of shared libraries into ${libdir}, delete ${workpath} dirs
+proc shared_library_chase { binname libdir rpath_re } {
+    global destroot
+    set workpath_list [get_workpath_list ${binname}]
+    foreach path [lreverse ${workpath_list}] {
+        system "install_name_tool -delete_rpath \"${path}\" \"${binname}\""
+    }
+    system "install_name_tool -add_rpath \"${libdir}\" \"${binname}\""
+    foreach rpath [exec bash -c \
+        "otool -L \"${binname}\" | grep -E -o -e '${rpath_re}' || true"] {
+        set libname [strsed ${rpath} "s|^@rpath/||"]
+        set libpath ${libdir}/${libname}
+        set builtlib {}
+        foreach path ${workpath_list} {
+            if { [file exists ${path}/${libname}]
+                && [file isfile ${path}/${libname}] } {
+                set builtlib ${path}/${libname}
+                break
+            }
+        }
+        if { ${builtlib} ne ""
+            && ![file exists ${destroot}${libpath}] } {
+            xinstall -m 0644 ${builtlib} ${destroot}${libpath}
+            shared_library_chase \
+                    ${destroot}${libpath} \
+                    ${libdir} ${rpath_re}
+        }
+    }
+}

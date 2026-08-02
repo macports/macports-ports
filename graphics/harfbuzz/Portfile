@@ -1,0 +1,170 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           gobject_introspection 1.0
+PortGroup           meson 1.0
+PortGroup           muniversal 1.1
+
+# Please keep the harfbuzz and harfbuzz-devel ports as similar as possible.
+
+github.setup        harfbuzz harfbuzz 14.2.1
+checksums           rmd160  291614dec3db67a0d7da5f5a3c6b0d2690d8c7e4 \
+                    sha256  a54a5d8e9380a41fbb762ce367bcbf7704792dfca0d93f1bbca86c5a57902e0e \
+                    size    19559952
+
+name                harfbuzz
+conflicts           harfbuzz-devel
+set my_name         harfbuzz
+categories          graphics
+maintainers         {ryandesign @ryandesign} {mascguy @mascguy} openmaintainer
+license             MIT
+description         OpenType text shaping engine
+long_description    HarfBuzz is an {*}${description}.
+homepage            https://harfbuzz.github.io
+
+github.tarball_from releases
+dist_subdir         ${my_name}
+use_xz              yes
+
+# Disable unexpected download of subprojects
+meson.wrap_mode     nodownload
+
+set py_ver          3.14
+set py_ver_nodot    [string map {. {}} ${py_ver}]
+
+depends_build-append \
+                    path:bin/pkg-config:pkgconfig \
+                    port:python${py_ver_nodot}
+
+configure.python    ${prefix}/bin/python${py_ver}
+
+# Disable legacy non-underscore macros, defined by AssertMacros.h, on older macOS releases; fixes:
+#
+#   ../harfbuzz-10.1.0/src/hb-buffer.hh:214:9: error: too many arguments provided to function-like macro invocation
+#     214 |                hb_font_t          *font,
+#         |                ^
+#   /usr/include/AssertMacros.h:1339:11: note: macro 'verify' defined here
+#     1339 |                 #define verify(assertion) __Verify(assertion)
+#          |                         ^
+patchfiles-append   patch-meson-assert-macros.diff
+
+post-patch {
+    fs-traverse f ${worksrcpath} {
+        if {[string match *.py ${f}]} {
+            ui_info "patching python: ${f}"
+            reinplace -q "s|/usr/bin/env python3$|${configure.python}|" ${f}
+        }
+    }
+}
+
+# https://github.com/harfbuzz/harfbuzz/issues/1642
+compiler.cxx_standard \
+                    2011
+
+# error: invalid operands to binary expression
+# https://github.com/harfbuzz/harfbuzz/issues/4371
+compiler.blacklist-append \
+                    {clang < 700}
+
+# Options common across main and subport
+configure.args-append \
+                    -Dchafa=disabled \
+                    -Ddocs=disabled
+
+# Do not use -Werror. New compilers may have new warnings; we don't want users
+# to encounter build failures because of that.
+configure.cflags-append     -DHB_NO_PRAGMA_GCC_DIAGNOSTIC_ERROR
+configure.cxxflags-append   -DHB_NO_PRAGMA_GCC_DIAGNOSTIC_ERROR
+
+if {${name} eq ${subport}} {
+    revision        0
+
+    gobject_introspection yes
+
+    # NOTE: lib dep for gobject-introspection added via pg gobject_introspection
+    depends_lib-append \
+                    path:lib/pkgconfig/cairo.pc:cairo \
+                    port:freetype \
+                    path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    port:graphite2
+
+    # NOTE: -Dintrospection set via pg gobject_introspection
+    configure.args-append \
+                    -Dcairo=enabled \
+                    -Dchafa=disabled \
+                    -Dfreetype=enabled \
+                    -Dglib=enabled \
+                    -Dgobject=enabled \
+                    -Dgraphite2=enabled \
+                    -Dicu=disabled
+
+    test.run        yes
+
+    post-destroot {
+        set docdir ${prefix}/share/doc/${name}
+        xinstall -d ${destroot}${docdir}
+        xinstall -m 0644 -W ${worksrcpath} \
+                    AUTHORS \
+                    COPYING \
+                    NEWS \
+                    README.md \
+                    THANKS \
+                    ${destroot}${docdir}
+    }
+
+    if {${os.platform} eq "darwin" && ${os.major} >= 9} {
+        configure.args-append \
+                    -Dcoretext=enabled
+    } else {
+        configure.args-append \
+                    -Dcoretext=disabled
+    }
+
+    if {${os.platform} eq "darwin" && ${os.major} < 10} {
+        depends_test-append \
+                    port:python27
+        test.env-append \
+                    PATH=${frameworks_dir}/Python.framework/Versions/2.7/bin:$env(PATH)
+    }
+} else {
+    livecheck.type  none
+}
+
+subport harfbuzz-icu {
+    revision        0
+
+    conflicts       harfbuzz-icu-devel
+
+    description     HarfBuzz ICU support library
+    long_description This library adds support for ICU (the International Components for Unicode) to HarfBuzz.
+
+    gobject_introspection no
+
+    depends_lib-append \
+                    port:harfbuzz \
+                    path:lib/pkgconfig/icu-uc.pc:icu
+
+    # ICU requires C++17
+    compiler.cxx_standard \
+                    2017
+
+    # NOTE: -Dintrospection set via pg gobject_introspection
+    configure.args-append \
+                    -Dcairo=disabled \
+                    -Dchafa=disabled \
+                    -Dfreetype=disabled \
+                    -Dglib=disabled \
+                    -Dgraphite2=disabled \
+                    -Dicu=enabled
+
+    # Deconflict with parent port contents
+    post-destroot {
+        ui_info "${subport}: removing files from parent"
+
+        foreach f [exec port -q contents ${name}] {
+            ui_info "${subport}: deleting file: ${f}"
+            delete ${destroot}${f}
+        }
+    }
+}

@@ -1,0 +1,191 @@
+diff -ur daemon.orig/gdm-server.c daemon/gdm-server.c
+--- daemon.orig/gdm-server.c	2015-04-02 06:52:39.000000000 -0700
++++ daemon/gdm-server.c	2015-05-04 12:11:56.000000000 -0700
+@@ -94,6 +94,7 @@
+         char    *auth_file;
+ 
+         guint    child_watch_id;
++        guint    sigusr1_id;
+ 
+         gboolean is_initial;
+ };
+@@ -179,83 +180,15 @@
+         return g_strdup (server->priv->display_device);
+ }
+ 
+-static void
+-gdm_server_ready (GdmServer *server)
+-{
+-        g_debug ("GdmServer: Got USR1 from X server - emitting READY");
+-
+-        gdm_run_script (GDMCONFDIR "/Init", GDM_USERNAME,
+-                        server->priv->display_name,
+-                        NULL, /* hostname */
+-                        server->priv->auth_file);
+-
+-        g_signal_emit (server, signals[READY], 0);
+-}
+-
+-static GSList *active_servers;
+-static gboolean sigusr1_thread_running;
+-static GCond sigusr1_thread_cond;
+-static GMutex sigusr1_thread_mutex;
+-
+ static gboolean
+-got_sigusr1 (gpointer user_data)
++on_sigusr1(gpointer user_data)
+ {
+-        GPid pid = GPOINTER_TO_UINT (user_data);
+-        GSList *l;
+-
+-        g_debug ("GdmServer: got SIGUSR1 from PID %d", pid);
+-
+-        for (l = active_servers; l; l = l->next) {
+-                GdmServer *server = l->data;
+-
+-                if (server->priv->pid == pid)
+-                        gdm_server_ready (server);
+-        }
+-
+-        return G_SOURCE_REMOVE;
+-}
+-
+-static gpointer
+-sigusr1_thread_main (gpointer user_data)
+-{
+-        sigset_t sigusr1_mask;
+-
+-        /* Handle only SIGUSR1 */
+-        sigemptyset (&sigusr1_mask);
+-        sigaddset (&sigusr1_mask, SIGUSR1);
+-        sigprocmask (SIG_SETMASK, &sigusr1_mask, NULL);
+-
+-        g_mutex_lock (&sigusr1_thread_mutex);
+-        sigusr1_thread_running = TRUE;
+-        g_cond_signal (&sigusr1_thread_cond);
+-        g_mutex_unlock (&sigusr1_thread_mutex);
+-
+-        /* Spin waiting for a SIGUSR1 */
+-        while (TRUE) {
+-                siginfo_t info;
+-
+-                if (sigwaitinfo (&sigusr1_mask, &info) == -1)
+-                        continue;
++        GdmServer *server = user_data;
+ 
+-                g_idle_add (got_sigusr1, GUINT_TO_POINTER (info.si_pid));
+-        }
+-
+-        return NULL;
+-}
+-
+-static void
+-gdm_server_launch_sigusr1_thread_if_needed (void)
+-{
+-        static GThread *sigusr1_thread;
+-
+-        if (sigusr1_thread == NULL) {
+-                sigusr1_thread = g_thread_new ("gdm SIGUSR1 catcher", sigusr1_thread_main, NULL);
++        g_debug ("GdmServer: Got USR1 from X server - emitting READY");
+ 
+-                g_mutex_lock (&sigusr1_thread_mutex);
+-                while (!sigusr1_thread_running)
+-                        g_cond_wait (&sigusr1_thread_cond, &sigusr1_thread_mutex);
+-                g_mutex_unlock (&sigusr1_thread_mutex);
+-        }
++        g_signal_emit (server, signals[READY], 0);
++        return FALSE;
+ }
+ 
+ static void
+@@ -709,12 +642,6 @@
+         g_object_unref (server);
+ }
+ 
+-static void
+-prune_active_servers_list (GdmServer *server)
+-{
+-        active_servers = g_slist_remove (active_servers, server);
+-}
+-
+ static gboolean
+ gdm_server_spawn (GdmServer    *server,
+                   const char   *vtarg,
+@@ -752,15 +679,6 @@
+         g_debug ("GdmServer: Starting X server process: %s", freeme);
+         g_free (freeme);
+ 
+-        active_servers = g_slist_append (active_servers, server);
+-
+-        g_object_weak_ref (G_OBJECT (server),
+-                           (GWeakNotify)
+-                           prune_active_servers_list,
+-                           server);
+-
+-        gdm_server_launch_sigusr1_thread_if_needed ();
+-
+         if (!g_spawn_async_with_pipes (NULL,
+                                        argv,
+                                        (char **)env->pdata,
+@@ -1096,11 +1014,16 @@
+ static void
+ gdm_server_init (GdmServer *server)
+ {
++
+         server->priv = GDM_SERVER_GET_PRIVATE (server);
+ 
+         server->priv->pid = -1;
+ 
+         server->priv->log_dir = g_strdup (LOGDIR);
++
++        server->priv->sigusr1_id = g_unix_signal_add (SIGUSR1,
++                                                      on_sigusr1,
++                                                      server);
+ }
+ 
+ static void
+@@ -1115,6 +1038,9 @@
+ 
+         g_return_if_fail (server->priv != NULL);
+ 
++        if (server->priv->sigusr1_id > 0)
++                g_source_remove (server->priv->sigusr1_id);
++
+         gdm_server_stop (server);
+ 
+         g_free (server->priv->command);
+Only in daemon: gdm-server.c.orig
+Only in daemon: gdm-server.c.rej
+diff -ur daemon.orig/main.c daemon/main.c
+--- daemon.orig/main.c	2015-04-02 06:52:42.000000000 -0700
++++ daemon/main.c	2015-05-04 11:58:58.000000000 -0700
+@@ -289,19 +289,6 @@
+         return debug;
+ }
+ 
+-/* SIGUSR1 is used by the X server to tell us that we're ready, so
+- * block it. We'll unblock it in the worker thread in gdm-server.c
+- */
+-static void
+-block_sigusr1 (void)
+-{
+-        sigset_t mask;
+-
+-        sigemptyset (&mask);
+-        sigaddset (&mask, SIGUSR1);
+-        sigprocmask (SIG_BLOCK, &mask, NULL);
+-}
+-
+ int
+ main (int    argc,
+       char **argv)
+@@ -322,8 +309,6 @@
+                 { NULL }
+         };
+ 
+-        block_sigusr1 ();
+-
+         bindtextdomain (GETTEXT_PACKAGE, GNOMELOCALEDIR);
+         textdomain (GETTEXT_PACKAGE);
+         setlocale (LC_ALL, "");
+Only in daemon: main.c.orig

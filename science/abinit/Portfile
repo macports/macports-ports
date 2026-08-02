@@ -1,0 +1,238 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           linear_algebra 1.0
+PortGroup           mpi 1.0
+
+github.setup        abinit abinit 10.8.1
+github.tarball_from archive
+revision            1
+
+categories          science
+license             GPL-3
+maintainers         {gmail.com:cram5431 @mtorrent} \
+                    {mps @Schamschula} \
+                    openmaintainer
+
+description         Full-featured atomic-scale first-principles simulation software
+
+long_description    ABINIT is a package whose main program allows one to find the total energy, \
+                    charge density and electronic structure of systems made of electrons and nuclei \
+                    (molecules and periodic solids) within Density Functional Theory (DFT), \
+                    using pseudopotentials and a planewave or wavelet basis. \
+                    ABINIT also includes options to optimize the geometry according to the DFT forces \
+                    and stresses, or to perform molecular dynamics simulations using these forces, \
+                    or to generate dynamical matrices, Born effective charges, and dielectric tensors, \
+                    based on Density-Functional Perturbation Theory, and many more properties. \
+                    Excited states can be computed within the Many-Body Perturbation Theory \
+                    (the GW approximation and the Bethe-Salpeter equation), and \
+                    Time-Dependent Density Functional Theory (for molecules). \
+                    In addition to the main ABINIT code, different utility programs are provided. \
+                    ABINIT is a project that favours development and collaboration.
+
+homepage            https://www.abinit.org
+
+checksums           rmd160  b1bb46e7b09dfdfe7f17e7a43de2450ec2dad957 \
+                    sha256  33efdb848798ee521557e216db67449b971ba7aa215f91ed6500a3cc8115bc93 \
+                    size    175258349
+
+depends_lib-append      port:libxc6 \
+                        port:hdf5\
+                        port:szip
+
+compilers.choose        cc cxx fc
+compilers.allow_arguments_mismatch \
+                        yes
+# g95 is no longer supported by abinit
+mpi.setup               default require_fortran -g95
+
+# note Xcode m4 is too old. Use MacPorts GNU m4
+depends_build           port:m4
+patchfiles              patch-config-scripts-makemake.diff
+
+# fix path to makemake
+patchfiles-append       patch-autogen.sh.diff
+post-patch {
+    reinplace "s|%%WORKSRCPATH%%|${worksrcpath}|g" ${worksrcpath}/autogen.sh
+}
+
+# configure scripts are looking for env python, rather then env python3
+patchfiles-append       patch-python3.diff
+
+configure.args-append   --enable-gw-dpc
+configure.fcflags-append \
+                        -ffree-line-length-none
+configure.optflags      -O3
+
+compilers.enforce_fortran \
+                        libxc6 hdf5
+configure.args-append   --with-libxc="${prefix}/libexec/libxc6" \
+                        --with-hdf5="${prefix}"
+mpi.enforce_variant     hdf5
+
+depends_lib-append      port:netcdf-fortran
+compilers.enforce_fortran \
+                        netcdf-fortran
+configure.args-append   --with-netcdf="${prefix}" \
+                        --with-netcdf-fortran="${prefix}"
+# check compatibility with MPI? not needed
+
+use_parallel_build      yes
+
+# We do not need to use ABINIT's own approach to parallel builds, which only is relevant if
+# the "fallbacks" are used, namely if we asked for libxc, wannier90, etc. support
+# but did not provide the libraries. That situation should never happen for this port.
+#build.target        multi multi_nprocs=4
+
+pre-configure {
+    # generate build environment
+    #exec ${worksrcpath}/autogen.sh
+
+    # enable LibPAW, PFFT?
+    if { [variant_isset atlas] } {
+        set linalg-flavor   atlas
+    } elseif { [variant_isset openblas] } {
+        set linalg-flavor   openblas
+    } else {
+        set linalg-flavor   netlib
+    }
+    if { [variant_isset scalapack] } {
+        set linalglib       "${linalglib} -lscalapack"
+    }
+    configure.args-append   --with-linalg-flavor="${linalg-flavor}" \
+                            LINALG_LIBS="${linalglib}"
+}
+
+# The GitHub tarball no longer provide the autotools files
+# We need to generate them first by running autogen.sh
+configure.cmd           ${worksrcpath}/autogen.sh && ./configure
+
+# install binaries and pkgconfig but not the very large number of test files
+destroot.target         install-exec install-data-local
+
+#universal variant not allowed for libxc
+universal_variant       no
+
+# tests fail under macOS for Python > 3.7 (via personal email from developer)
+# test.run            yes
+# test.cmd            tests/runtests.py -j ${build.jobs}
+#
+# # args -t0 for no timeout since it cannot be found anyway; or: set depends_test-append port:timeout
+# test.target         libxc built-in fast tutorespfn tutorial unitary
+# #test.target         built-in fast tutorespfn tutorial unitary v1 v2 v3 v4 v5 v6 v67mbpt v7
+# depends_test-append port:py${python.version}-pandas
+#
+# pre-test {
+#     if {[mpi_variant_isset]} {
+#         test.target-append paral mpiio tutoparal
+#         reinplace "s|mpirun -np|${mpi.exec} -np|" ${worksrcpath}/tests/pymods/jobrunner.py
+#         test.args-append -n 1
+#     } else {
+#         test.target-append seq
+#         test.args-append -j ${build.jobs}
+#     }
+# }
+
+pre-configure {
+    configure.args-append   FCCPP="${configure.cc} -E -ansi"
+    if {[mpi_variant_isset]} {
+        configure.args-append \
+                            --with-mpi \
+                            --enable-mpi-io="yes" \
+                            --enable-mpi-inplace
+
+        # causes compilation error in m_profiling_abi.F90 related to MPI_COMM_WORLD
+        # This looks like a possible mistake in not including the mpi module
+        # configure.args-append --with-mpi-level=3
+    } else {
+        configure.args-append \
+                            --without-mpi
+    }
+}
+
+variant fftw3 description {Build with support for fftw-3 FFT library} {
+    depends_lib-append      port:fftw-3 \
+                            port:fftw-3-single
+
+    compilers.enforce_some_fortran \
+                            fftw-3 fftw-3-single
+    
+    configure.args-append   --with-fft-flavor="fftw3"
+    configure.args-append   FFTW3_LIBS="-L${prefix} -lfftw3 -lfftw3f"
+}
+
+# the fftw-3 port always provides the threaded library
+variant fftw3 description {Build with support for (threaded) fftw-3 FFT library} {
+    depends_lib-append      port:fftw-3 \
+                            port:fftw-3-single
+
+    compilers.enforce_some_fortran \
+                            fftw-3 fftw-3-single
+
+    configure.args-append   --with-fft-flavor="fftw3-threads"
+    configure.args-append   FFTW3_LIBS="-L${prefix} -lfftw3 -lfftw3f -lfftw3_threads"
+}
+
+variant libxml2 description {Build with support for libxml2} {
+    depends_lib-append      port:libxml2
+
+    configure.args-append   --with-libxml2
+}
+
+# add support for gsl, yaml?
+
+variant scalapack description {Build with ScaLAPACK for parallel linear algebra} {
+    depends_lib-append      port:scalapack
+
+    configure.args-append   LINALG_LDFLAGS="-ld_classic"
+
+    if {![mpi_variant_isset]} {
+        ui_error "+scalapack requires an MPI variant. Choose +mpich, +mpich_devel, +openmpi, or +openmpi_devel."
+        return -code error "+scalapack requires an MPI variant."
+    }
+    
+    mpi.enforce_variant     scalapack
+}
+
+variant threads description {Build with support for OpenMP threads} {
+    configure.args-append   --enable-openmp
+    configure.fcflags-append \
+                            -fopenmp
+}
+
+variant tutorials description {Install tutorials} {
+    post-destroot {
+        xinstall -d ${destroot}${prefix}/share/${name}/tutorial/
+        exec cp -Rf ${worksrcpath}/tests/ ${destroot}${prefix}/share/${name}/tutorial/
+    }
+}
+
+variant wannier90 description {Build with support for Wannier90} {
+    depends_lib-append      port:wannier90
+
+    configure.args-append   --with-wannier90 WANNIER90_LIBS="-lwannier"
+    test.target-append      wannier90 tutoplugs vdwxc
+}
+
+# FIXME: the code's build system will download BigDFT itself, which is contrary to the
+# way MacPorts should work. Make a bigdft port to support this.
+# There is an error compiling anyway, which could be fixed with a patch,
+# but it is unpatchable since the download occurs after the patch phase.
+
+#variant bigdft description {Build with support for the wavelet BigDFT library} {
+    # avoid this error (and equivalent with OpenCL)
+    # :info:build ar cru libCUDA.a
+    # :info:build ar: no archive members specified
+#    patchfiles-append       patch-fallbacks-sources-bigdft-1.7.0.93-src-Makefile.in.diff
+#}
+
+# FIXME: same problem as for BigDFT, it gets downloaded. Make a separate port.
+#variant atompaw description {Build including AtomPAW atomic dataset generator} {
+#    depends_lib-append       port:atompaw
+#    configure.args-append    --enable-atompaw --with-atompaw-bins=${prefix} --with-atompaw-incs=-I${prefix} --with-atompaw-libs=-L${prefix}
+#    test.target-append       atompaw
+#}
+ 
+livecheck.url       ${github.homepage}/releases
+livecheck.regex     tree/(\[0-9.\]+)

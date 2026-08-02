@@ -1,0 +1,233 @@
+Description: Fix build with GCC	5
+ GCC 5 is more picky with external references which are not properly
+ declared with forward references. Add all relevant functions to tcpick.h
+ to avoid this problem and fix the problems put into light by this change
+ (some invalid function calls).
+Author: Raphaël Hertzog <hertzog@debian.org>
+Bug-Debian: http://bugs.debian.org/778141
+Origin: vendor
+Last-Update: 2015-07-13
+
+--- a/src/tcpick.h
++++ b/src/tcpick.h
+@@ -10,10 +10,12 @@
+  */
+ 
+ #include "config.h"
++#define _GNU_SOURCE
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
++#include <ctype.h>
+ 
+ #ifdef HAVE_SIGNAL_H
+ # include <signal.h>
+@@ -114,3 +116,102 @@
+ #include "flags.h"
+ #include "lookup.h"
+ #include "timer.h"
++
++/* From args.c */
++void parse_args(int argc, char ** argv);
++
++/* From colors.c */
++void textcolor(FILE * out, int attr, int fg, int bg);
++void resetcolor(FILE * out);
++void color(int attr, int fg, FILE * out, char *fmt, ...);
++
++/* From datalink.c */
++char *datalink2str(int dl_id);
++int datalink2off(int dl_id);
++
++/* From display.c */
++char * status2str(enum STATUS status);
++int display_status( FILE * out, struct CONN * conn, enum STATUS status );
++int display_header( FILE * out );
++int out_h( FILE * out, u_char * buf, int buflen );
++int out_hn( FILE * out, u_char * buf, int buflen );
++int out_p( FILE * out, u_char * buf, int buflen );
++int out_xa (FILE * out, u_char * buf, int buflen);
++int out_x (FILE * out, u_char * buf, int buflen);
++
++/* From fragments.c */
++int
++addfr( struct FRAGMENT ** first,
++       int wlen,
++       u_int32_t data_off,
++       u_char * payload,
++       int payload_len );
++
++int
++flush_ack( struct HOST_DESC * desc,
++           struct CONN * conn_ptr,
++           int ack_num );
++
++/* From lookup_query.c */
++char * lookup_new(struct in_addr ia);
++char * lookup(struct in_addr ia);
++char * getportname(u_int16_t port);
++
++/* From lookup_tree.c */
++struct _l_node *_l_alloc(struct in_addr, char *);
++char *_l_get(struct in_addr);
++int _l_insert(struct _l_node * new);
++
++/* Form msg.c */
++void err(char *fmt, ...);
++void msg(int v, int attr, int fg, char *fmt, ...);
++void sorry(char * func, char * desc);
++
++/* From quit.c */
++void fault(char * func, char * desc);
++void suicide(char * func, char * fmt, ...);
++void print_statistics();
++void cleanup();
++void exit_signal(int sig_type);
++
++/* From tcpick.c */
++void signal_setup(int sig, void (*handler)(  ));
++
++/* From time.c */
++char * time_ascii(char * ret);
++
++/* From timer.c */
++void set_timer();
++void check_expired();
++void sigalrm_callback(int sig_type);
++
++/* From tracker.c */
++int status_switch(struct CONN * prev, enum STATUS status);
++int newconn( struct CONN * prev_ring );
++int rmconn( struct CONN * prev_ring );
++int free_desc( struct HOST_DESC * desc, int freedescfilename );
++
++/* From verify.c */
++int
++verify();
++
++/* From write.c */
++char *
++avail_filename(struct CONN * conn_ptr,
++               enum PART side, char * ext);
++
++void
++open_file(struct CONN * conn_ptr,
++          struct HOST_DESC * desc);
++
++int
++flowflush(struct CONN * conn_ptr,
++          struct HOST_DESC * desc,
++          u_char * buf,
++          int buflen);
++
++int
++out_flavour(enum FLAVOUR flavour,
++            FILE * out,
++            u_char * buf,
++            int buflen);
+--- a/src/loop.c
++++ b/src/loop.c
+@@ -95,8 +95,7 @@
+ #endif /* TCPICK_DEBUG */
+ 
+ 		if( flags.header > 0 )
+-			display_header( stdout, ippacket, tcppacket, 
+-					payload_len );
++			display_header(stdout);
+ 		
+ 		verify(); /* call the core to manage the packet */
+ 
+--- a/src/display.c
++++ b/src/display.c
+@@ -297,7 +297,7 @@
+ 					color( c_NONPRINT, out, pos % 2 ? "%2.2x " : "%2.2x", *( buf + pos ) );
+ 			else
+ 				/* hex space fill */
+-				fprintf(out, pos % 2 ? "   " : "  ", *( buf + pos ) );
++				fprintf(out, pos % 2 ? "   " : "  ");
+ 			pos++;
+ 		} while ( pos % 16 );
+ 		
+--- a/src/tcpick.c
++++ b/src/tcpick.c
+@@ -50,10 +50,10 @@
+ #include "tcpick.h"
+ #include "globals.h"
+ 
+-char *errbuf[PCAP_ERRBUF_SIZE];
++char errbuf[PCAP_ERRBUF_SIZE];
+ struct bpf_program filter_compiled;
+ bpf_u_int32 netp; /* ip */
+-bpf_u_int32 maskp; /* subnet mask */
++bpf_u_int32 maskp = PCAP_NETMASK_UNKNOWN; /* subnet mask */
+ struct in_addr addr;
+ char *other_args = NULL;
+ pcap_t *descr;
+@@ -238,7 +238,7 @@
+ 				    &filter_compiled,
+ 				    filter, 
+ 				    0, 
+-				    (int)net 
++				    maskp
+ 			      ) == -1) )
+ 			err("error compiling filter \"%s\"",filter);
+ 
+--- a/src/time.c
++++ b/src/time.c
+@@ -42,7 +42,7 @@
+   tzp = (struct timezone * ) S_malloc( sizeof(struct timezone) );
+ 
+   memset(tp,  0, sizeof(struct timeval));
+-  memset(tzp, 0, sizeof(struct timeval));
++  memset(tzp, 0, sizeof(struct timezone));
+   
+   if(gettimeofday(tp, tzp)) {
+ 
+@@ -58,7 +58,7 @@
+ 			  brokentime->tm_hour,
+ 			  brokentime->tm_min,
+ 			  brokentime->tm_sec,
+-			  tp->tv_usec
++			  (int)tp->tv_usec
+ 			  );
+ 		  break;
+ 
+@@ -79,7 +79,7 @@
+ 			  brokentime->tm_hour,
+ 			  brokentime->tm_min,
+ 			  brokentime->tm_sec,
+-			  tp->tv_usec
++			  (int)tp->tv_usec
+ 			  );
+ 		  break;
+ 		  
+@@ -99,7 +99,7 @@
+   return ret;
+ 
+ retNULL:
+-  sprintf(ret,"");
++  ret[0] = '\0';
+   return NULL;
+ 
+ }
+--- a/src/debug.c
++++ b/src/debug.c
+@@ -32,7 +32,7 @@
+ print_conn_chain (struct CONN * f)
+ {
+ 	while (f) {
+-		printf ("%x->",f);
++		printf ("%p->",f);
+ 		
+ 		if (f == f->next) {
+ 			printf ("inf\n");
+@@ -48,7 +48,7 @@
+ print_fragment_chain(struct FRAGMENT * f)
+ {
+ 	while (f) {
+-		printf ("%x(%i,%i)->",f,f->off,f->len);
++		printf ("%p(%i,%i)->",f,f->off,f->len);
+ 
+ 		if (f == f->next) {
+ 			printf ("inf\n");

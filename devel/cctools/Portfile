@@ -1,0 +1,385 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+
+name                    cctools
+
+# Xcode 11.3.1
+version                 949.0.1
+set ld64_version        530
+revision                3
+
+# simulate stealth update; remove with next version change
+dist_subdir             ${name}/${version}_1
+
+categories              devel
+maintainers             {jeremyhu @jeremyhu} openmaintainer
+license                 {APSL-2 GPL-2+}
+installs_libs           no
+description             Compiler Tools for Mac OS X and Darwin
+long_description        A set of essential tools to support development \
+                        on Mac OS X and Darwin. Conceptually similar \
+                        to binutils on other platforms.
+
+homepage                https://opensource.apple.com/source/${name}/
+
+distfiles               ${name}-${version}.tar.gz:main \
+                        ld64-${ld64_version}.tar.gz:ld64
+
+master_sites            https://github.com/apple-oss-distributions/cctools/archive/:main \
+                        https://github.com/apple-oss-distributions/ld64/archive/ld64-${ld64_version}:ld64
+
+checksums               cctools-949.0.1.tar.gz \
+                        rmd160  54a8e318087547b827eee4e5dbb21a8f3956402f \
+                        sha256  8b2d8dc371a57e42852fa6102efaf324ef004adf86072bf9957e2ac9005326c1 \
+                        size    1967695 \
+                        ld64-530.tar.gz \
+                        rmd160  57d6629f31180b53f6f6a324a28e723611bd3cfb \
+                        sha256  a21de4c2d4cd3ebf13c887eebbafc4b58ff0ee5bb07e592ba12690fb28a9cb17 \
+                        size    729897
+
+patchfiles              cctools-829-lto.patch \
+                        PR-37520.patch \
+                        PR-12400897.patch \
+                        cctools-862-prunetrie.patch \
+                        cctools-921-noavx512.patch \
+                        as-try-clang.patch \
+                        cctools-949-libstuff-add-args-c.diff \
+                        cctools-949-redo_prebinding-add-segg-addr-table-header.diff \
+                        cctools-949-build-with-SDKs-older-than-1012.diff \
+                        cctools-949-nm-allow-no-lto-support.diff \
+                        cctools-949-write_object-fix.diff \
+                        cctools-949-missed-stdio.diff \
+                        cctools-949-lipo-segalign-log2fix.diff
+
+# lipo-segalign-log2fix https://trac.macports.org/ticket/63164
+
+# small fixes and sdk adjustments made to 949 but
+# there is a bug in cctools as/write_object.c in 949 that needs upstreaming
+# see https://github.com/macports/macports-ports/pull/9796
+
+post-patch {
+    if {![variant_isset xcode] && ![variant_isset xtools]} {
+        system "cd ${workpath}/ld64-${ld64_version} && patch -p0 < ${filespath}/ld64-512-work-around-older-compilers-without-has-include.diff"
+    }
+}
+
+if {${os.major} < 11} {
+    patchfiles-append snowleopard-strnlen.patch
+}
+
+set all_llvm_variants [list llvm16 llvm15 llvm14 llvm13 llvm12 llvm11 llvm10 llvmdev]
+if {${os.major} < 12} {
+    lappend all_llvm_variants llvm34
+}
+if {${os.major} < 14} {
+    lappend all_llvm_variants llvm37
+}
+if {${os.major} < 19} {
+    lappend all_llvm_variants llvm50 llvm60 llvm70 llvm80 llvm90
+}
+array set llvm_variant_version [list llvm34 3.4 llvm37 3.7 llvm50 5.0 \
+    llvm60 6.0 llvm70 7.0 llvm80 8.0 llvm90 9.0 llvm10 10 llvm11 11 \
+    llvm12 12 llvm13 13 llvm14 14 llvm15 15 llvm16 16 llvmdev devel]
+set llvm_version {}
+
+foreach variantname $all_llvm_variants {
+    set this_llvm_version $llvm_variant_version($variantname)
+    variant $variantname conflicts xcode xtools {*}[ldelete $all_llvm_variants $variantname] description "Use llvm-${this_llvm_version} for libLTO, llvm-mc, llvm-size, and llvm-nm" "
+        set llvm_version        $this_llvm_version
+        depends_lib-append      port:llvm-${this_llvm_version}
+    "
+}
+
+proc some_llvm_variant_set {} {
+    global all_llvm_variants
+    foreach variantname $all_llvm_variants {
+        if {[variant_isset $variantname]} {
+            return yes
+        }
+    }
+    return no
+}
+
+if { ![some_llvm_variant_set] && ![variant_isset xcode] && ![variant_isset xtools] } {
+    # Xcode 11 has a newer cctools than the current cctools port
+    # Check if Xcode is 11 or newer, or if not installed if the CLT is 11 or newer
+    # This +xcode cutoff can be moved up as the cctools port is updated
+    set xcode_ok [expr { ${xcodeversion} ne "none" && [vercmp ${xcodeversion} >= "11.0"] } ]
+    set clt_ok   [expr { ${xcodeversion} eq "none" && ${xcodecltversion} ne "none" && [vercmp ${xcodecltversion} >= "11.0"] } ]
+    if { ${xcode_ok} || ${clt_ok} } {
+        default_variants +xcode
+    } elseif {${os.major} >= 16} {
+        # llvm-11 changed the arguments accepted by llvm-objdump
+        # this causes a number of errors in scripts that still use the old arguments
+        # we will default to +llvm11 when xcode changes to require the new arguments
+        # see https://reviews.llvm.org/D92310 and https://trac.macports.org/ticket/61852
+        default_variants +llvm10
+    } elseif {${os.major} >= 14} {
+        # llvm-9.0 is the newest llvm the system toolchain can build on these systems
+        default_variants +llvm90
+    } elseif {${os.major} >= 12} {
+        # llvm-3.7 is the newest llvm the system toolchain can build on these systems
+        default_variants +llvm37
+    } elseif {${os.major} >= 9 && ${build_arch} ni [list ppc ppc64]} {
+        # llvm-3.4 is the newest llvm the system toolchain can build on these systems
+        default_variants +llvm34
+    }
+
+    # we purposefully don't force an llvm variant on cctools for < darwin10
+    # to avoid a dependency loop. Folks who want LTO support on
+    # systems prior to darwin10 can reinstall cctools with an llvm variant manually
+    # see https://trac.macports.org/ticket/52091
+
+    # If a default llvm is still not set, use +llvm10
+    # this fail-safe ensures some cctools variant can build
+    if {![some_llvm_variant_set] && ![variant_isset xcode] && ${os.major} >= 10 && ${build_arch} ni [list ppc ppc64]} {
+        default_variants +llvm10
+    }
+}
+
+if {[variant_isset llvm34] && ${os.major} < 11} {
+    # This port is used by clang-3.4 to bootstrap libcxx
+    configure.cxx_stdlib    libstdc++
+}
+
+variant xcode description "Use Xcode supplied cctools" {
+    supported_archs noarch
+    platforms       {darwin any}
+    patchfiles
+    distfiles
+    build {}
+    destroot {
+        set xcode_cmds {bitcode-strip nm nm-classic as ar otool ranlib lipo libtool segedit strip size size-classic strings objdump}
+        foreach xcode_cmd $xcode_cmds {
+            set mp_cmd ${destroot}${prefix}/bin/${xcode_cmd}
+            # Create script that uses xcrun to run the Xcode provided command
+            system "echo '#!/bin/bash'                                          > ${mp_cmd}"
+            system "echo 'if \[\[ \-x \/usr\/bin\/xcrun \]\] \; then'          >> ${mp_cmd}"
+            system "echo '  exec \/usr\/bin\/xcrun ${xcode_cmd} \"\$\{\@\}\"'  >> ${mp_cmd}"
+            system "echo 'elif \[\[ \-x \/usr\/bin\/${xcode_cmd} \]\] \; then' >> ${mp_cmd}"
+            system "echo '  exec \/usr\/bin/${xcode_cmd} \"\$\{\@\}\"'         >> ${mp_cmd}"
+            system "echo 'else'                                                >> ${mp_cmd}"
+            system "echo '  exec ${xcode_cmd} \"\$\{\@\}\"'                    >> ${mp_cmd}"
+            system "echo 'fi'                                                  >> ${mp_cmd}"
+            # make executable
+            system "chmod +x ${mp_cmd}"
+        }
+    }
+}
+
+variant xtools description "Use darwin-xtools as cctools" {
+    configure.cxx_stdlib
+    depends_run     port:darwin-xtools
+    supported_archs noarch
+    platforms       {darwin any}
+    patchfiles
+    distfiles
+    build {}
+    destroot {
+        set xtools_cmds {nm as ar otool ranlib lipo libtool segedit strip size strings}
+        foreach xtools_cmd $xtools_cmds {
+            ln -s ../libexec/darwin-xtools/bin/${xtools_cmd} ${destroot}${prefix}/bin/${xtools_cmd}
+        }
+    }
+}
+
+destroot.args           RAW_DSTROOT=${destroot} DSTROOT=${destroot}${prefix} RC_ProjectSourceVersion=${version}
+
+# reconfirmed 20210818 - cctools +llvm10 will not build universal on BigSur
+if {${os.major} >= 20} {
+    universal_variant no
+} else {
+    universal_variant yes
+}
+
+if {![variant_isset xcode] && ![variant_isset xtools]} {
+    depends_build       port:libunwind-headers
+}
+
+post-extract {
+    if {![variant_isset xcode] && ![variant_isset xtools]} {
+        move ${workpath}/cctools-cctools-${version} ${workpath}/cctools-${version}
+        move ${workpath}/ld64-ld64-${ld64_version}  ${workpath}/ld64-${ld64_version}
+
+        file copy ${worksrcpath}/../ld64-${ld64_version}/src/other/PruneTrie.cpp ${worksrcpath}/misc
+        system "touch ${worksrcpath}/../ld64-${ld64_version}/src/abstraction/configure.h"
+    }
+}
+
+post-patch {
+    if {![variant_isset xcode] && ![variant_isset xtools]} {
+        # We don't want to build cctools ld.  We want to use ld64
+        reinplace "/^SUBDIRS_32/s/ld//" ${worksrcpath}/Makefile
+        reinplace "/^COMMON_SUBDIRS/s/ ld / /" ${worksrcpath}/Makefile
+
+        # Use our chosen version of llvm
+        if {${llvm_version} ne ""} {
+            reinplace "s:\"llvm-objdump\":\"llvm-objdump-mp-${llvm_version}\":" ${worksrcpath}/otool/main.c
+            reinplace "s:\"llvm-mc\":\"llvm-mc-mp-${llvm_version}\":" ${worksrcpath}/as/driver.c
+            reinplace "s:@@LLVM_LIBDIR@@:${prefix}/libexec/llvm-${llvm_version}/lib:" ${worksrcpath}/libstuff/lto.c
+        }
+
+        # List of clang versions to search for at runtime internally by 'as'
+        # Build list from llvm variants, excluding clang < 5 and devel version
+        # (unless devel variant is used in which case it is included first)
+        set as_comps ""
+        foreach variantname ${all_llvm_variants} {
+            set ver $llvm_variant_version($variantname)
+            # Use all non-devel and clang > 4 versions
+            if { ${ver} ne "devel" && ${ver} > 4.999 } {
+                if { ${as_comps} ne "" } {
+                    set as_comps ",${as_comps}"
+                }
+                set as_comps "\"clang-mp-${ver}\"${as_comps}"
+            }
+        }
+        # If llvmdev variant is active, include at start of list
+        if {[variant_isset llvmdev]} {
+            set as_comps "\"clang-mp-devel\",${as_comps}"
+        }
+        ui_debug "as compiler list ${as_comps}"
+        reinplace "s:__MP_CLANG_NAMES__:${as_comps}:" ${worksrcpath}/as/driver.c
+
+        if {${os.major} >= 11} {
+            set try_system_clang 1
+        } else {
+            # clang's integrated assembler may not work well on 10.6 and doesn't
+            # exist on older OS versions.
+            set try_system_clang 0
+        }
+        reinplace "s:__TRY_SYSTEM_CLANG__:${try_system_clang}:" ${worksrcpath}/as/driver.c
+
+        foreach file [glob ${worksrcpath}/{*/,}Makefile] {
+            reinplace -q "s:/usr/local:@PREFIX@:g" ${file}
+            reinplace -q "s:/usr:@PREFIX@:g" ${file}
+            reinplace -q "s:@PREFIX@:${prefix}:g" ${file}
+            reinplace -q "s:${prefix}/efi:${prefix}:g" ${file}
+            reinplace -q "s:/Developer${prefix}:${prefix}:g" ${file}
+            reinplace -q "s:${prefix}/man:${prefix}/share/man:g" ${file}
+
+            # Don't strip installed binaries
+            reinplace -q "s:\\(install .*\\)-s :\\1:g" ${file}
+
+            if {${os.major} < 10} {
+                reinplace -q "s:${prefix}/bin/mig:/usr/bin/mig:g" ${file}
+            }
+        }
+
+        # macOS 10.14's SDKs have newer versions that are needed to compile
+        if {${os.major} > 17} {
+            file delete -force ${worksrcpath}/include/mach/i386
+        }
+    }
+}
+
+use_configure           no
+
+# https://trac.macports.org/ticket/43745
+configure.cflags-append -std=gnu99
+
+build.target            all
+
+set cxx_stdlibflags {}
+if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} ne ""} {
+    set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
+}
+
+configure.cppflags-append \
+                        -I${worksrcpath}/../ld64-${ld64_version}/src/abstraction \
+                        -I${worksrcpath}/../ld64-${ld64_version}/src/other \
+                        -I${worksrcpath}/include
+
+pre-build {
+    if {![variant_isset xcode] && ![variant_isset xtools]} {
+        build.args-append \
+            RC_ProjectSourceVersion=${version} \
+            USE_DEPENDENCY_FILE=NO \
+            BUILD_DYLIBS=NO \
+            CC="${configure.cc} ${configure.cflags}" \
+            CXX="${configure.cxx} ${configure.cxxflags}" \
+            CXXLIB="${cxx_stdlibflags}" \
+            TRIE=-DTRIE_SUPPORT \
+            RC_ARCHS="[get_canonical_archs]" \
+            SDK="${configure.cppflags}"
+
+        if {${llvm_version} ne ""} {
+            build.args-append \
+                LTO=-DLTO_SUPPORT \
+                RC_CFLAGS="[get_canonical_archflags] `llvm-config-mp-${llvm_version} --cflags`" \
+                LLVM_MC="llvm-mc-mp-${llvm_version}"
+        } else {
+            build.args-append \
+                LTO= \
+                RC_CFLAGS="[get_canonical_archflags]"
+        }
+    }
+}
+
+pre-destroot {
+    if {![variant_isset xcode] && ![variant_isset xtools]} {
+        destroot.args-append \
+            RC_ProjectSourceVersion=${version} \
+            USE_DEPENDENCY_FILE=NO \
+            BUILD_DYLIBS=NO \
+            CC="${configure.cc} ${configure.cflags}" \
+            CXX="${configure.cxx} ${configure.cxxflags}" \
+            CXXLIB="${cxx_stdlibflags}" \
+            TRIE=-DTRIE_SUPPORT \
+            RC_ARCHS="[get_canonical_archs]" \
+            SDK="${configure.cppflags}"
+
+        if {${llvm_version} ne ""} {
+            destroot.args-append \
+                LTO=-DLTO_SUPPORT \
+                RC_CFLAGS="[get_canonical_archflags] `llvm-config-mp-${llvm_version} --cflags`" \
+                LLVM_MC="llvm-mc-mp-${llvm_version}"
+        } else {
+            destroot.args-append \
+                LTO= \
+                RC_CFLAGS="[get_canonical_archflags]"
+        }
+    }
+}
+
+platform macosx {
+    build.args-append RC_OS="macos"
+    destroot.args-append RC_OS="macos"
+}
+
+destroot.target install_tools
+destroot.args-append DSTROOT=${destroot}
+post-destroot {
+    if {![variant_isset xcode] && ![variant_isset xtools]} {
+        file delete -force ${destroot}${prefix}/OpenSourceLicenses
+        file delete -force ${destroot}${prefix}/OpenSourceVersions
+        file delete -force ${destroot}${prefix}/RelNotes
+
+        if {${os.major} < 10} {
+            file delete -force ${destroot}/Developer
+        }
+
+        # Provided by port:cctools-headers
+        file delete -force ${destroot}${prefix}/include
+
+        # Older versions of llvm either don't have some tools, or they're not compatible
+
+        file delete -force ${destroot}${prefix}/bin/nm
+        file delete -force ${destroot}${prefix}/bin/size
+        if {${llvm_version} eq "3.4" || ${llvm_version} eq "3.7" || ${llvm_version} eq ""} {
+            ln -s nm-classic ${destroot}${prefix}/bin/nm
+            ln -s size-classic ${destroot}${prefix}/bin/size
+
+            # https://trac.macports.org/ticket/53099
+            file delete -force ${destroot}${prefix}/bin/otool
+            file delete -force ${destroot}${prefix}/bin/llvm-otool
+            ln -s otool-classic ${destroot}${prefix}/bin/otool
+        } else {
+            ln -s llvm-nm-mp-${llvm_version} ${destroot}${prefix}/bin/nm
+            ln -s llvm-size-mp-${llvm_version} ${destroot}${prefix}/bin/size
+        }
+    }
+}
+
+livecheck.type          regex
+livecheck.regex         "${name}-(\[\\d.\]+)"

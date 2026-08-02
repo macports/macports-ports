@@ -1,0 +1,400 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           compilers 1.0
+PortGroup           mpiutil 1.0
+
+#===============================================================================
+#
+# *** IMPORTANT NOTE ***
+#
+# When making logic changes to this port, PLEASE review port 'mpich' to see
+# if the same changes should be applied. While the subports and variants aren't
+# exactly the same between the two - and things like configure arguments
+# certainly differ, as they're different code bases - much of the core logic
+# is very similar. (And often identical.)
+#
+# Please help us avoid divergent MPI ports, which cause serious migraines.
+#
+#===============================================================================
+
+name                openmpi
+version             5.0.7
+revision            0
+
+license             BSD
+categories          science parallel net
+maintainers         {mascguy @mascguy}
+
+description         Message Passing Interface (MPI) Library
+
+long_description    Open MPI is a project combining technologies and resources \
+                    from several other projects (FT-MPI, LA-MPI, LAM/MPI, and \
+                    PACX-MPI) in order to build the best MPI library available. A \
+                    completely new MPI-2 compliant implementation, Open MPI offers \
+                    advantages for system and software vendors, application developers \
+                    and computer science researchers.
+
+homepage            https://www.open-mpi.org/
+set branch          [join [lrange [split ${version} .] 0 1] .]
+set subdir          ompi/v${branch}/downloads/
+master_sites        https://www.open-mpi.org/software/${subdir}
+
+checksums           rmd160  3f0cebf521504388dc6bc62576396f96197f0f24 \
+                    sha256  119f2009936a403334d0df3c0d74d5595a32d99497f9b1d41e90019fee2fc2dd \
+                    size    30506871
+
+use_bzip2           yes
+
+# Disable livecheck for all subports; only enabled for main port, at end of portfile
+livecheck.type      none
+
+#-------------------------------------------------------------------------------
+# Target Compiler Logic
+#-------------------------------------------------------------------------------
+
+# As OpenMPI creates compiler wrappers, there are lots of
+# variants for what compiler the user would like to wrap.
+
+# Please update the mpi portgroup whenever clist is changed.
+
+# Subport names and corresponding configure.compiler value
+set clist [dict create]
+set clist_unsupported [list]
+set clist_obsolete [list]
+
+# Compilers supported across-the-board
+dict set clist default {}
+dict set clist gcc7    {macports-gcc-7}
+dict set clist gcc10   {macports-gcc-10}
+dict set clist gcc11   {macports-gcc-11}
+dict set clist gcc12   {macports-gcc-12}
+dict set clist gcc13   {macports-gcc-13}
+dict set clist gcc14   {macports-gcc-14}
+dict set clist gcc15   {macports-gcc-15}
+dict set clist clang11 {macports-clang-11}
+dict set clist clang12 {macports-clang-12}
+dict set clist clang13 {macports-clang-13}
+dict set clist clang14 {macports-clang-14}
+dict set clist clang15 {macports-clang-15}
+dict set clist clang16 {macports-clang-16}
+dict set clist clang17 {macports-clang-17}
+dict set clist clang18 {macports-clang-18}
+dict set clist clang19 {macports-clang-19}
+dict set clist clang20 {macports-clang-20}
+
+# Only enable Xcode clang builds for MacOS 10.7 and later
+if { ${os.major} >= 11 } {
+    dict set clist clang {clang}
+} else {
+    lappend clist_unsupported \
+        clang
+}
+
+# Clang 9 and 10 not supported on ARM
+if { ${os.arch} eq "arm" } {
+    lappend clist_unsupported \
+        clang90 clang10
+} else {
+    dict set clist clang90 {macports-clang-9.0}
+    dict set clist clang10 {macports-clang-10}
+}
+
+# GCC 9 only supported for macOS 10.6 through 10.10
+if { ${os.major} >= 10 && ${os.major} <= 14 } {
+    dict set clist gcc9  {macports-gcc-9}
+} else {
+    lappend clist_unsupported \
+        gcc9
+}
+
+#-------------------------------------------------------------------------------
+# Subport Creation/Validation
+#-------------------------------------------------------------------------------
+
+set cname \
+    [lindex [split ${subport} -] end]
+
+mpiutil_add_subports \
+    ${name} ${subport} \
+    ${clist} ${clist_unsupported} ${clist_obsolete}
+
+set subport_enabled \
+    [mpiutil_validate_subport \
+        ${name} ${subport} ${cname} \
+        ${clist} ${clist_unsupported} ${clist_obsolete} \
+    ]
+
+#-------------------------------------------------------------------------------
+# General Subport Logic
+#-------------------------------------------------------------------------------
+
+# TODO: simplify via regex capture group, for clang version
+if {[string match {*-clang1[3-9]} ${subport}]
+    || [string match {*-clang2[0-9]} ${subport}]} {
+    platforms {darwin >= 11}
+}
+
+if {${subport_enabled}} {
+    PortGroup select 1.0
+    PortGroup muniversal 1.0
+    PortGroup legacysupport 1.0
+
+    if {${cname} == "default"} {
+        set cname "mp"
+    }
+
+    # Add various dependencies: build, lib, and run
+    mpiutil_add_depends \
+        ${subport} ${cname}
+
+    # Determine whether buildbot binaries should be used, and disable if necessary
+    mpiutil_set_binary_eligibility \
+        ${subport} ${cname}
+
+    depends_build-append        port:pkgconfig
+    depends_lib-append          port:libevent \
+                                port:zlib
+
+    pre-extract {
+        file mkdir ${workpath}/build
+    }
+
+    # https://trac.macports.org/ticket/39089
+    compiler.blacklist-append \
+                        gcc-4.0 \
+                        llvm-gcc-4.2 \
+                        macports-llvm-gcc-4.2
+
+    # For reasons that are not entirely clear, -I${worksrcpath} is added to the CPPFLAGS by the configure script.
+    # In ${worksrcpath}, there is a file called VERSION.
+    # C++ has a standard library header version (https://en.cppreference.com/w/cpp/header/version).
+    # Starting with Clang 8.0, version was included in other standard header files (https://reviews.llvm.org/D51955).
+    # With a case-insensitive file system, VERSION is used instead of version.
+    # This is an ugly workaround.
+#    patchfiles-append   patch-configure.diff
+
+    configure.dir       ${workpath}/build
+    configure.cmd       ${worksrcpath}/configure
+    configure.args      --disable-mpi-fortran \
+                        "FFLAGS='' F77=''"
+#    configure.args-append --enable-mpi-cxx
+
+    # remove -arch from ldflags, ticket #22833
+    configure.ld_archflags
+    configure.ccache no
+
+    # We're making compiler wrappers here... don't default to -O2 for wrappers.
+    # Actual library code is compiled with -O2 via --enable-fast=O2 configure arg
+    configure.optflags-delete   -O2 -Os
+    configure.cppflags-delete   -I${prefix}/include
+    configure.ldflags-delete    -L${prefix}/lib
+
+    build.dir           ${configure.dir}
+    destroot.dir        ${build.dir}
+
+    select.group                mpi
+    select.file                 ${filespath}/portselect/${name}-${cname}
+
+    if {${cname} ne "mp"} {
+        set compiler            [dict get ${clist} ${cname}]
+        configure.compiler      [lindex ${compiler} 0]
+        unset compiler
+
+        long_description-append \
+            "\n\nTHIS SUBPORT WRAPS ${cname}'s C/C++"
+    } else {
+        long_description-append \
+            "\n\nTHIS SUBPORT WRAPS MACPORTS' DEFAULT COMPILER FOR C/C++"
+    }
+
+    configure.args-append   \
+        --disable-silent-rules \
+        --bindir=${prefix}/libexec/${name}-${cname} \
+        --libdir=${prefix}/lib/${name}-${cname} \
+        --sysconfdir=${prefix}/etc/${name}-${cname} \
+        --includedir=${prefix}/include/${name}-${cname} \
+        --datadir=${prefix}/share/${name}-${cname} \
+        --docdir=${prefix}/share/docdelete \
+        --mandir=${prefix}/share/mandelete \
+        --with-hwloc=${prefix} \
+        --with-libevent=${prefix} \
+        --with-zlib=${prefix}
+
+    post-destroot {
+        # This version doesn't supply manpages
+        if {[file isdirectory ${destroot}${prefix}/share/mandelete]} {
+            delete ${destroot}${prefix}/share/mandelete
+        }
+        if {[file isdirectory ${destroot}${prefix}/share/docdelete]} {
+            delete ${destroot}${prefix}/share/docdelete
+        }
+
+        set vampirlog ${destroot}${prefix}/share/${name}-${cname}/vampirtrace/config.log
+        if { [ file exists $vampirlog ] } {
+            delete $vampirlog
+        }
+
+        foreach bin {mpirun mpiexec mpicc mpicxx mpif77 mpif90 mpifort} {
+            system -W ${destroot}${prefix}/share/$name-$cname/openmpi \
+                "ln -sf $bin-wrapper-data.txt $bin-$name-$cname-wrapper-data.txt"
+            system -W ${destroot}${prefix}/bin \
+                "ln -sf ${prefix}/libexec/$name-$cname/$bin $bin-$name-$cname"
+        }
+    }
+
+    #---------------------------------------------------------------------------
+    # Fortran Support
+    #---------------------------------------------------------------------------
+
+    set fortran_enabled no
+
+    if { [string first gcc $cname] == 0 } {
+        set fortran_enabled yes
+
+        long_description-append "AND FORTRAN COMPILERS"
+
+        variant fortran description {Stub : fortran always enabled for gcc-based version} {}
+        default_variants-append     +fortran
+
+        # GCC C++ always uses libstdc++
+        # see https://trac.macports.org/ticket/59185
+        configure.cxx_stdlib libstdc++
+    } else {
+        long_description-append "(AND THE FORTRAN COMPILER SELECTED BY THE VARIANT, IF ANY)"
+
+        compilers.choose   fc
+        compilers.setup    default_fortran
+
+        if {[fortran_variant_isset]} {
+            set fortran_enabled yes
+
+            # Get the dependent port for the active fortran variant
+            depends_lib-append      [fortran_variant_depends]
+        }
+    }
+
+    if {${fortran_enabled}} {
+        configure.args-replace  --disable-mpi-fortran \
+                                --enable-mpi-fortran
+
+        select.file             ${filespath}/portselect/${name}-${cname}-fortran
+    }
+
+    unset fortran_enabled
+
+    #---------------------------------------------------------------------------
+    # Universal Build Support
+    #---------------------------------------------------------------------------
+
+    if {![info exists universal_possible]} {
+        set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
+    }
+    if {${universal_possible} && [variant_isset universal]} {
+        # use open-mpi's multilib support to build universal
+        # see https://github.com/open-mpi/ompi/wiki/MultiLib
+        # Fortran is the only non-trivial case
+
+        merger-post-destroot {
+            # Fortran headers do not understand preprocessors commands like __LP64__
+            # Fortran mod files can not be merged for different architectures
+            # create a architecture specific folder for the non-build_arch architecture
+            foreach arch ${configure.universal_archs} {
+                if {${arch} ne ${build_arch}} {
+                    set mod_dir ${destroot}-${arch}${prefix}/lib/${name}-${cname}
+                    xinstall -d -m 0755 ${mod_dir}/${arch}
+                    foreach f [glob -nocomplain -directory ${mod_dir} *.mod] {
+                        move ${f} ${mod_dir}/${arch}
+                    }
+
+                    set inc_dir ${destroot}-${arch}${prefix}/include/${name}-${cname}
+                    xinstall -d -m 0755 ${inc_dir}/${arch}
+                    foreach f [glob -nocomplain -directory ${inc_dir} mpif-config.h] {
+                        move ${f} ${inc_dir}/${arch}
+                    }
+
+                    # include the new directories in the search paths for header and mod files
+                    set data_dir ${destroot}-${arch}${prefix}/share/${name}-${cname}/openmpi
+                    if {[file exists ${data_dir}/mpifort-wrapper-data.txt]} {
+                        reinplace \
+                            "s|-I\${libdir}|-I\${libdir}/${arch} -I\${libdir}|g" \
+                            ${data_dir}/mpifort-wrapper-data.txt
+
+                        reinplace \
+                            "s|preprocessor_flags=|preprocessor_flags=-I\${includedir}/i386|g" \
+                            ${data_dir}/mpifort-wrapper-data.txt
+                    }
+                }
+            }
+            foreach arch ${configure.universal_archs} {
+                set data_dir ${destroot}-${arch}${prefix}/share/${name}-${cname}/openmpi
+                if {[file exists ${data_dir}/mpifort-wrapper-data.txt]} {
+                    # muniversal PortGroup will not merge this file properly
+                    # merge file in destroot phase
+                    move \
+                        ${data_dir}/mpifort-wrapper-data.txt \
+                        ${data_dir}/mpifort-wrapper-data-${arch}.txt
+                }
+            }
+        }
+
+        post-destroot {
+            # merge mpifort data file
+            # see https://github.com/open-mpi/ompi/wiki/compilerwrapper3264
+            set data_dir ${destroot}${prefix}/share/${name}-${cname}/openmpi
+            if {[file exists ${data_dir}/mpifort-wrapper-data-${build_arch}.txt]} {
+                system -W ${data_dir} "cat mpifort-wrapper-data-${build_arch}.txt >> mpifort-wrapper-data.txt"
+            }
+            foreach arch ${configure.universal_archs} {
+                if {[file exists ${data_dir}/mpifort-wrapper-data-${arch}.txt]} {
+                    if {${arch} ne ${build_arch}} {
+                        if {${arch} eq "ppc" || ${arch} eq "i386"} {
+                            set bitval 32
+                        } else {
+                            set bitval 64
+                        }
+                        system -W ${data_dir} "echo \"\">> mpifort-wrapper-data.txt"
+                        system -W ${data_dir} "echo \"compiler_args=${arch};-m${bitval}\" >> mpifort-wrapper-data.txt"
+                        system -W ${data_dir} "cat mpifort-wrapper-data-${arch}.txt >> mpifort-wrapper-data.txt"
+                    }
+                }
+            }
+            foreach arch ${configure.universal_archs} {
+                delete ${data_dir}/mpifort-wrapper-data-${arch}.txt
+            }
+        }
+    }
+
+    #---------------------------------------------------------------------------
+    # Variants
+    #---------------------------------------------------------------------------
+
+    variant valgrind description {Enable valgrind support} {
+        depends_lib-append    path:${prefix}/lib/pkgconfig/valgrind.pc:valgrind
+        configure.args-append --enable-debug --enable-memchecker --with-valgrind=${prefix}
+    }
+
+    variant heterogeneous description {Enable heterogeneous cluster support} {
+        configure.args-append --enable-heterogeneous
+    }
+
+    variant mpi1 description {Enable legacy mpi1 compatibility} {
+        configure.args-append --enable-mpi1-compatibility
+    }
+
+    #---------------------------------------------------------------------------
+    # Notes
+    #---------------------------------------------------------------------------
+
+    mpiutil_add_notes \
+        ${name} ${subport} ${cname} ${select.file}
+
+} elseif {${subport} eq ${name}} {
+    PortGroup               stub 1.0
+
+    depends_lib-append      port:${name}-default
+
+    livecheck.type          regex
+    livecheck.url           https://www.open-mpi.org/
+    livecheck.regex         Open MPI v(\[0-9\.\]+) released
+}

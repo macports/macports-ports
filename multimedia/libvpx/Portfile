@@ -1,0 +1,187 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           muniversal 1.0
+
+name                libvpx
+conflicts           libvpx-devel
+set my_name         libvpx
+version             1.15.0
+revision            0
+
+categories          multimedia
+license             Permissive
+maintainers         {mascguy @mascguy} openmaintainer
+
+description         WebM VP8/VP9 Codec SDK
+long_description    The WebM VP8/VP9 codecs are being developed \
+                    specifically to meet the demand for the consumption \
+                    of video over the Internet, including professionally \
+                    and amateur produced video-on-demand and conversational \
+                    video content. VP9 is an evolution of the VP8 video \
+                    codec and includes a number of enhancements and new \
+                    coding tools that have been added to improve coding efficiency. \
+                    The VP9 encoder in this release is not, as yet, feature complete.
+homepage            http://webmproject.org/tools/
+
+distname            ${my_name}-${version}
+dist_subdir         ${my_name}
+
+# use git fetch rather than downloading a snapshot tarball
+# which delivers a different checksum and size on each download
+# this is not a stealth upgrade but a "feature" of this repo
+
+fetch.type          git
+git.url             https://chromium.googlesource.com/webm/${my_name}
+git.branch          v${version}
+
+patchfiles-append   patch-Makefile.diff
+patchfiles-append   patch-configure.sh.diff
+patchfiles-append   patch-vpx_ports.diff
+
+# requires c++11 https://trac.macports.org/ticket/67038
+compiler.cxx_standard 2011
+# Requires MacPorts -stdlib flag added to ldflags.
+# https://trac.macports.org/ticket/67038
+configure.ldflags-append \
+                    {*}${configure.cxxflags}
+
+# Avoid linking with already-installed libvpx or gtest.
+# https://trac.macports.org/ticket/66259
+# https://trac.macports.org/ticket/70989
+configure.cppflags-delete \
+                    -I${prefix}/include
+configure.ldflags-delete \
+                    -L${prefix}/lib
+
+# Uses newer assembly features on Intel.
+# Also blacklist clang 8, due to issues like:
+#   error: use of undeclared identifier 'abs'
+compiler.blacklist-append \
+                    {clang < 900} {macports-clang-3.*}
+
+# As of 1.7.0: builds both static and shared libraries
+# doesn't install docs or examples correctly, so disable them.
+configure.args-append \
+                    --disable-debug-libs \
+                    --disable-install-docs \
+                    --enable-examples \
+                    --enable-experimental \
+                    --enable-multithread \
+                    --enable-pic \
+                    --enable-postproc \
+                    --enable-unit-tests \
+                    --enable-vp8 \
+                    --enable-vp9 \
+                    --enable-vp9-highbitdepth
+
+platform darwin {
+    configure.args-append   --enable-shared
+}
+
+platform darwin 8 {
+    depends_build-append    port:gmake
+    build.cmd               ${prefix}/bin/gmake
+
+    # Tiger Intel has some unique restrictions https://trac.macports.org/ticket/67041
+    if {${configure.build_arch} in {i386 x86_64}} {
+        compiler.blacklist-append macports-gcc-7
+        configure.args-append --disable-libyuv
+    }
+}
+
+build.target
+build.args          verbose=1
+destroot.args       verbose=1
+
+if {"${configure.sdkroot}" eq ""} {
+    configure.sdkroot "/"
+}
+
+if {${universal_possible} && [variant_isset universal]} {
+
+    # universal build using muniversal portgroup
+
+    foreach my_arch {i386 x86_64 arm64} {
+
+        # strip the automatic setting of host
+        set merger_host(${my_arch}) ""
+
+        # force the target
+        set merger_configure_args(${my_arch})     --force-target=${my_arch}-${os.platform}${os.major}-gcc
+
+        # set LD
+        set merger_configure_env(${my_arch})      LD=${configure.cc}
+    }
+
+    foreach my_arch {ppc ppc64} {
+
+        set merger_host(${my_arch}) ""
+
+        set merger_configure_args(${my_arch})     --force-target=generic-${os.platform}${os.major}-gcc
+
+        set merger_configure_env(${my_arch})      LD=${configure.cc}
+    }
+
+    if {"x86_64" in ${configure.universal_archs} || "i386" in ${configure.universal_archs}} {
+        depends_build-append  port:yasm
+        depends_skip_archcheck-append yasm
+
+        # for Intel archs, allow runtime cpu detection
+        lappend merger_configure_args(i386)   --enable-runtime-cpu-detect
+        lappend merger_configure_args(x86_64) --enable-runtime-cpu-detect
+
+        # parses the assembly output by default even when emitting assembly
+        if {[string match {*clang*} ${configure.compiler}]} {
+            lappend merger_build_args(i386)   CFLAGS_S=-fno-integrated-as
+            lappend merger_build_args(x86_64) CFLAGS_S=-fno-integrated-as
+        }
+
+    }
+
+} else {
+
+    # single-arch build
+    
+    # force the target: generic fix for PowerPC
+    if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
+           configure.args-append --force-target=generic-${os.platform}${os.major}-gcc
+    } else {
+           configure.args-append --force-target=${configure.build_arch}-${os.platform}${os.major}-gcc
+    }
+
+    # set LD
+    configure.env-append  LD=${configure.cc}
+
+    if {${configure.build_arch} in {i386 x86_64}} {
+        depends_build-append     port:yasm
+        depends_skip_archcheck-append yasm
+
+        configure.args-append    --enable-runtime-cpu-detect
+
+        # parses the assembly output by default even when emitting assembly
+        if {[string match {*clang*} ${configure.compiler}]} {
+            build.args-append CFLAGS_S=-fno-integrated-as
+        }
+    }
+}
+
+# shared library uses relative path in install name
+# override with absolute path
+post-destroot {
+    foreach f [glob ${destroot}${prefix}/lib/${my_name}.*.dylib] {
+        system "install_name_tool -id [string map [list ${destroot} ""] ${f}] ${f}"
+    }
+    foreach f [glob ${destroot}${prefix}/bin/*] {
+        system "install_name_tool -change \
+        [lindex [split [glob ${destroot}${prefix}/lib/${my_name}.*.dylib] "/"] end] \
+        [string map [list ${destroot} ""] [glob ${destroot}${prefix}/lib/${my_name}.*.dylib]] ${f}"
+    }
+}
+
+test.run        yes
+test.target     test
+
+livecheck.type  regex
+livecheck.url   https://chromium.googlesource.com/webm/${my_name}
+livecheck.regex ">v(\\d+(?:\\.\\d+)*)<"

@@ -1,0 +1,994 @@
+From f32edcb5492ce1920361f0ac62516efe11e0c989 Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Sat, 23 Dec 2023 20:57:17 +0800
+Subject: [PATCH] FFMpeg: fix compatibility with modern FFMpeg
+
+Backport of:
+https://github.com/zaps166/QMPlay2/commit/6da1224fe664ecc2c8d8c8e0b57a81605938c35a
+https://github.com/zaps166/QMPlay2/commit/66a8c123c54bd83bcdc2a6ab9b073acd0a97368e
+https://github.com/zaps166/QMPlay2/commit/f9dbff5e3e3eab7f877d28a25dcbbc4839c88213
+
+diff --git README.md README.md
+index 31571b5e..6a3e82e7 100644
+--- README.md
++++ README.md
+@@ -157,7 +157,7 @@ For CMake build be sure that you have correct CMake version:
+ 	- QtOpenGL - not used since Qt 5.6.0,
+ 	- QtDBus - Linux/BSD only,
+ 	- QtSvg - for SVG icons,
+-- FFmpeg >= 2.2 (>= 2.5.x recommended; >= 3.1.x recommended for CUVID):
++- FFmpeg >= 3.1:
+ 	- libavformat - requires OpenSSL or GnuTLS for https support,
+ 	- libavcodec - for FFmpeg module only,
+ 	- libswscale,
+diff --git src/modules/CUVID/CuvidDec.cpp src/modules/CUVID/CuvidDec.cpp
+index 637878c1..de44793e 100644
+--- src/modules/CUVID/CuvidDec.cpp
++++ src/modules/CUVID/CuvidDec.cpp
+@@ -44,28 +44,6 @@ extern "C"
+ 	#include <libswscale/swscale.h>
+ }
+ 
+-#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 48, 101)
+-	#define NEW_BSF_API
+-#else
+-	#warning "FFmpeg 3.1 or higher is required for H264 and HEVC non Annex B support in CUVID"
+-
+-	static bool checkAnnexB(const QByteArray &extraData, AVCodecID codecID)
+-	{
+-		const quint8 *data = (const quint8 *)extraData.constData();
+-		const int size = extraData.size();
+-		switch (codecID)
+-		{
+-			case AV_CODEC_ID_H264:
+-				return size == 0 || (size >= 3 && (!data[0] && !data[1] && (data[2] == 1 || (size >= 4 && data[3] == 1))));
+-			case AV_CODEC_ID_HEVC:
+-				return size < 23 || (!data[0] && !data[1] && (data[2] == 1 || data[3] == 1));
+-			default:
+-				break;
+-		}
+-		return false;
+-	}
+-#endif
+-
+ namespace cu
+ {
+ 	using  cuInitType = CUresult CUDAAPI (*)(unsigned int flags);
+@@ -520,14 +498,10 @@ CuvidDec::~CuvidDec()
+ 		if (!m_writer)
+ 			cu::ctxDestroy(m_cuCtx);
+ 	}
+-#ifdef NEW_BSF_API
+ 	av_bsf_free(&m_bsfCtx);
+-#endif
+ 	if (m_swsCtx)
+ 		sws_freeContext(m_swsCtx);
+-#ifdef NEW_BSF_API
+ 	av_packet_free(&m_pkt);
+-#endif
+ 	av_buffer_unref(&m_nv12Chroma);
+ 	for (int p = 0; p < 3; ++p)
+ 		av_buffer_unref(&m_frameBuffer[p]);
+@@ -675,7 +649,6 @@ int CuvidDec::decodeVideo(Packet &encodedPacket, VideoFrame &decoded, QByteArray
+ 	{
+ 		cuvidPkt.flags = CUVID_PKT_TIMESTAMP;
+ 		cuvidPkt.timestamp = encodedPacket.ts.pts() * 10000000.0 + 0.5;
+-#ifdef NEW_BSF_API
+ 		if (m_bsfCtx)
+ 		{
+ 			m_pkt->buf = encodedPacket.toAvBufferRef();
+@@ -698,7 +671,6 @@ int CuvidDec::decodeVideo(Packet &encodedPacket, VideoFrame &decoded, QByteArray
+ 			cuvidPkt.payload_size = m_pkt->size;
+ 		}
+ 		else
+-#endif
+ 		{
+ 			cuvidPkt.payload = encodedPacket.constData();
+ 			cuvidPkt.payload_size = encodedPacket.size();
+@@ -710,10 +682,8 @@ int CuvidDec::decodeVideo(Packet &encodedPacket, VideoFrame &decoded, QByteArray
+ 	if (cuvidPkt.flags == CUVID_PKT_TIMESTAMP && videoDataParsed)
+ 		m_timestamps.enqueue(encodedPacket.ts);
+ 
+-#ifdef NEW_BSF_API
+ 	if (m_pkt)
+ 		av_packet_unref(m_pkt);
+-#endif
+ 
+ 	if (m_cuvidSurfaces.isEmpty())
+ 		encodedPacket.ts.setInvalid();
+@@ -853,11 +823,7 @@ bool CuvidDec::open(StreamInfo &streamInfo, VideoWriter *writer)
+ 	int depth = 8;
+ 	if (const AVPixFmtDescriptor *pixDesc = av_pix_fmt_desc_get(pixFmt))
+ 	{
+-#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 24, 102)
+ 		depth = pixDesc->comp[0].depth;
+-#else
+-		depth = pixDesc->comp[0].depth_minus1 + 1;
+-#endif
+ 	}
+ 
+ 	cudaVideoCodec codec;
+@@ -906,7 +872,6 @@ bool CuvidDec::open(StreamInfo &streamInfo, VideoWriter *writer)
+ 	const AVBitStreamFilter *bsf = nullptr;
+ 	switch (codec)
+ 	{
+-#ifdef NEW_BSF_API
+ 		case cudaVideoCodec_H264:
+ 			bsf = av_bsf_get_by_name("h264_mp4toannexb");
+ 			if (!bsf)
+@@ -917,14 +882,6 @@ bool CuvidDec::open(StreamInfo &streamInfo, VideoWriter *writer)
+ 			if (!bsf)
+ 				return false;
+ 			break;
+-#else
+-		case cudaVideoCodec_H264:
+-		case cudaVideoCodec_HEVC:
+-			if (checkAnnexB(streamInfo.data, avCodec->id))
+-				break;
+-			QMPlay2Core.logError("CUVID :: " + tr("Compilation with FFmpeg 3.1 or higher is required for H264 and HEVC support!"), true, true);
+-			return false;
+-#endif
+ 		default:
+ 			break;
+ 	}
+@@ -933,7 +890,6 @@ bool CuvidDec::open(StreamInfo &streamInfo, VideoWriter *writer)
+ 
+ 	if (!bsf)
+ 		extraData = streamInfo.data;
+-#ifdef NEW_BSF_API
+ 	else
+ 	{
+ 		av_bsf_alloc(bsf, &m_bsfCtx);
+@@ -951,7 +907,6 @@ bool CuvidDec::open(StreamInfo &streamInfo, VideoWriter *writer)
+ 
+ 		m_pkt = av_packet_alloc();
+ 	}
+-#endif
+ 
+ 	m_width = streamInfo.W;
+ 	m_height = streamInfo.H;
+diff --git src/modules/FFmpeg/FFCommon.cpp src/modules/FFmpeg/FFCommon.cpp
+index f2521500..c2df0e5f 100644
+--- src/modules/FFmpeg/FFCommon.cpp
++++ src/modules/FFmpeg/FFCommon.cpp
+@@ -31,32 +31,9 @@ extern "C"
+ #endif
+ }
+ 
+-AVPacket *FFCommon::createAVPacket()
+-{
+-	AVPacket *packet;
+-#if LIBAVCODEC_VERSION_MAJOR >= 57
+-	packet = av_packet_alloc();
+-#else
+-	packet = (AVPacket *)av_malloc(sizeof(AVPacket));
+-	av_init_packet(packet);
+-#endif
+-	return packet;
+-}
+-void FFCommon::freeAVPacket(AVPacket *&packet)
+-{
+-#if LIBAVCODEC_VERSION_MAJOR >= 57
+-	av_packet_free(&packet);
+-#else
+-	if (packet)
+-		av_packet_unref(packet);
+-	av_freep(&packet);
+-#endif
+-}
+-
+ #ifdef QMPlay2_VDPAU
+ AVVDPAUContext *FFCommon::allocAVVDPAUContext(AVCodecContext *codecCtx)
+ {
+-#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(56, 13, 100) // FFmpeg 2.5.0
+ 	// Since FFmpeg 3.3 we must not use "av_vdpau_alloc_context()" or "AVVDPAUContext" structure size
+ 	// for allocating "AVCodecContext::hwaccel_context", because internally it always uses field from
+ 	// different internal structure which is larger. Using different struct inside FFmpeg was provided
+@@ -67,8 +44,5 @@ AVVDPAUContext *FFCommon::allocAVVDPAUContext(AVCodecContext *codecCtx)
+ 	if (av_vdpau_bind_context(codecCtx, 0, nullptr, 0) == 0)
+ 		return (AVVDPAUContext *)codecCtx->hwaccel_context;
+ 	return nullptr;
+-#else
+-	return av_vdpau_alloc_context();
+-#endif
+ }
+ #endif
+diff --git src/modules/FFmpeg/FFCommon.hpp src/modules/FFmpeg/FFCommon.hpp
+index 9aebf57c..3e82c686 100644
+--- src/modules/FFmpeg/FFCommon.hpp
++++ src/modules/FFmpeg/FFCommon.hpp
+@@ -41,9 +41,6 @@ class VideoFrame;
+ 
+ namespace FFCommon
+ {
+-	AVPacket *createAVPacket();
+-	void freeAVPacket(AVPacket *&packet);
+-
+ #ifdef QMPlay2_VDPAU
+ 	AVVDPAUContext *allocAVVDPAUContext(AVCodecContext *codecCtx);
+ #endif
+diff --git src/modules/FFmpeg/FFDec.cpp src/modules/FFmpeg/FFDec.cpp
+index fd46bb37..13df6be1 100644
+--- src/modules/FFmpeg/FFDec.cpp
++++ src/modules/FFmpeg/FFDec.cpp
+@@ -39,7 +39,7 @@ FFDec::FFDec(QMutex &avcodec_mutex) :
+ FFDec::~FFDec()
+ {
+ 	av_frame_free(&frame);
+-	FFCommon::freeAVPacket(packet);
++	av_packet_free(&packet);
+ 	if (codecIsOpen)
+ 	{
+ 		avcodec_mutex.lock();
+@@ -84,7 +84,7 @@ bool FFDec::openCodec(AVCodec *codec)
+ 		return false;
+ 	}
+ 	avcodec_mutex.unlock();
+-	packet = FFCommon::createAVPacket();
++	packet = av_packet_alloc();
+ 	switch (codec_ctx->codec_type)
+ 	{
+ 		case AVMEDIA_TYPE_VIDEO:
+diff --git src/modules/FFmpeg/FFDecSW.cpp src/modules/FFmpeg/FFDecSW.cpp
+index 97930c46..dfae9f78 100644
+--- src/modules/FFmpeg/FFDecSW.cpp
++++ src/modules/FFmpeg/FFDecSW.cpp
+@@ -31,6 +31,10 @@ extern "C"
+ 	#include <libavutil/pixdesc.h>
+ }
+ 
++#ifndef AV_CODEC_FLAG2_FAST
++	#define AV_CODEC_FLAG2_FAST CODEC_FLAG2_FAST
++#endif
++
+ FFDecSW::FFDecSW(QMutex &avcodec_mutex, Module &module) :
+ 	FFDec(avcodec_mutex),
+ 	threads(0), lowres(0),
+@@ -213,14 +217,14 @@ int FFDecSW::decodeVideo(Packet &encodedPacket, VideoFrame &decoded, QByteArray
+ 			codec_ctx->skip_loop_filter = AVDISCARD_ALL;
+ 			if (hurry_up > 1)
+ 				codec_ctx->skip_idct = AVDISCARD_NONREF;
+-			codec_ctx->flags2 |= CODEC_FLAG2_FAST;
++			codec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
+ 		}
+ 		else
+ 		{
+ 			if (!forceSkipFrames)
+ 				codec_ctx->skip_frame = AVDISCARD_DEFAULT;
+ 			codec_ctx->skip_loop_filter = codec_ctx->skip_idct = AVDISCARD_DEFAULT;
+-			codec_ctx->flags2 &= ~CODEC_FLAG2_FAST;
++			codec_ctx->flags2 &= ~AV_CODEC_FLAG2_FAST;
+ 		}
+ 
+ 		bytes_consumed = avcodec_decode_video2(codec_ctx, frame, &frameFinished, packet);
+@@ -304,15 +308,9 @@ bool FFDecSW::decodeSubtitle(const Packet &encodedPacket, double pos, QMPlay2OSD
+ 			buff->y = av_clip(rect->y, 0, h - buff->h);
+ 			buff->bitmap.resize((buff->w * buff->h) << 2);
+ 
+-#if LIBAVCODEC_VERSION_MAJOR >= 57
+ 			const uint8_t  *source   = (uint8_t  *)rect->data[0];
+ 			const uint32_t *palette  = (uint32_t *)rect->data[1];
+ 			const int       linesize = rect->linesize[0];
+-#else
+-			const uint8_t  *source   = (uint8_t  *)rect->pict.data[0];
+-			const uint32_t *palette  = (uint32_t *)rect->pict.data[1];
+-			const int       linesize = rect->pict.linesize[0];
+-#endif
+ 
+ 			uint32_t       *dest     = (uint32_t *)buff->bitmap.data();
+ 			for (int y = 0; y < buff->h; ++y)
+@@ -339,8 +337,6 @@ bool FFDecSW::open(StreamInfo &streamInfo, VideoWriter *)
+ 		return false;
+ 	if (codec_ctx->codec_type == AVMEDIA_TYPE_VIDEO)
+ 	{
+-		if (codec->capabilities & CODEC_CAP_DR1)
+-			codec_ctx->flags |= CODEC_FLAG_EMU_EDGE; //Does nothing since FFmpeg 2.3
+ 		if ((codec_ctx->thread_count = threads) != 1)
+ 		{
+ 			if (!thread_type_slice)
+diff --git src/modules/FFmpeg/FFDecVDPAU.cpp src/modules/FFmpeg/FFDecVDPAU.cpp
+index 8624a3e7..44050402 100644
+--- src/modules/FFmpeg/FFDecVDPAU.cpp
++++ src/modules/FFmpeg/FFDecVDPAU.cpp
+@@ -75,7 +75,7 @@ bool FFDecVDPAU::open(StreamInfo &streamInfo, VideoWriter *writer)
+ 
+ 				new HWAccelHelper(codec_ctx, AV_PIX_FMT_VDPAU, vdpauCtx, vdpauWriter->getSurfacesQueue());
+ 
+-				if (pix_fmt == AV_PIX_FMT_YUVJ420P && avcodec_version() >= 0x383C64)
++				if (pix_fmt == AV_PIX_FMT_YUVJ420P)
+ 					codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P; //Force full color range
+ 
+ 				if (openCodec(codec))
+diff --git src/modules/FFmpeg/FFReader.cpp src/modules/FFmpeg/FFReader.cpp
+index 6bdb00d0..4e3b7d54 100644
+--- src/modules/FFmpeg/FFReader.cpp
++++ src/modules/FFmpeg/FFReader.cpp
+@@ -105,11 +105,7 @@ void FFReader::pause()
+ }
+ bool FFReader::atEnd() const
+ {
+-#if LIBAVFORMAT_VERSION_MAJOR >= 56
+ 	return avio_feof(avioCtx);
+-#else
+-	return url_feof(avioCtx);
+-#endif
+ }
+ void FFReader::abort()
+ {
+diff --git src/modules/FFmpeg/FFmpeg.cpp src/modules/FFmpeg/FFmpeg.cpp
+index ca5fb817..b6285a61 100644
+--- src/modules/FFmpeg/FFmpeg.cpp
++++ src/modules/FFmpeg/FFmpeg.cpp
+@@ -258,9 +258,7 @@ ModuleSettingsWidget::ModuleSettingsWidget(Module &module) :
+ 
+ 	reconnectStreamedB = new QCheckBox(tr("Try to automatically reconnect live streams on error"));
+ 	reconnectStreamedB->setChecked(sets().getBool("ReconnectStreamed"));
+-#if LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(57, 25, 100)
+-		reconnectStreamedB->setEnabled(false);
+-#endif
++	reconnectStreamedB->setEnabled(false);
+ 
+ 	decoderB = new QGroupBox(tr("Software decoder"));
+ 	decoderB->setCheckable(true);
+diff --git src/modules/FFmpeg/FormatContext.cpp src/modules/FFmpeg/FormatContext.cpp
+index e989db44..da13fa3d 100644
+--- src/modules/FFmpeg/FormatContext.cpp
++++ src/modules/FFmpeg/FormatContext.cpp
+@@ -25,23 +25,13 @@
+ #include <Settings.hpp>
+ #include <Packet.hpp>
+ 
+-#if LIBAVFORMAT_VERSION_INT >= 0x373000 // >= 55.48.00
+-	#define HAS_REPLAY_GAIN
+-#endif
+-
+ extern "C"
+ {
+ 	#include <libavformat/avformat.h>
+-#ifdef HAS_REPLAY_GAIN
+ 	#include <libavutil/replaygain.h>
+-#endif
+ 	#include <libavutil/pixdesc.h>
+-#if LIBAVFORMAT_VERSION_MAJOR <= 55
+-	#include <libavutil/opt.h>
+-#endif
+ }
+ 
+-#if LIBAVFORMAT_VERSION_MAJOR > 55
+ static void matroska_fix_ass_packet(AVRational stream_timebase, AVPacket *pkt)
+ {
+ 	AVBufferRef *line;
+@@ -70,7 +60,7 @@ static void matroska_fix_ass_packet(AVRational stream_timebase, AVPacket *pkt)
+ 		es     = ec / 100;
+ 		ec    -= 100 * es;
+ 		*ptr++ = '\0';
+-		len    = 50 + end - ptr + FF_INPUT_BUFFER_PADDING_SIZE;
++		len    = 50 + end - ptr + AV_INPUT_BUFFER_PADDING_SIZE;
+ 		if (!(line = av_buffer_alloc(len)))
+ 			return;
+ 		snprintf((char *)line->data, len, "Dialogue: %s,%d:%02d:%02d.%02d,%d:%02d:%02d.%02d,%s\r\n", layer, sh, sm, ss, sc, eh, em, es, ec, ptr);
+@@ -80,35 +70,6 @@ static void matroska_fix_ass_packet(AVRational stream_timebase, AVPacket *pkt)
+ 		pkt->size = strlen((char *)line->data);
+ 	}
+ }
+-#endif
+-
+-#if LIBAVFORMAT_VERSION_INT >= 0x392900
+-	static inline AVCodecParameters *codecParams(AVStream *stream)
+-	{
+-		return stream->codecpar;
+-	}
+-	static inline const char *getPixelFormat(AVStream *stream)
+-	{
+-		return av_get_pix_fmt_name((AVPixelFormat)stream->codecpar->format);
+-	}
+-	static inline const char *getSampleFormat(AVStream *stream)
+-	{
+-		return av_get_sample_fmt_name((AVSampleFormat)stream->codecpar->format);
+-	}
+-#else
+-	static inline AVCodecContext *codecParams(AVStream *stream)
+-	{
+-		return stream->codec;
+-	}
+-	static inline const char *getPixelFormat(AVStream *stream)
+-	{
+-		return av_get_pix_fmt_name(stream->codec->pix_fmt);
+-	}
+-	static inline const char *getSampleFormat(AVStream *stream)
+-	{
+-		return av_get_sample_fmt_name(stream->codec->sample_fmt);
+-	}
+-#endif
+ 
+ static QByteArray getTag(AVDictionary *metadata, const char *key, const bool deduplicate = true)
+ {
+@@ -159,14 +120,14 @@ static QByteArray getTag(AVDictionary *metadata, const char *key, const bool ded
+ 
+ static void fixFontsAttachment(AVStream *stream)
+ {
+-	if (codecParams(stream)->codec_type == AVMEDIA_TYPE_ATTACHMENT && codecParams(stream)->codec_id == AV_CODEC_ID_NONE)
++	if (stream->codecpar->codec_type == AVMEDIA_TYPE_ATTACHMENT && stream->codecpar->codec_id == AV_CODEC_ID_NONE)
+ 	{
+ 		// If codec for fonts is unknown - check the attachment file name extension
+ 		const QString attachmentFileName = getTag(stream->metadata, "filename", false);
+ 		if (attachmentFileName.endsWith(".otf", Qt::CaseInsensitive))
+-			codecParams(stream)->codec_id = AV_CODEC_ID_OTF;
++			stream->codecpar->codec_id = AV_CODEC_ID_OTF;
+ 		else if (attachmentFileName.endsWith(".ttf", Qt::CaseInsensitive))
+-			codecParams(stream)->codec_id = AV_CODEC_ID_TTF;
++			stream->codecpar->codec_id = AV_CODEC_ID_TTF;
+ 	}
+ }
+ 
+@@ -175,8 +136,8 @@ static bool streamNotValid(AVStream *stream)
+ 	return
+ 	(
+ 		(stream->disposition & AV_DISPOSITION_ATTACHED_PIC)    ||
+-		(codecParams(stream)->codec_type == AVMEDIA_TYPE_DATA) ||
+-		(codecParams(stream)->codec_type == AVMEDIA_TYPE_ATTACHMENT && codecParams(stream)->codec_id != AV_CODEC_ID_TTF && codecParams(stream)->codec_id != AV_CODEC_ID_OTF)
++		(stream->codecpar->codec_type == AVMEDIA_TYPE_DATA) ||
++		(stream->codecpar->codec_type == AVMEDIA_TYPE_ATTACHMENT && stream->codecpar->codec_id != AV_CODEC_ID_TTF && stream->codecpar->codec_id != AV_CODEC_ID_OTF)
+ 	);
+ }
+ 
+@@ -254,28 +215,26 @@ FormatContext::~FormatContext()
+ 	{
+ 		for (AVStream *stream : streams)
+ 		{
+-			if (codecParams(stream) && !streamNotValid(stream))
++			if (stream->codecpar && !streamNotValid(stream))
+ 			{
+-				//Data is allocated in QByteArray, so FFmpeg mustn't free it!
+-				codecParams(stream)->extradata = nullptr;
+-				codecParams(stream)->extradata_size = 0;
++				// Data is allocated in QByteArray, so FFmpeg mustn't free it!
++				stream->codecpar->extradata = nullptr;
++				stream->codecpar->extradata_size = 0;
+ 			}
+ 		}
+ 		avformat_close_input(&formatCtx);
+-		FFCommon::freeAVPacket(packet);
++		av_packet_free(&packet);
+ 	}
+ 	delete oggHelper;
+ }
+ 
+ bool FormatContext::metadataChanged() const
+ {
+-#if LIBAVFORMAT_VERSION_MAJOR > 55
+ 	if (formatCtx->event_flags & AVFMT_EVENT_FLAG_METADATA_UPDATED)
+ 	{
+ 		formatCtx->event_flags = 0;
+ 		isMetadataChanged = true;
+ 	}
+-#endif
+ 	if (isMetadataChanged)
+ 	{
+ 		isMetadataChanged = false;
+@@ -306,7 +265,7 @@ QList<ProgramInfo> FormatContext::getPrograms() const
+ 					const int idx = index_map[ff_idx];
+ 					if (idx > -1)
+ 					{
+-						const QMPlay2MediaType type = (QMPlay2MediaType)codecParams(streams[ff_idx])->codec_type;
++						const QMPlay2MediaType type = (QMPlay2MediaType)streams[ff_idx]->codecpar->codec_type;
+ 						if (type != QMPLAY2_TYPE_UNKNOWN)
+ 							programInfo.streams += {idx, type};
+ 					}
+@@ -399,7 +358,6 @@ QList<QMPlay2Tag> FormatContext::tags() const
+ }
+ bool FormatContext::getReplayGain(bool album, float &gain_db, float &peak) const
+ {
+-#ifdef HAS_REPLAY_GAIN
+ 	const int streamIdx = av_find_best_stream(formatCtx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+ 	if (streamIdx > -1)
+ 	{
+@@ -434,7 +392,6 @@ bool FormatContext::getReplayGain(bool album, float &gain_db, float &peak) const
+ 			return true;
+ 		}
+ 	}
+-#endif
+ 	if (AVDictionary *dict = getMetadata())
+ 	{
+ 		QString album_gain_db = getTag(dict, "REPLAYGAIN_ALBUM_GAIN", false);
+@@ -514,37 +471,28 @@ bool FormatContext::seek(double pos, bool backward)
+ 			pos = 0.0;
+ 		else if (len > 0.0 && pos > len)
+ 			pos = len;
+-#ifndef MP3_FAST_SEEK
+-		if (seekByByteOffset < 0)
+-		{
+-#endif
+-			const double posToSeek = pos + startTime;
+-			const qint64 timestamp = ((streamsInfo.count() == 1) ? posToSeek : (backward ? floor(posToSeek) : ceil(posToSeek))) * AV_TIME_BASE;
++		const double posToSeek = pos + startTime;
++		const qint64 timestamp = ((streamsInfo.count() == 1) ? posToSeek : (backward ? floor(posToSeek) : ceil(posToSeek))) * AV_TIME_BASE;
+ 
+-			isOk = av_seek_frame(formatCtx, -1, timestamp, backward ? AVSEEK_FLAG_BACKWARD : 0) >= 0;
+-			if (!isOk)
++		isOk = av_seek_frame(formatCtx, -1, timestamp, backward ? AVSEEK_FLAG_BACKWARD : 0) >= 0;
++		if (!isOk)
++		{
++			const int ret = av_read_frame(formatCtx, packet);
++			if (ret == AVERROR_EOF || ret == 0)
+ 			{
+-				const int ret = av_read_frame(formatCtx, packet);
+-				if (ret == AVERROR_EOF || ret == 0)
+-				{
+-					if (len <= 0.0 || pos < len)
+-						isOk = av_seek_frame(formatCtx, -1, timestamp, !backward ? AVSEEK_FLAG_BACKWARD : 0) >= 0; //Negate "backward" and try again
+-					else if (ret == AVERROR_EOF)
+-						isOk = true; //Allow seek to the end of the file, clear buffers and finish the playback
+-					if (isOk)
+-						av_packet_unref(packet);
+-				}
+-				if (!isOk) //If seek failed - allow to use the packet
+-				{
+-					errFromSeek = ret;
+-					maybeHasFrame = true;
+-				}
++				if (len <= 0.0 || pos < len)
++					isOk = av_seek_frame(formatCtx, -1, timestamp, !backward ? AVSEEK_FLAG_BACKWARD : 0) >= 0; //Negate "backward" and try again
++				else if (ret == AVERROR_EOF)
++					isOk = true; // Allow seek to the end of the file, clear buffers and finish the playback
++				if (isOk)
++					av_packet_unref(packet);
++			}
++			if (!isOk) // If seek failed - allow to use the packet
++			{
++				errFromSeek = ret;
++				maybeHasFrame = true;
+ 			}
+-#ifndef MP3_FAST_SEEK
+ 		}
+-		else if (length() > 0)
+-			isOk = av_seek_frame(formatCtx, -1, (qint64)pos * (avio_size(formatCtx->pb) - seekByByteOffset) / length() + seekByByteOffset, AVSEEK_FLAG_BYTE | (backward ? AVSEEK_FLAG_BACKWARD : 0)) >= 0;
+-#endif
+ 		if (isOk)
+ 		{
+ 			for (int i = 0; i < streamsTS.count(); ++i)
+@@ -609,49 +557,16 @@ bool FormatContext::read(Packet &encoded, int &idx)
+ 		return true;
+ 	}
+ 
+-#if LIBAVFORMAT_VERSION_MAJOR > 55
+ 	if (streams.at(ff_idx)->event_flags & AVSTREAM_EVENT_FLAG_METADATA_UPDATED)
+ 	{
+ 		streams.at(ff_idx)->event_flags = 0;
+ 		isMetadataChanged = true;
+ 	}
+-	if (fixMkvAss && codecParams(streams.at(ff_idx))->codec_id == AV_CODEC_ID_ASS)
++	if (fixMkvAss && streams.at(ff_idx)->codecpar->codec_id == AV_CODEC_ID_ASS)
+ 		matroska_fix_ass_packet(streams.at(ff_idx)->time_base, packet);
+-#else
+-	if (isStreamed)
+-	{
+-		char *value = nullptr;
+-		av_opt_get(formatCtx, "icy_metadata_packet", AV_OPT_SEARCH_CHILDREN, (quint8 **)&value);
+-		QString icyPacket = value;
+-		av_free(value);
+-		int idx = icyPacket.indexOf("StreamTitle='");
+-		if (idx > -1)
+-		{
+-			int idx2 = icyPacket.indexOf("';", idx += 13);
+-			if (idx2 > -1)
+-			{
+-				AVDictionaryEntry *e = av_dict_get(formatCtx->metadata, "StreamTitle", nullptr, AV_DICT_IGNORE_SUFFIX);
+-				icyPacket = icyPacket.mid(idx, idx2-idx);
+-				if (!e || QString(e->value) != icyPacket)
+-				{
+-					av_dict_set(&formatCtx->metadata, "StreamTitle", icyPacket.toUtf8(), 0);
+-					isMetadataChanged = true;
+-				}
+-			}
+-		}
+-		else if (AVDictionary *dict = getMetadata())
+-		{
+-			if (metadata != dict)
+-			{
+-				metadata = dict;
+-				isMetadataChanged = true;
+-			}
+-		}
+-	}
+-#endif
+ 
+-	if (!packet->buf || forceCopy) //Buffer isn't reference-counted, so copy the data
+-		encoded.assign(packet->data, packet->size, packet->size + FF_INPUT_BUFFER_PADDING_SIZE);
++	if (!packet->buf || forceCopy) // Buffer isn't reference-counted, so copy the data
++		encoded.assign(packet->data, packet->size, packet->size + AV_INPUT_BUFFER_PADDING_SIZE);
+ 	else
+ 	{
+ 		encoded.assign(packet->buf, packet->size);
+@@ -660,22 +575,11 @@ bool FormatContext::read(Packet &encoded, int &idx)
+ 
+ 	const double time_base = av_q2d(streams.at(ff_idx)->time_base);
+ 
+-#ifndef MP3_FAST_SEEK
+-	if (seekByByteOffset < 0)
+-#endif
+-	{
+-		encoded.ts.setInvalid();
+-		if (packet->dts != QMPLAY2_NOPTS_VALUE)
+-			encoded.ts.setDts(packet->dts * time_base, startTime);
+-		if (packet->pts != QMPLAY2_NOPTS_VALUE)
+-			encoded.ts.setPts(packet->pts * time_base, startTime);
+-	}
+-#ifndef MP3_FAST_SEEK
+-	else if (packet->pos > -1 && length() > 0.0)
+-		lastTime = encoded.ts = ((packet->pos - seekByByteOffset) * length()) / (avio_size(formatCtx->pb) - seekByByteOffset);
+-	else
+-		encoded.ts = lastTime;
+-#endif
++	encoded.ts.setInvalid();
++	if (packet->dts != QMPLAY2_NOPTS_VALUE)
++		encoded.ts.setDts(packet->dts * time_base, startTime);
++	if (packet->pts != QMPLAY2_NOPTS_VALUE)
++		encoded.ts.setPts(packet->pts * time_base, startTime);
+ 
+ 	if (packet->duration > 0)
+ 		encoded.duration = packet->duration * time_base;
+@@ -765,10 +669,8 @@ bool FormatContext::open(const QString &_url, const QString &param)
+ 	if (!inputFmt)
+ 	{
+ 		url = Functions::prepareFFmpegUrl(_url, options);
+-#if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(57, 25, 100)
+ 		if (!isLocal && reconnectStreamed)
+ 			av_dict_set(&options, "reconnect_streamed", "1", 0);
+-#endif
+ 	}
+ 
+ 	formatCtx = avformat_alloc_context();
+@@ -800,12 +702,8 @@ bool FormatContext::open(const QString &_url, const QString &param)
+ 		stillImage = true;
+ 	}
+ 
+-#ifdef MP3_FAST_SEEK
+ 	if (name() == "mp3")
+-		formatCtx->flags |= AVFMT_FLAG_FAST_SEEK; //This should be set before "avformat_open_input", but seems to be working for MP3...
+-#else
+-	seekByByteOffset = formatCtx->pb ? avio_tell(formatCtx->pb) : -1; //formatCtx->data_offset, moved to private since FFmpeg 2.6
+-#endif
++		formatCtx->flags |= AVFMT_FLAG_FAST_SEEK; // This should be set before "avformat_open_input", but seems to be working for MP3...
+ 
+ 	avcodec_mutex.lock();
+ 	if (avformat_find_stream_info(formatCtx, nullptr) < 0)
+@@ -815,14 +713,10 @@ bool FormatContext::open(const QString &_url, const QString &param)
+ 	}
+ 	avcodec_mutex.unlock();
+ 
+-	isStreamed = !isLocal && formatCtx->duration <= 0; //QMPLAY2_NOPTS_VALUE is negative
+-#ifndef MP3_FAST_SEEK
+-	if (seekByByteOffset > -1 && (isStreamed || name() != "mp3"))
+-		seekByByteOffset = -1;
+-#endif
++	isStreamed = !isLocal && formatCtx->duration <= 0; // QMPLAY2_NOPTS_VALUE is negative
+ 
+ #ifdef QMPlay2_libavdevice
+-	forceCopy = name().contains("v4l2"); //Workaround for v4l2 - if many buffers are referenced demuxer doesn't produce proper timestamps (FFmpeg BUG?).
++	forceCopy = name().contains("v4l2"); // Workaround for v4l2 - if many buffers are referenced demuxer doesn't produce proper timestamps (FFmpeg BUG?).
+ #else
+ 	forceCopy = false;
+ #endif
+@@ -845,11 +739,9 @@ bool FormatContext::open(const QString &_url, const QString &param)
+ 			index_map[i] = streamsInfo.count();
+ 			streamsInfo += streamInfo;
+ 		}
+-#if LIBAVFORMAT_VERSION_MAJOR > 55
+-		if (!fixMkvAss && codecParams(formatCtx->streams[i])->codec_id == AV_CODEC_ID_ASS && !strncasecmp(formatCtx->iformat->name, "matroska", 8))
++		if (!fixMkvAss && formatCtx->streams[i]->codecpar->codec_id == AV_CODEC_ID_ASS && !strncasecmp(formatCtx->iformat->name, "matroska", 8))
+ 			fixMkvAss = true;
+ 		formatCtx->streams[i]->event_flags = 0;
+-#endif
+ 		streams += formatCtx->streams[i];
+ 
+ 		streamsTS[i] = 0.0;
+@@ -857,34 +749,14 @@ bool FormatContext::open(const QString &_url, const QString &param)
+ 	if (streamsInfo.isEmpty())
+ 		return false;
+ 
+-	isOneStreamOgg = (name() == "ogg" && streamsInfo.count() == 1); //Workaround for OGG network streams
++	isOneStreamOgg = (name() == "ogg" && streamsInfo.count() == 1); // Workaround for OGG network streams
+ 
+ 	if (isStreamed && streamsInfo.count() == 1 && streamsInfo.at(0)->type == QMPLAY2_TYPE_SUBTITLE && formatCtx->pb && avio_size(formatCtx->pb) > 0)
+-		isStreamed = false; //Allow subtitles streams to be non-streamed if size is known
++		isStreamed = false; // Allow subtitles streams to be non-streamed if size is known
+ 
+-#if LIBAVFORMAT_VERSION_MAJOR > 55
+ 	formatCtx->event_flags = 0;
+-#else
+-	if (!isStreamed)
+-		metadata = nullptr;
+-	else
+-	{
+-		char *value = nullptr;
+-		av_opt_get(formatCtx, "icy_metadata_headers", AV_OPT_SEARCH_CHILDREN, (quint8 **)&value);
+-		QStringList icyHeaders = QString(value).split("\n", QString::SkipEmptyParts);
+-		av_free(value);
+-		for (const QString &icy : icyHeaders)
+-		{
+-			if (icy.startsWith("icy-name: "))
+-				av_dict_set(&formatCtx->metadata, "icy-name", icy.mid(10).toUtf8(), 0);
+-			else if (icy.startsWith("icy-description: "))
+-				av_dict_set(&formatCtx->metadata, "icy-description", icy.mid(17).toUtf8(), 0);
+-		}
+-		metadata = getMetadata();
+-	}
+-#endif
+ 
+-	packet = FFCommon::createAVPacket();
++	packet = av_packet_alloc();
+ 
+ 	return true;
+ }
+@@ -910,11 +782,11 @@ StreamInfo *FormatContext::getStreamInfo(AVStream *stream) const
+ 
+ 	StreamInfo *streamInfo = new StreamInfo;
+ 
+-	if (const AVCodec *codec = avcodec_find_decoder(codecParams(stream)->codec_id))
++	if (const AVCodec *codec = avcodec_find_decoder(stream->codecpar->codec_id))
+ 		streamInfo->codec_name = codec->name;
+ 
+ 	streamInfo->must_decode = true;
+-	if (const AVCodecDescriptor *codecDescr = avcodec_descriptor_get(codecParams(stream)->codec_id))
++	if (const AVCodecDescriptor *codecDescr = avcodec_descriptor_get(stream->codecpar->codec_id))
+ 	{
+ 		if (codecDescr->props & AV_CODEC_PROP_TEXT_SUB)
+ 			streamInfo->must_decode = false;
+@@ -923,21 +795,21 @@ StreamInfo *FormatContext::getStreamInfo(AVStream *stream) const
+ 			streamInfo->codec_name = codecDescr->name;
+ 	}
+ 
+-	streamInfo->bitrate = codecParams(stream)->bit_rate;
+-	streamInfo->bpcs = codecParams(stream)->bits_per_coded_sample;
+-	streamInfo->codec_tag = codecParams(stream)->codec_tag;
++	streamInfo->bitrate = stream->codecpar->bit_rate;
++	streamInfo->bpcs = stream->codecpar->bits_per_coded_sample;
++	streamInfo->codec_tag = stream->codecpar->codec_tag;
+ 	streamInfo->is_default = stream->disposition & AV_DISPOSITION_DEFAULT;
+ 	streamInfo->time_base.num = stream->time_base.num;
+ 	streamInfo->time_base.den = stream->time_base.den;
+-	streamInfo->type = (QMPlay2MediaType)codecParams(stream)->codec_type; //Enumy są takie same
++	streamInfo->type = (QMPlay2MediaType)stream->codecpar->codec_type; // Enumy są takie same
+ 
+-	if (codecParams(stream)->extradata_size)
++	if (stream->codecpar->extradata_size)
+ 	{
+-		streamInfo->data.reserve(codecParams(stream)->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE);
+-		streamInfo->data.resize(codecParams(stream)->extradata_size);
+-		memcpy(streamInfo->data.data(), codecParams(stream)->extradata, streamInfo->data.capacity());
+-		av_free(codecParams(stream)->extradata);
+-		codecParams(stream)->extradata = (quint8 *)streamInfo->data.data();
++		streamInfo->data.reserve(stream->codecpar->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
++		streamInfo->data.resize(stream->codecpar->extradata_size);
++		memcpy(streamInfo->data.data(), stream->codecpar->extradata, streamInfo->data.capacity());
++		av_free(stream->codecpar->extradata);
++		stream->codecpar->extradata = (quint8 *)streamInfo->data.data();
+ 	}
+ 
+ 	if (streamInfo->type != QMPLAY2_TYPE_ATTACHMENT)
+@@ -963,25 +835,25 @@ StreamInfo *FormatContext::getStreamInfo(AVStream *stream) const
+ 	switch (streamInfo->type)
+ 	{
+ 		case QMPLAY2_TYPE_AUDIO:
+-			streamInfo->format = getSampleFormat(stream);
+-			streamInfo->channels = codecParams(stream)->channels;
+-			streamInfo->sample_rate = codecParams(stream)->sample_rate;
+-			streamInfo->block_align = codecParams(stream)->block_align;
++			streamInfo->format = av_get_sample_fmt_name((AVSampleFormat)stream->codecpar->format);
++			streamInfo->channels = stream->codecpar->channels;
++			streamInfo->sample_rate = stream->codecpar->sample_rate;
++			streamInfo->block_align = stream->codecpar->block_align;
+ 			break;
+ 		case QMPLAY2_TYPE_VIDEO:
+-			streamInfo->format = getPixelFormat(stream);
++			streamInfo->format = av_get_pix_fmt_name((AVPixelFormat)stream->codecpar->format);
+ 			if (stream->sample_aspect_ratio.num)
+ 				streamInfo->sample_aspect_ratio = av_q2d(stream->sample_aspect_ratio);
+-			else if (codecParams(stream)->sample_aspect_ratio.num)
+-				streamInfo->sample_aspect_ratio = av_q2d(codecParams(stream)->sample_aspect_ratio);
+-			streamInfo->W = codecParams(stream)->width;
+-			streamInfo->H = codecParams(stream)->height;
++			else if (stream->codecpar->sample_aspect_ratio.num)
++				streamInfo->sample_aspect_ratio = av_q2d(stream->codecpar->sample_aspect_ratio);
++			streamInfo->W = stream->codecpar->width;
++			streamInfo->H = stream->codecpar->height;
+ 			if (!stillImage)
+ 				streamInfo->FPS = av_q2d(stream->r_frame_rate);
+ 			break;
+ 		case AVMEDIA_TYPE_ATTACHMENT:
+ 			streamInfo->title = getTag(stream->metadata, "filename", false);
+-			switch (codecParams(stream)->codec_id)
++			switch (stream->codecpar->codec_id)
+ 			{
+ 				case AV_CODEC_ID_TTF:
+ 					streamInfo->codec_name = "TTF";
+diff --git src/modules/FFmpeg/FormatContext.hpp src/modules/FFmpeg/FormatContext.hpp
+index f2aaa9e3..6171f89c 100644
+--- src/modules/FFmpeg/FormatContext.hpp
++++ src/modules/FFmpeg/FormatContext.hpp
+@@ -30,10 +30,6 @@ extern "C"
+ 	#include <libavformat/version.h>
+ }
+ 
+-#if LIBAVFORMAT_VERSION_INT >= 0x382400 // >= 56.36.00
+-	#define MP3_FAST_SEEK
+-#endif
+-
+ struct AVFormatContext;
+ struct AVDictionary;
+ struct AVStream;
+@@ -96,9 +92,6 @@ private:
+ 	bool isPaused, fixMkvAss;
+ 	mutable bool isMetadataChanged;
+ 	double lastTime, startTime;
+-#ifndef MP3_FAST_SEEK
+-	qint64 seekByByteOffset;
+-#endif
+ 	bool isOneStreamOgg;
+ 	bool forceCopy;
+ 
+@@ -108,9 +101,5 @@ private:
+ 	bool artistWithTitle;
+ 	bool stillImage;
+ 
+-#if LIBAVFORMAT_VERSION_MAJOR <= 55
+-	AVDictionary *metadata;
+-#endif
+-
+ 	QMutex &avcodec_mutex;
+ };
+diff --git src/qmplay2/CMakeLists.txt src/qmplay2/CMakeLists.txt
+index d29382cd..01932ce6 100644
+--- src/qmplay2/CMakeLists.txt
++++ src/qmplay2/CMakeLists.txt
+@@ -143,10 +143,10 @@ set(QMPLAY2_RESOURCES
+     languages.qrc
+ )
+ 
+-pkg_check_modules(LIBAVFORMAT libavformat>=55.33.100 REQUIRED)
+-pkg_check_modules(LIBAVCODEC libavcodec>=55.52.102 REQUIRED)
+-pkg_check_modules(LIBSWSCALE libswscale>=2.5.102 REQUIRED)
+-pkg_check_modules(LIBAVUTIL libavutil>=52.66.100 REQUIRED)
++pkg_check_modules(LIBAVFORMAT libavformat>=57.40.101 REQUIRED)
++pkg_check_modules(LIBAVCODEC libavcodec>=57.48.101 REQUIRED)
++pkg_check_modules(LIBSWSCALE libswscale>=4.1.100 REQUIRED)
++pkg_check_modules(LIBAVUTIL libavutil>=55.27.100 REQUIRED)
+ 
+ if(USE_LIBASS)
+     add_definitions(-DQMPLAY2_LIBASS)
+@@ -180,12 +180,12 @@ include_directories(
+ 
+ if(USE_AVRESAMPLE)
+     add_definitions(-DQMPLAY2_AVRESAMPLE)
+-    pkg_check_modules(LIBAVRESAMPLE libavresample>=1.2.0 REQUIRED)
++    pkg_check_modules(LIBAVRESAMPLE libavresample>=4.0.0 REQUIRED)
+     list(APPEND LIBQMPLAY2_LIBS ${LIBAVRESAMPLE_LIBRARIES})
+     include_directories(${LIBAVRESAMPLE_INCLUDE_DIRS})
+     link_directories(${LIBAVRESAMPLE_LIBRARY_DIRS})
+ else()
+-    pkg_check_modules(LIBSWRESAMPLE libswresample>=0.18.100 REQUIRED)
++    pkg_check_modules(LIBSWRESAMPLE libswresample>=2.1.100 REQUIRED)
+     list(APPEND LIBQMPLAY2_LIBS ${LIBSWRESAMPLE_LIBRARIES})
+     include_directories(${LIBSWRESAMPLE_INCLUDE_DIRS})
+     link_directories(${LIBSWRESAMPLE_LIBRARY_DIRS})
+diff --git src/qmplay2/Functions.cpp src/qmplay2/Functions.cpp
+index baf5373e..35e59931 100644
+--- src/qmplay2/Functions.cpp
++++ src/qmplay2/Functions.cpp
+@@ -806,9 +806,7 @@ QString Functions::prepareFFmpegUrl(QString url, AVDictionary *&options, bool se
+ 		if (!rawHeaders.isEmpty())
+ 			av_dict_set(&options, "headers", rawHeaders, 0);
+ 
+-#if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(56, 36, 100)
+ 		av_dict_set(&options, "reconnect", "1", 0);
+-#endif
+ 	}
+ 	return url;
+ }
+diff --git src/qmplay2/MkvMuxer.cpp src/qmplay2/MkvMuxer.cpp
+index a011c56b..dda74c15 100644
+--- src/qmplay2/MkvMuxer.cpp
++++ src/qmplay2/MkvMuxer.cpp
+@@ -31,20 +31,7 @@ extern "C"
+ 
+ #include <cmath>
+ 
+-#if LIBAVFORMAT_VERSION_INT >= 0x392900
+-	static inline AVCodecParameters *codecParams(AVStream *stream)
+-	{
+-		return stream->codecpar;
+-	}
+-	#define HAS_CODECPAR
+-#else
+-	static inline AVCodecContext *codecParams(AVStream *stream)
+-	{
+-		return stream->codec;
+-	}
+-#endif
+-
+-/**/
++using namespace std;
+ 
+ MkvMuxer::MkvMuxer(const QString &fileName, const QList<StreamInfo *> &streamsInfo)
+ {
+@@ -64,46 +51,32 @@ MkvMuxer::MkvMuxer(const QString &fileName, const QList<StreamInfo *> &streamsIn
+ 
+ 		stream->time_base.num = streamInfo->time_base.num;
+ 		stream->time_base.den = streamInfo->time_base.den;
+-#ifndef HAS_CODECPAR
+-		stream->codec->time_base = stream->time_base;
+-		if (m_ctx->oformat->flags & AVFMT_GLOBALHEADER)
+-			stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+-#endif
+-
+-		codecParams(stream)->codec_type = (AVMediaType)streamInfo->type;
+-		codecParams(stream)->codec_id = codec->id;
++		stream->codecpar->codec_type = (AVMediaType)streamInfo->type;
++		stream->codecpar->codec_id = codec->id;
+ 
+ 		if (streamInfo->data.size() > 0)
+ 		{
+-			codecParams(stream)->extradata = (uint8_t *)av_mallocz(streamInfo->data.capacity());
+-			codecParams(stream)->extradata_size = streamInfo->data.size();
+-			memcpy(codecParams(stream)->extradata, streamInfo->data.constData(), codecParams(stream)->extradata_size);
++			stream->codecpar->extradata = (uint8_t *)av_mallocz(streamInfo->data.capacity());
++			stream->codecpar->extradata_size = streamInfo->data.size();
++			memcpy(stream->codecpar->extradata, streamInfo->data.constData(), stream->codecpar->extradata_size);
+ 		}
+ 
+ 		switch (streamInfo->type)
+ 		{
+ 			case QMPLAY2_TYPE_VIDEO:
+-				codecParams(stream)->width = streamInfo->W;
+-				codecParams(stream)->height = streamInfo->H;
+-#ifdef HAS_CODECPAR
+-				codecParams(stream)->format = av_get_pix_fmt(streamInfo->format);
+-#else
+-				codecParams(stream)->pix_fmt = av_get_pix_fmt(streamInfo->format);
+-#endif
+-				codecParams(stream)->sample_aspect_ratio = av_d2q(streamInfo->sample_aspect_ratio, 10000);
++				stream->codecpar->width = streamInfo->W;
++				stream->codecpar->height = streamInfo->H;
++				stream->codecpar->format = av_get_pix_fmt(streamInfo->format);
++				stream->codecpar->sample_aspect_ratio = av_d2q(streamInfo->sample_aspect_ratio, 10000);
+ 				stream->avg_frame_rate = av_d2q(streamInfo->FPS, 10000);
+ 				if (streamInfo->is_default)
+ 					stream->disposition |= AV_DISPOSITION_DEFAULT;
+ 				break;
+ 			case QMPLAY2_TYPE_AUDIO:
+-				codecParams(stream)->channels = streamInfo->channels;
+-				codecParams(stream)->sample_rate = streamInfo->sample_rate;
+-				codecParams(stream)->block_align = streamInfo->block_align;
+-#ifdef HAS_CODECPAR
+-				codecParams(stream)->format = av_get_sample_fmt(streamInfo->format);
+-#else
+-				codecParams(stream)->sample_fmt = av_get_sample_fmt(streamInfo->format);
+-#endif
++				stream->codecpar->channels = streamInfo->channels;
++				stream->codecpar->sample_rate = streamInfo->sample_rate;
++				stream->codecpar->block_align = streamInfo->block_align;
++				stream->codecpar->format = av_get_sample_fmt(streamInfo->format);
+ 				break;
+ 			default:
+ 				break;
+diff --git src/qmplay2/NetworkAccess.cpp src/qmplay2/NetworkAccess.cpp
+index 6cc81dd9..a5fd2e12 100644
+--- src/qmplay2/NetworkAccess.cpp
++++ src/qmplay2/NetworkAccess.cpp
+@@ -135,7 +135,6 @@ private:
+ 				}
+ 				switch (ret)
+ 				{
+-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(54, 15, 100)
+ 					case AVERROR_HTTP_BAD_REQUEST:
+ 						m_error = NetworkReply::Error::Connection400;
+ 						break;
+@@ -154,7 +153,6 @@ private:
+ 					case AVERROR_HTTP_SERVER_ERROR:
+ 						m_error = NetworkReply::Error::Connection5XX;
+ 						continue; // Continue if server error (e.g. Service Temporarily Unavailable)
+-#endif
+ 					default:
+ 						m_error = NetworkReply::Error::Connection;
+ 						continue; // Continue if connection error

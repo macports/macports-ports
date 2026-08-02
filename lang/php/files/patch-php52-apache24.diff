@@ -1,0 +1,134 @@
+Fix build with Apache 2.4
+https://bugs.php.net/bug.php?id=61172
+
+Combination of:
+https://github.com/php/php-src/commit/1b16b4e24343a7e2cc07217ff678331c2b3f93df
+https://github.com/php/php-src/commit/a344adf72e48d725575c22b9955e028d7fdf6a52
+https://github.com/php/php-src/commit/698e0652953f0be372435b42b4f560976374aebd
+https://github.com/php/php-src/commit/390ccd899d73101ad5ddcfc46074a6c83ec178e8
+https://github.com/php/php-src/commit/730b54a3744035042cd4d738579c63bf15cc7384
+--- a/configure	2011-01-06 17:04:43.000000000 -0600
++++ b/configure	2024-01-10 15:17:14.000000000 -0600
+@@ -5618,7 +5618,6 @@
+   APXS_BINDIR=`$APXS -q BINDIR`
+   APXS_HTTPD=`$APXS -q SBINDIR`/`$APXS -q TARGET`
+   APXS_CFLAGS=`$APXS -q CFLAGS`
+-  APXS_MPM=`$APXS -q MPM_NAME`
+   APU_BINDIR=`$APXS -q APU_BINDIR`
+   APR_BINDIR=`$APXS -q APR_BINDIR`
+ 
+@@ -6380,13 +6379,26 @@
+     ;;
+   esac
+ 
+-  if test "$APXS_MPM" != "prefork"; then
+-    
++  if test "$APACHE_VERSION" -lt 2004001; then
++    APXS_MPM=`$APXS -q MPM_NAME`
++    if test "$APXS_MPM" != "prefork" && test "$APXS_MPM" != "peruser" && test "$APXS_MPM" != "itk"; then
++      
++  enable_maintainer_zts=yes
++  if test "$pthreads_working" != "yes"; then
++    { echo "configure: error: ZTS currently requires working POSIX threads. We were unable to verify that your system supports Pthreads." 1>&2; exit 1; }
++  fi
++
++    fi
++  else
++    APACHE_THREADED_MPM=`$APXS_HTTPD -V | grep 'threaded:.*yes'`
++    if test -n "$APACHE_THREADED_MPM"; then
++      
+   enable_maintainer_zts=yes
+   if test "$pthreads_working" != "yes"; then
+     { echo "configure: error: ZTS currently requires working POSIX threads. We were unable to verify that your system supports Pthreads." 1>&2; exit 1; }
+   fi
+ 
++    fi
+   fi
+   echo "$ac_t""yes" 1>&6
+   
+@@ -6466,7 +6478,6 @@
+   APXS_BINDIR=`$APXS -q BINDIR`
+   APXS_HTTPD=`$APXS -q SBINDIR`/`$APXS -q TARGET`
+   APXS_CFLAGS=`$APXS -q CFLAGS`
+-  APXS_MPM=`$APXS -q MPM_NAME`
+   APU_BINDIR=`$APXS -q APU_BINDIR`
+   APR_BINDIR=`$APXS -q APR_BINDIR`
+ 
+@@ -7228,13 +7239,26 @@
+     ;;
+   esac
+ 
+-  if test "$APXS_MPM" != "prefork"; then
+-    
++  if test "$APACHE_VERSION" -lt 2004001; then
++    APXS_MPM=`$APXS -q MPM_NAME`
++    if test "$APXS_MPM" != "prefork" && test "$APXS_MPM" != "peruser" && test "$APXS_MPM" != "itk"; then
++      
+   enable_maintainer_zts=yes
+   if test "$pthreads_working" != "yes"; then
+     { echo "configure: error: ZTS currently requires working POSIX threads. We were unable to verify that your system supports Pthreads." 1>&2; exit 1; }
+   fi
+ 
++    fi
++  else
++    APACHE_THREADED_MPM=`$APXS_HTTPD -V | grep 'threaded:.*yes'`
++    if test -n "$APACHE_THREADED_MPM"; then
++      
++  enable_maintainer_zts=yes
++  if test "$pthreads_working" != "yes"; then
++    { echo "configure: error: ZTS currently requires working POSIX threads. We were unable to verify that your system supports Pthreads." 1>&2; exit 1; }
++  fi
++
++    fi
+   fi
+   echo "$ac_t""yes" 1>&6
+   
+@@ -119064,6 +119088,21 @@
+ X
+   fi
+ 
++  if test "$PHP_SAPI" = "apache2handler" || test "$PHP_SAPI" = "apache2filter"; then
++    if test "$APACHE_VERSION" -ge 2004001; then
++      if test -z "$APACHE_THREADED_MPM"; then
++cat <<X
+++--------------------------------------------------------------------+
++|                        *** WARNING ***                             |
++|                                                                    |
++| You have built PHP for Apache's current non-threaded MPM.          |
++| If you change Apache to use a threaded MPM you must reconfigure    |
++| PHP with --enable-maintainer-zts                                   |
++X
++      fi
++    fi
++  fi
++
+   # Warn about linking Apache with libpthread if oci8 extension is enabled on linux.
+   if test "$PHP_OCI8" != "no"; then
+     if test "$PHP_SAPI" = "apache"; then
+--- a/sapi/apache2handler/php_functions.c
++++ b/sapi/apache2handler/php_functions.c
+@@ -383,8 +383,12 @@
+ 	char *p;
+ 	server_rec *serv = ((php_struct *) SG(server_context))->r->server;
+ #if !defined(WIN32) && !defined(WINNT) && !defined(NETWARE)
++#if MODULE_MAGIC_NUMBER_MAJOR >= 20081201
++	AP_DECLARE_DATA extern unixd_config_rec ap_unixd_config;
++#else
+ 	AP_DECLARE_DATA extern unixd_config_rec unixd_config;
+ #endif
++#endif
+ 	
+ 	for (n = 0; ap_loaded_modules[n]; ++n) {
+ 		char *s = (char *) ap_loaded_modules[n]->name;
+@@ -414,7 +418,11 @@
+ 	php_info_print_table_row(2, "Hostname:Port", tmp);
+ 	
+ #if !defined(WIN32) && !defined(WINNT) && !defined(NETWARE)
++#if MODULE_MAGIC_NUMBER_MAJOR >= 20081201
++	snprintf(tmp, sizeof(tmp), "%s(%d)/%d", ap_unixd_config.user_name, ap_unixd_config.user_id, ap_unixd_config.group_id);
++#else
+ 	snprintf(tmp, sizeof(tmp), "%s(%d)/%d", unixd_config.user_name, unixd_config.user_id, unixd_config.group_id);
++#endif
+ 	php_info_print_table_row(2, "User/Group", tmp);
+ #endif
+ 

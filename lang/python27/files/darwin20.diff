@@ -1,0 +1,189 @@
+https://bugs.python.org/issue41100
+https://github.com/python/cpython/pull/21113
+https://github.com/python/cpython/pull/21241
+https://github.com/python/cpython/pull/21564
+https://github.com/python/cpython/pull/21588
+
+--- configure.orig	2020-06-29 23:33:10.000000000 +1000
++++ configure	2020-06-29 23:35:47.000000000 +1000
+@@ -3409,7 +3409,7 @@
+   # has no effect, don't bother defining them
+   Darwin/[6789].*)
+     define_xopen_source=no;;
+-  Darwin/1[0-9].*)
++  Darwin/[12][0-9].*)
+     define_xopen_source=no;;
+   # On AIX 4 and 5.1, mbstate_t is defined only when _XOPEN_SOURCE == 500 but
+   # used in wcsnrtombs() and mbsnrtowcs() even if _XOPEN_SOURCE is not defined
+--- Lib/distutils/tests/test_build_ext.py.orig	2020-04-20 07:13:39.000000000 +1000
++++ Lib/distutils/tests/test_build_ext.py	2020-09-10 20:59:48.000000000 +1000
+@@ -491,7 +491,7 @@
+         # format the target value as defined in the Apple
+         # Availability Macros.  We can't use the macro names since
+         # at least one value we test with will not exist yet.
+-        if target[1] < 10:
++        if target[:2] < (10, 10):
+             # for 10.1 through 10.9.x -> "10n0"
+             target = '%02d%01d0' % target
+         else:
+--- Lib/test/test_platform.py.orig	2020-04-20 07:13:39.000000000 +1000
++++ Lib/test/test_platform.py	2020-09-10 21:04:05.000000000 +1000
+@@ -207,6 +207,11 @@
+             fd.close()
+             self.assertFalse(real_ver is None)
+             result_list = res[0].split('.')
++            # macOS 11.0 (Big Sur) may report its version number
++            # as 10.16 if the executable is built with an older
++            # SDK target but sw_vers reports 11.0.
++            if result_list == ['10', '16']:
++                result_list = ['11', '0']
+             expect_list = real_ver.split('.')
+             len_diff = len(result_list) - len(expect_list)
+             # On Snow Leopard, sw_vers reports 10.6.0 as 10.6
+--- Modules/getpath.c.orig	2020-04-20 07:13:39.000000000 +1000
++++ Modules/getpath.c	2020-09-10 21:23:10.000000000 +1000
+@@ -8,6 +8,7 @@
+ 
+ #ifdef __APPLE__
+ #include <mach-o/dyld.h>
++#include <AvailabilityMacros.h>
+ #endif
+ 
+ /* Search in some common locations for the associated Python libraries.
+--- Lib/ctypes/macholib/dyld.py.orig	2020-04-20 07:13:39.000000000 +1000
++++ Lib/ctypes/macholib/dyld.py	2020-09-17 23:36:03.000000000 +1000
+@@ -7,6 +7,12 @@
+ from dylib import dylib_info
+ from itertools import *
+ 
++try:
++    from _ctypes import _dyld_shared_cache_contains_path
++except ImportError:
++    def _dyld_shared_cache_contains_path(*args):
++        raise NotImplementedError
++
+ __all__ = [
+     'dyld_find', 'framework_find',
+     'framework_info', 'dylib_info',
+@@ -132,6 +138,12 @@
+             ), env):
+         if os.path.isfile(path):
+             return path
++        try:
++            if _dyld_shared_cache_contains_path(path):
++                return path
++        except NotImplementedError:
++            pass
++
+     raise ValueError("dylib %s could not be found" % (name,))
+ 
+ def framework_find(fn, executable_path=None, env=None):
+--- Lib/ctypes/test/test_macholib.py.orig	2020-04-20 07:13:39.000000000 +1000
++++ Lib/ctypes/test/test_macholib.py	2020-09-17 23:48:27.000000000 +1000
+@@ -48,18 +48,22 @@
+     @unittest.skipUnless(sys.platform == "darwin", 'OSX-specific test')
+     def test_find(self):
+ 
+-        self.assertEqual(find_lib('pthread'),
+-                             '/usr/lib/libSystem.B.dylib')
++        # On macOS 11, system dylibs are only present in the shared cache,
++        # so symlinks like libpthread.dylib -> libSystem.B.dylib will not
++        # be resolved by dyld_find
++        self.assertIn(find_lib('pthread'),
++            ('/usr/lib/libSystem.B.dylib', '/usr/lib/libpthread.dylib'))
+ 
+         result = find_lib('z')
+         # Issue #21093: dyld default search path includes $HOME/lib and
+         # /usr/local/lib before /usr/lib, which caused test failures if
+         # a local copy of libz exists in one of them. Now ignore the head
+         # of the path.
+-        self.assertRegexpMatches(result, r".*/lib/libz\..*.*\.dylib")
++        self.assertRegexpMatches(result, r".*/lib/libz.*\.dylib")
+ 
+-        self.assertEqual(find_lib('IOKit'),
+-                             '/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit')
++        self.assertIn(find_lib('IOKit'),
++            ('/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit',
++             '/System/Library/Frameworks/IOKit.framework/IOKit'))
+ 
+ if __name__ == "__main__":
+     unittest.main()
+--- Modules/_ctypes/callproc.c.orig	2020-04-20 07:13:39.000000000 +1000
++++ Modules/_ctypes/callproc.c	2020-09-18 00:28:54.000000000 +1000
+@@ -74,6 +74,10 @@
+ #include <malloc.h>
+ #endif
+ 
++#if __APPLE__ && HAVE_DYLD_SHARED_CACHE_CONTAINS_PATH
++#include <mach-o/dyld.h>
++#endif
++
+ #include <ffi.h>
+ #include "ctypes.h"
+ #ifdef HAVE_ALLOCA_H
+@@ -1416,6 +1420,25 @@ copy_com_pointer(PyObject *self, PyObjec
+ }
+ #else
+ 
++#if __APPLE__ && HAVE_DYLD_SHARED_CACHE_CONTAINS_PATH
++static PyObject *py_dyld_shared_cache_contains_path(PyObject *self, PyObject *args)
++{
++    if (__builtin_available(macos 11, ios 14, watchos 7, tvos 14, *)) {
++        char *name_str;
++        if (!PyArg_ParseTuple(args, "z", &name_str))
++            return NULL;
++
++        if(_dyld_shared_cache_contains_path(name_str))
++            Py_RETURN_TRUE;
++        else
++            Py_RETURN_FALSE;
++    } else {
++        PyErr_SetString(PyExc_NotImplementedError, "_dyld_shared_cache_contains_path symbol is missing");
++        return NULL;
++    }
++}
++#endif
++
+ static PyObject *py_dl_open(PyObject *self, PyObject *args)
+ {
+     char *name;
+@@ -1940,6 +1963,9 @@ PyMethodDef _ctypes_module_methods[] = {
+      "dlopen(name, flag={RTLD_GLOBAL|RTLD_LOCAL}) open a shared library"},
+     {"dlclose", py_dl_close, METH_VARARGS, "dlclose a library"},
+     {"dlsym", py_dl_sym, METH_VARARGS, "find symbol in shared library"},
++#if __APPLE__ && HAVE_DYLD_SHARED_CACHE_CONTAINS_PATH
++    {"_dyld_shared_cache_contains_path", py_dyld_shared_cache_contains_path, METH_VARARGS, "check if path is in the shared cache"},
++#endif
+ #endif
+     {"alignment", align_func, METH_O, alignment_doc},
+     {"sizeof", sizeof_func, METH_O, sizeof_doc},
+--- configure.orig	2020-04-20 07:13:39.000000000 +1000
++++ configure	2020-09-18 00:34:34.000000000 +1000
+@@ -10596,6 +10596,15 @@
+ done
+ 
+ 
++ac_fn_c_check_decl "$LINENO" "_dyld_shared_cache_contains_path" "ac_cv_have_decl__dyld_shared_cache_contains_path" "#include <mach-o/dyld.h>
++"
++if test "x$ac_cv_have_decl__dyld_shared_cache_contains_path" = xyes; then :
++
++$as_echo "#define HAVE_DYLD_SHARED_CACHE_CONTAINS_PATH 1" >>confdefs.h
++
++fi
++
++
+ # DYNLOADFILE specifies which dynload_*.o file we will use for dynamic
+ # loading of modules.
+ 
+--- pyconfig.h.in.orig	2020-04-20 07:13:39.000000000 +1000
++++ pyconfig.h.in	2020-09-18 00:38:31.000000000 +1000
+@@ -216,6 +216,9 @@
+ /* Define to 1 if you have the `dup2' function. */
+ #undef HAVE_DUP2
+ 
++/* Define if you have the '_dyld_shared_cache_contains_path' function. */
++#undef HAVE_DYLD_SHARED_CACHE_CONTAINS_PATH
++
+ /* Defined when any dynamic module loading is enabled. */
+ #undef HAVE_DYNAMIC_LOADING
+ 

@@ -1,0 +1,980 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+#------------------------------------------------------------------------------
+# Portfile Style Notes
+#
+# * When local variables are created within phases, they are unset when
+#   finished. This prevents clashes elsewhere.
+# * Intermediate variables, lists, etc, are often employed. While more
+#   verbose, it aids readability.
+#------------------------------------------------------------------------------
+
+PortSystem          1.0
+
+PortGroup           github 1.0
+PortGroup           conflicts_build 1.0
+
+name                mame
+categories          emulators
+license             GPL-2+
+maintainers         {mascguy @mascguy} openmaintainer
+
+description         Multiple Arcade Machine Emulator
+long_description    \
+    The purpose of MAME is to preserve decades of software history. As electronic \
+    technology continues to rush forward, MAME prevents this important "vintage" \
+    software from being lost and forgotten. This is achieved by documenting the \
+    hardware and how it functions. The source code to MAME serves as this \
+    documentation.
+homepage            https://www.mamedev.org
+
+# For now, disable macOS 10.13 and earlier, until build fixed
+platforms           {darwin >= 18}
+
+# Non-versioned lua port causes build failures
+conflicts_build-append \
+                    lua
+
+#------------------------------------------------------------------------------
+# Versions, Patches, and Checksums
+#------------------------------------------------------------------------------
+
+# Developer-only override for os.major, allowing rapid testing of platform-
+# specific logic.
+if {[info exists mame.override.os.major]} {
+    ui_msg "mame.override.os.major specified: ${mame.override.os.major}"
+    set g_mame_os_major \
+        ${mame.override.os.major}
+} else {
+    set g_mame_os_major \
+        ${os.major}
+}
+
+# Developer-only override, allowing easy testing of desired behavior:
+# - mame.override.fallback=yes - Force use of fallback release
+# - mame.override.fallback=no  - Force use of latest release
+if {[info exists mame.override.fallback]} {
+    if {[string is boolean -strict ${mame.override.fallback}]} {
+        ui_msg "mame.override.fallback specified: ${mame.override.fallback}"
+        set g_mame_fallback \
+            [string is true -strict ${mame.override.fallback}]
+    } else {
+        error "mame.override.fallback must be specified as a valid boolean value"
+    }
+} else {
+    # Mame versions > 0.226 require C++ 2017, and specifically aligned allocation
+    # support. That's only supported by MacOS system libc++ from 10.13 onward.
+    # However, once MacPorts provides a custom libc++ for all ports, Mame will
+    # support older MacOS releases.
+    #
+    # NOTE: Due to our current MacPorts build infrastructure for macOS 10.13 -
+    # which uses Xcode 9.4.1, rather than Xcode 10.1 - we must revert to 0.226.
+    # Not exactly ideal, but far better than forcing users to build from source.
+
+    if {${os.platform} eq "darwin" && ${g_mame_os_major} < 18} {
+        set g_mame_fallback yes
+    } else {
+        set g_mame_fallback no
+    }
+}
+
+set g_mame_latest \
+    [expr { !${g_mame_fallback} }]
+
+if {${g_mame_latest}} {
+    set g_mame_release \
+                    "0281"
+
+    revision        0
+    epoch           1
+
+    # Mame 0.240+: Disable PDF generation, which is problematic. (And not desired.)
+    patchfiles-append \
+                    mame-patch-0276-dist.mak-disable-pdf.diff
+
+    checksums       rmd160  8a220cc9aef86b7710a7c59bfdca7c5879dfd1f4 \
+                    sha256  8d648b43b0072b3efabc30290c1767a3c22a46ca3c4111a2f456b9f5d2a08319 \
+                    size    210289013
+} else {
+    set g_mame_release \
+                    "0226"
+
+    revision        9
+
+    # Mame 0.226: Fix errors during translation build phase.
+    # Merged into Mame releases from 0.227 onward. Tracked by issue:
+    # https://github.com/mamedev/mame/issues/7510
+    patchfiles-append \
+                    mame-patch-0226-language-portuguese_brazil.diff
+
+    # Mame 0.226: Fix compilation errors for MacOS 10.8 and Xcode 5.x.
+    # Merged into Mame releases from 0.227 onward. Tracked by issue:
+    # https://github.com/mamedev/mame/issues/7536
+    patchfiles-append \
+                    mame-patch-0226-src-posixfile-build-error.diff
+
+    # Mame 0.226: Fix build issue due to breaking asio API change.
+    # Latest Mame releases already updated; only an issue with older versions.
+    patchfiles-append \
+                    mame-patch-0226-asio-server_ws_impl.diff
+
+    checksums       rmd160  b9e4ae321b7673790d374c63bbe966d1502d6738 \
+                    sha256  7c4c9ec232ba988e65fd29665c9b8e40b5ac3aa9f561eeb107cebbf08ba94baf \
+                    size    196379874
+}
+
+# Note: For user-presentable version string, we add a period between the first
+# two characters of release. So '0227', for example, becomes '0.227'.
+set g_mame_version_string \
+    [append g_mame_version_string \
+        [string index ${g_mame_release} 0] \
+        "." \
+        [string range ${g_mame_release} 1 end] \
+    ]
+
+github.setup        mamedev mame ${g_mame_release} mame
+github.tarball_from archive
+
+# Note: Version declaration must occur after 'github.setup', as the latter
+# sets our version whether we want it or not.
+version             ${g_mame_version_string}
+
+if {!${g_mame_latest}} {
+    # Disable livecheck for older version
+    livecheck.type  none
+}
+
+#------------------------------------------------------------------------------
+# Python Version
+#------------------------------------------------------------------------------
+
+set g_mame_pyver_major     3
+set g_mame_pyver_minor     13
+
+#------------------------------------------------------------------------------
+# Port-Specific Globals
+#------------------------------------------------------------------------------
+
+# Whether we're building a 64-bit binary
+set g_mame_build_arch_64       0
+
+# Whether to build the BGFX components
+set g_mame_build_bgfx_enabled  0
+
+# Prefix for Tools executables
+set g_mame_tools_prefix "mame-"
+
+# Python version info, populated by python* variants.
+set g_mame_python_info_dict \
+    [dict create \
+        ver_major "" \
+        ver_minor "" \
+        py_bin "" \
+        sphinx_bin "" \
+    ]
+
+# Configure build targets.
+set g_mame_config_targets_list \
+    [list \
+        "generate" \
+    ]
+
+# Documentation build targets.
+set g_mame_build_targets_docs_list \
+    [list \
+        "man" \
+    ]
+
+# Documentation build args.
+# Note: Dynamic values populated in phase 'pre-build'.
+set g_mame_build_args_docs_list \
+    [list \
+    ]
+
+# BGFX build targets.
+# Note: Values populated in phase 'pre-build', as they differ based on variants.
+set g_mame_build_targets_bgfx_list \
+    [list \
+    ]
+
+# BGFX build args.
+# Note: Dynamic values populated in phase 'pre-build'.
+set g_mame_build_args_bgfx_list \
+    [list \
+        "--trace" \
+    ]
+
+# Main build targets.
+# Note: Target 'all' must be run before 'translation', or latter will fail.
+set g_mame_build_targets_main_list \
+    [list \
+        "all" \
+        "translation" \
+    ]
+
+# Distribution build targets.
+set g_mame_build_targets_dist_list \
+    [list \
+        "all" \
+    ]
+
+# Distribution build args.
+# Note: Dynamic values populated in phase 'pre-build'.
+set g_mame_build_args_dist_list \
+    [list \
+    ]
+
+#------------------------------------------------------------------------------
+# Dependencies
+#------------------------------------------------------------------------------
+
+depends_build-append \
+                    port:asio \
+                    port:gettext \
+                    port:gmake \
+                    port:pkgconfig
+
+depends_lib-append  \
+                    port:expat \
+                    port:flac \
+                    path:include/turbojpeg.h:libjpeg-turbo \
+                    port:libiconv \
+                    port:libsdl2 \
+                    port:libutf8proc \
+                    port:portaudio \
+                    port:portmidi \
+                    port:pugixml \
+                    port:sqlite3 \
+                    port:zlib
+
+# Note: Port 'coreutils' needed for 'grealpath', used in launcher script.
+depends_run-append  \
+                    path:libexec/coreutils/libstdbuf.so:coreutils
+
+#------------------------------------------------------------------------------
+# Build Options
+#------------------------------------------------------------------------------
+
+supported_archs     ppc ppc64 i386 x86_64 arm64
+
+use_configure       no
+
+# Note: GMake needed for newer features like '--trace', which are unavailable
+# in Apple's older version.
+build.cmd           ${prefix}/bin/gmake
+
+# https://github.com/mamedev/mame/issues/6004
+compiler.blacklist  \
+                    {clang < 1000}
+
+# https://github.com/mamedev/mame/issues/3788
+# As long as we're blacklisting clangs from the affected Xcode versions,
+# we don't need to add this flag.
+#if {${os.platform} eq "darwin" && ([vercmp $xcodeversion 9.0] < 0)} {
+#    configure.cxxflags-append -DMAME_DEVCB_GNUC_BROKEN_FRIEND
+#}
+
+if {${g_mame_latest}} {
+    compiler.cxx_standard \
+                    2017
+} else {
+    compiler.cxx_standard \
+                    2014
+}
+
+# Ensure local project headers take priority over others
+configure.cflags \
+                    -isystem${prefix}/include
+
+# Note: Compiler optimization level is controlled by makefile variable 'OPTIMIZE', below.
+configure.cxxflags-delete \
+                    -O1 -O2 -O3 -Os
+
+# Note: Linker flag '-no_deduplicate' is absolutely vital, ensuring that 'ld'
+# finishes quickly. Without it, the final link time increases by a factor of
+# 10x for a release build... and 50x for a debug build! (The latter can take
+# 50+ minutes without it.)
+# Note: Linker dedupe support not present in version of MacPorts 'ld', for
+# macOS 10.6 and earlier.
+if {${g_mame_os_major} >= 11} {
+    configure.cxxflags-append \
+                    -Xlinker -no_deduplicate \
+                    -Wno-unused-command-line-argument
+}
+
+if {[tbool configure.ccache]} {
+    configure.cc-prepend \
+                    ${prefix}/bin/ccache
+    configure.cxx-prepend \
+                    ${prefix}/bin/ccache
+}
+
+# Metal renderer now requires Big Sur or later
+if {${g_mame_latest} && (${g_mame_os_major} < 20)} {
+    configure.cxxflags-append \
+                    -DBGFX_CONFIG_RENDERER_METAL=0
+}
+
+build.args-append   \
+                    ARCHOPTS="${configure.cxxflags}" \
+                    CC="${configure.cc}" \
+                    CXX="${configure.cxx}" \
+                    CFLAGS="${configure.cflags}" \
+                    LDOPTS="${configure.ldflags}" \
+                    PRECOMPILE=1 \
+                    TESTS=0 \
+                    BENCHMARKS=0 \
+                    DEBUG=0 \
+                    OPTIMIZE=2 \
+                    NOWERROR=1 \
+                    DEPRECATED=0 \
+                    VERBOSE=1 \
+                    USE_LIBSDL=1 \
+                    USE_SYSTEM_LIB_ASIO=1 \
+                    USE_SYSTEM_LIB_EXPAT=1 \
+                    USE_SYSTEM_LIB_FLAC=1 \
+                    USE_SYSTEM_LIB_JPEG=1 \
+                    USE_SYSTEM_LIB_PORTAUDIO=1 \
+                    USE_SYSTEM_LIB_PORTMIDI=1 \
+                    USE_SYSTEM_LIB_PUGIXML=1 \
+                    USE_SYSTEM_LIB_SQLITE3=1 \
+                    USE_SYSTEM_LIB_UTF8PROC=1 \
+                    USE_SYSTEM_LIB_ZLIB=1
+
+# Clear 'build.target', to avoid contaminating 'build.pre_args'.
+# We cannot rely on default build logic, as multiple makefiles are involved.
+build.target
+
+# TODO: Ensure errors are grouped with their command invocation during make.
+# Requires jobserver coordination with non-make subprocesses; not done yet.
+#build.pre_args-append \
+#    "--output-sync=line"
+
+build.post_args
+
+# Ensure 'g_mame_build_arch_64' set early, as it's needed later
+if {$build_arch in [list arm64 x86_64 ppc64]} {
+    set g_mame_build_arch_64  1
+} else {
+    set g_mame_build_arch_64  0
+}
+
+#------------------------------------------------------------------------------
+# Test Support
+#
+# Note: As of release 0.226, Mame's test suite is quite limited. And it
+# doesn't require a build. But it's still worthwhile, to provide some basic
+# sanity checks.
+#------------------------------------------------------------------------------
+
+test.run            yes
+test.target         tests
+
+#------------------------------------------------------------------------------
+# Developer-Only Command-Line Overrides
+#
+# These allow testing key options, without local portfile modification.
+#------------------------------------------------------------------------------
+
+# Toggle BGFX build, which fails on some MasOS/Xcode combinations.
+# Note: Normally disabled, due to those failures.
+if {[info exists mame.override.build.bgfx]} {
+    ui_msg "mame.override.build.bgfx specified: ${mame.override.build.bgfx}"
+
+    set g_mame_build_bgfx_enabled \
+        [string is true ${mame.override.build.bgfx}]
+}
+
+# Support for additional gmake arguments
+if {[info exists mame.override.build.gmake.args]} {
+    ui_msg "mame.override.build.gmake.args specified: ${mame.override.build.gmake.args}"
+
+    build.pre_args-append \
+        ${mame.override.build.gmake.args}
+}
+
+#------------------------------------------------------------------------------
+# Procs - Bootstrap
+#------------------------------------------------------------------------------
+
+proc mame_arch_setup {p_arch_64} {
+    global executable
+    global g_mame_latest
+
+    # Architecture setup - 64-bit vs 32-bit
+    set executable "mame"
+    # Starting with release 0.229, executable no longer has suffix '64' for 64-bit build
+    if {${p_arch_64} && !${g_mame_latest}} {
+        set executable "${executable}64"
+    }
+
+    # Remember to append a 'd' suffix for debug builds
+    # Note: Mame Tools executables have no such suffix
+    if {[variant_isset debug]} {
+        set executable "${executable}d"
+    }
+
+    ui_debug "mame_arch_setup: executable: ${executable}"
+
+    return 0
+}
+
+# This must be run early, after 'g_mame_build_arch_64' set.
+mame_arch_setup ${g_mame_build_arch_64}
+
+#------------------------------------------------------------------------------
+# Procs - Low Level - Python Setup
+#------------------------------------------------------------------------------
+
+# Populate global Python info dictionary, for specified version
+proc mame_python_populate_info {p_ver_major p_ver_minor} {
+    global prefix
+    global g_mame_python_info_dict
+
+    # Version info
+    dict set g_mame_python_info_dict ver_major ${p_ver_major}
+    dict set g_mame_python_info_dict ver_minor ${p_ver_minor}
+
+    # Paths to executables
+    dict set g_mame_python_info_dict py_bin \
+        "${prefix}/bin/python${p_ver_major}.${p_ver_minor}"
+    dict set g_mame_python_info_dict sphinx_bin \
+        "${prefix}/bin/sphinx-build-${p_ver_major}.${p_ver_minor}"
+
+    ui_debug "mame_python_populate_info: g_mame_python_info_dict: ${g_mame_python_info_dict}"
+
+    return 0
+}
+
+# Update dependencies, based on global Python info dictionary.
+# Note: Proc 'mame_python_populate_info' must be called first!
+proc mame_python_add_deps {} {
+    global g_mame_python_info_dict
+
+    set ver_major [dict get ${g_mame_python_info_dict} ver_major]
+    set ver_minor [dict get ${g_mame_python_info_dict} ver_minor]
+
+    depends_build-append \
+        "port:python${ver_major}${ver_minor}" \
+        "port:py${ver_major}${ver_minor}-sphinx" \
+        "port:py${ver_major}${ver_minor}-sphinxcontrib-svg2pdfconverter"
+
+    # License fix, to allow port binaries to be published
+    license_noconflict  python${ver_major}${ver_minor}
+
+    return 0
+}
+
+#------------------------------------------------------------------------------
+# Procs - High Level - Variant Support
+#------------------------------------------------------------------------------
+
+proc mame_variant_debug_setup {} {
+    build.args-replace \
+        "DEBUG=0" \
+        "DEBUG=1"
+
+    # Disable optimization, to improve debuggability
+    build.args-replace \
+        "OPTIMIZE=2" \
+        "OPTIMIZE=0"
+
+    return 0
+}
+
+proc mame_variant_tools_setup {} {
+    build.args-append \
+        "TOOLS=1"
+
+    return 0
+}
+
+# Wrapper for python* variants to call, limiting copy-and-paste mayhem.
+proc mame_variant_python_setup {p_ver_major p_ver_minor} {
+    mame_python_populate_info ${p_ver_major} ${p_ver_minor}
+    mame_python_add_deps
+
+    return 0
+}
+
+#------------------------------------------------------------------------------
+# Procs - Low Level - Phase Support
+#------------------------------------------------------------------------------
+
+proc mame_get_release_dir {} {
+    global worksrcpath
+    global g_mame_build_arch_64
+
+    # Generate release dir name, based on build options
+    # Format: build/release/[x64|x32]/[Debug|Release]/mame
+    set mame_release_dir \
+        [file join \
+            "${worksrcpath}/build/release" \
+            [expr { ${g_mame_build_arch_64} ? "x64" : "x32" } ] \
+            [expr { [variant_isset debug] ? "Debug" : "Release" } ] \
+            "mame" \
+        ]
+
+    return ${mame_release_dir}
+}
+
+proc mame_get_tools_list {p_dir p_fn_prefix} {
+    set mame_tools_list \
+        [list \
+            "${p_dir}/${p_fn_prefix}aueffectutil" \
+            "${p_dir}/${p_fn_prefix}castool" \
+            "${p_dir}/${p_fn_prefix}chdman" \
+            "${p_dir}/${p_fn_prefix}floptool" \
+            "${p_dir}/${p_fn_prefix}imgtool" \
+            "${p_dir}/${p_fn_prefix}jedutil" \
+            "${p_dir}/${p_fn_prefix}ldresample" \
+            "${p_dir}/${p_fn_prefix}ldverify" \
+            "${p_dir}/${p_fn_prefix}nltool" \
+            "${p_dir}/${p_fn_prefix}nlwav" \
+            "${p_dir}/${p_fn_prefix}pngcmp" \
+            "${p_dir}/${p_fn_prefix}regrep" \
+            "${p_dir}/${p_fn_prefix}romcmp" \
+            "${p_dir}/${p_fn_prefix}split" \
+            "${p_dir}/${p_fn_prefix}srcclean" \
+            "${p_dir}/${p_fn_prefix}testkeys" \
+            "${p_dir}/${p_fn_prefix}unidasm" \
+        ]
+
+    return ${mame_tools_list}
+}
+
+proc mame_get_dir_create_list {p_target_dir p_share_dir} {
+    set mame_dir_create_list \
+        [list \
+            ${p_target_dir} \
+            ${p_target_dir}/cfg \
+            ${p_target_dir}/cheat \
+            ${p_target_dir}/comments \
+            ${p_target_dir}/crsshair \
+            ${p_target_dir}/diff \
+            ${p_target_dir}/fonts \
+            ${p_target_dir}/inp \
+            ${p_target_dir}/nvram \
+            ${p_target_dir}/software \
+            ${p_target_dir}/snap \
+            ${p_target_dir}/sta \
+            ${p_share_dir} \
+        ]
+
+    return ${mame_dir_create_list}
+}
+
+proc mame_get_copy_list {p_release_dir p_worksrcpath p_executable} {
+    set mame_copy_list \
+        [list \
+            ${p_release_dir}/${p_executable} \
+            ${p_worksrcpath}/artwork \
+            ${p_worksrcpath}/bgfx \
+            ${p_release_dir}/ctrlr \
+            ${p_release_dir}/hash \
+            ${p_worksrcpath}/hlsl \
+            ${p_release_dir}/ini \
+            ${p_worksrcpath}/keymaps \
+            ${p_release_dir}/language \
+            ${p_worksrcpath}/plugins \
+            ${p_release_dir}/roms \
+            ${p_worksrcpath}/samples \
+        ]
+
+    return ${mame_copy_list}
+}
+
+#------------------------------------------------------------------------------
+# Procs - High Level - Phase Support
+#------------------------------------------------------------------------------
+
+proc mame_build_run {p_work_path p_makefile p_target p_build_args_list} {
+    global build.cmd
+    global build.jobs
+    global build.pre_args
+
+    ui_debug "mame_build_run: p_work_path: ${p_work_path}"
+    ui_debug "mame_build_run: p_makefile: ${p_makefile}"
+    ui_debug "mame_build_run: p_target: ${p_target}"
+    ui_debug "mame_build_run: p_build_args_list: ${p_build_args_list}"
+
+    set build_cmd_line \
+        "${build.cmd} \
+            --jobs=${build.jobs} \
+            --file=${p_makefile} \
+            [join ${build.pre_args}] \
+            ${p_target} \
+            [join ${p_build_args_list}]"
+
+    ui_debug "mame_build_run: build_cmd_line: ${build_cmd_line}"
+
+    system -W \
+        ${p_work_path} \
+        ${build_cmd_line}
+
+    return 0
+}
+
+#------------------------------------------------------------------------------
+# Variants
+#------------------------------------------------------------------------------
+
+# Universal variant is untested
+universal_variant no
+
+variant debug \
+        description {Enable debug support} {
+    mame_variant_debug_setup
+}
+
+variant tools \
+        description {Compile and install the mame tools like chdman and others} {
+    mame_variant_tools_setup
+}
+
+default_variants-append \
+    +tools
+
+# Python variants eliminated; setup via default Python version
+mame_variant_python_setup \
+    ${g_mame_pyver_major} \
+    ${g_mame_pyver_minor}
+
+#------------------------------------------------------------------------------
+# Phases
+#------------------------------------------------------------------------------
+
+proc pre_config {} {
+    global build.args
+    global g_mame_python_info_dict
+    global g_mame_build_arch_64
+    global g_mame_build_args_docs_list
+    global g_mame_build_args_bgfx_list
+    global g_mame_build_args_dist_list
+    global g_mame_build_targets_bgfx_list
+
+    # Main - update build args
+    # Note: These need to be set first, as they're also used below
+    set py_bin [dict get ${g_mame_python_info_dict} py_bin]
+    build.args-append \
+        "PTR64=${g_mame_build_arch_64}" \
+        "PYTHON_EXECUTABLE=${py_bin}"
+    unset py_bin
+
+    # Documentation - update build args
+    set sphinx_bin [dict get ${g_mame_python_info_dict} sphinx_bin]
+    set build_args_docs \
+        [list \
+            "SPHINXBUILD=${sphinx_bin}" \
+        ]
+    set g_mame_build_args_docs_list \
+        [concat \
+            ${g_mame_build_args_docs_list} \
+            ${build_args_docs} \
+        ]
+    unset build_args_docs
+    unset sphinx_bin
+
+    # BGFX - update build args
+    # Combine the args for main build, with those that are BGFX-specific
+    set g_mame_build_args_bgfx_list \
+        [concat \
+            ${build.args} \
+            ${g_mame_build_args_bgfx_list} \
+        ]
+
+    # Distribution - update build args
+    # Combine the args for main build, with those that are dist-specific
+    set g_mame_build_args_dist_list \
+        [concat \
+            ${build.args} \
+            ${g_mame_build_args_dist_list} \
+        ]
+
+    # BGFX - add appropriate build target, based on whether debug requested
+    # Note: BGFX doesn't support 32-bit builds. So if/when we enable this,
+    # we'll have to add additional logic to warn about that.
+    if {[variant_isset debug]} {
+        set bgfx_target "osx-debug64"
+    } else {
+        set bgfx_target "osx-release64"
+    }
+    set build_targets_bgfx \
+        [list \
+            ${bgfx_target} \
+        ]
+    set g_mame_build_targets_bgfx_list \
+        [concat \
+            ${g_mame_build_targets_bgfx_list} \
+            ${build_targets_bgfx} \
+        ]
+    unset build_targets_bgfx
+    unset bgfx_target
+
+    ui_debug "Phase pre-configure: g_mame_build_args_docs_list: ${g_mame_build_args_docs_list}"
+    ui_debug "Phase pre-configure: g_mame_build_args_bgfx_list: ${g_mame_build_args_bgfx_list}"
+    ui_debug "Phase pre-configure: g_mame_build_targets_bgfx_list: ${g_mame_build_targets_bgfx_list}"
+    ui_debug "Phase pre-configure: g_mame_build_args_dist_list: ${g_mame_build_args_dist_list}"
+}
+
+pre-configure {
+    pre_config
+}
+
+configure {
+    # Configure; iterate over targets
+    foreach target ${g_mame_config_targets_list} {
+        ui_msg "Building config target: ${target}"
+        mame_build_run \
+            ${worksrcpath} \
+            "makefile" \
+            ${target} \
+            ${build.args}
+    }
+}
+
+pre-build {
+    pre_config
+}
+
+# Override the standard build phase, to work with separate makefiles and targets
+build {
+    # Documentation build; iterate over targets
+    foreach target ${g_mame_build_targets_docs_list} {
+        ui_msg "Building documentation target: ${target}"
+        mame_build_run \
+            "${worksrcpath}/docs" \
+            "Makefile" \
+            ${target} \
+            ${g_mame_build_args_docs_list}
+    }
+
+    # BGFX build; iterate over targets, if enabled
+    if {${g_mame_build_bgfx_enabled}} {
+        foreach target ${g_mame_build_targets_bgfx_list} {
+            ui_msg "Building bgfx target: ${target}"
+            mame_build_run \
+                "${worksrcpath}/3rdparty/bgfx" \
+                "makefile" \
+                ${target} \
+                ${g_mame_build_args_bgfx_list}
+        }
+    } else {
+        ui_debug "Phase build: BGFX build disabled"
+    }
+
+    # Main build; iterate over targets
+    foreach target ${g_mame_build_targets_main_list} {
+        ui_msg "Building main target: ${target}"
+        mame_build_run \
+            ${worksrcpath} \
+            "makefile" \
+            ${target} \
+            ${build.args}
+    }
+
+    # Distribution build; iterate over targets
+    foreach target ${g_mame_build_targets_dist_list} {
+        ui_msg "Building distribution target: ${target}"
+        mame_build_run \
+            ${worksrcpath} \
+            "dist.mak" \
+            ${target} \
+            ${g_mame_build_args_dist_list}
+    }
+
+    unset target
+}
+
+post-build {
+    set mame_release_dir \
+        [mame_get_release_dir]
+    set mame_release_doc_dir \
+        "${mame_release_dir}/docs/man"
+
+    ui_debug "Phase post-build: mame_release_dir: ${mame_release_dir}"
+    ui_debug "Phase post-build: mame_release_doc_dir: ${mame_release_doc_dir}"
+
+    # Rename Tools-related man pages, to include defined prefix
+    if {[variant_isset tools]} {
+        set man_page_rename_list \
+            [glob -nocomplain -type f \
+                -directory ${mame_release_doc_dir} \
+                *.1]
+        ui_debug "Phase post-build: man_page_rename_list: ${man_page_rename_list}"
+        foreach tgt ${man_page_rename_list} {
+            set fn [file tail ${tgt}]
+            set fn_new "${g_mame_tools_prefix}${fn}"
+            ui_debug "Phase post-build: renaming man page: ${fn} -> ${fn_new}"
+            move ${tgt} "${mame_release_doc_dir}/${fn_new}"
+        }
+        unset man_page_rename_list
+    }
+
+    # Copy generated Mame man page, joining pre-generated files for Tools
+    ui_debug "Phase post-build: Copying man page: mame.1"
+    copy "${worksrcpath}/docs/build/man/MAME.1" \
+        "${mame_release_doc_dir}/mame.1"
+
+    # Remove section 6 man pages, which aren't helpful
+    set man_page_delete_list \
+        [glob -nocomplain -type f \
+            -directory ${mame_release_doc_dir} \
+            *.6]
+    ui_debug "Phase post-build: man_page_delete_list: ${man_page_delete_list}"
+    foreach tgt ${man_page_delete_list} {
+        ui_debug "Phase post-build: deleting man page: ${tgt}"
+        delete ${tgt}
+    }
+    unset tgt
+    unset man_page_delete_list
+
+    unset mame_release_doc_dir
+    unset mame_release_dir
+}
+
+pre-destroot {
+    set mame_target_dir "${destroot}${prefix}/libexec/mame"
+    set mame_share_dir "${destroot}${prefix}/share/mame"
+    set mame_dir_create_list \
+        [mame_get_dir_create_list ${mame_target_dir} ${mame_share_dir}]
+
+    # Create directories
+    foreach tgt ${mame_dir_create_list} {
+        set dn [file tail ${tgt}]
+        ui_debug "Phase pre-destroot: creating directory: ${dn}"
+        xinstall -d ${tgt}
+    }
+    unset tgt
+
+    unset mame_dir_create_list
+    unset mame_share_dir
+    unset mame_target_dir
+}
+
+destroot {
+    set mame_target_dir "${destroot}${prefix}/libexec/mame"
+    set mame_share_dir "${destroot}${prefix}/share/mame"
+    set mame_release_dir \
+        [mame_get_release_dir]
+    set mame_copy_list \
+        [mame_get_copy_list ${mame_release_dir} ${worksrcpath} ${executable}]
+
+    ui_debug "Phase destroot: mame_release_dir: ${mame_release_dir}"
+
+    # Copy content
+    foreach tgt ${mame_copy_list} {
+        ui_debug "Phase destroot: Copying content: ${tgt}"
+        copy ${tgt} ${mame_target_dir}
+    }
+    # For Tools, prefix each command with defined prefix
+    if {[variant_isset tools]} {
+        set mame_tools_list \
+            [mame_get_tools_list ${mame_release_dir} ""]
+        foreach tgt ${mame_tools_list} {
+            set fn [file tail ${tgt}]
+            set fn_dest "${mame_target_dir}/${g_mame_tools_prefix}${fn}"
+            if {[file exists ${tgt}]} {
+                ui_debug "Phase destroot: Copying tool: ${fn}"
+                copy ${tgt} ${fn_dest}
+            } else {
+                # Distribution doesn't copy everything, so fall back to worksrcdir
+                ui_debug "Phase destroot: Tool missing from dist, srcing from worksrcpath: ${fn}"
+                copy "${worksrcpath}/${fn}" ${fn_dest}
+            }
+        }
+        unset mame_tools_list
+    }
+    unset tgt
+
+    # Copy all docs
+    ui_debug "Phase destroot: Copying docs"
+    copy "${mame_release_dir}/docs" \
+        ${mame_share_dir}
+
+    unset mame_copy_list
+    unset mame_release_dir
+    unset mame_share_dir
+    unset mame_target_dir
+}
+
+post-destroot {
+    set mp_man_dest_dir "${destroot}${prefix}/share/man/man1"
+    set mame_target_dir "${destroot}${prefix}/libexec/mame"
+    set mame_share_dir "${destroot}${prefix}/share/mame"
+    set mame_launch_script "${mame_target_dir}/mame.sh"
+    set mame_launch_link "${destroot}${prefix}/bin/mame"
+
+    # Create launch wrapper script
+    ui_debug "Phase post-destroot: creating launch script"
+    xinstall ${filespath}/mame-script-template-launcher.sh \
+        ${mame_launch_script}
+    # Substitute placeholder with real executable name
+    reinplace "s|@@MACPORTS_MAME_EXECUTABLE@@|${executable}|g" \
+        ${mame_launch_script}
+    # Create soft link 'mame', to launch wrapper script
+    ln -s "${prefix}/libexec/mame/mame.sh" \
+        ${mame_launch_link}
+
+    # Create soft links to Tools executables
+    if {[variant_isset tools]} {
+        set mame_tools_list \
+            [mame_get_tools_list ${mame_target_dir} ${g_mame_tools_prefix}]
+        ui_debug "Phase post-destroot: mame_tools_list: ${mame_tools_list}"
+        foreach f ${mame_tools_list} {
+            ui_debug "Phase post-destroot: soft linking tool: ${f}"
+            set fn [file tail ${f}]
+            ln -s "${prefix}/libexec/mame/${fn}" \
+                "${destroot}${prefix}/bin/${fn}"
+        }
+        unset mame_tools_list
+    }
+
+    set man_page_files \
+        [glob -nocomplain -type f \
+            -directory "${destroot}${prefix}/share/mame/docs/man" \
+            *.1]
+    ui_debug "Phase post-destroot: man_page_files: ${man_page_files}"
+
+    # Create soft links to man pages
+    xinstall -d ${mp_man_dest_dir}
+    foreach f ${man_page_files} {
+        ui_debug "Phase post-destroot: man pages: soft linking to: ${f}"
+        set fn [file tail ${f}]
+        ln -s "${prefix}/share/mame/docs/man/${fn}" \
+            "${mp_man_dest_dir}/${fn}"
+    }
+    unset f
+    unset man_page_files
+
+    unset mame_launch_link
+    unset mame_launch_script
+    unset mame_share_dir
+    unset mame_target_dir
+    unset mp_man_dest_dir
+}
+
+#------------------------------------------------------------------------------
+# Notes
+#------------------------------------------------------------------------------
+
+notes {
+    * Mame is launched via command 'mame'.
+    * If a blank screen is encountered, press ESC to exit, and then re-launch\
+    with an alternative video option. For example:
+        mame -video accel
+        mame -video opengl
+    * If you're new to Mame, our tutorial will quickly walk you through the\
+    process of setting up a new game:
+        https://trac.macports.org/wiki/howto/Mame
+}
+
+if {[variant_isset tools]} {
+    notes-append {
+    * Mame tools are also installed. Each has a prefix of 'mame-', to avoid\
+    conflicts with system tools. For example:
+        mame-imgtool
+        mame-split
+    }
+}
+

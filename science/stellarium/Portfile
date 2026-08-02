@@ -1,0 +1,179 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem      1.0
+PortGroup       github 1.0
+PortGroup       cmake 1.1
+PortGroup       qt6 1.0
+
+github.setup    Stellarium stellarium 26.2 v
+github.tarball_from \
+                releases
+revision        0
+
+categories      science
+installs_libs   no
+license         GPL-2+
+maintainers     {mps @Schamschula} openmaintainer
+
+platforms       {darwin >= 19}
+
+description     Stellarium is a free open source planetarium for your computer.
+
+long_description {*}${description} \
+    It shows a realistic sky in 3D, just like what you see with the naked eye, \
+    binoculars or a telescope. It is being used in planetarium projectors. Just \
+    set your coordinates and go.
+
+homepage        https://stellarium.org/
+
+conflicts       stellarium-qt4
+
+checksums       rmd160  62a978619530b4c882014a75bd37af431d6ac2c3 \
+                sha256  a564cb133ab1b2ff7587ea8a9d5659433af0502743167eb354233fea2795188c \
+                size    579133105
+
+# builds as 64-bit only, according to its top-level CMakeLists.txt file
+universal_variant   no
+
+depends_build-append \
+    path:bin/doxygen:doxygen
+
+depends_lib-append \
+    port:zlib \
+    path:lib/libgps.dylib:gpsd \
+    port:gettext \
+    port:qt6-qtcharts \
+    port:qt6-qtmultimedia \
+    port:qt6-qtpositioning \
+    port:qt6-qtserialport \
+    port:qt6-qttools
+
+configure.args-append \
+    -DQt6LinguistTools_DIR=${prefix}/libexec/qt6/lib/cmake/Qt6LinguistTools/
+
+# for ShowMySky plugin
+depends_lib-append \
+    port:eigen3 \
+    port:glm
+
+# fix the install prefix for MP use only
+patchfiles-append patch-CMakeLists.txt.diff
+
+compiler.c_standard   2011
+compiler.cxx_standard 2017
+
+# prevent opportunistic use of ccache
+if {![tbool configure.ccache]} {
+    configure.args-append -DCCACHE_PROGRAM=""
+}
+
+# prevent opportunistic use of exiv2 by LensDistortionEstimator plugin since
+# it requires a newer version of exiv2 than we currently have in MacPorts.
+# https://trac.macports.org/ticket/68991
+# https://trac.macports.org/ticket/69170
+configure.args-append \
+    -DCMAKE_DISABLE_FIND_PACKAGE_exiv2=ON
+
+# special args for our needs
+configure.args-append \
+    -DMP_APPLICATIONS_DIR=${applications_dir}
+
+# This post-destroot phase is similar to the 'make macosx_bundle' target,
+# but it does not copy libraries into the bundle and does not require perl as
+# another dependency
+post-destroot {
+    set appdir ${destroot}${applications_dir}/Stellarium.app/Contents
+
+    # copy other useful file(s)
+    copy ${worksrcpath}/data/qt.conf ${appdir}/Resources/
+}
+
+# this is the only part of Stellarium that requires Python
+variant RemoteControl description "build RemoteControl plugin" {}
+
+default_variants-append +RemoteControl
+
+if {[variant_isset RemoteControl]} {
+
+    # specify the Python dependencies; these are checked for at configure,
+    # then used for building, but not at runtime.
+
+    set pythons_versions_with_dot {3.10 3.11 3.12 3.13 3.14}
+
+    set pythons_ports {}
+    set pythons_versions_no_dot {}
+    foreach s ${pythons_versions_with_dot} {
+        lappend pythons_ports python[string map {. {}} ${s}]
+        lappend pythons_versions_no_dot [string map {. {}} ${s}]
+    }
+
+    foreach v ${pythons_versions_with_dot} {
+        set s [string map {. {}} ${v}]
+        set p python${s}
+        set i [lsearch -exact ${pythons_ports} ${p}]
+        set c [lreplace ${pythons_ports} ${i} ${i}]
+        variant ${p} description "Build ${name} using Python ${v}" conflicts {*}${c} ""
+    }
+
+    #default to Python 3.14
+    set selected_python_no_dot 314
+    foreach v ${pythons_versions_with_dot} {
+        set s [string map {. {}} ${v}]
+        if {[variant_isset python${s}]} {
+            set selected_python_no_dot ${s}
+        }
+    }
+    default_variants +python${selected_python_no_dot}
+
+    # make sure the default python variant wasn't
+    # deselected without selecting another one
+    set selected_python_no_dot ""
+    foreach v ${pythons_versions_with_dot} {
+        set s [string map {. {}} ${v}]
+        if {[variant_isset python${s}]} {
+            set selected_python_no_dot ${s}
+        }
+    }
+
+    if {${selected_python_no_dot} eq ""} {
+        set py_vars ""
+        set final_s [string map {. {}} [lindex ${pythons_versions_with_dot} end]]
+        foreach s ${pythons_suffixes} {
+            if {${s} eq ${final_s}} {
+                set py_vars "${py_vars}or "
+            }
+            set py_vars "${py_vars}+python${s}"
+            if {${s} ne ${final_s}} {
+                set py_vars "${py_vars}, "
+            }
+        }
+        ui_error "\n\nYou must select one of the variants ${py_vars}.\n"
+        return -code error "Invalid variant selection"
+    }
+
+    set PythonVersionNoDot ${selected_python_no_dot}
+
+    set PythonVersionWithDot [lindex ${pythons_versions_with_dot} \
+                                  [lsearch ${pythons_versions_no_dot} \
+                                       ${selected_python_no_dot}]]
+
+    set PythonTopDir "${frameworks_dir}/Python.framework/Versions/${PythonVersionWithDot}"
+
+    set PythonName python${PythonVersionWithDot}
+
+    # required Python
+    depends_lib-append \
+        port:python${PythonVersionNoDot}
+
+    # special args for our needs
+    configure.args-append \
+        -DPYTHON_EXECUTABLE=${prefix}/bin/python${PythonVersionWithDot} \
+        -DUSE_PLUGIN_REMOTECONTROL=YES
+
+} else {
+
+    configure.args-append \
+        -DPYTHON_EXECUTABLE= \
+        -DUSE_PLUGIN_REMOTECONTROL=NO
+
+}

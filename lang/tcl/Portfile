@@ -1,0 +1,169 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                tcl
+version             8.6.18
+revision            0
+# Tk (x11/tk) port depends on this version
+categories          lang
+license             Tcl/Tk
+maintainers         {mcalhoun @MarcusCalhoun-Lopez} {gmx.us:chrischavez @chrstphrchvz} openmaintainer
+platforms           darwin freebsd
+description         Tool Command Language
+long_description    \
+    Tcl (Tool Command Language) is a very powerful but easy to learn dynamic \
+    programming language, suitable for a very wide range of uses, including web \
+    and desktop applications, networking, administration, testing and many more. \
+    Open source and business-friendly, Tcl is a mature yet evolving language \
+    that is truly cross platform, easily deployed and highly extensible.
+
+homepage            https://www.tcl-lang.org/
+configure.cppflags-delete  -I${prefix}/include
+configure.ldflags-delete   -L${prefix}/lib
+
+subport tcl8 {
+    version         8.6.18
+    revision        0
+    checksums       md5     acfe0c9f7d0c626ecf026e834a888da6 \
+                    sha1    84ba661edc5e615f32944e68039db568328f9a47 \
+                    rmd160  633917b67cb502be919cd5194f6f82ab7c216f44 \
+                    sha256  14f9af32b1767ff718477a8f974ad03c34341097e6b43f4ce54644ee974e268e
+}
+subport tcl9 {
+    version         9.0.4
+    revision        0
+    checksums       md5     6c409d091c8f85f8601957bb6e77c8b3 \
+                    sha1    e7f2212f40bd6b98f65841094ef72b33da49f2f2 \
+                    rmd160  41179b681eb73238153889e4ad7920e6646e6a71 \
+                    sha256  d0aed49230bc02a65c1e0229e65f34590a4b037ec40d546f32573b467f7551ea
+    patchfiles-append   zipfs.patch
+    depends_lib-append  port:libtommath
+    configure.cppflags-append   -I${prefix}/include/libtommath
+    configure.args-append   --with-system-libtommath
+}
+master_sites        sourceforge:project/tcl/Tcl/${version}
+
+distname            ${name}${version}-src
+worksrcdir          ${name}${version}/unix
+patch.dir           ${workpath}/${name}${version}
+
+if {$subport eq $name} {
+    # tcl metaport depends on tcl 8 for now - can revisit this when all
+    # dependents switch to depending on a specific subport.
+    set tclmajor 8
+    set tcldepname tcl${tclmajor}
+    depends_lib port:${tcldepname}
+    distfiles
+    # Not noarch so arch checking works transitively
+    test.ignore_archs   yes
+    platforms       any
+    use_configure   no
+    universal_variant   yes
+    build           {}
+    destroot {
+        ln -s tclsh8.6 ${destroot}${prefix}/bin/tclsh
+
+        set incdir ${prefix}/include/${tcldepname}
+        ln -s {*}[glob -directory ${incdir} *] ${destroot}${prefix}/include
+
+        set libdir ${prefix}/lib/${tcldepname}
+        ln -s {*}[glob -directory ${libdir} tcl*Config.sh] ${destroot}${prefix}/lib
+        ln -s libtcl8.6.dylib ${destroot}${prefix}/lib/libtcl.dylib
+        ln -s libtclstub8.6.a ${destroot}${prefix}/lib/libtclstub.a
+        ln -s ${libdir}/pkgconfig/tcl.pc ${destroot}${prefix}/lib/pkgconfig
+
+        set mandir ${prefix}/share/${tcldepname}/man
+        foreach sect {1 3 n} {
+            xinstall -d ${destroot}${prefix}/share/man/man${sect}
+            ln -s {*}[glob -directory ${mandir}/man${sect} *] ${destroot}${prefix}/share/man/man${sect}
+        }
+    }
+} else {
+    depends_lib-append  port:zlib
+    set libdir          ${prefix}/lib/${subport}
+    configure.args-append   --disable-corefoundation \
+                            --includedir=${prefix}/include/${subport} \
+                            --libdir=${libdir} \
+                            --mandir=${prefix}/share/${subport}/man \
+                            --enable-man-symlinks
+
+    pre-configure {
+        # sqlite3 package is provided by sqlite3-tcl
+        delete {*}[glob ${worksrcpath}/../pkgs/sqlite*]
+    }
+
+    post-configure {
+        reinplace -E {s|-arch [^ ]+||g} ${worksrcpath}/tclConfig.sh
+    }
+
+    # see https://trac.macports.org/ticket/17189
+    destroot.target-append \
+                        install-private-headers
+    destroot.destdir    INSTALL_ROOT=${destroot}
+    post-destroot {
+        if {${configure.ccache}} {
+            reinplace {/TCL_CC/s/ccache //} ${destroot}${libdir}/tclConfig.sh
+        }
+        if {$subport eq "tcl8"} {
+            foreach lib [glob -directory ${destroot}${libdir} -tails libtcl*.{a,dylib}] {
+                ln -s ${libdir}/${lib} ${destroot}${prefix}/lib
+            }
+        }
+        ln -s ${libdir}/pkgconfig/tcl.pc ${destroot}${prefix}/lib/pkgconfig/${subport}.pc
+    }
+}
+
+if {$subport eq "tcl8"} {
+    configure.args-append   --disable-threads
+
+    variant threads description {add multithreading support} {
+        configure.args-replace --disable-threads \
+                               --enable-threads
+    }
+    default_variants-append +threads
+    pre-activate {
+        set checkfile ${prefix}/bin/tclsh8.6
+        if {[file exists $checkfile] && [registry_file_registered $checkfile] eq "tcl"} {
+            registry_deactivate_composite tcl {} [dict create ports_nodepcheck 1]
+        }
+    }
+}
+
+if {$subport eq $name} {
+    notes "
+    The Sqlite3 Tcl package is now being provided by the sqlite3-tcl port:
+    sudo port install sqlite3-tcl
+    "
+    livecheck.type      none
+} else {
+    platform macosx {
+        # CF is not fork()-safe and software e.g. using tk and fork() will crash
+        variant corefoundation description {Enable CoreFoundation support (not fork-safe)} {
+            configure.args-replace --disable-corefoundation \
+                                   --enable-corefoundation
+        }
+        # tk +quartz crashes at launch without CF support
+        default_variants-append +corefoundation
+    }
+
+    variant memdebug description {enable memory debugging support} {
+        configure.args-append --enable-symbols=mem
+    }
+
+    variant dtrace description {Enable DTrace static probes} {
+        configure.args-append --enable-dtrace
+    }
+
+    platform darwin {
+        configure.args-append tcl_cv_type_64bit="long long"
+    }
+
+    test.run            yes
+    livecheck.type      regex
+    if {$subport eq "tcl8"} {
+        livecheck.regex     {Tcl/Tk (8(?:\.\d+)*)</a>}
+    } else {
+        livecheck.regex     {Tcl/Tk (\d+(?:\.\d+)*)</a>}
+    }
+}

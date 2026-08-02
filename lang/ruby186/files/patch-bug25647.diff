@@ -1,0 +1,351 @@
+Index: ext/openssl/ossl_x509attr.c
+===================================================================
+--- ext/openssl/ossl_x509attr.c	(revision 28642)
++++ ext/openssl/ossl_x509attr.c	(working copy)
+@@ -197,8 +197,9 @@
+ 	ossl_str_adjust(str, p);
+     }
+     else{
+-	length = i2d_ASN1_SET_OF_ASN1_TYPE(attr->value.set, NULL,
+-			i2d_ASN1_TYPE, V_ASN1_SET, V_ASN1_UNIVERSAL, 0);
++	length = i2d_ASN1_SET_OF_ASN1_TYPE(attr->value.set,
++			(unsigned char **) NULL, i2d_ASN1_TYPE,
++			V_ASN1_SET, V_ASN1_UNIVERSAL, 0);
+ 	str = rb_str_new(0, length);
+ 	p = RSTRING(str)->ptr;
+ 	i2d_ASN1_SET_OF_ASN1_TYPE(attr->value.set, &p,
+Index: ext/openssl/ossl_ssl.c
+===================================================================
+--- ext/openssl/ossl_ssl.c	(revision 28642)
++++ ext/openssl/ossl_ssl.c	(working copy)
+@@ -791,10 +791,10 @@
+     }
+     chain = SSL_get_peer_cert_chain(ssl);
+     if(!chain) return Qnil;
+-    num = sk_num(chain);
++    num = sk_X509_num(chain);
+     ary = rb_ary_new2(num);
+     for (i = 0; i < num; i++){
+-	cert = (X509*)sk_value(chain, i);
++	cert = sk_X509_value(chain, i);
+ 	rb_ary_push(ary, ossl_x509_new(cert));
+     }
+ 
+Index: ext/openssl/ossl.c
+===================================================================
+--- ext/openssl/ossl.c	(revision 28642)
++++ ext/openssl/ossl.c	(working copy)
+@@ -92,7 +92,7 @@
+ 
+ #define OSSL_IMPL_SK2ARY(name, type)	        \
+ VALUE						\
+-ossl_##name##_sk2ary(STACK *sk)			\
++ossl_##name##_sk2ary(STACK_OF(type) *sk)	\
+ {						\
+     type *t;					\
+     int i, num;					\
+@@ -102,7 +102,7 @@
+ 	OSSL_Debug("empty sk!");		\
+ 	return Qnil;				\
+     }						\
+-    num = sk_num(sk);				\
++    num = sk_##type##_num(sk);			\
+     if (num < 0) {				\
+ 	OSSL_Debug("items in sk < -1???");	\
+ 	return rb_ary_new();			\
+@@ -110,7 +110,7 @@
+     ary = rb_ary_new2(num);			\
+ 						\
+     for (i=0; i<num; i++) {			\
+-	t = (type *)sk_value(sk, i);		\
++	t = sk_##type##_value(sk, i);		\
+ 	rb_ary_push(ary, ossl_##name##_new(t));	\
+     }						\
+     return ary;					\
+Index: ext/openssl/ossl.h
+===================================================================
+--- ext/openssl/ossl.h	(revision 28642)
++++ ext/openssl/ossl.h	(working copy)
+@@ -107,6 +107,13 @@
+ } while (0)
+ 
+ /*
++ * Compatibility
++ */
++#if OPENSSL_VERSION_NUMBER >= 0x10000000L
++#define STACK _STACK
++#endif
++
++/*
+  * String to HEXString conversion
+  */
+ int string2hex(char *, int, char **, int *);
+Index: ext/openssl/ossl_x509crl.c
+===================================================================
+--- ext/openssl/ossl_x509crl.c	(revision 28642)
++++ ext/openssl/ossl_x509crl.c	(working copy)
+@@ -262,7 +262,7 @@
+     VALUE ary, revoked;
+ 
+     GetX509CRL(self, crl);
+-    num = sk_X509_CRL_num(X509_CRL_get_REVOKED(crl));
++    num = sk_X509_REVOKED_num(X509_CRL_get_REVOKED(crl));
+     if (num < 0) {
+ 	OSSL_Debug("num < 0???");
+ 	return rb_ary_new();
+@@ -270,7 +270,7 @@
+     ary = rb_ary_new2(num);
+     for(i=0; i<num; i++) {
+ 	/* NO DUP - don't free! */
+-	rev = (X509_REVOKED *)sk_X509_CRL_value(X509_CRL_get_REVOKED(crl), i);
++	rev = sk_X509_REVOKED_value(X509_CRL_get_REVOKED(crl), i);
+ 	revoked = ossl_x509revoked_new(rev);
+ 	rb_ary_push(ary, revoked);
+     }
+Index: ext/openssl/ossl_pkcs7.c
+===================================================================
+--- ext/openssl/ossl_pkcs7.c	(revision 28642)
++++ ext/openssl/ossl_pkcs7.c	(working copy)
+@@ -543,11 +543,33 @@
+     return self;
+ }
+ 
+-static STACK *
+-pkcs7_get_certs_or_crls(VALUE self, int want_certs)
++static STACK_OF(X509) *
++pkcs7_get_certs(VALUE self)
+ {
+     PKCS7 *pkcs7;
+     STACK_OF(X509) *certs;
++    int i;
++
++    GetPKCS7(self, pkcs7);
++    i = OBJ_obj2nid(pkcs7->type);
++    switch(i){
++    case NID_pkcs7_signed:
++        certs = pkcs7->d.sign->cert;
++        break;
++    case NID_pkcs7_signedAndEnveloped:
++        certs = pkcs7->d.signed_and_enveloped->cert;
++        break;
++    default:
++        certs = NULL;
++    }
++
++    return certs;
++}
++
++static STACK_OF(X509_CRL) *
++pkcs7_get_crls(VALUE self)
++{
++    PKCS7 *pkcs7;
+     STACK_OF(X509_CRL) *crls;
+     int i;
+ 
+@@ -555,18 +577,16 @@
+     i = OBJ_obj2nid(pkcs7->type);
+     switch(i){
+     case NID_pkcs7_signed:
+-        certs = pkcs7->d.sign->cert;
+         crls = pkcs7->d.sign->crl;
+         break;
+     case NID_pkcs7_signedAndEnveloped:
+-        certs = pkcs7->d.signed_and_enveloped->cert;
+         crls = pkcs7->d.signed_and_enveloped->crl;
+         break;
+     default:
+-        certs = crls = NULL;
++        crls = NULL;
+     }
+ 
+-    return want_certs ? certs : crls;
++    return crls;
+ }
+ 
+ static VALUE
+@@ -581,7 +601,7 @@
+     STACK_OF(X509) *certs;
+     X509 *cert;
+ 
+-    certs = pkcs7_get_certs_or_crls(self, 1);
++    certs = pkcs7_get_certs(self);
+     while((cert = sk_X509_pop(certs))) X509_free(cert);
+     rb_iterate(rb_each, ary, ossl_pkcs7_set_certs_i, self);
+ 
+@@ -591,7 +611,7 @@
+ static VALUE
+ ossl_pkcs7_get_certificates(VALUE self)
+ {
+-    return ossl_x509_sk2ary(pkcs7_get_certs_or_crls(self, 1));
++    return ossl_x509_sk2ary(pkcs7_get_certs(self));
+ }
+ 
+ static VALUE
+@@ -621,7 +641,7 @@
+     STACK_OF(X509_CRL) *crls;
+     X509_CRL *crl;
+ 
+-    crls = pkcs7_get_certs_or_crls(self, 0);
++    crls = pkcs7_get_crls(self);
+     while((crl = sk_X509_CRL_pop(crls))) X509_CRL_free(crl);
+     rb_iterate(rb_each, ary, ossl_pkcs7_set_crls_i, self);
+ 
+@@ -631,7 +651,7 @@
+ static VALUE
+ ossl_pkcs7_get_crls(VALUE self)
+ {
+-    return ossl_x509crl_sk2ary(pkcs7_get_certs_or_crls(self, 0));
++    return ossl_x509crl_sk2ary(pkcs7_get_crls(self));
+ }
+ 
+ static VALUE
+Index: test/openssl/test_x509cert.rb
+===================================================================
+--- test/openssl/test_x509cert.rb	(revision 28642)
++++ test/openssl/test_x509cert.rb	(working copy)
+@@ -134,8 +134,8 @@
+                       nil, nil, OpenSSL::Digest::SHA1.new) 
+     assert_equal(false, cert.verify(@rsa1024))
+     assert_equal(true,  cert.verify(@rsa2048))
+-    assert_equal(false, cert.verify(@dsa256))
+-    assert_equal(false, cert.verify(@dsa512))
++    assert_equal(false, certificate_error_returns_false { cert.verify(@dsa256) })
++    assert_equal(false, certificate_error_returns_false { cert.verify(@dsa512) })
+     cert.serial = 2
+     assert_equal(false, cert.verify(@rsa2048))
+ 
+@@ -143,17 +143,17 @@
+                       nil, nil, OpenSSL::Digest::MD5.new) 
+     assert_equal(false, cert.verify(@rsa1024))
+     assert_equal(true,  cert.verify(@rsa2048))
+-    assert_equal(false, cert.verify(@dsa256))
+-    assert_equal(false, cert.verify(@dsa512))
++    assert_equal(false, certificate_error_returns_false { cert.verify(@dsa256) })
++    assert_equal(false, certificate_error_returns_false { cert.verify(@dsa512) })
+     cert.subject = @ee1
+     assert_equal(false, cert.verify(@rsa2048))
+ 
+     cert = issue_cert(@ca, @dsa512, 1, Time.now, Time.now+3600, [],
+                       nil, nil, OpenSSL::Digest::DSS1.new) 
+-    assert_equal(false, cert.verify(@rsa1024))
+-    assert_equal(false, cert.verify(@rsa2048))
+-    assert_equal(false, cert.verify(@dsa256))
+-    assert_equal(true,  cert.verify(@dsa512))
++    assert_equal(false, certificate_error_returns_false { cert.verify(@rsa1024) })
++    assert_equal(false, certificate_error_returns_false { cert.verify(@rsa2048) })
++    assert_equal(false, cert.verify(@rsa256))
++    assert_equal(false, cert.verify(@rsa512))
+     cert.not_after = Time.now 
+     assert_equal(false, cert.verify(@dsa512))
+ 
+@@ -165,11 +165,15 @@
+       cert = issue_cert(@ca, @dsa512, 1, Time.now, Time.now+3600, [],
+                         nil, nil, OpenSSL::Digest::MD5.new) 
+     }
+-    assert_raises(OpenSSL::X509::CertificateError){
+-      cert = issue_cert(@ca, @dsa512, 1, Time.now, Time.now+3600, [],
+-                        nil, nil, OpenSSL::Digest::SHA1.new) 
+-    }
+   end
++  
++  private
++  
++  def certificate_error_returns_false
++    yield
++  rescue OpenSSL::X509::CertificateError
++    false
++  end
+ end
+ 
+ end
+Index: test/openssl/test_x509crl.rb
+===================================================================
+--- test/openssl/test_x509crl.rb	(revision 28642)
++++ test/openssl/test_x509crl.rb	(working copy)
+@@ -197,8 +197,8 @@
+                     cert, @rsa2048, OpenSSL::Digest::SHA1.new)
+     assert_equal(false, crl.verify(@rsa1024))
+     assert_equal(true,  crl.verify(@rsa2048))
+-    assert_equal(false, crl.verify(@dsa256))
+-    assert_equal(false, crl.verify(@dsa512))
++    assert_equal(false, crl_error_returns_false { crl.verify(@dsa256) })
++    assert_equal(false, crl_error_returns_false { crl.verify(@dsa512) })
+     crl.version = 0
+     assert_equal(false, crl.verify(@rsa2048))
+ 
+@@ -206,13 +206,21 @@
+                       nil, nil, OpenSSL::Digest::DSS1.new)
+     crl = issue_crl([], 1, Time.now, Time.now+1600, [],
+                     cert, @dsa512, OpenSSL::Digest::DSS1.new)
+-    assert_equal(false, crl.verify(@rsa1024))
+-    assert_equal(false, crl.verify(@rsa2048))
++    assert_equal(false, crl_error_returns_false { crl.verify(@rsa1024) })
++    assert_equal(false, crl_error_returns_false { crl.verify(@rsa2048) })
+     assert_equal(false, crl.verify(@dsa256))
+     assert_equal(true,  crl.verify(@dsa512))
+     crl.version = 0
+     assert_equal(false, crl.verify(@dsa512))
+   end
++  
++  private
++  
++  def crl_error_returns_false
++    yield
++  rescue OpenSSL::X509::CRLError
++    false
++  end
+ end
+ 
+ end
+Index: test/openssl/test_x509req.rb
+===================================================================
+--- test/openssl/test_x509req.rb	(revision 28642)
++++ test/openssl/test_x509req.rb	(working copy)
+@@ -107,22 +107,22 @@
+     req = issue_csr(0, @dn, @rsa1024, OpenSSL::Digest::SHA1.new)
+     assert_equal(true,  req.verify(@rsa1024))
+     assert_equal(false, req.verify(@rsa2048))
+-    assert_equal(false, req.verify(@dsa256))
+-    assert_equal(false, req.verify(@dsa512))
++    assert_equal(false, request_error_returns_false { req.verify(@dsa256) })
++    assert_equal(false, request_error_returns_false { req.verify(@dsa512) })
+     req.version = 1
+     assert_equal(false, req.verify(@rsa1024))
+ 
+     req = issue_csr(0, @dn, @rsa2048, OpenSSL::Digest::MD5.new)
+     assert_equal(false, req.verify(@rsa1024))
+     assert_equal(true,  req.verify(@rsa2048))
+-    assert_equal(false, req.verify(@dsa256))
+-    assert_equal(false, req.verify(@dsa512))
++    assert_equal(false, request_error_returns_false { req.verify(@dsa256) })
++    assert_equal(false, request_error_returns_false { req.verify(@dsa512) })
+     req.subject = OpenSSL::X509::Name.parse("/C=JP/CN=FooBar")
+     assert_equal(false, req.verify(@rsa2048))
+ 
+     req = issue_csr(0, @dn, @dsa512, OpenSSL::Digest::DSS1.new)
+-    assert_equal(false, req.verify(@rsa1024))
+-    assert_equal(false, req.verify(@rsa2048))
++    assert_equal(false, request_error_returns_false { req.verify(@rsa1024) })
++    assert_equal(false, request_error_returns_false { req.verify(@rsa2048) })
+     assert_equal(false, req.verify(@dsa256))
+     assert_equal(true,  req.verify(@dsa512))
+     req.public_key = @rsa1024.public_key
+@@ -131,10 +131,16 @@
+     assert_raise(OpenSSL::X509::RequestError){
+       issue_csr(0, @dn, @rsa1024, OpenSSL::Digest::DSS1.new) }
+     assert_raise(OpenSSL::X509::RequestError){
+-      issue_csr(0, @dn, @dsa512, OpenSSL::Digest::SHA1.new) }
+-    assert_raise(OpenSSL::X509::RequestError){
+       issue_csr(0, @dn, @dsa512, OpenSSL::Digest::MD5.new) }
+   end
++  
++  private
++  
++  def request_error_returns_false
++    yield
++  rescue OpenSSL::X509::RequestError
++    false
++  end
+ end
+ 
+ end

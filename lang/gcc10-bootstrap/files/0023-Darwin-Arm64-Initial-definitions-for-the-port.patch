@@ -1,0 +1,937 @@
+From 5224dbbb985428f92833250ae7d80f98722ac4f3 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sun, 9 Aug 2020 23:04:15 +0100
+Subject: [PATCH] Darwin, Arm64 : Initial definitions for the port.
+
+This is enough to make a buildable cross-compiler on x86_64
+Darwin and compile trivial codes.  Although the link phase might
+not succeed - one can link objects manually and get an exe
+that works.
+
+There's an initial implementation of the rule changes for darwinpcs.
+
+There's an initial (pretty hacky) set of changes to deal with the
+post-fix assembly notation for Mach-O relocs.
+
+There are a few places where ELF was assumed, and we need to
+prevent incompatible output for Mach-O (probably there are other
+ways to do this).
+
++ Pick up atomic builtins from the libgcc.a
+
+CHECKME: should these be exported from the shared lib? (at
+present, that doesn't seem to be ideal).  Look at what's done for
+the clang toolchain.
+
++ long double is DF not TF :(
+
+We will need to figure out what to do about supporting XXX*16 a some point.
+
++ Fix ptrdiff type.
+
+This was wrong (the size needs to track the 64-bitness and was failing
+to do so.
+
++ Add in driver sef-specs.
+
+Ensure that we issue the Darwin driver self specs and set the
+mabi and little-endian flags.  clang accepts -mabi=darwinpcs
+so we allow that (but it means the same as lp64 at present since
+the target is determined at configuration time).
+
++ Fix an other build error for Darwin.
+
+Since we don't emit ELF function decorations this means that
+some of the variables are unused.
+
++  Initial implementation for EH without .cfi_xxxx
+
+While we can (most likely) make the .cfi_ codegen work, there are
+comments in the Ada code that suggest the capabilities of the unwinder
+are somewhat restricted.  At least this option allows for the case of using
+libgcc_eh when an exe is self-contained.
+
++ Just whitespace fixes NFC.
+
++ We don't yet support TF, so reject 'q' suffix.
+
+The floating point literal suffix 'q' is specifically stated to be used
+for _float128, which we don't yet support.
+
++ Connect up the subtarget builtins i.e. __builtin_cfstring.
+
+The idea of OS-specific subtarget builtins doesn't fit too well with
+the general organisation of the aarch64 ones.
+
+What this does is to add it into the "GENERAL" class (but the
+darwin-specific code has no idea that the builtin code number has
+subfields).
++ Build fix for subtarget builtins.
+
+One either needs to define SUBTARGET_INIT_BUILTINS to empty
+or conditionalize its use
+
++ Connect up the sub-target attribute table.
+
+Darwin has some Mach-O / OS attributes, add these to the end of
+the aarch64 set..
+
++ Connect up the pragma table.
+
+Darwin has some Mach-O / OS-specific pragmas, connected these to
+the end of the aarch64 table.
+
+gcc/ChangeLog:
+
+	* config.gcc: Handle aarch64 and arm64 darwin.
+	* config/aarch64/aarch64-protos.h (enum aarch64_symbol_type):
+	Provide for symbol classifications for Mach-O.
+	* config/aarch64/aarch64.c (aarch64_elf_asm_destructor):
+	Don't define these for Mach-O (it's not ELF!).
+	(handle_aarch64_vector_pcs_attribute):
+	Handle darwinpcs.
+	(aarch64_reg_save_mode): Likewise.
+	(aarch64_load_symref_appropriately): Handle Mach-O.
+	(aarch64_expand_mov_immediate): Likewise.
+	(aarch64_layout_arg): Handle darwinpcs rules.
+	(aarch64_function_arg): Likewise.
+	(aarch64_init_cumulative_args): Likewise.
+	(aarch64_function_arg_advance): Likewise.
+	(aarch64_print_operand): Likewise (we can probably do
+	better).
+	(aarch64_print_address_internal): Likewise.
+	(aarch64_asm_output_labelref): Likewise.
+	(initialize_aarch64_code_model): Accept large PIC for
+	Mach-O - of course, that doesn't mean it works.
+	(aarch64_classify_symbol): Only emit ELF directives if they
+	are available.
+	(aarch64_declare_function_name): Likewise.
+	(aarch64_asm_output_alias): Likewise.
+	(aarch64_sls_emit_shared_blr_thunks): Likewise.
+	(TARGET_ASM_UNALIGNED_HI_OP): New.
+	(TARGET_ASM_UNALIGNED_SI_OP): New.
+	(TARGET_ASM_UNALIGNED_DI_OP): New.
+	* config/aarch64/aarch64.h (TARGET_MACHO): Declare as 0.
+	(enum arm_pcs): Add darwinpcs.
+	(SUBTARGET_EXTRA_SPECS): New.
+	(EXTRA_SPECS): Allow for sub-target specs.
+	* config/aarch64/aarch64.md (unspec enum):  Add UNSPEC_MACHOPIC_OFFSET.
+	(ldr_got_small_<mode>): Allow for postfix assembler syntax.
+	(ldr_got_small_<mode>): Likewise.
+	* config/aarch64/darwin.h: New file.
+	* config/aarch64/t-aarch64-darwin: New file.
+
+(cherry picked from commit 419fa01def5a199dfe7aa230f6dc354b77b2b1a6)
+Signed-off-by: Kirill A. Korinsky <kirill@korins.ky>
+---
+ gcc/config.gcc                        |   5 +
+ gcc/config/aarch64/aarch64-builtins.c |  10 ++
+ gcc/config/aarch64/aarch64-c.c        |   4 +
+ gcc/config/aarch64/aarch64-protos.h   |   9 +
+ gcc/config/aarch64/aarch64.c          | 115 ++++++++++++-
+ gcc/config/aarch64/aarch64.h          |  11 +-
+ gcc/config/aarch64/aarch64.md         |  11 +-
+ gcc/config/aarch64/aarch64.opt        |   3 +
+ gcc/config/aarch64/darwin.h           | 226 ++++++++++++++++++++++++++
+ gcc/config/aarch64/t-aarch64-darwin   |  25 +++
+ 10 files changed, 407 insertions(+), 12 deletions(-)
+ create mode 100644 gcc/config/aarch64/darwin.h
+ create mode 100644 gcc/config/aarch64/t-aarch64-darwin
+
+diff --git gcc/config.gcc gcc/config.gcc
+index 02b42941c3d..dfd3c0936e2 100644
+--- gcc/config.gcc
++++ gcc/config.gcc
+@@ -1114,6 +1114,11 @@ aarch64*-*-elf | aarch64*-*-fuchsia* | aarch64*-*-rtems*)
+ 	done
+ 	TM_MULTILIB_CONFIG=`echo $TM_MULTILIB_CONFIG | sed 's/^,//'`
+ 	;;
++aarch64-*-darwin* | arm64-*-darwin*)
++	tm_file="${tm_file} aarch64/aarch64-errata.h"
++	tmake_file="${tmake_file} aarch64/t-aarch64 aarch64/t-aarch64-darwin"
++	tm_defines="${tm_defines} TARGET_DEFAULT_ASYNC_UNWIND_TABLES=1"
++	;;
+ aarch64*-*-freebsd*)
+ 	tm_file="${tm_file} dbxelf.h elfos.h ${fbsd_tm_file}"
+ 	tm_file="${tm_file} aarch64/aarch64-elf.h aarch64/aarch64-errata.h aarch64/aarch64-freebsd.h"
+diff --git gcc/config/aarch64/aarch64-builtins.c gcc/config/aarch64/aarch64-builtins.c
+index d92157dff02..3a755b5ed44 100644
+--- gcc/config/aarch64/aarch64-builtins.c
++++ gcc/config/aarch64/aarch64-builtins.c
+@@ -493,6 +493,8 @@ enum aarch64_builtins
+   AARCH64_MEMTAG_BUILTIN_SET_TAG,
+   AARCH64_MEMTAG_BUILTIN_GET_TAG,
+   AARCH64_MEMTAG_BUILTIN_END,
++  /* OS-specific */
++  AARCH64_BUILTIN_CFSTRING,
+   AARCH64_BUILTIN_MAX
+ };
+ 
+@@ -1312,6 +1314,14 @@ aarch64_general_init_builtins (void)
+     aarch64_init_memtag_builtins ();
+ }
+ 
++void
++aarch64_init_subtarget_builtins (void)
++{
++#ifdef SUBTARGET_INIT_BUILTINS
++  SUBTARGET_INIT_BUILTINS;
++#endif
++}
++
+ /* Implement TARGET_BUILTIN_DECL for the AARCH64_BUILTIN_GENERAL group.  */
+ tree
+ aarch64_general_builtin_decl (unsigned code, bool)
+diff --git gcc/config/aarch64/aarch64-c.c gcc/config/aarch64/aarch64-c.c
+index 244b42c3c3c..3af1b553a45 100644
+--- gcc/config/aarch64/aarch64-c.c
++++ gcc/config/aarch64/aarch64-c.c
+@@ -361,4 +361,8 @@ aarch64_register_pragmas (void)
+   targetm.check_builtin_call = aarch64_check_builtin_call;
+ 
+   c_register_pragma ("GCC", "aarch64", aarch64_pragma_aarch64);
++
++#ifdef REGISTER_SUBTARGET_PRAGMAS
++  REGISTER_SUBTARGET_PRAGMAS ();
++#endif
+ }
+diff --git gcc/config/aarch64/aarch64-protos.h gcc/config/aarch64/aarch64-protos.h
+index ef24c48fc14..f799f40ada5 100644
+--- gcc/config/aarch64/aarch64-protos.h
++++ gcc/config/aarch64/aarch64-protos.h
+@@ -108,6 +108,14 @@ enum aarch64_symbol_type
+   SYMBOL_TLSLE24,
+   SYMBOL_TLSLE32,
+   SYMBOL_TLSLE48,
++  SYMBOL_MO_SMALL_ABS,
++  SYMBOL_MO_SMALL_PCR,
++  SYMBOL_MO_SMALL_GOT,
++  SYMBOL_MO_SMALL_TLS,
++  SYMBOL_MO_LARGE_ABS,
++  SYMBOL_MO_LARGE_PCR,
++  SYMBOL_MO_LARGE_GOT,
++  SYMBOL_MO_LARGE_TLS,
+   SYMBOL_FORCE_TO_MEM
+ };
+ 
+@@ -716,6 +724,7 @@ void aarch64_override_options_internal (struct gcc_options *);
+ 
+ const char *aarch64_general_mangle_builtin_type (const_tree);
+ void aarch64_general_init_builtins (void);
++void aarch64_init_subtarget_builtins (void);
+ tree aarch64_general_fold_builtin (unsigned int, tree, unsigned int, tree *);
+ gimple *aarch64_general_gimple_fold_builtin (unsigned int, gcall *);
+ rtx aarch64_general_expand_builtin (unsigned int, tree, rtx, int);
+diff --git gcc/config/aarch64/aarch64.c gcc/config/aarch64/aarch64.c
+index e3fff8cde61..f6120ea1351 100644
+--- gcc/config/aarch64/aarch64.c
++++ gcc/config/aarch64/aarch64.c
+@@ -287,8 +287,10 @@ static bool aarch64_vfp_is_call_or_return_candidate (machine_mode,
+ 						     const_tree,
+ 						     machine_mode *, int *,
+ 						     bool *, bool);
++#if !TARGET_MACHO
+ static void aarch64_elf_asm_constructor (rtx, int) ATTRIBUTE_UNUSED;
+ static void aarch64_elf_asm_destructor (rtx, int) ATTRIBUTE_UNUSED;
++#endif
+ static void aarch64_override_options_after_change (void);
+ static bool aarch64_vector_mode_supported_p (machine_mode);
+ static int aarch64_address_cost (rtx, machine_mode, addr_space_t, bool);
+@@ -1635,6 +1637,7 @@ handle_aarch64_vector_pcs_attribute (tree *node, tree name, tree,
+     case ARM_PCS_SIMD:
+       return NULL_TREE;
+ 
++    case ARM_PCS_DARWINPCS: /* FIXME: check if this is correct.  */
+     case ARM_PCS_SVE:
+       error ("the %qE attribute cannot be applied to an SVE function type",
+ 	     name);
+@@ -1661,6 +1664,9 @@ static const struct attribute_spec aarch64_attribute_table[] =
+   { "Advanced SIMD type", 0, 0, false, true,  false, true,  NULL, NULL },
+   { "SVE type",		  3, 3, false, true,  false, true,  NULL, NULL },
+   { "SVE sizeless type",  0, 0, false, true,  false, true,  NULL, NULL },
++#ifdef SUBTARGET_ATTRIBUTE_TABLE
++  SUBTARGET_ATTRIBUTE_TABLE,
++#endif
+   { NULL,                 0, 0, false, false, false, false, NULL, NULL }
+ };
+ 
+@@ -2868,6 +2874,7 @@ aarch64_reg_save_mode (unsigned int regno)
+     switch (crtl->abi->id ())
+       {
+       case ARM_PCS_AAPCS64:
++      case ARM_PCS_DARWINPCS:
+ 	/* Only the low 64 bits are saved by the base PCS.  */
+ 	return DFmode;
+ 
+@@ -3204,6 +3211,7 @@ aarch64_load_symref_appropriately (rtx dest, rtx imm,
+   switch (type)
+     {
+     case SYMBOL_SMALL_ABSOLUTE:
++    case SYMBOL_MO_SMALL_PCR:
+       {
+ 	/* In ILP32, the mode of dest can be either SImode or DImode.  */
+ 	rtx tmp_reg = dest;
+@@ -3297,6 +3305,7 @@ aarch64_load_symref_appropriately (rtx dest, rtx imm,
+ 	return;
+       }
+ 
++    case SYMBOL_MO_SMALL_GOT:
+     case SYMBOL_SMALL_GOT_4G:
+       {
+ 	/* In ILP32, the mode of dest can be either SImode or DImode,
+@@ -5406,6 +5415,7 @@ aarch64_expand_mov_immediate (rtx dest, rtx imm)
+ 	case SYMBOL_SMALL_TLSIE:
+ 	case SYMBOL_SMALL_GOT_28K:
+ 	case SYMBOL_SMALL_GOT_4G:
++	case SYMBOL_MO_SMALL_GOT:
+ 	case SYMBOL_TINY_GOT:
+ 	case SYMBOL_TINY_TLSIE:
+ 	  if (const_offset != 0)
+@@ -5419,6 +5429,7 @@ aarch64_expand_mov_immediate (rtx dest, rtx imm)
+ 	  /* FALLTHRU */
+ 
+ 	case SYMBOL_SMALL_ABSOLUTE:
++	case SYMBOL_MO_SMALL_PCR:
+ 	case SYMBOL_TINY_ABSOLUTE:
+ 	case SYMBOL_TLSLE12:
+ 	case SYMBOL_TLSLE24:
+@@ -6176,7 +6187,13 @@ aarch64_layout_arg (cumulative_args_t pcum_v, const function_arg_info &arg)
+       if (!pcum->silent_p && !TARGET_FLOAT)
+ 	aarch64_err_no_fpadvsimd (mode);
+ 
+-      if (nvrn + nregs <= NUM_FP_ARG_REGS)
++      if (pcum->pcs_variant == ARM_PCS_DARWINPCS
++	  && !arg.named)
++	{
++	  pcum->aapcs_nextnvrn = NUM_FP_ARG_REGS;
++	  goto on_stack;
++	}
++      else if (nvrn + nregs <= NUM_FP_ARG_REGS)
+ 	{
+ 	  pcum->aapcs_nextnvrn = nvrn + nregs;
+ 	  if (!aarch64_composite_type_p (type, mode))
+@@ -6216,10 +6233,18 @@ aarch64_layout_arg (cumulative_args_t pcum_v, const function_arg_info &arg)
+   /* C6 - C9.  though the sign and zero extension semantics are
+      handled elsewhere.  This is the case where the argument fits
+      entirely general registers.  */
++
+   if (allocate_ncrn && (ncrn + nregs <= NUM_ARG_REGS))
+     {
+       gcc_assert (nregs == 0 || nregs == 1 || nregs == 2);
+ 
++      if (pcum->pcs_variant == ARM_PCS_DARWINPCS
++	  && !arg.named)
++	{
++	  pcum->aapcs_nextncrn = NUM_ARG_REGS;
++	  goto on_stack;
++	}
++
+       /* C.8 if the argument has an alignment of 16 then the NGRN is
+ 	 rounded up to the next even number.  */
+       if (nregs == 2
+@@ -6229,7 +6254,9 @@ aarch64_layout_arg (cumulative_args_t pcum_v, const function_arg_info &arg)
+ 	     alignment nregs should be > 2 and therefore it should be
+ 	     passed by reference rather than value.  */
+ 	  && (aarch64_function_arg_alignment (mode, type, &abi_break)
+-	      == 16 * BITS_PER_UNIT))
++	      == 16 * BITS_PER_UNIT)
++	  /* Darwin PCS deletes rule C.8.  */
++	  && pcum->pcs_variant != ARM_PCS_DARWINPCS)
+ 	{
+ 	  if (warn_pcs_change && abi_break)
+ 	    inform (input_location, "parameter passing for argument of type "
+@@ -6311,7 +6338,8 @@ aarch64_function_arg (cumulative_args_t pcum_v, const function_arg_info &arg)
+   CUMULATIVE_ARGS *pcum = get_cumulative_args (pcum_v);
+   gcc_assert (pcum->pcs_variant == ARM_PCS_AAPCS64
+ 	      || pcum->pcs_variant == ARM_PCS_SIMD
+-	      || pcum->pcs_variant == ARM_PCS_SVE);
++	      || pcum->pcs_variant == ARM_PCS_SVE
++	      || pcum->pcs_variant == ARM_PCS_DARWINPCS);
+ 
+   if (arg.end_marker_p ())
+     return gen_int_mode (pcum->pcs_variant, DImode);
+@@ -6338,6 +6366,9 @@ aarch64_init_cumulative_args (CUMULATIVE_ARGS *pcum,
+     pcum->pcs_variant = (arm_pcs) fntype_abi (fntype).id ();
+   else
+     pcum->pcs_variant = ARM_PCS_AAPCS64;
++  /* FIXME: Is there ever a case on Darwin where non-darwinpcs is valid?  */
++  if (TARGET_MACHO && pcum->pcs_variant == ARM_PCS_AAPCS64)
++    pcum->pcs_variant = ARM_PCS_DARWINPCS;
+   pcum->aapcs_reg = NULL_RTX;
+   pcum->aapcs_arg_processed = false;
+   pcum->aapcs_stack_words = 0;
+@@ -6379,7 +6410,8 @@ aarch64_function_arg_advance (cumulative_args_t pcum_v,
+   CUMULATIVE_ARGS *pcum = get_cumulative_args (pcum_v);
+   if (pcum->pcs_variant == ARM_PCS_AAPCS64
+       || pcum->pcs_variant == ARM_PCS_SIMD
+-      || pcum->pcs_variant == ARM_PCS_SVE)
++      || pcum->pcs_variant == ARM_PCS_SVE
++      || pcum->pcs_variant == ARM_PCS_DARWINPCS)
+     {
+       aarch64_layout_arg (pcum_v, arg);
+       gcc_assert ((pcum->aapcs_reg != NULL_RTX)
+@@ -10671,7 +10703,7 @@ aarch64_print_operand (FILE *f, rtx x, int code)
+     case 'A':
+       if (GET_CODE (x) == HIGH)
+ 	x = XEXP (x, 0);
+-
++#if !TARGET_MACHO
+       switch (aarch64_classify_symbolic_expression (x))
+ 	{
+ 	case SYMBOL_SMALL_GOT_4G:
+@@ -10701,10 +10733,27 @@ aarch64_print_operand (FILE *f, rtx x, int code)
+ 	default:
+ 	  break;
+ 	}
++#endif
+       output_addr_const (asm_out_file, x);
++#if TARGET_MACHO
++  // FIXME update classify symbolic expression to handle macho.
++      switch (aarch64_classify_symbolic_expression (x))
++	{
++	case SYMBOL_MO_SMALL_PCR:
++	  asm_fprintf (asm_out_file, "@PAGE;mopcr");
++	  break;
++	case SYMBOL_MO_SMALL_GOT:
++	  asm_fprintf (asm_out_file, "@GOTPAGE;mosg");
++	  break;
++	default:
++	  asm_fprintf (asm_out_file, "@BLEAH");
++	  break;
++	}
++#endif
+       break;
+ 
+     case 'L':
++#if !TARGET_MACHO
+       switch (aarch64_classify_symbolic_expression (x))
+ 	{
+ 	case SYMBOL_SMALL_GOT_4G:
+@@ -10742,10 +10791,12 @@ aarch64_print_operand (FILE *f, rtx x, int code)
+ 	default:
+ 	  break;
+ 	}
++#endif
+       output_addr_const (asm_out_file, x);
+       break;
+ 
+     case 'G':
++#if !TARGET_MACHO
+       switch (aarch64_classify_symbolic_expression (x))
+ 	{
+ 	case SYMBOL_TLSLE24:
+@@ -10754,6 +10805,7 @@ aarch64_print_operand (FILE *f, rtx x, int code)
+ 	default:
+ 	  break;
+ 	}
++#endif
+       output_addr_const (asm_out_file, x);
+       break;
+ 
+@@ -10901,9 +10953,15 @@ aarch64_print_address_internal (FILE *f, machine_mode mode, rtx x,
+ 	break;
+ 
+       case ADDRESS_LO_SUM:
++#if TARGET_MACHO
++	asm_fprintf (f, "[%s, #", reg_names [REGNO (addr.base)]);
++	output_addr_const (f, addr.offset);
++	asm_fprintf (f, "@PAGEOFF]");
++#else
+ 	asm_fprintf (f, "[%s, #:lo12:", reg_names [REGNO (addr.base)]);
+ 	output_addr_const (f, addr.offset);
+ 	asm_fprintf (f, "]");
++#endif
+ 	return true;
+ 
+       case ADDRESS_SYMBOLIC:
+@@ -11386,6 +11444,8 @@ aarch64_asm_output_labelref (FILE* f, const char *name)
+   asm_fprintf (f, "%U%s", name);
+ }
+ 
++#if !TARGET_MACHO
++
+ static void
+ aarch64_elf_asm_constructor (rtx symbol, int priority)
+ {
+@@ -11425,6 +11485,7 @@ aarch64_elf_asm_destructor (rtx symbol, int priority)
+       assemble_aligned_integer (POINTER_BYTES, symbol);
+     }
+ }
++#endif
+ 
+ const char*
+ aarch64_output_casesi (rtx *operands)
+@@ -13609,12 +13670,17 @@ aarch64_init_builtins ()
+ {
+   aarch64_general_init_builtins ();
+   aarch64_sve::init_builtins ();
++  aarch64_init_subtarget_builtins ();
+ }
+ 
+ /* Implement TARGET_FOLD_BUILTIN.  */
+ static tree
+ aarch64_fold_builtin (tree fndecl, int nargs, tree *args, bool)
+ {
++#ifdef SUBTARGET_FOLD_BUILTIN
++  if (tree res = SUBTARGET_FOLD_BUILTIN (fndecl, nargs, args, false))
++    return res;
++#endif
+   unsigned int code = DECL_MD_FUNCTION_CODE (fndecl);
+   unsigned int subcode = code >> AARCH64_BUILTIN_SHIFT;
+   tree type = TREE_TYPE (TREE_TYPE (fndecl));
+@@ -15427,10 +15493,14 @@ initialize_aarch64_code_model (struct gcc_options *opts)
+ 	}
+       break;
+     case AARCH64_CMODEL_LARGE:
+-      if (opts->x_flag_pic)
++      if (TARGET_MACHO)
++	/* We need to implement fPIC here (arm64_32 also accepts the large
++	   model).  */
++	;
++      else if (opts->x_flag_pic)
+ 	sorry ("code model %qs with %<-f%s%>", "large",
+ 	       opts->x_flag_pic > 1 ? "PIC" : "pic");
+-      if (opts->x_aarch64_abi == AARCH64_ABI_ILP32)
++      else if (opts->x_aarch64_abi == AARCH64_ABI_ILP32)
+ 	sorry ("code model %qs not supported in ilp32 mode", "large");
+       break;
+     case AARCH64_CMODEL_TINY_PIC:
+@@ -16383,6 +16453,13 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
+ 
+ 	case AARCH64_CMODEL_SMALL_SPIC:
+ 	case AARCH64_CMODEL_SMALL_PIC:
++#if TARGET_MACHO
++	  if (TARGET_MACHO)
++	    return (MACHO_SYMBOL_INDIRECTION_P (x) ||
++		   ! MACHO_SYMBOL_DEFINED_P (x))
++		   ? SYMBOL_MO_SMALL_GOT
++		   : SYMBOL_MO_SMALL_PCR;
++#endif
+ 	  if (!aarch64_symbol_binds_local_p (x))
+ 	    return (aarch64_cmodel == AARCH64_CMODEL_SMALL_SPIC
+ 		    ?  SYMBOL_SMALL_GOT_28K : SYMBOL_SMALL_GOT_4G);
+@@ -19598,7 +19675,9 @@ aarch64_declare_function_name (FILE *stream, const char* name,
+   aarch64_asm_output_variant_pcs (stream, fndecl, name);
+ 
+   /* Don't forget the type directive for ELF.  */
++#ifdef ASM_OUTPUT_TYPE_DIRECTIVE
+   ASM_OUTPUT_TYPE_DIRECTIVE (stream, name, "function");
++#endif
+   ASM_OUTPUT_LABEL (stream, name);
+ 
+   cfun->machine->label_is_assembled = true;
+@@ -19659,12 +19738,17 @@ aarch64_output_patchable_area (unsigned int patch_area_size, bool record_p)
+ /* Implement ASM_OUTPUT_DEF_FROM_DECLS.  Output .variant_pcs for aliases.  */
+ 
+ void
+-aarch64_asm_output_alias (FILE *stream, const tree decl, const tree target)
++aarch64_asm_output_alias (FILE *stream, const tree decl,
++			  const tree target ATTRIBUTE_UNUSED)
+ {
+   const char *name = XSTR (XEXP (DECL_RTL (decl), 0), 0);
++#ifdef ASM_OUTPUT_DEF
+   const char *value = IDENTIFIER_POINTER (target);
++#endif
+   aarch64_asm_output_variant_pcs (stream, decl, name);
++#ifdef ASM_OUTPUT_DEF
+   ASM_OUTPUT_DEF (stream, name, value);
++#endif
+ }
+ 
+ /* Implement ASM_OUTPUT_EXTERNAL.  Output .variant_pcs for undefined
+@@ -20137,7 +20221,7 @@ aarch64_init_libfuncs (void)
+ static machine_mode
+ aarch64_c_mode_for_suffix (char suffix)
+ {
+-  if (suffix == 'q')
++  if (suffix == 'q' && !TARGET_MACHO)
+     return TFmode;
+ 
+   return VOIDmode;
+@@ -23698,13 +23782,17 @@ aarch64_sls_emit_shared_blr_thunks (FILE *out_file)
+       /* Only emits if the compiler is configured for an assembler that can
+ 	 handle visibility directives.  */
+       targetm.asm_out.assemble_visibility (decl, VISIBILITY_HIDDEN);
++#ifdef ASM_OUTPUT_TYPE_DIRECTIVE
+       ASM_OUTPUT_TYPE_DIRECTIVE (out_file, name, "function");
++#endif
+       ASM_OUTPUT_LABEL (out_file, name);
+       aarch64_sls_emit_function_stub (out_file, regnum);
+       /* Use the most conservative target to ensure it can always be used by any
+ 	 function in the translation unit.  */
+       asm_fprintf (out_file, "\tdsb\tsy\n\tisb\n");
++#ifdef ASM_DECLARE_FUNCTION_SIZE
+       ASM_DECLARE_FUNCTION_SIZE (out_file, name, decl);
++#endif
+     }
+ }
+ 
+@@ -23803,6 +23891,15 @@ aarch64_run_selftests (void)
+ #undef TARGET_ASM_ALIGNED_SI_OP
+ #define TARGET_ASM_ALIGNED_SI_OP "\t.word\t"
+ 
++#if TARGET_MACHO
++#undef TARGET_ASM_UNALIGNED_HI_OP
++#define TARGET_ASM_UNALIGNED_HI_OP "\t.short\t"
++#undef TARGET_ASM_UNALIGNED_SI_OP
++#define TARGET_ASM_UNALIGNED_SI_OP "\t.long\t"
++#undef TARGET_ASM_UNALIGNED_DI_OP
++#define TARGET_ASM_UNALIGNED_DI_OP "\t.quad\t"
++#endif
++
+ #undef TARGET_ASM_CAN_OUTPUT_MI_THUNK
+ #define TARGET_ASM_CAN_OUTPUT_MI_THUNK \
+   hook_bool_const_tree_hwi_hwi_const_tree_true
+diff --git gcc/config/aarch64/aarch64.h gcc/config/aarch64/aarch64.h
+index 9be4ec3d280..1732eb81459 100644
+--- gcc/config/aarch64/aarch64.h
++++ gcc/config/aarch64/aarch64.h
+@@ -57,6 +57,9 @@
+ #define TARGET_SIMD (!TARGET_GENERAL_REGS_ONLY && AARCH64_ISA_SIMD)
+ #define TARGET_FLOAT (!TARGET_GENERAL_REGS_ONLY && AARCH64_ISA_FP)
+ 
++/* Object format, ABI and syntax for Darwin platforms.  */
++#define TARGET_MACHO		0
++
+ #define UNITS_PER_WORD		8
+ 
+ #define UNITS_PER_VREG		16
+@@ -902,6 +905,7 @@ enum arm_pcs
+   ARM_PCS_SVE,			/* For functions that pass or return
+ 				   values in SVE registers.  */
+   ARM_PCS_TLSDESC,		/* For targets of tlsdesc calls.  */
++  ARM_PCS_DARWINPCS,		/* Darwin's amended AAPCS for 64 bit.  */
+   ARM_PCS_UNKNOWN
+ };
+ 
+@@ -1220,8 +1224,13 @@ extern const char *host_detect_local_cpu (int argc, const char **argv);
+ #define ASM_CPU_SPEC \
+    MCPU_TO_MARCH_SPEC
+ 
++#ifndef SUBTARGET_EXTRA_SPECS
++#define SUBTARGET_EXTRA_SPECS
++#endif
++
+ #define EXTRA_SPECS						\
+-  { "asm_cpu_spec",		ASM_CPU_SPEC }
++  { "asm_cpu_spec",		ASM_CPU_SPEC },			\
++  SUBTARGET_EXTRA_SPECS
+ 
+ #define ASM_OUTPUT_POOL_EPILOGUE  aarch64_asm_output_pool_epilogue
+ 
+diff --git gcc/config/aarch64/aarch64.md gcc/config/aarch64/aarch64.md
+index e39fad1bc8a..38666010e52 100644
+--- gcc/config/aarch64/aarch64.md
++++ gcc/config/aarch64/aarch64.md
+@@ -283,6 +283,7 @@ (define_c_enum "unspec" [
+     UNSPEC_LD1RO
+     UNSPEC_SALT_ADDR
+     UNSPECV_PATCHABLE_AREA
++    UNSPEC_MACHOPIC_OFFSET
+ ])
+ 
+ (define_c_enum "unspecv" [
+@@ -6504,7 +6505,10 @@ (define_insn "add_losym_<mode>"
+ 	(lo_sum:P (match_operand:P 1 "register_operand" "r")
+ 		  (match_operand 2 "aarch64_valid_symref" "S")))]
+   ""
+-  "add\\t%<w>0, %<w>1, :lo12:%c2"
++  { return TARGET_MACHO
++    ? "add\\t%<w>0, %<w>1, %c2@PAGEOFF;momd"
++    : "add\\t%<w>0, %<w>1, :lo12:%c2";
++  }
+   [(set_attr "type" "alu_imm")]
+ )
+ 
+@@ -6515,7 +6519,10 @@ (define_insn "ldr_got_small_<mode>"
+ 			      (match_operand:PTR 2 "aarch64_valid_symref" "S")))]
+ 		    UNSPEC_GOTSMALLPIC))]
+   ""
+-  "ldr\\t%<w>0, [%1, #:got_lo12:%c2]"
++  { return TARGET_MACHO
++    ? "ldr\\t%<w>0, [%1, %c2@GOTPAGEOFF];momd"
++    : "ldr\\t%<w>0, [%1, #:got_lo12:%c2]";
++  }
+   [(set_attr "type" "load_<ldst_sz>")]
+ )
+ 
+diff --git gcc/config/aarch64/aarch64.opt gcc/config/aarch64/aarch64.opt
+index 1b3d942e0f5..85f98ad6384 100644
+--- gcc/config/aarch64/aarch64.opt
++++ gcc/config/aarch64/aarch64.opt
+@@ -152,6 +152,9 @@ Enum(aarch64_abi) String(ilp32) Value(AARCH64_ABI_ILP32)
+ EnumValue
+ Enum(aarch64_abi) String(lp64) Value(AARCH64_ABI_LP64)
+ 
++EnumValue
++Enum(aarch64_abi) String(darwinpcs) Value(AARCH64_ABI_LP64)
++
+ mpc-relative-literal-loads
+ Target Report Save Var(pcrelative_literal_loads) Init(2) Save
+ PC relative literal loads.
+diff --git gcc/config/aarch64/darwin.h gcc/config/aarch64/darwin.h
+new file mode 100644
+index 00000000000..25721630924
+--- /dev/null
++++ gcc/config/aarch64/darwin.h
+@@ -0,0 +1,226 @@
++/* Target definitions for Arm64/Aarch64 running on macOS/iOS.
++   Copyright (C) 2020 Free Software Foundation, Inc.
++   Contributed by Iain Sandoe.
++
++This file is part of GCC.
++
++GCC is free software; you can redistribute it and/or modify
++it under the terms of the GNU General Public License as published by
++the Free Software Foundation; either version 3, or (at your option)
++any later version.
++
++GCC is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++GNU General Public License for more details.
++
++You should have received a copy of the GNU General Public License
++along with GCC; see the file COPYING3.  If not see
++<http://www.gnu.org/licenses/>.  */
++
++/* Enable Mach-O bits in generic Aarch64 code.  */
++#undef TARGET_MACHO
++#define TARGET_MACHO 1
++
++#undef DARWIN_ARM64
++#define DARWIN_ARM64 1
++
++/* FIXME FIXME FIXME - these are mostly guesses right now.  */
++
++/* FIXME: this is only used in generic code in darwin.c.  */
++#undef TARGET_64BIT
++#define TARGET_64BIT 1
++
++#undef  PTRDIFF_TYPE
++#define PTRDIFF_TYPE "long int"
++
++/* NOTE that arm64_32 is a valid thing and corresponds to darwinpcs
++   and TARGET_ILP32, but we are not implementing that for now.  */
++#define TARGET_OS_CPP_BUILTINS()		\
++  do {						\
++    builtin_define ("__LITTLE_ENDIAN__");	\
++    builtin_define ("__arm64");			\
++    builtin_define ("__arm64__");		\
++    darwin_cpp_builtins (pfile);		\
++  } while (0)
++
++/* In Darwin's arm64 ABI, chars are signed, for consistency with other Darwin
++   architectures.  */
++
++#undef DEFAULT_SIGNED_CHAR
++#define DEFAULT_SIGNED_CHAR 1
++
++#undef LONG_DOUBLE_TYPE_SIZE
++#define LONG_DOUBLE_TYPE_SIZE	64
++
++/* Hack alert - we want the exported cas etc.  */
++#undef LIB_SPEC
++#define LIB_SPEC "%{!static:-lSystem} -lgcc"
++
++/* Force the default endianness and ABI flags onto the command line
++   in order to make the other specs easier to write.  */
++#undef DRIVER_SELF_SPECS
++#define DRIVER_SELF_SPECS \
++"%{mbig-endian:%eDarwin platforms do not support big-endian arm64}" \
++"%{!mlittle-endian:-mlittle-endian} " \
++"%{mabi=ilp32:%eSorry, support for Darwin ilp32 arm64 is not implemented} " \
++"%{!mabi=*:-mabi=lp64} " \
++  MCPU_MTUNE_NATIVE_SPECS \
++  SUBTARGET_DRIVER_SELF_SPECS
++
++/* We want -fPIC by default, unless we're using -static to compile for
++   the kernel or some such.  */
++
++#undef CC1_SPEC
++#define CC1_SPEC \
++"%{!mkernel:%{!static:-fPIC}} " DARWIN_CC1_SPEC
++
++#undef ASM_SPEC
++#define ASM_SPEC "-arch %(darwin_arch) "\
++  ASM_OPTIONS " %{static} " ASM_MMACOSX_VERSION_MIN_SPEC
++
++#undef ENDFILE_SPEC
++#define ENDFILE_SPEC \
++  " " TM_DESTRUCTOR
++
++/* The arch is known as 'arm64' by the system tools.  */
++#define DARWIN_ARCH_SPEC "arm64"
++
++#undef SUBTARGET_EXTRA_SPECS
++#define SUBTARGET_EXTRA_SPECS					\
++  DARWIN_EXTRA_SPECS						\
++  { "darwin_arch", DARWIN_ARCH_SPEC },				\
++  { "darwin_crt2", "" },					\
++  { "darwin_subarch", DARWIN_ARCH_SPEC },
++
++#undef TARGET_ASM_FILE_END
++#define TARGET_ASM_FILE_END darwin_file_end
++
++/* Define the syntax of pseudo-ops, labels and comments.  */
++
++#ifdef HAVE_GAS_MAX_SKIP_P2ALIGN
++/* Support for -falign-* switches.  Use .p2align to ensure that code
++   sections are padded with NOP instructions, rather than zeros.  */
++#define ASM_OUTPUT_MAX_SKIP_ALIGN(FILE, LOG, MAX_SKIP)		\
++  do								\
++    {								\
++      if ((LOG) != 0)						\
++	{							\
++	  if ((MAX_SKIP) == 0)					\
++	    fprintf ((FILE), "\t.p2align %d\n", (int) (LOG));	\
++	  else							\
++	    fprintf ((FILE), "\t.p2align %d,,%d\n",		\
++		     (int) (LOG), (int) (MAX_SKIP));		\
++	}							\
++    } while (0)
++
++#endif /* HAVE_GAS_MAX_SKIP_P2ALIGN */
++
++/* String containing the assembler's comment-starter.  */
++
++#define ASM_COMMENT_START ";"
++
++/* Define the syntax of pseudo-ops, labels and comments.  */
++
++#define LPREFIX "L"
++
++/* Assembler pseudos to introduce constants of various size.  */
++
++#define ASM_BYTE "\t.byte\t"
++#define ASM_SHORT "\t.word\t"
++#define ASM_LONG "\t.long\t"
++#define ASM_QUAD "\t.quad\t"
++
++/* darwinpcs reserves X18.  */
++
++#undef FIXED_REGISTERS
++#define FIXED_REGISTERS					\
++  {							\
++    0, 0, 0, 0,   0, 0, 0, 0,	/* R0 - R7 */		\
++    0, 0, 0, 0,   0, 0, 0, 0,	/* R8 - R15 */		\
++    0, 0, 1, 0,   0, 0, 0, 0,	/* R16 - R23 */		\
++    0, 0, 0, 0,   0, 1, 0, 1,	/* R24 - R30, SP */	\
++    0, 0, 0, 0,   0, 0, 0, 0,   /* V0 - V7 */           \
++    0, 0, 0, 0,   0, 0, 0, 0,   /* V8 - V15 */		\
++    0, 0, 0, 0,   0, 0, 0, 0,   /* V16 - V23 */         \
++    0, 0, 0, 0,   0, 0, 0, 0,   /* V24 - V31 */         \
++    1, 1, 1, 1,			/* SFP, AP, CC, VG */	\
++    0, 0, 0, 0,   0, 0, 0, 0,   /* P0 - P7 */           \
++    0, 0, 0, 0,   0, 0, 0, 0,   /* P8 - P15 */          \
++    1, 1			/* FFR and FFRT */	\
++  }
++
++#define SUBTARGET_ENCODE_SECTION_INFO  darwin_encode_section_info
++
++#undef ASM_MAYBE_OUTPUT_ENCODED_ADDR_RTX
++#define ASM_MAYBE_OUTPUT_ENCODED_ADDR_RTX(FILE, ENCODING, SIZE, ADDR, DONE) \
++  if (TARGET_64BIT)							\
++    {									\
++      if ((SIZE) == 4 && ((ENCODING) & 0x70) == DW_EH_PE_pcrel)		\
++	{								\
++	  fputs (ASM_LONG, FILE);					\
++	  assemble_name (FILE, XSTR (ADDR, 0));				\
++	  fputs ("@GOT-.", FILE);					\
++	  goto DONE;							\
++	}								\
++    }									\
++  else									\
++    {									\
++      if (ENCODING == ASM_PREFERRED_EH_DATA_FORMAT (2, 1))		\
++	{								\
++	  gcc_unreachable (); /* no 32b support yet.*/			\
++	  /*darwin_non_lazy_pcrel (FILE, ADDR);*/			\
++	  goto DONE;							\
++	}								\
++    }
++
++/* Darwin x86 assemblers support the .ident directive.  */
++
++#undef TARGET_ASM_OUTPUT_IDENT
++#define TARGET_ASM_OUTPUT_IDENT default_asm_output_ident_directive
++
++/* Pull in the stuff common to all Darwin-based platforms.  */
++#define C_COMMON_OVERRIDE_OPTIONS				\
++  do {								\
++    SUBTARGET_C_COMMON_OVERRIDE_OPTIONS;			\
++  } while (0)
++
++#undef SUBTARGET_OVERRIDE_OPTIONS
++#define SUBTARGET_OVERRIDE_OPTIONS					\
++  do {									\
++    if (global_options.x_aarch64_cmodel_var == AARCH64_CMODEL_TINY)	\
++      error ("code model %qs is not supported on Darwin platforms",	\
++	     "tiny");							\
++    if (!global_options_set.x_flag_section_anchors)			\
++      flag_section_anchors = 0;						\
++  } while (0); 								\
++  SUBSUBTARGET_OVERRIDE_OPTIONS
++
++#undef  SUBTARGET_INIT_BUILTINS
++#define SUBTARGET_INIT_BUILTINS						\
++  do {									\
++    aarch64_builtin_decls[AARCH64_BUILTIN_CFSTRING]			\
++      = darwin_init_cfstring_builtins ((AARCH64_BUILTIN_CFSTRING << AARCH64_BUILTIN_SHIFT) | AARCH64_BUILTIN_GENERAL); \
++  } while(0)
++
++/* Darwin on Arm64 uses dwarf-2.  */
++#ifndef DARWIN_PREFER_DWARF
++# undef PREFERRED_DEBUGGING_TYPE
++# define PREFERRED_DEBUGGING_TYPE DWARF2_DEBUG
++#endif
++
++#undef REGISTER_SUBTARGET_PRAGMAS
++#define REGISTER_SUBTARGET_PRAGMAS() DARWIN_REGISTER_TARGET_PRAGMAS()
++
++#undef TARGET_SET_DEFAULT_TYPE_ATTRIBUTES
++#define TARGET_SET_DEFAULT_TYPE_ATTRIBUTES darwin_set_default_type_attributes
++
++/* FIXME:  CHECK Define the shadow offset for asan.  */
++#undef SUBTARGET_SHADOW_OFFSET
++#define SUBTARGET_SHADOW_OFFSET (HOST_WIDE_INT_1 << 44)
++
++/* First available SYMBOL flag bit for use by subtargets.  */
++#define SYMBOL_FLAG_SUBT_DEP (SYMBOL_FLAG_MACH_DEP)
++
++#undef ASM_OUTPUT_DEF_FROM_DECLS
++
+diff --git gcc/config/aarch64/t-aarch64-darwin gcc/config/aarch64/t-aarch64-darwin
+new file mode 100644
+index 00000000000..a8bfcffad78
+--- /dev/null
++++ gcc/config/aarch64/t-aarch64-darwin
+@@ -0,0 +1,25 @@
++# Machine description for AArch64 architecture.
++#  Copyright (C) 2020 Free Software Foundation, Inc.
++#
++#  This file is part of GCC.
++#
++#  GCC is free software; you can redistribute it and/or modify it
++#  under the terms of the GNU General Public License as published by
++#  the Free Software Foundation; either version 3, or (at your option)
++#  any later version.
++#
++#  GCC is distributed in the hope that it will be useful, but
++#  WITHOUT ANY WARRANTY; without even the implied warranty of
++#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++#  General Public License for more details.
++#
++#  You should have received a copy of the GNU General Public License
++#  along with GCC; see the file COPYING3.  If not see
++#  <http://www.gnu.org/licenses/>.
++
++LIB1ASMSRC   = aarch64/lib1funcs.asm
++LIB1ASMFUNCS = _aarch64_sync_cache_range
++
++# FIXME - figure out what multilib provisions we should make for 
++# a) arm64e
++# b) arm64_32
+-- 
+2.42.1
+

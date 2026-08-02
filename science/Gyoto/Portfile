@@ -1,0 +1,225 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           active_variants 1.1
+PortGroup           boost 1.0
+PortGroup           compilers 1.0
+PortGroup           github 1.0
+
+github.setup        gyoto Gyoto 25968c285d78393b3bf91494b0f89f9f75453dff
+set version_base        2.0.2
+set version_date        20251105
+version             ${version_base}-${version_date}
+revision            1
+checksums           rmd160  4c6e5d42f9ae603e7b98a1610225e458ae704a03 \
+                    sha256  5a5b11964e455490d34f56ad9cc7ee23f12f87cd5891541cfbbad53ea61a990a \
+                    size    2346138
+
+license             GPL-3+
+categories          science
+maintainers         {thibaut @paumard} openmaintainer
+description         General relativistic geodesic integration and ray-tracing
+long_description    Gyoto aims at providing a framework for computing orbits \
+                    and ray-traced images in General relativity. It consists \
+                    in a C++ shared library (libgyoto) and a utility programs \
+                    (gyoto). Gyoto can be extended with plug-ins. The py*-gyoto \
+                    Ports contains Python bindings for libgyoto.
+
+homepage            https://gyoto.obspm.fr
+github.tarball_from archive
+
+depends_build       path:share/pkgconfig/eigen3.pc:eigen3 \
+                    port:LORENE \
+                    path:bin/pkg-config:pkgconfig
+
+depends_lib         port:cfitsio \
+                    port:flint \
+                    port:udunits2 \
+                    port:xercesc3
+
+# xercesc3 requires C++11; notice that eigen3-devel needs C++14.
+compiler.cxx_standard   2011
+
+# About the configuration arguments:
+# --without-yorick: Yorick support is deprecated, let's not build it
+# --with-lorene=${prefix}/lib/lorene: required for some numerical metrics
+# --with-xerces: xerces-c is required for XML input, autodetection succeeds
+# --with-cfitsio: cfitsio is required for FITS i/o, autodetection succeeds
+# --with-udunits-*: udunits is required for unit support, autodetection fails
+# --with-flint --without-arblib --without-aeae: Astrobj::Jet requires one of
+#   flint, arblib or AEAE
+# --without-mpi: see variants openmpi and mpich for MPI support
+# --without-python: see py31x-gyoto subports for Python support
+# --disable-doc: don't build the documentation
+# --enable-release: remove "unreleased" from library name
+# --with-sosuffix=-mp-${version}: add custom suffix to library name
+configure.args      --without-yorick \
+                    --with-lorene=${prefix}/lib/lorene \
+                    --with-xerces \
+                    --with-cfitsio \
+                    --with-udunits-headers=-I${prefix}/include/udunits2/ \
+                    --with-udunits-libs=-L${prefix}/lib/ \
+                    --with-flint \
+                    --without-arblib \
+                    --without-aeae \
+                    --without-mpi \
+                    --without-python \
+                    --disable-doc \
+                    --enable-release \
+                    --with-sosuffix=-mp-${version}
+
+if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} ne ""} {
+    configure.ldflags-append    -stdlib=${configure.cxx_stdlib}
+}
+
+# When building from a git commit, reflect the version number that we chose in gyoto --version etc
+post-configure {
+    reinplace -W ${worksrcpath} "s|PACKAGE_STRING = Gyoto.*|PACKAGE_STRING = Gyoto ${version}|g" \
+        Makefile bin/Makefile lib/Makefile
+    reinplace -W ${worksrcpath} "s|PACKAGE_VERSION = .*|PACKAGE_VERSION = ${version}|g" \
+        Makefile bin/Makefile lib/Makefile
+}
+
+test.target         check check-lorene
+test.run            yes
+
+compilers.setup     -gcc
+compilers.enforce_c lorene
+
+if {![catch {set result [active_variants [boost::depends_portname] openmpi {}]}]} {
+  if {$result} {
+    default_variants +openmpi
+  } else {
+      if {[active_variants [boost::depends_portname] mpich {}]} {
+          default_variants +mpich
+      }
+  }
+}
+
+foreach nodot [list 310 311 312 313 314] wdot [list 3.10 3.11 3.12 3.13 3.14] {
+    subport py${nodot}-gyoto {
+        depends_build-append path:bin/doxygen:doxygen port:swig-python \
+            port:py${nodot}-setuptools port:py${nodot}-build \
+            port:py${nodot}-pip
+        depends_lib-append    port:python${nodot} port:py${nodot}-numpy \
+            port:Gyoto
+        depends_test          port:py${nodot}-matplotlib
+        compilers.enforce_c   Gyoto
+        categories-append     python
+        # check that Gyoto is has the right version before attempting to
+        # install py??-gyoto. Else, prompt the user for upgrade.
+        pre-fetch {
+            # Gyoto is in depends_lib, so it is guaranteed to be installed at this stage
+            set gyoto_version [lindex [lindex [registry_active gyoto] 0] 1]
+            if {[vercmp ${gyoto_version} ${version}] != 0} {
+                ui_error "${subport} requires Gyoto ${version} but version ${gyoto_version} is installed."
+                ui_error "Please upgrade Gyoto:"
+                ui_error "    sudo port upgrade Gyoto"
+                return -code error "incompatible Gyoto version"
+            }
+        }
+        configure.args-delete --without-python
+        configure.args-append PYTHON=${prefix}/bin/python${wdot}
+        # When building from a git commit, reflect the version number that we
+        # chose in gyoto --version etc
+        post-configure {
+            reinplace -W ${worksrcpath} "s|PACKAGE_STRING = Gyoto.*|PACKAGE_STRING = Gyoto ${version}|g" \
+                python/Makefile
+            # We put a slighlty different version here as this is the name that pip will use for the wheel file
+            reinplace -W ${worksrcpath} "s|PACKAGE_VERSION = .*|PACKAGE_VERSION = ${version_base}.post${version_date}|g" \
+                python/Makefile
+            reinplace -W ${worksrcpath} "s|version = \".*\"|version = \"${version}\"|g" python/pyproject.toml
+        }
+        use_parallel_build    no
+        build.target          python plugins/python
+        test.args             -C python
+        test.target           check
+        destroot.target       install-python
+        destroot.args         -C python
+        post-destroot {
+            system -W ${worksrcpath}/plugins/python "${build.cmd} install DESTDIR=${destroot}"
+            xinstall -d ${destroot}${prefix}/share/doc/${subport}/examples
+            xinstall {*}[glob ${worksrcpath}/plugins/python/doc/examples/*] \
+                ${destroot}${prefix}/share/doc/${subport}/examples/
+            xinstall {*}[glob ${worksrcpath}/python/example*.py] \
+                ${destroot}${prefix}/share/doc/${subport}/examples/
+            file delete -force ${destroot}${prefix}/include/
+        }
+    }
+}
+
+subport Gyoto {
+#    PortGroup conflicts_build 1.0
+#    conflicts_build ${name}
+    post-destroot {
+        xinstall -W ${worksrcpath}/python/include \
+            gyoto.i gyoto_std.i gyoto_lorene.i numpy.i \
+            ${destroot}${prefix}/include/Gyoto/
+        xinstall ${worksrcpath}/plugins/python/include/GyotoPython.h \
+            ${destroot}${prefix}/include/Gyoto/
+        xinstall -d ${destroot}${prefix}/share/doc/${subport}/examples/plugins
+        xinstall {*}[glob ${worksrcpath}/doc/examples/*] \
+            ${destroot}${prefix}/share/doc/${subport}/examples/
+        copy ${worksrcpath}/plugins/null \
+            ${destroot}${prefix}/share/doc/${subport}/examples/plugins/null
+        system \
+            -W ${destroot}${prefix}/share/doc/${subport}/examples/plugins/null \
+            "touch aclocal.m4 configure Makefile.in */Makefile.in"
+    }
+}
+
+compilers.enforce_c [boost::depends_portname]
+
+variant openmpi conflicts mpich \
+        description {Add MPI parallelization using OpenMPI} {
+        set c_variant [c_variant_name]
+        if {${c_variant} == ""} {
+            set mpi_port openmpi
+            set mpi_suffix mp
+        } else {
+            set mpi_port openmpi-${c_variant}
+            set mpi_suffix ${c_variant}
+        }
+        require_active_variants [boost::depends_portname] openmpi {}
+        depends_lib-append port:${mpi_port}
+        configure.args-delete --without-mpi
+        configure.args-append --with-mpi \
+            MPICC="mpicc-openmpi-${mpi_suffix}" \
+            MPICXX="mpicxx-openmpi-${mpi_suffix}" \
+            CC="mpicc-openmpi-${mpi_suffix}" \
+            CXX="mpicxx-openmpi-${mpi_suffix}"
+        build.args-delete CC="${configure.cc}"
+        build.args-append CC="mpicc-openmpi-${mpi_suffix}"
+        notes "
+    For multi-processing, wrap gyoto in mpirun-openmpi-${mpi_suffix}, e.g.:
+    $ mpirun-openmpi-${mpi_suffix} gyoto -P4 in.xml out.fits
+    "
+}
+
+variant mpich conflicts openmpi \
+        description {Add MPI parallelization using MPICH} {
+        set c_variant [c_variant_name]
+        if {${c_variant} == ""} {
+            set mpi_port mpich
+            set mpi_suffix mp
+        } else {
+            set mpi_port mpich-${c_variant}
+            set mpi_suffix ${c_variant}
+        }
+        require_active_variants [boost::depends_portname] mpich {}
+        depends_lib-append port:${mpi_port}
+        configure.args-delete --without-mpi
+        configure.args-append --with-mpi \
+            MPICC="mpicc-mpich-${mpi_suffix}" \
+            MPICXX="mpicxx-mpich-${mpi_suffix}" \
+            CC="mpicc-mpich-${mpi_suffix}" \
+            CXX="mpicxx-mpich-${mpi_suffix}"
+        build.args-delete CC="${configure.cc}"
+        build.args-append CC="mpicc-mpich-${mpi_suffix}"
+        notes "
+    +-- Gyoto Usage note ------------------------------------------------------
+    | For multi-processing, wrap gyoto in mpirun-mpich-${mpi_suffix}, e.g.:
+    |   $ mpirun-mpich-${mpi_suffix} gyoto -P4 in.xml out.fits
+    +--------------------------------------------------------------------------
+    "
+}

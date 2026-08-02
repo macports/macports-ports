@@ -1,0 +1,261 @@
+From e0837e2d59ae85b7828f4897c9efce0bc9903b4f Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <vital.had@gmail.com>
+Date: Wed, 27 Nov 2024 08:38:35 +0800
+Subject: [PATCH] Darwin fixes from owl-compositor
+
+Cherry-picked from https://github.com/owl-compositor/wayland/commit/bc49b0159b7e358e1bd3d52c2646c51700b9a084
+---
+ meson.build             |  9 +++++++--
+ src/connection.c        |  5 ++++-
+ src/event-loop.c        | 40 ++++++++++++++++++++++++++++++++++++++++
+ src/wayland-shm.c       |  2 +-
+ tests/event-loop-test.c | 11 +++++++++++
+ 5 files changed, 63 insertions(+), 4 deletions(-)
+
+diff --git a/meson.build b/meson.build
+index 9e0a6c9..bd5d157 100644
+--- a/meson.build
++++ b/meson.build
+@@ -90,8 +90,8 @@ if get_option('libraries')
+ 	endif
+ 
+ 	decls = [
+-		{ 'header': 'sys/signalfd.h', 'symbol': 'SFD_CLOEXEC' },
+-		{ 'header': 'sys/timerfd.h', 'symbol': 'TFD_CLOEXEC' },
++		{ 'header': 'sys/signalfd.h', 'symbol': 'SFD_CLOEXEC', 'variable': 'HAVE_SIGNALFD' },
++		{ 'header': 'sys/timerfd.h', 'symbol': 'TFD_CLOEXEC', 'variable': 'HAVE_TIMERFD' },
+ 		{ 'header': 'time.h', 'symbol': 'CLOCK_MONOTONIC' },
+ 	]
+ 
+@@ -101,6 +101,11 @@ if get_option('libraries')
+ 		endif
+ 	endforeach
+ 
++	config_h.set(
++		'HAVE_ITIMERSPEC',
++		cc.has_members('struct itimerspec', 'it_interval', 'it_value', dependencies: epoll_dep)
++	)
++
+ 	if host_machine.system() == 'darwin'
+ 		rt_dep = []
+ 	else
+diff --git a/src/connection.c b/src/connection.c
+index af79450..2009125 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -315,7 +315,10 @@ wl_connection_flush(struct wl_connection *connection)
+ 
+ 		do {
+ 			len = sendmsg(connection->fd, &msg,
+-				      MSG_NOSIGNAL | MSG_DONTWAIT);
++	#ifdef MSG_NOSIGNAL
++					MSG_NOSIGNAL |
++	#endif
++					MSG_DONTWAIT);
+ 		} while (len == -1 && errno == EINTR);
+ 
+ 		if (len == -1)
+diff --git a/src/event-loop.c b/src/event-loop.c
+index 37cf95d..5d276f6 100644
+--- a/src/event-loop.c
++++ b/src/event-loop.c
+@@ -39,11 +39,27 @@
+ #include <sys/signalfd.h>
+ #include <sys/timerfd.h>
+ #include <unistd.h>
++
++#include "../config.h"
++
+ #include "wayland-util.h"
+ #include "wayland-private.h"
+ #include "wayland-server-core.h"
+ #include "wayland-os.h"
+ 
++#ifdef HAVE_SIGNALFD
++#include <sys/signalfd.h>
++#endif
++#ifdef HAVE_TIMERFD
++#include <sys/timerfd.h>
++#endif
++#ifndef HAVE_ITIMERSPEC
++struct itimerspec {
++	struct timespec it_interval;
++	struct timespec it_value;
++};
++#endif
++
+ /** \cond INTERNAL */
+ 
+ #define TIMER_REMOVED -2
+@@ -75,7 +91,9 @@ struct wl_event_loop {
+ 
+ 	struct wl_signal destroy_signal;
+ 
++#ifdef HAVE_TIMERFD
+ 	struct wl_timer_heap timers;
++#endif
+ };
+ 
+ struct wl_event_source_interface {
+@@ -104,10 +122,14 @@ wl_event_source_fd_dispatch(struct wl_event_source *source,
+ 		mask |= WL_EVENT_READABLE;
+ 	if (ep->events & EPOLLOUT)
+ 		mask |= WL_EVENT_WRITABLE;
++#ifdef EPOLLHUP
+ 	if (ep->events & EPOLLHUP)
+ 		mask |= WL_EVENT_HANGUP;
++#endif
++#ifdef EPOLLERR
+ 	if (ep->events & EPOLLERR)
+ 		mask |= WL_EVENT_ERROR;
++#endif
+ 
+ 	return fd_source->func(fd_source->fd, mask, source->data);
+ }
+@@ -227,6 +249,8 @@ wl_event_source_fd_update(struct wl_event_source *source, uint32_t mask)
+ 	return epoll_ctl(loop->epoll_fd, EPOLL_CTL_MOD, source->fd, &ep);
+ }
+ 
++#ifdef HAVE_TIMERFD
++
+ /** \cond INTERNAL */
+ 
+ struct wl_event_source_timer {
+@@ -658,6 +682,10 @@ wl_event_source_timer_update(struct wl_event_source *source, int ms_delay)
+ 	return 0;
+ }
+ 
++#endif /* HAVE_TIMERFD */
++
++#ifdef HAVE_SIGNALFD
++
+ /** \cond INTERNAL */
+ 
+ struct wl_event_source_signal {
+@@ -735,6 +763,8 @@ wl_event_loop_add_signal(struct wl_event_loop *loop,
+ 	return add_source(loop, &source->base, WL_EVENT_READABLE, data);
+ }
+ 
++#endif /* HAVE_SIGNALFD */
++
+ /** \cond INTERNAL */
+ 
+ struct wl_event_source_idle {
+@@ -838,6 +868,7 @@ wl_event_source_remove(struct wl_event_source *source)
+ 		source->fd = -1;
+ 	}
+ 
++#ifdef HAVE_TIMERFD
+ 	if (source->interface == &timer_source_interface &&
+ 	    source->fd != TIMER_REMOVED) {
+ 		/* Disarm the timer (and the loop's timerfd, if necessary),
+@@ -848,6 +879,7 @@ wl_event_source_remove(struct wl_event_source *source)
+ 		 * be dispatched in `wl_event_loop_dispatch` */
+ 		source->fd = TIMER_REMOVED;
+ 	}
++#endif
+ 
+ 	wl_list_remove(&source->link);
+ 	wl_list_insert(&loop->destroy_list, &source->link);
+@@ -900,7 +932,9 @@ wl_event_loop_create(void)
+ 
+ 	wl_signal_init(&loop->destroy_signal);
+ 
++#ifdef HAVE_TIMERFD
+ 	wl_timer_heap_init(&loop->timers, loop);
++#endif
+ 
+ 	return loop;
+ }
+@@ -924,7 +958,9 @@ wl_event_loop_destroy(struct wl_event_loop *loop)
+ 	wl_signal_emit(&loop->destroy_signal, loop);
+ 
+ 	wl_event_loop_process_destroy_list(loop);
++#ifdef HAVE_TIMERFD
+ 	wl_timer_heap_release(&loop->timers);
++#endif
+ 	close(loop->epoll_fd);
+ 	free(loop);
+ }
+@@ -997,7 +1033,9 @@ wl_event_loop_dispatch(struct wl_event_loop *loop, int timeout)
+ 	struct epoll_event ep[32];
+ 	struct wl_event_source *source;
+ 	int i, count;
++#ifdef HAVE_TIMERFD
+ 	bool has_timers = false;
++#endif
+ 
+ 	wl_event_loop_dispatch_idle(loop);
+ 
+@@ -1005,6 +1043,7 @@ wl_event_loop_dispatch(struct wl_event_loop *loop, int timeout)
+ 	if (count < 0)
+ 		return -1;
+ 
++#ifdef HAVE_TIMERFD
+ 	for (i = 0; i < count; i++) {
+ 		source = ep[i].data.ptr;
+ 		if (source == &loop->timers.base)
+@@ -1020,6 +1059,7 @@ wl_event_loop_dispatch(struct wl_event_loop *loop, int timeout)
+ 		if (wl_timer_heap_dispatch(&loop->timers) < 0)
+ 			return -1;
+ 	}
++#endif
+ 
+ 	for (i = 0; i < count; i++) {
+ 		source = ep[i].data.ptr;
+diff --git a/src/wayland-shm.c b/src/wayland-shm.c
+index 4b52b0f..ab09adc 100644
+--- a/src/wayland-shm.c
++++ b/src/wayland-shm.c
+@@ -30,7 +30,7 @@
+ 
+ #define _GNU_SOURCE
+ 
+-#include "config.h"
++#include "../config.h"
+ 
+ #include <stdbool.h>
+ #include <stdio.h>
+diff --git a/tests/event-loop-test.c b/tests/event-loop-test.c
+index a51ba8f..8603015 100644
+--- a/tests/event-loop-test.c
++++ b/tests/event-loop-test.c
+@@ -25,6 +25,9 @@
+  */
+ 
+ #define _GNU_SOURCE
++
++#include "../config.h"
++
+ #include <stdlib.h>
+ #include <stdint.h>
+ #include <assert.h>
+@@ -148,6 +151,8 @@ TEST(event_loop_free_source_with_data)
+ 	assert(close(context.p2[1]) == 0);
+ }
+ 
++#ifdef HAVE_SIGNALFD
++
+ static int
+ signal_callback(int signal_number, void *data)
+ {
+@@ -238,6 +243,10 @@ TEST(event_loop_multiple_same_signals)
+ 	wl_event_loop_destroy(loop);
+ }
+ 
++#endif /* HAVE_SIGNALFD */
++
++#ifdef HAVE_TIMERFD
++
+ static int
+ timer_callback(void *data)
+ {
+@@ -499,6 +508,8 @@ TEST(event_loop_timer_cancellation)
+ 	wl_event_loop_destroy(loop);
+ }
+ 
++#endif /* HAVE_TIMERFD */
++
+ struct event_loop_destroy_listener {
+ 	struct wl_listener listener;
+ 	int done;

@@ -1,0 +1,174 @@
+From 8d9130fc685f2955657ee43ed53cc3019ce3faa8 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Thu, 1 Aug 2024 07:21:48 +0800
+Subject: [PATCH] Unbreak MurmurHash: revert
+ 1110819343455b5f698e8d01a951b9da1b3b9c5a
+
+---
+ folly/hash/BUCK                    |  1 -
+ folly/hash/MurmurHash.h            | 27 +++---------
+ folly/hash/test/MurmurHashTest.cpp | 69 ++++++++++++------------------
+ 3 files changed, 32 insertions(+), 65 deletions(-)
+
+diff --git folly/hash/BUCK folly/hash/BUCK
+index af523d04a..e2f156106 100644
+--- folly/hash/BUCK
++++ folly/hash/BUCK
+@@ -67,6 +67,5 @@ cpp_library(
+     exported_deps = [
+         "//folly:c_portability",
+         "//folly/lang:bits",
+-        "//folly/portability:constexpr",
+     ],
+ )
+diff --git folly/hash/MurmurHash.h folly/hash/MurmurHash.h
+index 8bdf9e526..82854e72e 100644
+--- folly/hash/MurmurHash.h
++++ folly/hash/MurmurHash.h
+@@ -20,7 +20,6 @@
+ 
+ #include <folly/CPortability.h>
+ #include <folly/lang/Bits.h>
+-#include <folly/portability/Constexpr.h>
+ 
+ namespace folly {
+ namespace hash {
+@@ -32,17 +31,6 @@ FOLLY_ALWAYS_INLINE constexpr std::uint64_t shiftMix(std::uint64_t v) {
+   return v ^ (v >> kShift);
+ }
+ 
+-FOLLY_ALWAYS_INLINE constexpr std::uint64_t constexprLoad64(
+-    const char* s, std::size_t l) {
+-  static_assert(kIsLittleEndian);
+-
+-  std::uint64_t ret = 0;
+-  for (std::size_t i = 0; i < l; ++i) {
+-    ret |= std::uint64_t(static_cast<uint8_t>(s[i])) << (i * 8);
+-  }
+-  return ret;
+-}
+-
+ } // namespace detail
+ 
+ /*
+@@ -51,7 +39,7 @@ FOLLY_ALWAYS_INLINE constexpr std::uint64_t constexprLoad64(
+  *
+  * https://en.wikipedia.org/wiki/MurmurHash
+  */
+-constexpr std::uint64_t murmurHash64(
++inline std::uint64_t murmurHash64(
+     const char* key, std::size_t len, std::uint64_t seed) noexcept {
+   constexpr std::uint64_t kMul = 0xc6a4a7935bd1e995UL;
+ 
+@@ -59,19 +47,14 @@ constexpr std::uint64_t murmurHash64(
+ 
+   const char* beg = key;
+   const char* end = beg + (len & ~0x7);
+-  const std::size_t tail = len & 0x7;
+ 
+-  for (const char* p = beg; p != end; p += 8) {
+-    const std::uint64_t k = folly::is_constant_evaluated_or(false)
+-        ? detail::constexprLoad64(p, 8)
+-        : loadUnaligned<std::uint64_t>(p);
++  for (const char* p = beg; p != end; p += sizeof(std::uint64_t)) {
++    const std::uint64_t k = loadUnaligned<std::uint64_t>(p);
+     hash = (hash ^ detail::shiftMix(k * kMul) * kMul) * kMul;
+   }
+ 
+-  if (tail != 0) {
+-    const std::uint64_t k = folly::is_constant_evaluated_or(false)
+-        ? detail::constexprLoad64(end, tail)
+-        : partialLoadUnaligned<std::uint64_t>(end, tail);
++  if ((len & 0x7) != 0) {
++    const std::uint64_t k = partialLoadUnaligned<std::uint64_t>(end, len & 0x7);
+     hash ^= k;
+     hash *= kMul;
+   }
+diff --git folly/hash/test/MurmurHashTest.cpp folly/hash/test/MurmurHashTest.cpp
+index 8cd0e5a58..e6e2487eb 100644
+--- folly/hash/test/MurmurHashTest.cpp
++++ folly/hash/test/MurmurHashTest.cpp
+@@ -21,56 +21,41 @@
+ 
+ #include <folly/portability/GTest.h>
+ 
+-#define TEST_CASES(X)                                                      \
+-  /* Empty string */                                                       \
+-  X("", UINT64_C(0))                                                       \
+-  /* Short sequences, no execution of primary loop, only tail handling. */ \
+-  X("0", UINT64_C(5533571732986600803))                                    \
+-  X("01", UINT64_C(2988402087957123519))                                   \
+-  X("012", UINT64_C(18121251311279197961))                                 \
+-  X("0123", UINT64_C(3086299600550921888))                                 \
+-  X("01234", UINT64_C(12373468686010462630))                               \
+-  X("012345", UINT64_C(8037360064841115407))                               \
+-  X("0123456", UINT64_C(12284635732915976134))                             \
+-  /* Only primary loop. */                                                 \
+-  X("01234567", UINT64_C(9778579411364587418))                             \
+-  X("0123456789ABCDEF", UINT64_C(8277819783762704778))                     \
+-  X("0123456789ABCDEF01234567", UINT64_C(9980960296277708772))             \
+-  /* Primary loop and tail. */                                             \
+-  X("0123456789ABCDEF0", UINT64_C(654503456484488283))                     \
+-  X("0123456789ABCDEF01", UINT64_C(10240825431821950816))                  \
+-  X("0123456789ABCDEF012", UINT64_C(6811778381211949987))                  \
+-  X("0123456789ABCDEF0123", UINT64_C(10791461727592423385))                \
+-  X("0123456789ABCDEF01234", UINT64_C(11236139906480711106))               \
+-  X("0123456789ABCDEF012345", UINT64_C(8264417865430344363))               \
+-  X("0123456789ABCDEF0123456", UINT64_C(2915833106541791378))              \
+-  /* Sequences with bytes represented as negative chars. */                \
+-  X("\x80", UINT64_C(13393303071874499911))                                \
+-  X("\x80\x81", UINT64_C(3896321919913970216))                             \
+-  X("\x80\x81\x82\x83\x84\x85\x86\x87", UINT64_C(2468552239318681156))     \
+-  X("\x61\x80\x81\x82\x83\x84\x85\x86\x87\x62", UINT64_C(836019401831928519))
+-
+ namespace {
+ 
+-constexpr std::uint64_t murmurHash64(std::string_view input) {
++std::uint64_t murmurHash64(std::string_view input) {
+   return folly::hash::murmurHash64(input.data(), input.size(), /* seed */ 0);
+ }
+ 
+ } // namespace
+ 
+-TEST(MurmurHash, Runtime){
+-#define X(s, expected) EXPECT_EQ(murmurHash64(s), expected);
+-    TEST_CASES(X)
+-#undef X
++TEST(MurmurHash, Empty) {
++  EXPECT_EQ(murmurHash64(""), 0ULL);
++}
++
++TEST(MurmurHash, Tail) {
++  // Short sequences, no execution of primary loop, only tail handling.
++  EXPECT_EQ(murmurHash64("0"), 5533571732986600803ULL);
++  EXPECT_EQ(murmurHash64("01"), 2988402087957123519ULL);
++  EXPECT_EQ(murmurHash64("012"), 18121251311279197961ULL);
++  EXPECT_EQ(murmurHash64("0123"), 3086299600550921888ULL);
++  EXPECT_EQ(murmurHash64("01234"), 12373468686010462630ULL);
++  EXPECT_EQ(murmurHash64("012345"), 8037360064841115407ULL);
++  EXPECT_EQ(murmurHash64("0123456"), 12284635732915976134ULL);
+ }
+ 
+-TEST(MurmurHash, Constexpr) {
+-#define X(s, expected)                      \
+-  {                                         \
+-    constexpr uint64_t h = murmurHash64(s); \
+-    static_assert(h == expected);           \
+-  }
++TEST(MurmurHash, PrimaryLoop) {
++  EXPECT_EQ(murmurHash64("01234567"), 9778579411364587418ULL);
++  EXPECT_EQ(murmurHash64("0123456789ABCDEF"), 8277819783762704778ULL);
++  EXPECT_EQ(murmurHash64("0123456789ABCDEF01234567"), 9980960296277708772ULL);
++}
+ 
+-  TEST_CASES(X)
+-#undef X
++TEST(MurmurHash, PrimaryLoopAndTail) {
++  EXPECT_EQ(murmurHash64("0123456789ABCDEF0"), 654503456484488283ULL);
++  EXPECT_EQ(murmurHash64("0123456789ABCDEF01"), 10240825431821950816ULL);
++  EXPECT_EQ(murmurHash64("0123456789ABCDEF012"), 6811778381211949987ULL);
++  EXPECT_EQ(murmurHash64("0123456789ABCDEF0123"), 10791461727592423385ULL);
++  EXPECT_EQ(murmurHash64("0123456789ABCDEF01234"), 11236139906480711106ULL);
++  EXPECT_EQ(murmurHash64("0123456789ABCDEF012345"), 8264417865430344363ULL);
++  EXPECT_EQ(murmurHash64("0123456789ABCDEF0123456"), 2915833106541791378ULL);
+ }

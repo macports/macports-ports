@@ -1,0 +1,226 @@
+Add the capability to extract to stdout. Relevant parts from:
+https://github.com/mackyle/xar/commit/312a71a77dff76c4bf6ebc8d7a9e64ca1322d8dd 2012-09-15T07:10
+https://github.com/mackyle/xar/commit/ba57887b34af69e786b35b34762ab06f17135e2b 2012-09-15T07:29
+https://github.com/mackyle/xar/commit/ddea2e4b53b6b2cfdd0d13c6beaac0978330c2a2 2012-09-15T07:33
+--- include/xar.h.in.orig	2019-02-14 18:05:37.000000000 -0600
++++ include/xar.h.in	2022-03-10 06:07:31.000000000 -0600
+@@ -134,6 +134,8 @@
+ #define XAR_OPT_VAL_TRUE       "true"
+ #define XAR_OPT_VAL_FALSE      "false"
+ 
++#define XAR_OPT_EXTRACTSTDOUT  "extract-stdout" /* Extract data to stdout instead of file (true/false) */
++
+ /* xar signing algorithms */
+ #define XAR_SIG_SHA1RSA		1
+ 
+--- lib/archive.c.orig	2022-03-14 05:57:47.000000000 -0500
++++ lib/archive.c	2022-03-14 06:03:01.000000000 -0500
+@@ -886,6 +886,9 @@
+ 	if( (strcmp(option, XAR_OPT_TOCCKSUM) == 0) ) {
+ 		XAR(x)->heap_offset = xar_io_get_toc_checksum_length_for_type(value);
+ 	}
++	if ((strcmp(option, XAR_OPT_EXTRACTSTDOUT) == 0)) {
++		XAR(x)->tostdout = strcmp(value, XAR_OPT_VAL_TRUE) == 0;
++	}
+ 	
+ 	/*	This was an edit from xar-1.4
+ 		Looks like we would only allow one definition for a particular key in this list
+@@ -1499,33 +1502,46 @@
+ 	xar_file_t tmpf;
+ 	uint32_t result = -1;
+ 	
+-	if( (strstr(XAR_FILE(f)->fspath, "/") != NULL) && (stat(XAR_FILE(f)->fspath, &sb)) && (XAR_FILE(f)->parent_extracted == 0) ) {
+-		tmp1 = strdup(XAR_FILE(f)->fspath);
+-		dname = xar_safe_dirname(tmp1);
+-		tmpf = xar_file_find(XAR(x)->files, dname);
+-		free(dname);
+-		free(tmp1);
+-		if( !tmpf ) {
+-			xar_err_set_string(x, "Unable to find file");
+-			xar_err_callback(x, XAR_SEVERITY_NONFATAL, XAR_ERR_ARCHIVE_EXTRACTION);
+-			return -1;
+-		}
++	if (XAR(x)->tostdout) {
++		char *buffer = NULL;
++		size_t bsize = 0;
++		int32_t result;
++		if ((result = xar_extract_tobuffersz(x, f, &buffer, &bsize)) != 0)
++			return result;
++		if (bsize && buffer && fwrite(buffer, bsize, 1, stdout) != 1)
++			result = -1;
++		free(buffer);
++		return result;
++	}
++	else {
++		if( (strstr(XAR_FILE(f)->fspath, "/") != NULL) && (stat(XAR_FILE(f)->fspath, &sb)) && (XAR_FILE(f)->parent_extracted == 0) ) {
++			tmp1 = strdup(XAR_FILE(f)->fspath);
++			dname = xar_safe_dirname(tmp1);
++			tmpf = xar_file_find(XAR(x)->files, dname);
++			free(dname);
++			free(tmp1);
++			if( !tmpf ) {
++				xar_err_set_string(x, "Unable to find file");
++				xar_err_callback(x, XAR_SEVERITY_NONFATAL, XAR_ERR_ARCHIVE_EXTRACTION);
++				return -1;
++			}
+ 		
+-		XAR_FILE(f)->parent_extracted++;
+-		result = xar_extract(x, tmpf);
++			XAR_FILE(f)->parent_extracted++;
++			result = xar_extract(x, tmpf);
+ 		
+-		if (result < 0)
+-			return result;
++			if (result < 0)
++				return result;
+ 			
+-	}
++		}
+ 	
+-	char* safe_path = xar_get_safe_path(f);
+-	if (safe_path) {
+-		result = xar_extract_tofile(x, f, safe_path);
+-		free(safe_path);
+-	}
++		char* safe_path = xar_get_safe_path(f);
++		if (safe_path) {
++			result = xar_extract_tofile(x, f, safe_path);
++			free(safe_path);
++		}
+ 	
+-	return result;
++		return result;
++	}
+ }
+ 
+ int32_t xar_verify_progress(xar_t x, xar_file_t f, xar_progress_callback p) {
+--- lib/archive.h.orig	2022-03-10 05:12:27.000000000 -0600
++++ lib/archive.h	2022-03-10 05:45:47.000000000 -0600
+@@ -101,6 +101,7 @@
+ 	int toc_hash_size;			/* size of toc hash that was copied during archive open */
+ 	void *toc_hash;				/* copy of the toc hash copied during archive open */
+ 	int skipwarn;
++	int tostdout;
+ 	struct stat sbcache;
+ };
+ 
+--- src/xar.c.orig	2022-03-10 05:12:27.000000000 -0600
++++ src/xar.c	2022-03-10 05:39:41.000000000 -0600
+@@ -53,8 +53,10 @@
+ #include "config.h"
+ #include "../lib/filetree.h"
+ #include "util.h"
++#include "xar.h"
+ #define SYMBOLIC 1
+ #define NUMERIC  2
++#define XAR_OPT_EXTRACTSTDOUT  "extract-stdout" /* Extract data to stdout instead of file (true/false) */
+ static int Perms = 0;
+ static int Local = 0;
+ static char *Subdoc = NULL;
+@@ -73,6 +73,7 @@
+ static int LinkSame = 0;
+ static int NoOverwrite = 0;
+ static int SaveSuid = 0;
++static int ToStdout = 0;
+ 
+ struct lnode {
+ 	char *str;
+@@ -383,6 +384,9 @@
+ 	if( SaveSuid ) {
+ 		xar_opt_set(x, XAR_OPT_SAVESUID, XAR_OPT_VAL_TRUE);
+ 	}
++	if (ToStdout) {
++		xar_opt_set(x, XAR_OPT_EXTRACTSTDOUT, XAR_OPT_VAL_TRUE);
++	}
+ 	
+ 	iter = xar_iter_new();
+ 	if( !iter ) {
+@@ -457,24 +461,28 @@
+ 		
+ 		if( matched ) {
+ 			struct stat sb;
+-			if( NoOverwrite && (lstat(path, &sb) == 0) ) {
++			if( !ToStdout && NoOverwrite && (lstat(path, &sb) == 0) ) {
+ 				printf("%s already exists, not overwriting\n", path);
+ 			} else {
+ 				const char *prop = NULL;
+ 				int deferred = 0;
+ 				if( xar_prop_get(f, "type", &prop) == 0 && prop != NULL ) {
+ 					if( strcmp(prop, "directory") == 0 ) {
+-						struct lnode *tmpl = calloc(sizeof(struct lnode),1);
+-						tmpl->str = (char *)f;
+-						tmpl->next = dirs;
+-						dirs = tmpl;
+-						deferred = 1;
++						if (!ToStdout) {
++							struct lnode *tmpl = calloc(sizeof(struct lnode),1);
++							tmpl->str = (char *)f;
++							tmpl->next = dirs;
++							dirs = tmpl;
++							deferred = 1;
++						}
+ 					}
+ 				}
+ 				if( ! deferred ) {
+-					files_extracted++;
+ 					print_file(x, f);
+-					xar_extract(x, f);
++					if (xar_extract(x, f) == 0)
++						files_extracted++;
++					else if (!ToStdout)
++						fprintf(stderr, "Unable to extract file %s\n", path);
+ 				}
+ 			}
+ 		}
+@@ -859,6 +867,8 @@
+ 	fprintf(stderr, "\t                      to a document in cwd named <name>.xml\n");
+ 	fprintf(stderr, "\t--exclude        POSIX regular expression of files to \n");
+ 	fprintf(stderr, "\t                      ignore while archiving.\n");
++	fprintf(stderr, "\t--to-stdout      Write file contents to standard out when extracting\n");
++	fprintf(stderr, "\t-O               Synonym for \"--to-stdout\"\n");
+ 	fprintf(stderr, "\t--rsize          Specifies the size of the buffer used\n");
+ 	fprintf(stderr, "\t                      for read IO operations in bytes.\n");
+ 	fprintf(stderr, "\t--coalesce-heap  When archived files are identical, only store one copy\n");
+@@ -917,6 +927,7 @@
+ 		{"keep-existing",    no_argument,       0, 15},
+ 		{"keep-setuid",      no_argument,       0, 16},
+ 		{"compression-args", required_argument, 0, 17},
++		{"to-stdout",        no_argument,       0, 'O'},
+ 		{ 0, 0, 0, 0}
+ 	};
+ 
+@@ -925,7 +936,7 @@
+ 		exit(1);
+ 	}
+ 
+-	while( (c = getopt_long(argc, argv, "axcC:vtjzf:hpPln:s:d:vk", o, &loptind)) != -1 ) {
++	while( (c = getopt_long(argc, argv, "axcOC:vtjzf:hpPln:s:d:vk", o, &loptind)) != -1 ) {
+ 		switch(c) {
+ 		case  1 : // toc-cksum
+ 			if( !optarg ) {
+@@ -1150,6 +1161,9 @@
+ 		case 'l': // stay on local device
+ 			Local = 1;
+ 			break;
++		case 'O':
++			ToStdout = 1;
++			break;
+ 		case 'n': // provide subdocument name
+ 			SubdocName = optarg;
+ 			break;
+--- src/xar.1.orig	2020-05-12 22:28:17.000000000 -0500
++++ src/xar.1	2022-03-09 19:52:00.000000000 -0600
+@@ -103,6 +103,13 @@
+ the archive during creation or from being extracted during extraction.  
+ This option can be specified multiple times.
+ .TP
++\-\-to\-stdout
++Instead of creating files during extraction, write the file contents to standard output.
++Only the file data will be written to standard output.  All extended attributes, resource forks and other file properties are ignored with this option.
++.TP
++\-O
++Synonym for \-\-to\-stdout
++.TP
+ \-\-rsize
+ Specifies a size (in bytes) for the internal libxar read buffer while performing I/O.
+ .TP

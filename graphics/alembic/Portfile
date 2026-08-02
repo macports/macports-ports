@@ -1,0 +1,156 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           cmake 1.1
+PortGroup           active_variants 1.1
+PortGroup           legacysupport 1.0
+
+github.setup        alembic alembic 1.8.11
+github.tarball_from archive
+revision            0
+categories          graphics
+license             BSD
+maintainers         @jasonliu-- openmaintainer
+homepage            https://www.alembic.io
+description         data representation scheme for storing computer \
+                    graphics scenes
+long_description    Alembic is a computer graphics interchange \
+                    framework, developed by Sony Pictures Imageworks \
+                    and Industrial Light & Magic. It distills complex, \
+                    animated scenes into a non-procedural, \
+                    application-independent set of baked geometric \
+                    results. It is very specifically not concerned \
+                    with storing portions of the assets such as \
+                    animation rigs. Instead, Alembic is used to bake \
+                    things like the geometry and physics of an \
+                    animated scene, the results of which are then \
+                    ready for hand-off to lighting and rendering.
+
+checksums           rmd160  4d98af8f6caa41593e835bb71b3cc53c5bf3b29a \
+                    sha256  ab299bb4b1894a6675c73fa29940522b54c81a91b1d691ca3470d86b7345ffce \
+                    size    931491
+
+depends_lib         port:imath
+
+# lib/Alembic/AbcCoreOgawa/StreamManager.cpp uses ffsll but fails to include <strings.h>
+patchfiles-append   patch-strings-include.diff
+
+# This is the default C++ standard for MacPorts,
+# so we don't need to specify it ourselves.
+# (Reference: https://trac.macports.org/wiki/CompilerSelection)
+#compiler.cxx_standard 1998
+
+configure.args-append   -DUSE_EXAMPLES=ON
+
+# fix 'include/AbcClients' getting output to the wrong location.
+# This problem has been reported upstream:
+#     https://github.com/alembic/alembic/issues/264
+post-destroot {
+    if {[file exists ${destroot}${prefix}/include/AbcClients]} {
+        move ${destroot}${prefix}/include/AbcClients \
+             ${destroot}${prefix}/include/Alembic/
+    }
+}
+
+variant boost description {Build Alembic using Boost} {
+    PortGroup               boost 1.0
+
+    configure.args-append   -DALEMBIC_LIB_USES_BOOST=ON
+}
+
+variant hdf5 description {Enable HDF5 support} {
+    depends_lib-append      port:zlib \
+                            port:hdf5
+    configure.args-append   -DUSE_HDF5=ON
+}
+
+variant docs description {Build documentation} {
+    configure.args-append   -DDOCS_PATH=docs
+    depends_build-append    path:bin/doxygen:doxygen
+    build.target-append     doxygen
+    post-destroot {
+        xinstall -d ${destroot}${prefix}/share/doc/alembic
+        copy ${build.dir}/lib/Alembic/docs/html \
+            ${destroot}${prefix}/share/doc/alembic
+    }
+}
+
+default_variants    +docs
+
+# Patches needed in order to build PyAlembic
+# (not to be confused with py-alembic)
+proc patch_pyalembic_files {python_suffix} {
+    global worksrcpath prefix
+    if {[active_variants boost cmake_scripts]} {
+        reinplace -E "s|\(Boost_NO_BOOST_CMAKE\) ON|\\1 OFF|g" \
+            ${worksrcpath}/cmake/AlembicBoost.cmake
+    } else {
+        depends_lib-append path:include/boost/python:boost
+    }
+
+    if {[active_variants boost no_single]} {
+        reinplace -E "s|\(USE_MULTITHREADED\) OFF|\\1 ON|" \
+            ${worksrcpath}/cmake/AlembicBoost.cmake
+    }
+
+    # According to 'cmake --help-module FindBoost': "Note that
+    # Boost Python components require a Python version suffix (Boost
+    # 1.67 and later), e.g. 'python36' or 'python27' for the versions
+    # built against Python 3.6 and 2.7, respectively."
+    reinplace -E "s|\(program_options python\)|\\1${python_suffix}|" \
+        ${worksrcpath}/cmake/AlembicBoost.cmake
+    set files [
+        concat [
+            glob -directory ${worksrcpath}/python/PyAlembic *] [
+            glob -directory ${worksrcpath}/python/PyAlembic/Tests *
+        ]
+    ]
+    foreach f $files {
+        reinplace -q -E "s|\(Boost_PYTHON\)\(_LIBRARY\)|\\1${python_suffix}\\2|g" $f
+    }
+
+    reinplace -E "s|Boost_VERSION LESS 104200|Boost_VERSION VERSION_LESS 1.42.0|" \
+        ${worksrcpath}/cmake/AlembicBoost.cmake
+
+    reinplace -E "/DARWIN/,/ROOT NOTFOUND/s|\(ROOT\) NOTFOUND|\\1 \"${prefix}\"|" \
+        ${worksrcpath}/cmake/Modules/FindPyIlmBase.cmake
+}
+
+### The following code was adapted from the portfiles
+### of ports such as openvdb and openimageio
+
+set pythons_suffixes    {27 313 314}
+
+set pythons_ports       {}
+foreach s ${pythons_suffixes} {
+    lappend pythons_ports python${s}
+}
+
+foreach s ${pythons_suffixes} {
+    set p python${s}
+    set v [string index ${s} 0].[string index ${s} 1]
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    variant ${p} requires boost hdf5 conflicts {*}${c} \
+        description "Build Alembic with Python ${v} bindings" \
+    "
+        # Note to future maintainers of this port: All of the following
+        # code MUST be wrapped inside double quotes and NOT curly
+        # braces. Otherwise, the values of the various variables will be
+        # wrong, and all of the variants will end up being built with
+        # whatever version of Python happens to be the last value of
+        # python_suffixes!
+        depends_lib-append      port:${p}
+
+        post-patch {
+            patch_pyalembic_files ${s}
+        }
+
+        configure.args-append   -DUSE_PYALEMBIC=ON \
+                                -DPYTHON_EXECUTABLE:FILEPATH=${prefix}/bin/python${v}
+    "
+}
+
+# do not find "_beta3" versions
+github.livecheck.regex  {([0-9.]+)}

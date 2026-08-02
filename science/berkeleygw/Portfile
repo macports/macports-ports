@@ -1,0 +1,181 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           mpi 1.0
+PortGroup           linear_algebra 1.0
+
+name                berkeleygw
+version             2.0.0
+revision            6
+categories          science
+platforms           darwin
+license             BSD
+maintainers         {dstrubbe @dstrubbe}
+
+description         GW/Bethe-Salpeter equation
+long_description    BerkeleyGW is a set of computer codes that calculate the quasiparticle properties \
+                    and the optical responses of a large variety of materials from bulk periodic crystals \
+                    to nanostructures such as slabs, wires and molecules, using many-body perturbation theory \
+                    (the GW approximation and Bethe-Salpeter equation).
+homepage            http://www.berkeleygw.org
+
+checksums           rmd160  56c3330b9f8928439b04b503f56a3df6dc3a32f0 \
+                    sha256  887146cc6598a509a6d2a7b5044d12ebc5a4a2c7b028513f247fe62cf0861563 \
+                    size    71864027
+
+master_sites        https://berkeley.box.com/shared/static
+distfiles           wkqu37wu77tll53r8t1soe6ozqja67yy.gz
+# needed for case-sensitive filesystems
+worksrcdir          BGW-${version}
+
+depends_lib         port:fftw-3
+if {![variant_isset fftw2]} {
+    compilers.enforce_some_fortran  fftw-3
+}
+
+# May fail with +mpich +gcc5. Use +mpich +gfortran instead.
+# In file included from /opt/local/include/mpich-gcc5/mpi.h:2231:0,
+#                  from icm.cpp:86:
+# /opt/local/include/mpich-gcc5/mpicxx.h:22:4: error: #error 'Please use the same version of GCC and g++ for compiling MPICH and user MPI programs'
+#  #  error 'Please use the same version of GCC and g++ for compiling MPICH and user MPI programs'
+#     ^
+
+# WHAT DO WE DO WHEN meaning of 'gfortran' is updated? No record... Maybe rename to gfortran5 etc. ?
+
+compilers.choose    fc cc cxx cpp
+compilers.allow_arguments_mismatch yes
+mpi.setup           require_fortran -g95
+# won't compile with g95
+#In file Common/timing.p.f:289
+#   contains
+#           1
+#Error: Unexpected CONTAINS statement at (1)
+
+if {[mpi_variant_isset]} {
+    depends_lib-append  port:scalapack
+    #FIXME: this unnecessarily enforces scalapack also had same C compiler as we are using.
+    # Without this MPI consistency, a seg fault may occur.
+    mpi.enforce_variant scalapack
+}
+
+# fftw is not universal
+universal_variant   no
+
+configure {
+    system -W ${worksrcpath} "sed 's|/opt/local|${prefix}|' < config/generic.serial.macos.mk > arch.mk"
+    reinplace -W ${worksrcpath} "s|MATHFLAG += -DHDF5||" arch.mk
+}
+
+# Makefile: fix changed path, otherwise destroot would fail
+# BSE/vmtxel.f90: guard MPI_COMM_WORLD with #ifdef MPI, or cannot compile in serial
+patchfiles         patch-Makefile.diff \
+                   patch-BSE-vmtxel.f90.diff
+
+build.target	    all-flavors
+use_parallel_build  yes
+
+destroot.post_args  INSTDIR=${destroot}${prefix}
+test.run            yes
+# BN.test will fail because it is written assuming h5
+
+#depends_build       port:gsed
+pre-test {
+    reinplace -W ${worksrcpath}/testsuite "s|sed|gsed|" Graphene/Graphene.test Graphene/Graphene_3D.test \
+        Si-EPM/Si.test Si-EPM/Si_cplx_spin.test
+
+    if {[mpi_variant_isset]} {
+        test.args-append    TESTSCRIPT="MPIEXEC=${prefix}/bin/${mpi.exec} make check-parallel"
+        test.target         check-jobscript
+
+        # FIXME: what about with threads? set OMP_NUM_THREADS=2 and divide build.jobs by 2.
+        test.env-append BGW_TEST_MPI_NPROCS=${build.jobs}
+    } else {
+        test.target         check
+    }
+}
+
+notes {
+    For the purposes of record-keeping and support, please register an account at www.berkeleygw.org.
+}
+
+pre-build {
+    build.args-append   LINK="${configure.fc}" CC_COMP=${configure.cxx} C_COMP=${configure.cc} C_LINK=${configure.cxx} \
+                        LAPACKLIB="-L${prefix}/lib/ ${linalglib}"
+
+    set mathflag ""
+    if {[variant_isset hdf5]} {
+        set mathflag "${mathflag} -DHDF5"
+        reinplace -W ${worksrcpath} "s|\#HDF5|HDF5|g" arch.mk
+    }
+    
+    if {[variant_isset fftw2]} {
+        build.args-append  FFTWLIB="-L${prefix}/lib/ -ldfftw"
+    } else {
+        if {[variant_isset threads]} {
+            build.args-append  FFTWLIB="-L${prefix}/lib/ -lfftw3 -lfftw3_threads"
+        } else {
+            build.args-append  FFTWLIB="-L${prefix}/lib/ -lfftw3"
+        }
+        set mathflag "${mathflag} -DUSEFFTW3"
+    }
+
+    configure.fcflags-append -ffree-form -fno-second-underscore
+
+    if {[variant_isset g95]} {
+        build.args-append COMPFLAG="-DG95" FCPP="${configure.cc} -E -x c -P -ansi" MOD_OPT="-fmod=" \
+            F90free="${configure.fc} -ffree-line-length-huge ${configure.fcflags}"
+        # test, destroot args needed just to avoid trying to build in the test/openmp directory unnecessarily
+        test.args-append  COMPFLAG="-DG95"
+        destroot.args-append  COMPFLAG="-DG95"
+    } else {
+        if {[gcc_variant_isset]} {
+            build.args-append FCPP="${configure.cpp} -C"
+        } else {
+            # for clang. Could be wrong in odd situation where no C variant is set, and default is not clang.
+            build.args-append FCPP="${configure.cc} -E -x c -ansi"
+        }
+
+        # gcc is default in arch.mk so most things do not need to be modified
+        build.args-append F90free="${configure.fc} -ffree-line-length-none ${configure.fcflags}"
+    }
+
+    if {[variant_isset threads]} {
+        set paraflag "-DOMP"
+    } else {
+        set paraflag ""
+    }
+    
+    if {[mpi_variant_isset]} {
+        set mathflag "${mathflag} -DUSESCALAPACK"
+        set paraflag "${paraflag} -DMPI"
+        build.args-append C_PARAFLAG="-DPARA" SCALAPACKLIB="-L${prefix}/lib/ -lscalapack"
+    }
+
+    build.args-append   MATHFLAG="${mathflag}" PARAFLAG="${paraflag}"
+    test.args-append    MATHFLAG="${mathflag}" PARAFLAG="${paraflag}"
+}
+
+variant threads description {Build with OpenMP support} conflicts g95 {
+    set configure.fc "${configure.fc} -fopenmp"
+}
+
+variant debug description {Add debug flags for more checking and output, but slower runs.} {
+    build.args-append    DEBUGFLAG="-DDEBUG -DVERBOSE"
+}
+
+variant hdf5 description {Build with HDF5 support for faster epsmat I/O} {
+    depends_lib-append          port:hdf5
+    require_active_variants     port:hdf5 hl
+    compilers.enforce_fortran   hdf5
+    mpi.enforce_variant         hdf5
+    # if MPI, hdf5 must have MPI
+}
+
+variant fftw2 description {Build with FFTW-2} {
+    depends_lib-replace        port:fftw-3 port:fftw
+    # fftw port always has a Fortran variant
+}
+
+livecheck.type      regex
+livecheck.url       https://berkeleygw.org/download/
+livecheck.regex     BGW-(\[0-9.\]+).tar.gz

@@ -1,0 +1,131 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem                  1.0
+PortGroup                   conflicts_build 1.0
+PortGroup                   linear_algebra 1.0
+PortGroup                   makefile 1.0
+PortGroup                   mpi 1.0
+PortGroup                   muniversal 1.0
+
+name                        mumps
+version                     5.9.0
+revision                    0
+categories                  math
+license                     CeCILL-C
+maintainers                 {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
+description                 MUltifrontal Massively Parallel sparse direct Solver
+long_description            MUMPS: a parallel sparse direct solver
+
+depends_lib                 port:scotch \
+                            port:scalapack \
+                            port:metis \
+                            port:parmetis
+
+homepage                    https://mumps-solver.org
+master_sites                ${homepage}
+
+distname                    MUMPS_${version}
+
+checksums                   rmd160  59eb8c3c7fb780e88b95461b9ca6c86a35fc18d5 \
+                            sha256  02c6efdb91749ec0f82351d40f3f860547272a1eb1d899126a4265b4d6bcc4ca \
+                            size    4976904
+
+conflicts_build-append      ${name}
+
+post-extract {
+    file copy ${worksrcpath}/Make.inc/Makefile.inc.generic ${worksrcpath}/Makefile.inc
+}
+
+mpi.setup                   require \
+                            require_fortran
+
+mpi.enforce_variant         scalapack
+
+linalg.setup                blas_only
+
+# Xcode clang of 10.7 fails with error: invalid instruction mnemonic 'cvtsi2ssl'
+compiler.blacklist-append \
+                    {clang < 500} *gcc-4.* macports-gcc-5 macports-gcc-6
+
+# see https://listes.ens-lyon.fr/sympa/arc/mumps-users/2020-05/msg00000.html
+compilers.allow_arguments_mismatch  yes
+
+# when using a non-GCC compiler, avoid:
+#     Undefined symbols for architecture i386:
+#       "___divmoddi4", referenced from:
+#           _dmumps_facto_root_ in libdmumps.a(dfac_root_parallel.o)
+#     ld: symbol(s) not found for architecture i386
+# see https://gitlab.haskell.org/ghc/ghc/issues/15094
+lappend merger_configure_fcflags(i386) \
+                            -fno-expensive-optimizations
+if {(!${universal_possible} || ![variant_isset universal]) && ${build_arch} eq "i386"} {
+    configure.fflags-append -fno-expensive-optimizations
+}
+
+if {!${universal_possible} || ![variant_isset universal]} {
+    # find correct scotch Fortran header
+    if {[file exists ${prefix}/include/${build_arch}]} {
+        configure.cppflags-prepend -I${prefix}/include/${build_arch}
+    }
+} else {
+    # find correct scotch Fortran header
+    foreach arch ${configure.universal_archs} {
+        if {[file exists ${prefix}/include/${arch}]} {
+            lappend merger_configure_cppflags(${arch}) -I${prefix}/include/${arch}
+        }
+    }
+}
+
+use_parallel_build          no
+
+build.target                all allshared
+build.args-append           LIBEXT_SHARED=.dylib SONAME=-install_name \
+                            FL='\$(FC)' \
+                            INCPAR= \
+                            LAPACK= \
+                            LMETIS="-lparmetis -lmetis" \
+                            LSCOTCH="-lptesmumps -lptscotch -lptscotcherr -lscotch" \
+                            OPTC="${configure.cppflags} ${configure.cflags}" \
+                            OPTF="${configure.cppflags} ${configure.fflags}" \
+                            OPTL="${configure.ldflags}" \
+                            ORDERINGSF="-Dscotch -Dmetis -Dpord -Dptscotch -Dparmetis" \
+                            SCALAP='-lscalapack \$(LIBBLAS)'
+
+pre-build {
+    build.args-append       LIBBLAS=${linalglib}
+}
+
+destroot {
+    xinstall -m 644 {*}[glob ${worksrcpath}/include/*.h] ${destroot}${prefix}/include
+    xinstall -m 644 {*}[glob ${worksrcpath}/lib/*.a] ${destroot}${prefix}/lib
+    xinstall -m 644 {*}[glob ${worksrcpath}/lib/*.dylib] ${destroot}${prefix}/lib
+    foreach f [glob -tails -directory ${destroot} ${prefix}/lib/*.dylib] {
+        system "install_name_tool -id /$f ${destroot}/$f"
+    }
+    system "install_name_tool \
+        -change libpord.dylib ${prefix}/lib/libpord.dylib \
+        ${destroot}${prefix}/lib/libmumps_common.dylib"
+    foreach f [glob -tails -directory ${destroot} ${prefix}/lib/lib*mumps.dylib] {
+        system "install_name_tool \
+            -change libmumps_common.dylib ${prefix}/lib/libmumps_common.dylib \
+            -change libpord.dylib ${prefix}/lib/libpord.dylib \
+            ${destroot}/$f"
+    }
+}
+
+livecheck.url               ${homepage}/index.php?page=dwnld
+livecheck.regex             {>(\d+(?:\.\d+)*)<}
+
+test.run                    yes
+test.target                 all
+test.args-append            LPORD=../lib/libpord.a
+
+post-test {
+    set runcmd "${mpi.exec} -np ${build.jobs}"
+
+    system -W ${worksrcpath}/examples "${runcmd} ./ssimpletest < input_simpletest_real"
+    system -W ${worksrcpath}/examples "${runcmd} ./dsimpletest < input_simpletest_real"
+    system -W ${worksrcpath}/examples "${runcmd} ./csimpletest < input_simpletest_cmplx"
+    system -W ${worksrcpath}/examples "${runcmd} ./zsimpletest < input_simpletest_cmplx"
+    system -W ${worksrcpath}/examples "${runcmd} ./c_example"
+}

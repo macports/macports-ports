@@ -1,0 +1,876 @@
+From 3f5bda4b33b9098109917b155c0d6c4227568e03 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <vital.had@gmail.com>
+Date: Sun, 7 Jul 2024 21:05:23 +0800
+Subject: [PATCH] Some hacks to fix the build for powerpc
+
+Mostly borrowed from https://github.com/nilsvanvelzen/mac_ppc_openjdk8u60
+with some modifications and updates.
+---
+ hotspot/agent/src/os/bsd/Makefile             |  4 +-
+ hotspot/make/bsd/makefiles/saproc.make        |  1 -
+ hotspot/src/os/bsd/vm/os_bsd.cpp              |  4 +-
+ jdk/make/Bundles.gmk                          |  2 +-
+ jdk/make/CompileLaunchers.gmk                 | 20 ++--
+ jdk/make/lib/Awt2dLibraries.gmk               | 52 +++++-----
+ jdk/make/lib/PlatformLibraries.gmk            | 11 +--
+ jdk/src/macosx/bin/java_md_macosx.c           |  4 +
+ .../media/sound/PLATFORM_API_MacOSX_PCM.cpp   |  7 ++
+ jdk/src/macosx/native/sun/font/AWTFont.m      | 99 +------------------
+ .../nio/ch/SocketOptionRegistry.java.template |  2 -
+ .../share/native/sun/font/AccelGlyphCache.c   |  6 +-
+ jdk/src/solaris/native/java/net/net_util_md.c |  2 +-
+ jdk/src/solaris/native/sun/awt/CUPSfuncs.c    | 32 +++---
+ .../solaris/native/sun/awt/HeadlessToolkit.c  |  2 +-
+ .../solaris/native/sun/awt/awt_LoadLibrary.c  | 10 +-
+ jdk/src/solaris/native/sun/awt/fontpath.c     |  7 +-
+ jdk/src/solaris/native/sun/awt/jawt.c         |  2 +-
+ .../native/sun/nio/ch/DatagramChannelImpl.c   |  2 +-
+ 19 files changed, 89 insertions(+), 180 deletions(-)
+
+diff --git hotspot/agent/src/os/bsd/Makefile hotspot/agent/src/os/bsd/Makefile
+index af22b597b8..3ae3f1fb4f 100644
+--- hotspot/agent/src/os/bsd/Makefile
++++ hotspot/agent/src/os/bsd/Makefile
+@@ -51,8 +51,8 @@ SOURCES  = symtab.c     \
+ OBJS    = $(SOURCES:.c=.o)
+ OBJSPLUS = MacosxDebuggerLocal.o sadis.o $(OBJS)
+ EXTINCLUDE = -I.
+-EXTCFLAGS = -m64 -D__APPLE__ -framework JavaNativeFoundation
+-FOUNDATIONFLAGS = -framework Foundation -framework JavaNativeFoundation -framework Security -framework CoreFoundation
++EXTCFLAGS = -D__APPLE__
++FOUNDATIONFLAGS = -framework Foundation -framework Security -framework CoreFoundation
+ LIBSA = $(ARCH)/libsaproc.dylib
+ endif   # Darwin
+ 
+diff --git hotspot/make/bsd/makefiles/saproc.make hotspot/make/bsd/makefiles/saproc.make
+index 5c837895f6..284cb2ebba 100644
+--- hotspot/make/bsd/makefiles/saproc.make
++++ hotspot/make/bsd/makefiles/saproc.make
+@@ -66,7 +66,6 @@ else
+     SASRCFILES = $(DARWIN_NON_STUB_SASRCFILES)
+     SALIBS = -g \
+              -framework Foundation \
+-             -framework JavaNativeFoundation \
+              -framework Security \
+              -framework CoreFoundation
+     #objc compiler blows up on -march=i586, perhaps it should not be included in the macosx intel 32-bit C++ compiles?
+diff --git hotspot/src/os/bsd/vm/os_bsd.cpp hotspot/src/os/bsd/vm/os_bsd.cpp
+index 87eec228fa..b640906a86 100644
+--- hotspot/src/os/bsd/vm/os_bsd.cpp
++++ hotspot/src/os/bsd/vm/os_bsd.cpp
+@@ -3842,7 +3842,7 @@ int os::active_processor_count() {
+ }
+ 
+ void os::set_native_thread_name(const char *name) {
+-#if defined(__APPLE__) && MAC_OS_X_VERSION_MIN_REQUIRED > MAC_OS_X_VERSION_10_5
++#if defined(__APPLE__) && (MAC_OS_X_VERSION_MIN_REQUIRED > 1050) && !defined(__ppc__)
+   // This is only supported in Snow Leopard and beyond
+   if (name != NULL) {
+     // Add a "Java: " prefix to the name
+@@ -3850,6 +3850,8 @@ void os::set_native_thread_name(const char *name) {
+     snprintf(buf, sizeof(buf), "Java: %s", name);
+     pthread_setname_np(buf);
+   }
++#else
++  return;
+ #endif
+ }
+ 
+diff --git jdk/make/Bundles.gmk jdk/make/Bundles.gmk
+index 555d7bbab4..d55da545bc 100644
+--- jdk/make/Bundles.gmk
++++ jdk/make/Bundles.gmk
+@@ -29,7 +29,7 @@ include MakeBase.gmk
+ default: bundles
+ 
+ # Only macosx has bundles defined.
+-ifeq ($(OPENJDK_TARGET_OS), macosx)
++ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+ 
+   bundles: jre-bundle jdk-bundle
+ 
+diff --git jdk/make/CompileLaunchers.gmk jdk/make/CompileLaunchers.gmk
+index 61973b3bd6..ceae21ed26 100644
+--- jdk/make/CompileLaunchers.gmk
++++ jdk/make/CompileLaunchers.gmk
+@@ -263,11 +263,11 @@ ifeq ($(OPENJDK_TARGET_OS), windows)
+ endif
+ 
+ 
+-ifndef BUILD_HEADLESS_ONLY
+-  $(eval $(call SetupLauncher,appletviewer, \
+-      -DJAVA_ARGS='{ "-J-ms8m"$(COMMA) "sun.applet.Main"$(COMMA) }',, \
+-      $(XLIBS)))
+-endif
++# ifndef BUILD_HEADLESS_ONLY
++#   $(eval $(call SetupLauncher,appletviewer, \
++#       -DJAVA_ARGS='{ "-J-ms8m"$(COMMA) "sun.applet.Main"$(COMMA) }',, \
++#       $(XLIBS)))
++# endif
+ 
+ $(eval $(call SetupLauncher,extcheck, \
+     -DJAVA_ARGS='{ "-J-ms8m"$(COMMA) "com.sun.tools.extcheck.Main"$(COMMA) }'))
+@@ -400,11 +400,11 @@ $(eval $(call SetupLauncher,keytool, \
+ $(eval $(call SetupLauncher,native2ascii, \
+     -DJAVA_ARGS='{ "-J-ms8m"$(COMMA) "sun.tools.native2ascii.Main"$(COMMA) }'))
+ 
+-ifndef BUILD_HEADLESS_ONLY
+-  $(eval $(call SetupLauncher,policytool, \
+-      -DJAVA_ARGS='{ "-J-ms8m"$(COMMA) "sun.security.tools.policytool.PolicyTool"$(COMMA) }',, \
+-      $(XLIBS)))
+-endif
++# ifndef BUILD_HEADLESS_ONLY
++#   $(eval $(call SetupLauncher,policytool, \
++#       -DJAVA_ARGS='{ "-J-ms8m"$(COMMA) "sun.security.tools.policytool.PolicyTool"$(COMMA) }',, \
++#       $(XLIBS)))
++# endif
+ 
+ $(eval $(call SetupLauncher,rmic, \
+     -DEXPAND_CLASSPATH_WILDCARDS \
+diff --git jdk/make/lib/Awt2dLibraries.gmk jdk/make/lib/Awt2dLibraries.gmk
+index cd579f7a9a..b2ec36284d 100644
+--- jdk/make/lib/Awt2dLibraries.gmk
++++ jdk/make/lib/Awt2dLibraries.gmk
+@@ -186,7 +186,7 @@ ifeq ($(OPENJDK_TARGET_OS)-$(OPENJDK_TARGET_CPU_ARCH), solaris-sparc)
+           $(CFLAGS_JDKLIB), \
+       MAPFILE := $(BUILD_LIBMLIB_IMAGE_MAPFILE), \
+       LDFLAGS := $(LDFLAGS_JDKLIB) \
+-          $(BUILD_LIBMLIB_LDLIBS) -ljava -ljvm \
++          $(BUILD_LIBMLIB_LDLIBS) -ljvm \
+           $(call SET_SHARED_LIBRARY_ORIGIN), \
+       LDFLAGS_SUFFIX_solaris := -lc, \
+       OBJECT_DIR := $(JDK_OUTPUTDIR)/objs/libmlib_image_v, \
+@@ -223,7 +223,7 @@ ifeq ($(OPENJDK_TARGET_OS), windows)
+       $(JDK_TOPDIR)/src/$(OPENJDK_TARGET_OS_API_DIR)/native/sun/windows \
+       $(JDK_TOPDIR)/src/$(OPENJDK_TARGET_OS_API_DIR)/native/sun/java2d/windows \
+       $(JDK_TOPDIR)/src/$(OPENJDK_TARGET_OS_API_DIR)/native/sun/java2d/d3d
+-else ifneq ($(OPENJDK_TARGET_OS), macosx)
++else ifneq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+   LIBAWT_DIRS += \
+       $(JDK_TOPDIR)/src/$(OPENJDK_TARGET_OS_API_DIR)/native/sun/java2d/x11
+ endif
+@@ -477,11 +477,9 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBAWT, \
+     LDFLAGS_SUFFIX_linux := -ljvm $(LIBM) $(LIBDL) -ljava, \
+     LDFLAGS_SUFFIX_solaris := -ljvm $(LIBM) $(LIBDL) -ljava -lc, \
+     LDFLAGS_SUFFIX_aix :=-ljvm $(LIBM) $(LIBDL) -ljava -lm,\
+-    LDFLAGS_SUFFIX_macosx := -lmlib_image -ljvm $(LIBM) \
++    LDFLAGS_SUFFIX_macosx := -ljvm $(LIBM) \
+         -framework Cocoa \
+         -framework OpenGL \
+-        -framework JavaNativeFoundation \
+-        -framework JavaRuntimeSupport \
+         -framework ApplicationServices \
+         -framework AudioToolbox \
+         -ljava, \
+@@ -504,7 +502,7 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBAWT, \
+ 
+ $(BUILD_LIBAWT): $(BUILD_LIBJAVA)
+ 
+-ifeq ($(OPENJDK_TARGET_OS), macosx)
++ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+   $(BUILD_LIBAWT): $(BUILD_LIBMLIB_IMAGE)
+ endif
+ 
+@@ -764,7 +762,7 @@ BUILD_LIBRARIES += $(BUILD_LIBJPEG)
+ 
+ ifeq ($(BUILD_HEADLESS), true)
+   # Mac and Windows only use the native AWT lib, do not build libawt_headless
+-  ifeq ($(findstring $(OPENJDK_TARGET_OS), windows macosx),)
++  ifeq ($(findstring $(OPENJDK_TARGET_OS), windows),)
+ 
+     LIBAWT_HEADLESS_DIRS := $(JDK_TOPDIR)/src/share/native/sun/font \
+         $(JDK_TOPDIR)/src/share/native/sun/java2d/opengl \
+@@ -773,7 +771,7 @@ ifeq ($(BUILD_HEADLESS), true)
+         $(JDK_TOPDIR)/src/solaris/native/sun/java2d/opengl \
+         $(JDK_TOPDIR)/src/solaris/native/sun/java2d/x11
+ 
+-    ifeq ($(OPENJDK_TARGET_OS), macosx)
++    ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+       LIBAWT_HEADLESS_DIRS += $(JDK_TOPDIR)/src/macosx/native/sun/font
+     endif
+ 
+@@ -873,7 +871,7 @@ ifeq ($(OPENJDK_TARGET_OS), windows)
+   LIBFONTMANAGER_EXCLUDE_FILES += X11FontScaler.c \
+       X11TextRenderer.c
+   LIBFONTMANAGER_OPTIMIZATION := HIGHEST
+-else ifeq ($(OPENJDK_TARGET_OS), macosx)
++else ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+   LIBFONTMANAGER_EXCLUDE_FILES += X11FontScaler.c \
+       X11TextRenderer.c \
+       fontpath.c \
+@@ -969,6 +967,9 @@ ifndef OPENJDK
+       -I$(JDK_TOPDIR)/src/$(OPENJDK_TARGET_OS_API_DIR)/native/sun/java2d \
+       -I$(JDK_TOPDIR)/src/share/native/sun/java2d
+ 
++# For now -lawt_headless is dropped below in:
++# LDFLAGS_SUFFIX_solaris := -lawt -lawt_headless
++
+   $(eval $(call SetupNativeCompilation,BUILD_LIBT2K, \
+       LIBRARY := t2k, \
+       OUTPUT_DIR := $(INSTALL_LIBRARIES_HERE), \
+@@ -987,7 +988,7 @@ ifndef OPENJDK
+           $(call SET_SHARED_LIBRARY_ORIGIN), \
+       LDFLAGS_windows := user32.lib $(JDK_OUTPUTDIR)/objs/libfontmanager/fontmanager.lib, \
+       LDFLAGS_SUFFIX_posix := $(LIBM) $(LIBCXX) -lfontmanager -ljava -ljvm -lc, \
+-      LDFLAGS_SUFFIX_solaris := -lawt -lawt_headless, \
++      LDFLAGS_SUFFIX_solaris := -lawt, \
+       VERSIONINFO_RESOURCE := $(JDK_TOPDIR)/src/windows/resource/version.rc, \
+       RC_FLAGS := $(RC_FLAGS) \
+           -D "JDK_FNAME=t2k.dll" \
+@@ -1043,17 +1044,17 @@ ifeq ($(OPENJDK_TARGET_OS), windows)
+ 
+ else # OPENJDK_TARGET_OS not windows
+ 
+-  ifeq ($(OPENJDK_TARGET_OS), macosx)
++  ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+     JAWT_FILES := jawt.m
+     JAWT_LIBS := -lawt_lwawt
+   else
+     JAWT_FILES := jawt.c
+     JAWT_LIBS :=
+     ifneq ($(OPENJDK_TARGET_OS), solaris)
+-      JAWT_LIBS += -lawt
++      JAWT_LIBS +=
+     endif
+     ifndef BUILD_HEADLESS_ONLY
+-      JAWT_LIBS += -lawt_xawt
++      JAWT_LIBS +=
+     else
+       JAWT_LIBS += -lawt_headless
+       HEADLESS_CFLAG += -DHEADLESS
+@@ -1089,7 +1090,7 @@ else # OPENJDK_TARGET_OS not windows
+     $(BUILD_LIBJAWT): $(INSTALL_LIBRARIES_HERE)/$(LIBRARY_PREFIX)awt_headless$(SHARED_LIBRARY_SUFFIX)
+   endif
+ 
+-  ifeq ($(OPENJDK_TARGET_OS), macosx)
++  ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+     $(BUILD_LIBJAWT): $(INSTALL_LIBRARIES_HERE)/$(LIBRARY_PREFIX)awt_lwawt$(SHARED_LIBRARY_SUFFIX)
+   endif
+ 
+@@ -1149,7 +1150,7 @@ ifndef BUILD_HEADLESS_ONLY
+     GIFLIB_CFLAGS := -I$(JDK_TOPDIR)/src/share/native/sun/awt/giflib
+   endif
+ 
+-  ifneq ($(OPENJDK_TARGET_OS), macosx)
++  ifneq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+     LIBSPLASHSCREEN_DIRS += $(JDK_TOPDIR)/src/$(OPENJDK_TARGET_OS_API_DIR)/native/sun/awt/splashscreen
+   else
+     LIBSPLASHSCREEN_DIRS += $(JDK_TOPDIR)/src/macosx/native/sun/awt/splashscreen
+@@ -1165,7 +1166,7 @@ ifndef BUILD_HEADLESS_ONLY
+     endif
+   endif
+ 
+-  ifeq ($(OPENJDK_TARGET_OS), macosx)
++  ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+     LIBSPLASHSCREEN_CFLAGS := -I$(JDK_TOPDIR)/src/macosx/native/sun/awt/splashscreen \
+         $(LIBSPLASHSCREEN_CFLAGS)
+     LIBSPLASHSCREEN_CFLAGS += -DWITH_MACOSX
+@@ -1192,16 +1193,15 @@ ifndef BUILD_HEADLESS_ONLY
+     LIBSPLASHSCREEN_CFLAGS += $(ZLIB_CPPFLAGS)
+   endif
+ 
+-  ifeq ($(OPENJDK_TARGET_OS), macosx)
++  ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+     LIBSPLASHSCREEN_LDFLAGS_SUFFIX += $(LIBM) -lpthread -liconv -losxapp \
+         -framework ApplicationServices \
+         -framework Foundation \
+         -framework Cocoa \
+-        -framework JavaNativeFoundation
+   else ifeq ($(OPENJDK_TARGET_OS), windows)
+     LIBSPLASHSCREEN_LDFLAGS_SUFFIX += kernel32.lib user32.lib gdi32.lib delayimp.lib -DELAYLOAD:user32.dll
+   else
+-    LIBSPLASHSCREEN_LDFLAGS_SUFFIX += $(X_LIBS) -lX11 -lXext $(LIBM) -lpthread
++    LIBSPLASHSCREEN_LDFLAGS_SUFFIX += $(X_LIBS) -lX11 -lXext $(LIBM) -lpthread -liconv
+   endif
+ 
+   $(eval $(call SetupNativeCompilation,LIBSPLASHSCREEN, \
+@@ -1227,7 +1227,7 @@ ifndef BUILD_HEADLESS_ONLY
+ 
+   BUILD_LIBRARIES += $(LIBSPLASHSCREEN)
+ 
+-  ifeq ($(OPENJDK_TARGET_OS), macosx)
++  ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+     $(LIBSPLASHSCREEN): $(INSTALL_LIBRARIES_HERE)/$(LIBRARY_PREFIX)osxapp$(SHARED_LIBRARY_SUFFIX)
+   endif
+ 
+@@ -1276,7 +1276,7 @@ endif
+ 
+ ##########################################################################################
+ 
+-ifeq ($(OPENJDK_TARGET_OS), macosx)
++ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+ 
+   LIBAWT_LWAWT_FILES := \
+       awt.m \
+@@ -1383,7 +1383,7 @@ ifeq ($(OPENJDK_TARGET_OS), macosx)
+           -I$(JDK_TOPDIR)/src/share/native/sun/awt/debug, \
+       LDFLAGS := $(LDFLAGS_JDKLIB) \
+           $(call SET_SHARED_LIBRARY_ORIGIN), \
+-      LDFLAGS_SUFFIX_macosx := -lawt -lmlib_image -losxapp -ljvm $(LIBM) \
++      LDFLAGS_SUFFIX_macosx := -lawt -losxapp -ljvm $(LIBM) \
+           -framework Accelerate \
+           -framework ApplicationServices \
+           -framework AudioToolbox \
+@@ -1391,10 +1391,8 @@ ifeq ($(OPENJDK_TARGET_OS), macosx)
+           -framework Cocoa \
+           -framework Security \
+           -framework ExceptionHandling \
+-          -framework JavaNativeFoundation \
+-          -framework JavaRuntimeSupport \
+           -framework OpenGL \
+-          -framework QuartzCore -ljava, \
++          -framework QuartzCore, \
+       OBJECT_DIR := $(JDK_OUTPUTDIR)/objs/libawt_lwawt, \
+       DEBUG_SYMBOLS := $(DEBUG_ALL_BINARIES)))
+ 
+@@ -1412,7 +1410,7 @@ endif
+ 
+ ##########################################################################################
+ 
+-ifeq ($(OPENJDK_TARGET_OS), macosx)
++ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+ 
+   $(eval $(call SetupNativeCompilation,BUILD_LIBOSXUI, \
+       LIBRARY := osxui, \
+@@ -1431,8 +1429,6 @@ ifeq ($(OPENJDK_TARGET_OS), macosx)
+           -framework Cocoa \
+           -framework Carbon \
+           -framework ApplicationServices \
+-          -framework JavaNativeFoundation \
+-          -framework JavaRuntimeSupport \
+           -ljava -ljvm, \
+       OBJECT_DIR := $(JDK_OUTPUTDIR)/objs/libosxui, \
+       DEBUG_SYMBOLS := $(DEBUG_ALL_BINARIES)))
+diff --git jdk/make/lib/PlatformLibraries.gmk jdk/make/lib/PlatformLibraries.gmk
+index 49f584b447..07f2e6408d 100644
+--- jdk/make/lib/PlatformLibraries.gmk
++++ jdk/make/lib/PlatformLibraries.gmk
+@@ -23,7 +23,7 @@
+ # questions.
+ #
+ 
+-ifeq ($(OPENJDK_TARGET_OS), macosx)
++ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+ 
+   $(eval $(call SetupNativeCompilation,BUILD_LIBAPPLESCRIPTENGINE, \
+       LIBRARY := AppleScriptEngine, \
+@@ -37,7 +37,6 @@ ifeq ($(OPENJDK_TARGET_OS), macosx)
+           $(call SET_SHARED_LIBRARY_ORIGIN), \
+       LDFLAGS_SUFFIX := -framework Cocoa \
+           -framework Carbon \
+-          -framework JavaNativeFoundation \
+           $(LDFLAGS_JDKLIB_SUFFIX), \
+       OBJECT_DIR := $(JDK_OUTPUTDIR)/objs/libAppleScriptEngine, \
+       DEBUG_SYMBOLS := $(DEBUG_ALL_BINARIES)))
+@@ -50,7 +49,7 @@ endif
+ 
+ ##########################################################################################
+ 
+-ifeq ($(OPENJDK_TARGET_OS), macosx)
++ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+ 
+   $(eval $(call SetupNativeCompilation,BUILD_LIBOSXAPP, \
+       LIBRARY := osxapp, \
+@@ -71,8 +70,6 @@ ifeq ($(OPENJDK_TARGET_OS), macosx)
+           -framework Cocoa \
+           -framework Security \
+           -framework ExceptionHandling \
+-          -framework JavaNativeFoundation \
+-          -framework JavaRuntimeSupport \
+           -framework OpenGL \
+           -framework IOSurface \
+           -framework QuartzCore, \
+@@ -85,7 +82,7 @@ endif
+ 
+ ##########################################################################################
+ 
+-ifeq ($(OPENJDK_TARGET_OS), macosx)
++ifeq ($(OPENJDK_TARGET_OS), macosx_lion_up)
+ 
+   LIBOSX_DIRS := \
+       $(JDK_TOPDIR)/src/macosx/native/com/apple/concurrent \
+@@ -109,8 +106,6 @@ ifeq ($(OPENJDK_TARGET_OS), macosx)
+           -losxapp \
+           -framework Cocoa \
+           -framework ApplicationServices \
+-          -framework JavaNativeFoundation \
+-          -framework JavaRuntimeSupport \
+           -framework Security \
+           -framework SystemConfiguration \
+           $(LDFLAGS_JDKLIB_SUFFIX), \
+diff --git jdk/src/macosx/bin/java_md_macosx.c jdk/src/macosx/bin/java_md_macosx.c
+index 89210cb708..a319e65a35 100644
+--- jdk/src/macosx/bin/java_md_macosx.c
++++ jdk/src/macosx/bin/java_md_macosx.c
+@@ -307,7 +307,9 @@ static int (*main_fptr)(int argc, char **argv) = NULL;
+  */
+ static void *apple_main (void *arg)
+ {
++#ifndef __POWERPC__
+     objc_registerThreadWithCollector();
++#endif
+ 
+     if (main_fptr == NULL) {
+         main_fptr = (int (*)())dlsym(RTLD_DEFAULT, "main");
+@@ -923,7 +925,9 @@ JLI_GetJavaVMInstance()
+ void
+ RegisterThread()
+ {
++#ifndef __POWERPC__
+     objc_registerThreadWithCollector();
++#endif
+ }
+ 
+ static void
+diff --git jdk/src/macosx/native/com/sun/media/sound/PLATFORM_API_MacOSX_PCM.cpp jdk/src/macosx/native/com/sun/media/sound/PLATFORM_API_MacOSX_PCM.cpp
+index 608ee13d7e..8222438ae9 100644
+--- jdk/src/macosx/native/com/sun/media/sound/PLATFORM_API_MacOSX_PCM.cpp
++++ jdk/src/macosx/native/com/sun/media/sound/PLATFORM_API_MacOSX_PCM.cpp
+@@ -31,6 +31,7 @@
+ #include <AudioToolbox/AudioConverter.h>
+ #include <pthread.h>
+ #include <math.h>
++#include <AvailabilityMacros.h>
+ /*
+ #if !defined(__COREAUDIO_USE_FLAT_INCLUDES__)
+ #include <CoreAudio/CoreAudioTypes.h>
+@@ -620,7 +621,9 @@ struct OSX_DirectAudioDevice {
+ 
+     ~OSX_DirectAudioDevice() {
+         if (audioUnit) {
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+             AudioComponentInstanceDispose(audioUnit);
++#endif
+         }
+         if (resampler) {
+             delete resampler;
+@@ -630,6 +633,7 @@ struct OSX_DirectAudioDevice {
+ 
+ static AudioUnit CreateOutputUnit(AudioDeviceID deviceID, int isSource)
+ {
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+     OSStatus err;
+     AudioUnit unit;
+ 
+@@ -683,6 +687,9 @@ static AudioUnit CreateOutputUnit(AudioDeviceID deviceID, int isSource)
+     }
+ 
+     return unit;
++#else
++    return NULL;
++#endif
+ }
+ 
+ static OSStatus OutputCallback(void                         *inRefCon,
+diff --git jdk/src/macosx/native/sun/font/AWTFont.m jdk/src/macosx/native/sun/font/AWTFont.m
+index b392022f76..baec124f33 100644
+--- jdk/src/macosx/native/sun/font/AWTFont.m
++++ jdk/src/macosx/native/sun/font/AWTFont.m
+@@ -397,24 +397,6 @@ Java_sun_font_CFontManager_loadNativeFonts
+                             "(Ljava/lang/String;Ljava/lang/String;)V");
+ 
+     jint num = 0;
+-
+-JNF_COCOA_ENTER(env);
+-
+-    NSArray *filteredFonts = GetFilteredFonts();
+-    num = (jint)[filteredFonts count];
+-
+-    jint i;
+-    for (i = 0; i < num; i++) {
+-        NSString *fontname = [filteredFonts objectAtIndex:i];
+-        jobject jFontName = JNFNSToJavaString(env, fontname);
+-        jobject jFontFamilyName =
+-            JNFNSToJavaString(env, GetFamilyNameForFontName(fontname));
+-
+-        JNFCallVoidMethod(env, jthis,
+-                          jm_registerFont, jFontName, jFontFamilyName);
+-    }
+-
+-JNF_COCOA_EXIT(env);
+ }
+ 
+ /*
+@@ -426,22 +408,7 @@ JNIEXPORT void JNICALL
+ Java_sun_font_CFontManager_loadNativeDirFonts
+ (JNIEnv *env, jclass clz, jstring filename)
+ {
+-JNF_COCOA_ENTER(env);
+-
+-    NSString *nsFilePath = JNFJavaToNSString(env, filename);
+-
+-    FSRef iFile;
+-    OSStatus status = CreateFSRef(&iFile, nsFilePath);
+ 
+-    if (status == noErr) {
+-        ATSFontContainerRef oContainer;
+-        status = ATSFontActivateFromFileReference(&iFile, kATSFontContextLocal,
+-                                                  kATSFontFormatUnspecified,
+-                                                  NULL, kNilOptions,
+-                                                  &oContainer);
+-    }
+-
+-JNF_COCOA_EXIT(env);
+ }
+ 
+ #pragma mark --- sun.font.CFont JNI ---
+@@ -488,49 +455,6 @@ Java_sun_font_CFont_getTableBytesNative
+      jlong awtFontPtr, jint jtag)
+ {
+     jbyteArray jbytes = NULL;
+-JNF_COCOA_ENTER(env);
+-
+-    CTFontTableTag tag = (CTFontTableTag)jtag;
+-    int i, found = 0;
+-    AWTFont *awtFont = (AWTFont *)jlong_to_ptr(awtFontPtr);
+-    NSFont* nsFont = awtFont->fFont;
+-    CTFontRef ctfont = (CTFontRef)nsFont;
+-    CFArrayRef tagsArray =
+-        CTFontCopyAvailableTables(ctfont, kCTFontTableOptionNoOptions);
+-    CFIndex numTags = CFArrayGetCount(tagsArray);
+-    for (i=0; i<numTags; i++) {
+-        if (tag ==
+-            (CTFontTableTag)(uintptr_t)CFArrayGetValueAtIndex(tagsArray, i)) {
+-            found = 1;
+-            break;
+-        }
+-    }
+-    CFRelease(tagsArray);
+-    if (!found) {
+-        return NULL;
+-    }
+-    CFDataRef table = CTFontCopyTable(ctfont, tag, kCTFontTableOptionNoOptions);
+-    if (table == NULL) {
+-        return NULL;
+-    }
+-
+-    char *tableBytes = (char*)(CFDataGetBytePtr(table));
+-    size_t tableLength = CFDataGetLength(table);
+-    if (tableBytes == NULL || tableLength == 0) {
+-        CFRelease(table);
+-        return NULL;
+-    }
+-
+-    jbytes = (*env)->NewByteArray(env, (jsize)tableLength);
+-    if (jbytes == NULL) {
+-        return NULL;
+-    }
+-    (*env)->SetByteArrayRegion(env, jbytes, 0,
+-                               (jsize)tableLength,
+-                               (jbyte*)tableBytes);
+-    CFRelease(table);
+-
+-JNF_COCOA_EXIT(env);
+ 
+     return jbytes;
+ }
+@@ -547,18 +471,6 @@ Java_sun_font_CFont_createNativeFont
+ {
+     AWTFont *awtFont = nil;
+ 
+-JNF_COCOA_ENTER(env);
+-
+-    awtFont =
+-        [AWTFont awtFontForName:JNFJavaToNSString(env, nativeFontName)
+-         style:style]; // autoreleased
+-
+-    if (awtFont) {
+-        CFRetain(awtFont); // GC
+-    }
+-
+-JNF_COCOA_EXIT(env);
+-
+     return ptr_to_jlong(awtFont);
+ }
+ 
+@@ -572,17 +484,8 @@ Java_sun_font_CFont_getWidthNative
+     (JNIEnv *env, jobject cfont, jlong awtFontPtr)
+ {
+     float widthVal;
+-JNF_COCOA_ENTER(env);
+-
+-    AWTFont *awtFont = (AWTFont *)jlong_to_ptr(awtFontPtr);
+-    NSFont* nsFont = awtFont->fFont;
+-    NSFontDescriptor *fontDescriptor = nsFont.fontDescriptor;
+-    NSDictionary *fontTraits = [fontDescriptor objectForKey : NSFontTraitsAttribute];
+-    NSNumber *width = [fontTraits objectForKey : NSFontWidthTrait];
+-    widthVal = (float)[width floatValue];
+ 
+-JNF_COCOA_EXIT(env);
+-   return (jfloat)widthVal;
++    return (jfloat)widthVal;
+ }
+ 
+ /*
+diff --git jdk/src/share/classes/sun/nio/ch/SocketOptionRegistry.java.template jdk/src/share/classes/sun/nio/ch/SocketOptionRegistry.java.template
+index c0286d1795..7513f93494 100644
+--- jdk/src/share/classes/sun/nio/ch/SocketOptionRegistry.java.template
++++ jdk/src/share/classes/sun/nio/ch/SocketOptionRegistry.java.template
+@@ -114,8 +114,6 @@ class SocketOptionRegistry {
+ 
+ #ifdef AF_INET6
+             // IPPROTO_IPV6 is 41
+-            map.put(new RegistryKey(StandardSocketOptions.PREFIX_IP_TOS,
+-                StandardProtocolFamily.INET6), new OptionKey(41, IPV6_TCLASS));
+             map.put(new RegistryKey(StandardSocketOptions.PREFIX_IP_MULTICAST_IF,
+                 StandardProtocolFamily.INET6), new OptionKey(41, IPV6_MULTICAST_IF));
+             map.put(new RegistryKey(StandardSocketOptions.PREFIX_IP_MULTICAST_TTL,
+diff --git jdk/src/share/native/sun/font/AccelGlyphCache.c jdk/src/share/native/sun/font/AccelGlyphCache.c
+index 67729ad7ec..bcdeaa5de7 100644
+--- jdk/src/share/native/sun/font/AccelGlyphCache.c
++++ jdk/src/share/native/sun/font/AccelGlyphCache.c
+@@ -66,12 +66,12 @@ AccelGlyphCache_Init(jint width, jint height,
+ {
+     GlyphCacheInfo *gcinfo;
+ 
+-    J2dTraceLn(J2D_TRACE_INFO, "AccelGlyphCache_Init");
++//    J2dTraceLn(J2D_TRACE_INFO, "AccelGlyphCache_Init");
+ 
+     gcinfo = (GlyphCacheInfo *)malloc(sizeof(GlyphCacheInfo));
+     if (gcinfo == NULL) {
+-        J2dRlsTraceLn(J2D_TRACE_ERROR,
+-            "AccelGlyphCache_Init: could not allocate GlyphCacheInfo");
++//        J2dRlsTraceLn(J2D_TRACE_ERROR,
++//            "AccelGlyphCache_Init: could not allocate GlyphCacheInfo");
+         return NULL;
+     }
+ 
+diff --git jdk/src/solaris/native/java/net/net_util_md.c jdk/src/solaris/native/java/net/net_util_md.c
+index bd0bd8c2c9..c4c029c1bf 100644
+--- jdk/src/solaris/native/java/net/net_util_md.c
++++ jdk/src/solaris/native/java/net/net_util_md.c
+@@ -1026,7 +1026,7 @@ NET_MapSocketOption(jint cmd, int *level, int *optname) {
+                 *level = IPPROTO_IPV6;
+                 *optname = IPV6_MULTICAST_LOOP;
+                 return 0;
+-#if (defined(__solaris__) || defined(MACOSX))
++#if defined(__solaris__) || (defined(MACOSX) && !defined(__POWERPC__))
+             // Map IP_TOS request to IPV6_TCLASS
+             case java_net_SocketOptions_IP_TOS:
+                 *level = IPPROTO_IPV6;
+diff --git jdk/src/solaris/native/sun/awt/CUPSfuncs.c jdk/src/solaris/native/sun/awt/CUPSfuncs.c
+index ce8350dec3..ab3f891b35 100644
+--- jdk/src/solaris/native/sun/awt/CUPSfuncs.c
++++ jdk/src/solaris/native/sun/awt/CUPSfuncs.c
+@@ -173,9 +173,9 @@ Java_sun_print_CUPSPrinter_getCupsServer(JNIEnv *env,
+     if (server != NULL) {
+         // Is this a local domain socket?
+         if (strncmp(server, "/", 1) == 0) {
+-            cServer = JNU_NewStringPlatform(env, "localhost");
++//            cServer = JNU_NewStringPlatform(env, "localhost");
+         } else {
+-            cServer = JNU_NewStringPlatform(env, server);
++//            cServer = JNU_NewStringPlatform(env, server);
+         }
+     }
+     return cServer;
+@@ -211,7 +211,7 @@ Java_sun_print_CUPSPrinter_getCupsDefaultPrinter(JNIEnv *env,
+     if (dest != NULL) {
+         defaultPrinter = dest->name;
+         if (defaultPrinter != NULL) {
+-            cDefPrinter = JNU_NewStringPlatform(env, defaultPrinter);
++//            cDefPrinter = JNU_NewStringPlatform(env, defaultPrinter);
+         }
+     }
+     j2d_cupsFreeDests(num_dests, dests);
+@@ -263,7 +263,7 @@ Java_sun_print_CUPSPrinter_getMedia(JNIEnv *env,
+     name = (*env)->GetStringUTFChars(env, printer, NULL);
+     if (name == NULL) {
+         (*env)->ExceptionClear(env);
+-        JNU_ThrowOutOfMemoryError(env, "Could not create printer name");
++//        JNU_ThrowOutOfMemoryError(env, "Could not create printer name");
+         return NULL;
+     }
+ 
+@@ -299,28 +299,28 @@ Java_sun_print_CUPSPrinter_getMedia(JNIEnv *env,
+             j2d_ppdClose(ppd);
+             DPRINTF("CUPSfuncs::bad alloc new array\n", "")
+             (*env)->ExceptionClear(env);
+-            JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
++//            JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
+             return NULL;
+         }
+ 
+         for (i = 0; optionPage!=NULL && i<nPages; i++) {
+             choice = (optionPage->choices)+i;
+-            utf_str = JNU_NewStringPlatform(env, choice->text);
++//            utf_str = JNU_NewStringPlatform(env, choice->text);
+             if (utf_str == NULL) {
+                 unlink(filename);
+                 j2d_ppdClose(ppd);
+                 DPRINTF("CUPSfuncs::bad alloc new string ->text\n", "")
+-                JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
++//                JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
+                 return NULL;
+             }
+             (*env)->SetObjectArrayElement(env, nameArray, i*2, utf_str);
+             (*env)->DeleteLocalRef(env, utf_str);
+-            utf_str = JNU_NewStringPlatform(env, choice->choice);
++//            utf_str = JNU_NewStringPlatform(env, choice->choice);
+             if (utf_str == NULL) {
+                 unlink(filename);
+                 j2d_ppdClose(ppd);
+                 DPRINTF("CUPSfuncs::bad alloc new string ->choice\n", "")
+-                JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
++//                JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
+                 return NULL;
+             }
+             (*env)->SetObjectArrayElement(env, nameArray, i*2+1, utf_str);
+@@ -329,23 +329,23 @@ Java_sun_print_CUPSPrinter_getMedia(JNIEnv *env,
+ 
+         for (i = 0; optionTray!=NULL && i<nTrays; i++) {
+             choice = (optionTray->choices)+i;
+-            utf_str = JNU_NewStringPlatform(env, choice->text);
++//            utf_str = JNU_NewStringPlatform(env, choice->text);
+             if (utf_str == NULL) {
+                 unlink(filename);
+                 j2d_ppdClose(ppd);
+                 DPRINTF("CUPSfuncs::bad alloc new string text\n", "")
+-                JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
++//                JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
+                 return NULL;
+             }
+             (*env)->SetObjectArrayElement(env, nameArray,
+                                           (nPages+i)*2, utf_str);
+             (*env)->DeleteLocalRef(env, utf_str);
+-            utf_str = JNU_NewStringPlatform(env, choice->choice);
++//            utf_str = JNU_NewStringPlatform(env, choice->choice);
+             if (utf_str == NULL) {
+                 unlink(filename);
+                 j2d_ppdClose(ppd);
+                 DPRINTF("CUPSfuncs::bad alloc new string choice\n", "")
+-                JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
++//                JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
+                 return NULL;
+             }
+             (*env)->SetObjectArrayElement(env, nameArray,
+@@ -375,7 +375,7 @@ Java_sun_print_CUPSPrinter_getPageSizes(JNIEnv *env,
+     const char *name = (*env)->GetStringUTFChars(env, printer, NULL);
+     if (name == NULL) {
+         (*env)->ExceptionClear(env);
+-        JNU_ThrowOutOfMemoryError(env, "Could not create printer name");
++//        JNU_ThrowOutOfMemoryError(env, "Could not create printer name");
+         return NULL;
+     }
+     const char *filename;
+@@ -405,7 +405,7 @@ Java_sun_print_CUPSPrinter_getPageSizes(JNIEnv *env,
+             j2d_ppdClose(ppd);
+             DPRINTF("CUPSfuncs::bad alloc new float array\n", "")
+             (*env)->ExceptionClear(env);
+-            JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
++//            JNU_ThrowOutOfMemoryError(env, "OutOfMemoryError");
+             return NULL;
+         }
+ 
+@@ -414,7 +414,7 @@ Java_sun_print_CUPSPrinter_getPageSizes(JNIEnv *env,
+             unlink(filename);
+             j2d_ppdClose(ppd);
+             (*env)->ExceptionClear(env);
+-            JNU_ThrowOutOfMemoryError(env, "Could not create printer name");
++//            JNU_ThrowOutOfMemoryError(env, "Could not create printer name");
+             return NULL;
+         }
+         for (i = 0; i<option->num_choices; i++) {
+diff --git jdk/src/solaris/native/sun/awt/HeadlessToolkit.c jdk/src/solaris/native/sun/awt/HeadlessToolkit.c
+index fd17f3b87f..a2f113aba8 100644
+--- jdk/src/solaris/native/sun/awt/HeadlessToolkit.c
++++ jdk/src/solaris/native/sun/awt/HeadlessToolkit.c
+@@ -33,7 +33,7 @@ extern JavaVM *jvm;
+ JNIEXPORT jint JNICALL
+ JNI_OnLoad(JavaVM *vm, void *reserved)
+ {
+-    jvm = vm;
++//    jvm = vm;
+     return JNI_VERSION_1_2;
+ }
+ 
+diff --git jdk/src/solaris/native/sun/awt/awt_LoadLibrary.c jdk/src/solaris/native/sun/awt/awt_LoadLibrary.c
+index 5948302713..01158ddec3 100644
+--- jdk/src/solaris/native/sun/awt/awt_LoadLibrary.c
++++ jdk/src/solaris/native/sun/awt/awt_LoadLibrary.c
+@@ -85,13 +85,13 @@ JNIEXPORT jboolean JNICALL AWTIsHeadless() {
+  * Pathnames to the various awt toolkits
+  */
+ 
+-#ifdef MACOSX
++#if defined(MACOSX) && !defined(__POWERPC__)
+   #define LWAWT_PATH "/libawt_lwawt.dylib"
+   #define DEFAULT_PATH LWAWT_PATH
+ #else
+-  #define XAWT_PATH "/libawt_xawt.so"
++  #define XAWT_PATH "/libawt_xawt.dylib"
+   #define DEFAULT_PATH XAWT_PATH
+-  #define HEADLESS_PATH "/libawt_headless.so"
++  #define HEADLESS_PATH "/libawt_headless.dylib"
+ #endif
+ 
+ jint
+@@ -130,7 +130,7 @@ AWT_OnLoad(JavaVM *vm, void *reserved)
+     fmProp = (*env)->NewStringUTF(env, "sun.font.fontmanager");
+     CHECK_EXCEPTION_FATAL(env, "Could not allocate font manager property");
+ 
+-#ifdef MACOSX
++#if defined(MACOSX) && !defined(__POWERPC__)
+         fmanager = (*env)->NewStringUTF(env, "sun.font.CFontManager");
+         tk = LWAWT_PATH;
+ #else
+@@ -146,7 +146,7 @@ AWT_OnLoad(JavaVM *vm, void *reserved)
+         CHECK_EXCEPTION_FATAL(env, "Could not allocate set properties");
+     }
+ 
+-#ifndef MACOSX
++#if !defined(MACOSX) || defined(__POWERPC__)
+     if (AWTIsHeadless()) {
+         tk = HEADLESS_PATH;
+     }
+diff --git jdk/src/solaris/native/sun/awt/fontpath.c jdk/src/solaris/native/sun/awt/fontpath.c
+index 66db1911f2..c533b4aab8 100644
+--- jdk/src/solaris/native/sun/awt/fontpath.c
++++ jdk/src/solaris/native/sun/awt/fontpath.c
+@@ -636,6 +636,11 @@ static void* openFontConfig() {
+     if (libfontconfig == NULL) {
+         libfontconfig = dlopen(FONTCONFIG_DLL, RTLD_LOCAL|RTLD_LAZY);
+         if (libfontconfig == NULL) {
++            printf("MAC PPC: port we failed to load the library %s\n",FONTCONFIG_DLL_VERSIONED);
++            printf("MAC PPC: you need to explicitly put this library in your jdk lib factory\n");
++            printf("MAC PPC: you might have to upde the build sript to add the correct copy action at build\n");
++            printf("MAC PPC: expect java to crash with some null pointer exception...\n");
++            fprintf(stderr, "MAC PPC: error: %s\n", dlerror());
+             return NULL;
+         }
+     }
+@@ -1151,7 +1156,7 @@ Java_sun_font_FontConfigManager_getFontConfig
+     locale = (*env)->GetStringUTFChars(env, localeStr, 0);
+     if (locale == NULL) {
+         (*env)->ExceptionClear(env);
+-        JNU_ThrowOutOfMemoryError(env, "Could not create locale");
++        // JNU_ThrowOutOfMemoryError(env, "Could not create locale");
+         return;
+     }
+ 
+diff --git jdk/src/solaris/native/sun/awt/jawt.c jdk/src/solaris/native/sun/awt/jawt.c
+index 64284bc6e9..1ed9c44048 100644
+--- jdk/src/solaris/native/sun/awt/jawt.c
++++ jdk/src/solaris/native/sun/awt/jawt.c
+@@ -33,7 +33,7 @@
+  */
+ JNIEXPORT jboolean JNICALL JAWT_GetAWT(JNIEnv* env, JAWT* awt)
+ {
+-#if defined(JAVASE_EMBEDDED) && defined(HEADLESS)
++#if defined(JAVASE_EMBEDDED) && defined(HEADLESS) || defined(__POWERPC__)
+     /* there are no AWT libs available at all */
+     return JNI_FALSE;
+ #else
+diff --git jdk/src/solaris/native/sun/nio/ch/DatagramChannelImpl.c jdk/src/solaris/native/sun/nio/ch/DatagramChannelImpl.c
+index ff1290756f..730ff52c86 100644
+--- jdk/src/solaris/native/sun/nio/ch/DatagramChannelImpl.c
++++ jdk/src/solaris/native/sun/nio/ch/DatagramChannelImpl.c
+@@ -89,7 +89,7 @@ Java_sun_nio_ch_DatagramChannelImpl_disconnect0(JNIEnv *env, jobject this,
+ 
+ #ifdef __solaris__
+     rv = connect(fd, 0, 0);
+-#elif defined(__APPLE__)
++#elif defined(__APPLE__) && !defined(__POWERPC__)
+     // On macOS systems we use disconnectx
+     rv = disconnectx(fd, SAE_ASSOCID_ANY, SAE_CONNID_ANY);
+ #elif defined(__linux__) || defined(_ALLBSD_SOURCE) || defined(_AIX)

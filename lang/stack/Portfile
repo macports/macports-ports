@@ -1,0 +1,159 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           gpg_verify 1.0
+PortGroup           haskell_stack 1.0
+PortGroup           legacysupport 1.1
+
+github.setup        commercialhaskell stack 3.9.1 v
+github.tarball_from archive
+revision            0
+
+name                stack
+categories          lang haskell
+maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
+license             BSD
+
+description         The Haskell Tool Stack
+long_description    Stack is a cross-platform command line interface \
+                    for developing Haskell projects. It features: \
+                    installing GHC automatically, installing packages \
+                    needed for your project, building your project, \
+                    testing your project, benchmarking your project. \
+                    It is intended for Haskellers both new and experienced.
+
+homepage            https://haskellstack.org
+
+variant prebuilt \
+    description {Do not bootstrap stack; install the pre-built binary.} {}
+
+if {${build_arch} eq "x86_64"} {
+    distname        ${name}-${github.version}-osx-x86_64
+} elseif {${build_arch} eq "arm64"} {
+    distname        ${name}-${github.version}-osx-aarch64
+}
+
+worksrcdir          ${name}-${github.version}
+
+master_sites        ${github.homepage}/releases/download/${github.tag_prefix}${github.version}/:release \
+                    ${github.homepage}/archive/refs/tags/:archive
+
+distfiles           ${distname}-bin:release \
+                    ${github.tag_prefix}${github.version}${extract.suffix}:archive
+
+extract.only        ${github.tag_prefix}${github.version}${extract.suffix}
+
+# set build_arch by hand on arm64/x86_64 systems to get x86_64/arm64 checksums
+# sudo port -d checksum stack +prebuilt os.arch=arm build_arch=arm64
+# sudo port -d checksum stack +prebuilt os.arch=i386 build_arch=x86_64
+# run `port clean --all stack` afterwards
+
+checksums           ${github.tag_prefix}${github.version}${extract.suffix} \
+                    rmd160  7a4332fb23f130d4ff7b5cd448dd7ddcb4643228 \
+                    sha256  9e3a40df6bcf3ca012d5b924eaf3b5b24563bfe07a6b4ed20098b73b15870c54 \
+                    size    4874022
+
+switch ${build_arch} {
+    arm64 {
+        checksums-append \
+                    ${distname}-bin \
+                    rmd160  1f9f853f2f8bcced536d2b77304ad6d00e2405e5 \
+                    sha256  293f766f8d87f5d4983da0f2295025084c990f4e7fdce2ea52c6b1595bfb9d91 \
+                    size    106948584
+    }
+    x86_64 {
+        checksums-append \
+                    ${distname}-bin \
+                    rmd160  7aaf8f0636790ec785f4b920fe53305f4b442e93 \
+                    sha256  60e3086d6c717783dbd4ca700030661d6bafcefa61c3902e72c40542472085d9 \
+                    size    36006184
+    }
+    default {
+        known_fail  yes
+        pre-fetch {
+            ui_error "${subport} @ ${version} only supported for architectures ${supported_archs}"  
+            return -code error "Unsupported architecture: ${build_arch}"
+        }
+    }
+}
+
+checksums-append    ${distname}-bin.asc \
+                    size    488
+
+gpg_verify.use_gpg_verification \
+                    yes
+
+if {[option gpg_verify.use_gpg_verification]} {
+    distfiles-append \
+                    ${distname}-bin.asc:release
+
+    post-checksum {
+        # check GPG signature: https://docs.haskellstack.org/en/stable/SIGNING_KEY/
+        set gpg_keyid 575159689befb442
+
+        gpg_verify.verify_gpg_signature \
+            ${filespath}/keyid-${gpg_keyid}.txt \
+            ${distpath}/${distname}-bin.asc \
+            ${distpath}/${distname}-bin
+    }
+}
+
+post-extract {
+    xinstall -W ${workpath} -d ./bin
+    xinstall -m 0755 -W ${distpath} ./${distname}-bin ${workpath}/bin
+}
+
+# bootstrap binaries seg fault on 10.7 and older
+set max_darwin 12
+if { ${os.platform} eq "darwin" && ${os.major} < ${max_darwin} } {
+    known_fail yes
+    pre-fetch {
+        ui_error "${name} @${version} requires OS X 10.[expr ${max_darwin} - 4] or later"
+        return -code error "unsupported Mac OS X version"
+    }
+}
+
+# Darwin 19 and older fails to build from source, e.g.
+# Undefined symbols for architecture x86_64:
+#  "_utimensat", referenced from:
+#      _Lc6xB_info in libHSdirectory-1.3.6.0.a(Posix.o)
+# and error: ld: unknown option: -no_fixup_chains
+if { ${os.platform} eq "darwin" && ${os.major} <= 19 } {
+    default_variants-append +prebuilt
+}
+
+if { [variant_isset "prebuilt"] } {
+    use_configure   no
+
+    build {}
+
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+        depends_build-append port:cctools
+    }
+
+    destroot {
+        copy        ${workpath}/bin/${distname}-bin \
+                    ${destroot}${prefix}/bin/${name}
+        legacysupport::relink_libSystem ${destroot}${prefix}/bin/${name}
+    }
+} else {
+    post-extract {
+        xinstall -m 0755 -d "[option haskell_stack.stack_root]"
+
+        # standard stack install with 'curl | sh'; don't use
+        # system -W ${worksrcpath} "/bin/mkdir ./bin && /usr/bin/curl -sSL https://get.haskellstack.org/ | /bin/sh -s - -d ./bin"
+        # bootstrap using the pre-built ./stack binary
+        ln -s       ${workpath}/bin/${distname}-bin \
+                    ${workpath}/bin/${name}
+    }
+
+    depends_build-append port:pkgconfig
+
+    # use a modified zlib.pc that forces the system paths to be used
+    # this prevents -L${prefix}/lib from being added to the library link path
+    # which causes libiconv linkage errors
+    build.env-append PKG_CONFIG_PATH=${filespath}/zlibsystempkgconfig
+
+    set haskell_stack.bin ${workpath}/bin/stack
+}
