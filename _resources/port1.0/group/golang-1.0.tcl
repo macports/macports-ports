@@ -76,6 +76,12 @@
 #     needs, and may be well above it. Declare a minimum for such a port only
 #     when it is known to be needed, or the port will be skipped on systems
 #     where it would have built.
+#
+# Builds run with GOTOOLCHAIN=local, so a module asking for a Go newer than the
+# one installed fails and says so rather than downloading that release and
+# running it. A Portfile does not need to set this; see go_env below for why it
+# is set at all. It does mean the packaged patch release is a floor, which
+# go.toolchain_min will not warn about because it compares only the series.
 
 PortGroup legacysupport    1.1
 PortGroup compiler_wrapper 1.0
@@ -266,7 +272,25 @@ default depends_build   port:go
 set gopath              ${workpath}/gopath
 default worksrcdir      {gopath/src/${go.package}}
 
+# GOTOOLCHAIN=local keeps the build on the Go that MacPorts installed. Go
+# defaults to auto, which downloads and runs whatever release go.mod names
+# whenever that is newer than the toolchain in hand: an unchecksummed binary
+# fetched at build time, outside the distfile and mirror machinery, and one
+# this system may not be able to start at all. That last case is
+# https://trac.macports.org/ticket/73086 arriving by another route, and it
+# reports as a bare SIGABRT naming neither the version nor the reason.
+#
+# Only module mode reads go.mod, so only there can a switch happen, but it
+# costs nothing to set for both and cannot then be lost if the offline_build
+# branch below is rearranged.
+#
+# The cost is that MacPorts' packaged patch release becomes a hard floor: a
+# go.mod asking for 1.26.7 will not build against a packaged 1.26.5, where
+# before it would have quietly fetched 1.26.7. Keep the toolchain ports
+# current. Note also that go.toolchain_min compares by series and so will not
+# catch that case for you.
 set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} GOPROXY=off GO111MODULE=off \
+                GOTOOLCHAIN=local \
                 CC=${configure.cc} CXX=${configure.cxx} FC=${configure.fc} \
                 OBJC=${configure.objc} OBJCXX=${configure.objcxx} }
 
