@@ -605,10 +605,10 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
 
 # get default supported architectures then further restrict them depending on muniversal options
 rename portconfigure::choose_supported_archs portconfigure::choose_supported_archs_real
-proc portconfigure::choose_supported_archs {archs} {
+proc portconfigure::choose_supported_archs {args} {
     global  os.arch
 
-    set universal_archs_supported [portconfigure::choose_supported_archs_real ${archs}]
+    set universal_archs_supported [portconfigure::choose_supported_archs_real {*}$args]
 
     # user has specified that build platform must be able to run binaries for supported architectures
     if {[option muniversal.run_binaries]} {
