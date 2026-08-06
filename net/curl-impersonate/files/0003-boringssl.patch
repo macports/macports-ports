@@ -1,0 +1,828 @@
+From 34d88b786662d1636a63d5cac22f728f19f80055 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Tue, 4 Aug 2026 08:58:18 +0000
+Subject: [PATCH] Fix big-endian
+
+ crypto/blake2/blake2.cc                 |  8 +++
+ crypto/bytestring/cbb.cc                | 12 +++++
+ crypto/chacha/chacha.cc                 | 29 ++++++++--
+ crypto/compiler_test.cc                 |  6 ++-
+ crypto/curve25519/spake25519.cc         | 17 ++++++
+ crypto/ec/hash_to_curve.cc              |  6 +++
+ crypto/evp/scrypt.cc                    | 20 +++++++
+ crypto/fipsmodule/aes/aes_nohw.cc.inc   | 40 ++++++++++++++
+ crypto/fipsmodule/bn/bytes.cc.inc       | 38 ++++++++++++--
+ crypto/fipsmodule/entropy/sha512.cc.inc |  8 +++
+ crypto/fipsmodule/keccak/keccak.cc.inc  | 70 +++++++++++++------------
+ crypto/internal.h                       | 62 ++++++++++++++++++++++
+ crypto/siphash/siphash_test.cc          | 12 +++++
+ include/openssl/target.h                | 11 ++++
+ 14 files changed, 296 insertions(+), 43 deletions(-)
+
+diff --git a/crypto/blake2/blake2.cc b/crypto/blake2/blake2.cc
+index a14cb8e..ce5d9a6 100644
+--- a/deps/src/boringssl/crypto/blake2/blake2.cc
++++ b/deps/src/boringssl/crypto/blake2/blake2.cc
+@@ -161,7 +161,15 @@ void BLAKE2B256_Final(uint8_t out[BLAKE2B256_DIGEST_LENGTH], BLAKE2B_CTX *b2b) {
+   blake2b_transform(b2b, b2b->block, b2b->block_used,
+                     /*is_final_block=*/1);
+   static_assert(BLAKE2B256_DIGEST_LENGTH <= sizeof(b2b->h));
++#ifdef OPENSSL_BIGENDIAN
++  uint64_t hswap[BLAKE2B256_DIGEST_LENGTH / sizeof(uint64_t)];
++  for (size_t i = 0; i < BLAKE2B256_DIGEST_LENGTH / sizeof(uint64_t); i++) {
++    hswap[i] = CRYPTO_bswap8(b2b->h[i]);
++  }
++  memcpy(out, hswap, BLAKE2B256_DIGEST_LENGTH);
++#else
+   memcpy(out, b2b->h, BLAKE2B256_DIGEST_LENGTH);
++#endif
+ }
+ 
+ void BLAKE2B256(const uint8_t *data, size_t len,
+diff --git a/crypto/bytestring/cbb.cc b/crypto/bytestring/cbb.cc
+index 9400ab9..13258bb 100644
+--- a/deps/src/boringssl/crypto/bytestring/cbb.cc
++++ b/deps/src/boringssl/crypto/bytestring/cbb.cc
+@@ -571,17 +571,29 @@ int CBB_add_asn1_int64_with_tag(CBB *cbb, int64_t value, CBS_ASN1_TAG tag) {
+ 
+   uint8_t bytes[sizeof(int64_t)];
+   memcpy(bytes, &value, sizeof(value));
++#ifdef OPENSSL_BIGENDIAN
++  int start = 0;
++  // Skip leading sign-extension bytes unless they are necessary.
++  while (start < 7 && (bytes[start] == 0xff && (bytes[start + 1] & 0x80))) {
++    start++;
++  }
++#else
+   int start = 7;
+   // Skip leading sign-extension bytes unless they are necessary.
+   while (start > 0 && (bytes[start] == 0xff && (bytes[start - 1] & 0x80))) {
+     start--;
+   }
++#endif
+ 
+   CBB child;
+   if (!CBB_add_asn1(cbb, &child, tag)) {
+     goto err;
+   }
++#ifdef OPENSSL_BIGENDIAN
++  for (int i = start; i <= 7; i++) {
++#else
+   for (int i = start; i >= 0; i--) {
++#endif
+     if (!CBB_add_u8(&child, bytes[i])) {
+       goto err;
+     }
+diff --git a/crypto/chacha/chacha.cc b/crypto/chacha/chacha.cc
+index 808a975..bf3382c 100644
+--- a/deps/src/boringssl/crypto/chacha/chacha.cc
++++ b/deps/src/boringssl/crypto/chacha/chacha.cc
+@@ -43,9 +43,26 @@ static const uint8_t sigma[16] = { 'e', 'x', 'p', 'a', 'n', 'd', ' ', '3',
+ void bssl::CRYPTO_hchacha20(uint8_t out[32], const uint8_t key[32],
+                             const uint8_t nonce[16]) {
+   uint32_t x[16];
+-  OPENSSL_memcpy(x, sigma, sizeof(sigma));
+-  OPENSSL_memcpy(&x[4], key, 32);
+-  OPENSSL_memcpy(&x[12], nonce, 16);
++
++  x[0] = CRYPTO_load_u32_le(sigma + 0);
++  x[1] = CRYPTO_load_u32_le(sigma + 4);
++  x[2] = CRYPTO_load_u32_le(sigma + 8);
++  x[3] = CRYPTO_load_u32_le(sigma + 12);
++
++  x[4] = CRYPTO_load_u32_le(key + 0);
++  x[5] = CRYPTO_load_u32_le(key + 4);
++  x[6] = CRYPTO_load_u32_le(key + 8);
++  x[7] = CRYPTO_load_u32_le(key + 12);
++
++  x[8] = CRYPTO_load_u32_le(key + 16);
++  x[9] = CRYPTO_load_u32_le(key + 20);
++  x[10] = CRYPTO_load_u32_le(key + 24);
++  x[11] = CRYPTO_load_u32_le(key + 28);
++
++  x[12] = CRYPTO_load_u32_le(nonce + 0);
++  x[13] = CRYPTO_load_u32_le(nonce + 4);
++  x[14] = CRYPTO_load_u32_le(nonce + 8);
++  x[15] = CRYPTO_load_u32_le(nonce + 12);
+ 
+   for (size_t i = 0; i < 20; i += 2) {
+     QUARTERROUND(0, 4, 8, 12)
+@@ -58,8 +75,10 @@ void bssl::CRYPTO_hchacha20(uint8_t out[32], const uint8_t key[32],
+     QUARTERROUND(3, 4, 9, 14)
+   }
+ 
+-  OPENSSL_memcpy(out, &x[0], sizeof(uint32_t) * 4);
+-  OPENSSL_memcpy(&out[16], &x[12], sizeof(uint32_t) * 4);
++  for (size_t i = 0; i < 4; ++i) {
++    CRYPTO_store_u32_le(out + 4 * i, x[i]);
++    CRYPTO_store_u32_le(&out[16] + 4 * i, x[12 + i]);
++  }
+ }
+ 
+ #if defined(CHACHA20_ASM_NOHW)
+diff --git a/crypto/compiler_test.cc b/crypto/compiler_test.cc
+index 58c926d..cdf5983 100644
+--- a/deps/src/boringssl/crypto/compiler_test.cc
++++ b/deps/src/boringssl/crypto/compiler_test.cc
+@@ -69,9 +69,13 @@ static void CheckRepresentation(T value) {
+   UnsignedT value_u = static_cast<UnsignedT>(value);
+   EXPECT_EQ(sizeof(UnsignedT), sizeof(T));
+ 
+-  // Integers must be little-endian.
++  // Integers must be either big-endian or little-endian.
+   uint8_t expected[sizeof(UnsignedT)];
++#ifdef OPENSSL_BIGENDIAN
++  for (size_t i = sizeof(UnsignedT); i-- > 0;) {
++#else
+   for (size_t i = 0; i < sizeof(UnsignedT); i++) {
++#endif
+     expected[i] = static_cast<uint8_t>(value_u);
+     // Divide instead of right-shift to appease compilers that warn if `T` is a
+     // char. The explicit cast is also needed to appease MSVC if integer
+diff --git a/crypto/curve25519/spake25519.cc b/crypto/curve25519/spake25519.cc
+index ee5cd7c..d06fde5 100644
+--- a/deps/src/boringssl/crypto/curve25519/spake25519.cc
++++ b/deps/src/boringssl/crypto/curve25519/spake25519.cc
+@@ -393,7 +393,16 @@ int SPAKE2_generate_msg(SPAKE2_CTX *ctx, uint8_t *out, size_t *out_len,
+   // bit and so one for all the bottom three bits.
+ 
+   scalar password_scalar;
++#ifdef OPENSSL_BIGENDIAN
++  // `password_tmp` is a little-endian byte string; convert it to words,
++  // adjusting for the byte order within each word with the XOR pattern.
++  uint8_t *pws = (uint8_t *)&password_scalar;
++  for (size_t i = 0; i < sizeof(password_scalar); i++) {
++    pws[i ^ (sizeof(BN_ULONG) - 1)] = password_tmp[i];
++  }
++#else
+   OPENSSL_memcpy(&password_scalar, password_tmp, sizeof(password_scalar));
++#endif
+ 
+   // `password_scalar` is the result of `x25519_sc_reduce` and thus is, at
+   // most, $l-1$ (where $l$ is `kOrder`, the order of the prime-order subgroup
+@@ -424,8 +433,16 @@ int SPAKE2_generate_msg(SPAKE2_CTX *ctx, uint8_t *out, size_t *out_len,
+     assert((password_scalar.words[0] & 7) == 0);
+   }
+ 
++#ifdef OPENSSL_BIGENDIAN
++  // Convert the words back to a little-endian byte string.
++  for (size_t i = 0; i < sizeof(ctx->password_scalar); i++) {
++    ctx->password_scalar[i] =
++        ((uint8_t *)password_scalar.words)[i ^ (sizeof(BN_ULONG) - 1)];
++  }
++#else
+   OPENSSL_memcpy(ctx->password_scalar, password_scalar.words,
+                  sizeof(ctx->password_scalar));
++#endif
+ 
+   ge_p3 mask;
+   x25519_ge_scalarmult_small_precomp(&mask, ctx->password_scalar,
+diff --git a/crypto/ec/hash_to_curve.cc b/crypto/ec/hash_to_curve.cc
+index 8fae618..2ee9912 100644
+--- a/deps/src/boringssl/crypto/ec/hash_to_curve.cc
++++ b/deps/src/boringssl/crypto/ec/hash_to_curve.cc
+@@ -163,7 +163,13 @@ void big_endian_to_words(Span<BN_ULONG> out, Span<const uint8_t> in) {
+   OPENSSL_memset(out.data(), 0, out.size() * sizeof(BN_ULONG));
+   uint8_t *out_u8 = reinterpret_cast<uint8_t *>(out.data());
+   for (size_t i = 0; i < in.size(); i++) {
++#ifdef OPENSSL_BIGENDIAN
++    // On big-endian, adjust for the byte order within each word with the XOR
++    // pattern.
++    out_u8[(in.size() - 1 - i) ^ (sizeof(BN_ULONG) - 1)] = in[i];
++#else
+     out_u8[in.size() - 1 - i] = in[i];
++#endif
+   }
+ }
+ 
+diff --git a/crypto/evp/scrypt.cc b/crypto/evp/scrypt.cc
+index d1e89a7..40dce20 100644
+--- a/deps/src/boringssl/crypto/evp/scrypt.cc
++++ b/deps/src/boringssl/crypto/evp/scrypt.cc
+@@ -201,10 +201,30 @@ int EVP_PBE_scrypt(const char *password, size_t password_len,
+     goto err;
+   }
+ 
++#ifdef OPENSSL_BIGENDIAN
++  // The PBKDF2 output is interpreted as a sequence of little-endian words, so
++  // byte-swap into the host representation.
++  for (size_t i = 0; i < B_blocks; i++) {
++    for (size_t j = 0; j < 16; j++) {
++      B[i].words[j] = CRYPTO_bswap4(B[i].words[j]);
++    }
++  }
++#endif
++
+   for (uint64_t i = 0; i < p; i++) {
+     scryptROMix(B + 2 * r * i, r, N, T, V);
+   }
+ 
++#ifdef OPENSSL_BIGENDIAN
++  // Byte-swap back so the following PBKDF2 hashes the little-endian
++  // serialization.
++  for (size_t i = 0; i < B_blocks; i++) {
++    for (size_t j = 0; j < 16; j++) {
++      B[i].words[j] = CRYPTO_bswap4(B[i].words[j]);
++    }
++  }
++#endif
++
+   if (!PKCS5_PBKDF2_HMAC(password, password_len, (const uint8_t *)B, B_bytes, 1,
+                          EVP_sha256(), key_len, out_key)) {
+     goto err;
+diff --git a/crypto/fipsmodule/aes/aes_nohw.cc.inc b/crypto/fipsmodule/aes/aes_nohw.cc.inc
+index 0c31251..ea34868 100644
+--- a/deps/src/boringssl/crypto/fipsmodule/aes/aes_nohw.cc.inc
++++ b/deps/src/boringssl/crypto/fipsmodule/aes/aes_nohw.cc.inc
+@@ -284,6 +284,26 @@ static aes_word_t aes_nohw_delta_swap(aes_word_t a, aes_word_t mask,
+ // http://programming.sirrida.de/calcperm.php on smaller inputs.
+ #if defined(OPENSSL_64_BIT)
+ static uint64_t aes_nohw_compact_word(uint64_t a) {
++#ifdef OPENSSL_BIGENDIAN
++  // On big-endian the 16 4-bit chunks are numbered MSB-first, so the
++  // permutation steps are reversed relative to the LE case.
++  // Swap pairs of 4-bit chunks:
++  //   14 15 12 13 | 10 11 8  9 | 6 7 4 5 | 2 3 0 1 =>
++  //   15 14 13 12 | 11 10 9  8 | 7 6 5 4 | 3 2 1 0
++  a = aes_nohw_delta_swap(a, UINT64_C(0x0f0f0f0f0f0f0f0f), 4);
++  // Swap quartets of 4-bit chunks:
++  //   15 14 13 12 | 11 10 9  8 | 7 6 5 4 | 3 2 1 0 =>
++  //   12 14 13 15 |  8 10 9 11 | 4 6 5 7 | 0 2 1 3
++  a = aes_nohw_delta_swap(a, UINT64_C(0x000f000f000f000f), 12);
++  // Swap quartets of 8-bit chunks:
++  //   12 14 13 15 | 8 10  9 11 | 4 6 5 7 | 0 2 1 3 =>
++  //    9 11 13 15 | 8 10 12 14 | 1 3 5 7 | 0 2 4 6
++  a = aes_nohw_delta_swap(a, UINT64_C(0x000000ff000000ff), 24);
++  // Swap quartets of 16-bit chunks:
++  //   9 11 13 15 | 8 10 12 14 | 1 3 5 7 | 0  2  4  6 =>
++  //   0  2  4  6 | 8 10 12 14 | 1 3 5 7 | 9 11 13 15
++  a = aes_nohw_delta_swap(a, UINT64_C(0x000000000000ffff), 48);
++#else
+   // Numbering the 64/2 = 16 4-bit chunks, least to most significant, we swap
+   // quartets of those chunks:
+   //   0 1 2 3 | 4 5 6 7 | 8  9 10 11 | 12 13 14 15 =>
+@@ -297,18 +317,33 @@ static uint64_t aes_nohw_compact_word(uint64_t a) {
+   //   0 2 4 6 | 1  3  5  7 | 8 10 12 14 | 9 11 13 15 =>
+   //   0 2 4 6 | 8 10 12 14 | 1  3  5  7 | 9 11 13 15
+   a = aes_nohw_delta_swap(a, UINT64_C(0x00000000ffff0000), 16);
++#endif
+   return a;
+ }
+ 
+ static uint64_t aes_nohw_uncompact_word(uint64_t a) {
+   // Reverse the steps of `aes_nohw_uncompact_word`.
++#ifdef OPENSSL_BIGENDIAN
++  a = aes_nohw_delta_swap(a, UINT64_C(0x000000000000ffff), 48);
++  a = aes_nohw_delta_swap(a, UINT64_C(0x000000ff000000ff), 24);
++  a = aes_nohw_delta_swap(a, UINT64_C(0x000f000f000f000f), 12);
++  a = aes_nohw_delta_swap(a, UINT64_C(0x0f0f0f0f0f0f0f0f), 4);
++#else
+   a = aes_nohw_delta_swap(a, UINT64_C(0x00000000ffff0000), 16);
+   a = aes_nohw_delta_swap(a, UINT64_C(0x0000ff000000ff00), 8);
+   a = aes_nohw_delta_swap(a, UINT64_C(0x00f000f000f000f0), 4);
++#endif
+   return a;
+ }
+ #else   // !OPENSSL_64_BIT
+ static uint32_t aes_nohw_compact_word(uint32_t a) {
++#ifdef OPENSSL_BIGENDIAN
++  // On big-endian, byte 0 of the AES block lands in the MSB of the word.
++  // Byte-swap to LE so the LE delta-swap masks work correctly. The result
++  // is consumed byte-by-byte via aes_nohw_word_from_bytes, so no
++  // second bswap is needed.
++  a = CRYPTO_bswap4(a);
++#endif
+   // Numbering the 32/2 = 16 pairs of bits, least to most significant, we swap:
+   //   0 1 2 3 | 4 5 6 7 | 8  9 10 11 | 12 13 14 15 =>
+   //   0 4 2 6 | 1 5 3 7 | 8 12 10 14 |  9 13 11 15
+@@ -327,6 +362,11 @@ static uint32_t aes_nohw_uncompact_word(uint32_t a) {
+   // Reverse the steps of `aes_nohw_uncompact_word`.
+   a = aes_nohw_delta_swap(a, 0x0000f0f0, 12);
+   a = aes_nohw_delta_swap(a, 0x00cc00cc, 6);
++#ifdef OPENSSL_BIGENDIAN
++  // Restore BE byte order so that memcpy(out, &word, 4) writes
++  // AES byte 0 first (into out[0]).
++  a = CRYPTO_bswap4(a);
++#endif
+   return a;
+ }
+ 
+diff --git a/crypto/fipsmodule/bn/bytes.cc.inc b/crypto/fipsmodule/bn/bytes.cc.inc
+index ef2c87b..648f6d1 100644
+--- a/deps/src/boringssl/crypto/fipsmodule/bn/bytes.cc.inc
++++ b/deps/src/boringssl/crypto/fipsmodule/bn/bytes.cc.inc
+@@ -111,9 +111,17 @@ BIGNUM *BN_lebin2bn(const uint8_t *in, size_t len, BIGNUM *ret) {
+   // Make sure the top bytes will be zeroed.
+   ret->d[num_words - 1] = 0;
+ 
++#ifdef OPENSSL_BIGENDIAN
++  // On big-endian, byte-swap the input data into the internal representation.
++  uint8_t *out = (uint8_t *)ret->d;
++  for (size_t i = 0; i < len; i++) {
++    out[i ^ (BN_BYTES - 1)] = in[i];
++  }
++#else
+   // We only support little-endian platforms, so we can simply memcpy the
+   // internal representation.
+   OPENSSL_memcpy(ret->d, in, len);
++#endif
+   return ret;
+ }
+ 
+@@ -129,7 +137,11 @@ static int fits_in_bytes(const BN_ULONG *words, size_t num_words,
+   size_t tot_bytes = num_words * sizeof(BN_ULONG);
+   uint8_t mask = 0;
+   for (size_t i = num_bytes; i < tot_bytes; i++) {
++#ifdef OPENSSL_BIGENDIAN
++    mask |= bytes[i ^ (BN_BYTES - 1)];
++#else
+     mask |= bytes[i];
++#endif
+   }
+   return mask == 0;
+ }
+@@ -140,7 +152,11 @@ void bssl::bn_assert_fits_in_bytes(const BIGNUM *bn, size_t num) {
+   if (tot_bytes > num) {
+     CONSTTIME_DECLASSIFY(bytes + num, tot_bytes - num);
+     for (size_t i = num; i < tot_bytes; i++) {
++#ifdef OPENSSL_BIGENDIAN
++      assert(bytes[i ^ (BN_BYTES - 1)] == 0);
++#else
+       assert(bytes[i] == 0);
++#endif
+     }
+     (void)bytes;
+   }
+@@ -151,17 +167,24 @@ void bssl::bn_words_to_big_endian(uint8_t *out, size_t out_len,
+   // The caller should have selected an output length without truncation.
+   declassify_assert(fits_in_bytes(in, in_len, out_len));
+ 
+-  // We only support little-endian platforms, so the internal representation is
+-  // also little-endian as bytes. We can simply copy it in reverse.
+   const uint8_t *bytes = (const uint8_t *)in;
+   size_t num_bytes = in_len * sizeof(BN_ULONG);
+   if (out_len < num_bytes) {
+     num_bytes = out_len;
+   }
+ 
++#ifdef OPENSSL_BIGENDIAN
++  // On big-endian, internal representation is big-endian, so swap index.
++  for (size_t i = 0; i < num_bytes; i++) {
++    out[out_len - i - 1] = bytes[i ^ (BN_BYTES - 1)];
++  }
++#else
++  // We only support little-endian platforms, so the internal representation is
++  // also little-endian as bytes. We can simply copy it in reverse.
+   for (size_t i = 0; i < num_bytes; i++) {
+     out[out_len - i - 1] = bytes[i];
+   }
++#endif
+   // Pad out the rest of the buffer with zeroes.
+   OPENSSL_memset(out, 0, out_len - num_bytes);
+ }
+@@ -177,15 +200,22 @@ int BN_bn2le_padded(uint8_t *out, size_t len, const BIGNUM *in) {
+     return 0;
+   }
+ 
+-  // We only support little-endian platforms, so we can simply memcpy into the
+-  // internal representation.
+   const uint8_t *bytes = (const uint8_t *)in->d;
+   size_t num_bytes = in->width * BN_BYTES;
+   if (len < num_bytes) {
+     num_bytes = len;
+   }
+ 
++#ifdef OPENSSL_BIGENDIAN
++  // On big-endian, byte-swap the internal representation to little-endian output.
++  for (size_t i = 0; i < num_bytes; i++) {
++    out[i] = bytes[i ^ (BN_BYTES - 1)];
++  }
++#else
++  // We only support little-endian platforms, so we can simply memcpy into the
++  // internal representation.
+   OPENSSL_memcpy(out, bytes, num_bytes);
++#endif
+   // Pad out the rest of the buffer with zeroes.
+   OPENSSL_memset(out + num_bytes, 0, len - num_bytes);
+   return 1;
+diff --git a/crypto/fipsmodule/entropy/sha512.cc.inc b/crypto/fipsmodule/entropy/sha512.cc.inc
+index 1d954d0..65f5644 100644
+--- a/deps/src/boringssl/crypto/fipsmodule/entropy/sha512.cc.inc
++++ b/deps/src/boringssl/crypto/fipsmodule/entropy/sha512.cc.inc
+@@ -36,16 +36,24 @@ struct SHA512_CTX {
+   unsigned num, md_len;
+ };
+ 
++#ifndef OPENSSL_BIGENDIAN
+ uint64_t CRYPTO_bswap8(uint64_t x) { return __builtin_bswap64(x); }
++#endif
+ 
+ uint64_t CRYPTO_load_u64_be(const void *ptr) {
+   uint64_t ret;
+   memcpy(&ret, ptr, sizeof(ret));
++#ifdef OPENSSL_BIGENDIAN
++  return ret;
++#else
+   return CRYPTO_bswap8(ret);
++#endif
+ }
+ 
+ void CRYPTO_store_u64_be(void *out, uint64_t v) {
++#ifndef OPENSSL_BIGENDIAN
+   v = CRYPTO_bswap8(v);
++#endif
+   memcpy(out, &v, sizeof(v));
+ }
+ 
+diff --git a/crypto/fipsmodule/keccak/keccak.cc.inc b/crypto/fipsmodule/keccak/keccak.cc.inc
+index 83b8647..6d4753a 100644
+--- a/deps/src/boringssl/crypto/fipsmodule/keccak/keccak.cc.inc
++++ b/deps/src/boringssl/crypto/fipsmodule/keccak/keccak.cc.inc
+@@ -292,16 +292,15 @@ void bssl::BORINGSSL_keccak_absorb(struct BORINGSSL_keccak_st *ctx,
+   BSSL_CHECK(ctx->phase != boringssl_keccak_phase_squeeze);
+ 
+   const size_t rate_words = ctx->rate_bytes / 8;
+-  // XOR the input. Accessing `ctx->state` as a `uint8_t*` is allowed by
+-  // strict aliasing because we require `uint8_t` to be a character type.
+-  uint8_t *state_bytes = (uint8_t *)ctx->state;
+ 
+-  // Absorb partial block.
++  // Absorb partial block. XOR the input into the correct little-endian byte
++  // position within each lane, which is endianness-independent.
+   if (ctx->absorb_offset != 0) {
+     assert(ctx->absorb_offset < ctx->rate_bytes);
+     size_t first_block_len = ctx->rate_bytes - ctx->absorb_offset;
+     for (size_t i = 0; i < first_block_len && i < in_len; i++) {
+-      state_bytes[ctx->absorb_offset + i] ^= in[i];
++      size_t byte_pos = ctx->absorb_offset + i;
++      ctx->state[byte_pos / 8] ^= (uint64_t)in[i] << (8 * (byte_pos % 8));
+     }
+ 
+     // This input didn't fill the block.
+@@ -328,7 +327,7 @@ void bssl::BORINGSSL_keccak_absorb(struct BORINGSSL_keccak_st *ctx,
+   // Absorb partial block.
+   assert(in_len < ctx->rate_bytes);
+   for (size_t i = 0; i < in_len; i++) {
+-    state_bytes[i] ^= in[i];
++    ctx->state[i / 8] ^= (uint64_t)in[i] << (8 * (i % 8));
+   }
+   ctx->absorb_offset = in_len;
+ }
+@@ -347,22 +346,26 @@ static uint8_t keccak_terminator(struct BORINGSSL_keccak_st *ctx) {
+ }
+ 
+ static void keccak_finalize(struct BORINGSSL_keccak_st *ctx) {
+-  // XOR the terminator. Accessing `ctx->state` as a `uint8_t*` is allowed by
+-  // strict aliasing because we require `uint8_t` to be a character type.
+-  uint8_t *state_bytes = (uint8_t *)ctx->state;
+-  state_bytes[ctx->absorb_offset] ^= keccak_terminator(ctx);
+-  state_bytes[ctx->rate_bytes - 1] ^= 0x80;
++  // XOR the terminator into the correct little-endian byte position within
++  // the lane, which is endianness-independent.
++  uint8_t terminator = keccak_terminator(ctx);
++  ctx->state[ctx->absorb_offset / 8] ^=
++      (uint64_t)terminator << (8 * (ctx->absorb_offset % 8));
++  ctx->state[(ctx->rate_bytes - 1) / 8] ^=
++      (uint64_t)0x80 << (8 * ((ctx->rate_bytes - 1) % 8));
+   keccak_f(ctx->state);
+ }
+ 
+ #if defined(HAVE_KECCAK_X2)
+ static void keccak_finalize_x2(struct BORINGSSL_keccak_st ctx[2]) {
+   for (size_t i = 0; i < 2; ++i) {
+-    // XOR the terminator. Accessing `ctx->state` as a `uint8_t*` is allowed
+-    // by strict aliasing because we require `uint8_t` to be a character type.
+-    uint8_t *state_bytes = (uint8_t *)ctx[i].state;
+-    state_bytes[ctx[i].absorb_offset] ^= keccak_terminator(&ctx[i]);
+-    state_bytes[ctx[i].rate_bytes - 1] ^= 0x80;
++    // XOR the terminator into the correct little-endian byte position within
++    // the lane, which is endianness-independent.
++    uint8_t terminator = keccak_terminator(&ctx[i]);
++    ctx[i].state[ctx[i].absorb_offset / 8] ^=
++        (uint64_t)terminator << (8 * (ctx[i].absorb_offset % 8));
++    ctx[i].state[(ctx[i].rate_bytes - 1) / 8] ^=
++        (uint64_t)0x80 << (8 * ((ctx[i].rate_bytes - 1) % 8));
+   }
+   keccak_f_x2(ctx[0].state, ctx[1].state);
+ }
+@@ -371,8 +374,6 @@ static void keccak_finalize_x2(struct BORINGSSL_keccak_st ctx[2]) {
+ #if defined(HAVE_KECCAK_X4)
+ static void keccak_finalize_x4(struct BORINGSSL_keccak_st ctx[4]) {
+   for (size_t i = 0; i < 4; ++i) {
+-    // XOR the terminator. Accessing `ctx->state` as a `uint8_t*` is allowed
+-    // by strict aliasing because we require `uint8_t` to be a character type.
+     uint8_t terminator;
+     switch (ctx[i].config) {
+       case boringssl_sha3_256:
+@@ -386,9 +387,12 @@ static void keccak_finalize_x4(struct BORINGSSL_keccak_st ctx[4]) {
+       default:
+         abort();
+     }
+-    uint8_t *state_bytes = (uint8_t *)ctx[i].state;
+-    state_bytes[ctx[i].absorb_offset] ^= terminator;
+-    state_bytes[ctx[i].rate_bytes - 1] ^= 0x80;
++    // XOR the terminator into the correct little-endian byte position within
++    // the lane, which is endianness-independent.
++    ctx[i].state[ctx[i].absorb_offset / 8] ^=
++        (uint64_t)terminator << (8 * (ctx[i].absorb_offset % 8));
++    ctx[i].state[(ctx[i].rate_bytes - 1) / 8] ^=
++        (uint64_t)0x80 << (8 * ((ctx[i].rate_bytes - 1) % 8));
+   }
+   keccak_f_x4(ctx[0].state, ctx[1].state, ctx[2].state, ctx[3].state);
+ }
+@@ -407,9 +411,6 @@ void bssl::BORINGSSL_keccak_squeeze(struct BORINGSSL_keccak_st *ctx,
+     ctx->phase = boringssl_keccak_phase_squeeze;
+   }
+ 
+-  // Accessing `ctx->state` as a `uint8_t*` is allowed by strict aliasing
+-  // because we require `uint8_t` to be a character type.
+-  const uint8_t *state_bytes = (const uint8_t *)ctx->state;
+   while (out_len) {
+     if (ctx->squeeze_offset == ctx->rate_bytes) {
+       keccak_f(ctx->state);
+@@ -421,7 +422,10 @@ void bssl::BORINGSSL_keccak_squeeze(struct BORINGSSL_keccak_st *ctx,
+     if (todo > remaining) {
+       todo = remaining;
+     }
+-    OPENSSL_memcpy(out, &state_bytes[ctx->squeeze_offset], todo);
++    for (size_t i = 0; i < todo; i++) {
++      size_t byte_pos = ctx->squeeze_offset + i;
++      out[i] = (ctx->state[byte_pos / 8] >> (8 * (byte_pos % 8))) & 0xff;
++    }
+     out += todo;
+     out_len -= todo;
+     ctx->squeeze_offset += todo;
+@@ -457,8 +461,6 @@ void bssl::BORINGSSL_keccak_squeeze_x2(struct BORINGSSL_keccak_st ctx[2],
+     ctx->phase = boringssl_keccak_phase_squeeze;
+   }
+ 
+-  // Accessing `ctx->state` as a `uint8_t*` is allowed by strict aliasing
+-  // because we require `uint8_t` to be a character type.
+   uint8_t *optr[2] = {outs[0], outs[1]};
+   while (out_len) {
+     if (ctx->squeeze_offset == ctx->rate_bytes) {
+@@ -472,8 +474,10 @@ void bssl::BORINGSSL_keccak_squeeze_x2(struct BORINGSSL_keccak_st ctx[2],
+       todo = remaining;
+     }
+     for (size_t i = 0; i < 2; ++i) {
+-      const uint8_t *state_bytes = (const uint8_t *)ctx[i].state;
+-      OPENSSL_memcpy(optr[i], &state_bytes[ctx->squeeze_offset], todo);
++      for (size_t j = 0; j < todo; j++) {
++        size_t byte_pos = ctx->squeeze_offset + j;
++        optr[i][j] = (ctx[i].state[byte_pos / 8] >> (8 * (byte_pos % 8))) & 0xff;
++      }
+       optr[i] += todo;
+     }
+     out_len -= todo;
+@@ -520,8 +524,6 @@ KECCAK_X4_TARGET void bssl::BORINGSSL_keccak_squeeze_x4(
+     ctx->phase = boringssl_keccak_phase_squeeze;
+   }
+ 
+-  // Accessing `ctx->state` as a `uint8_t*` is allowed by strict aliasing
+-  // because we require `uint8_t` to be a character type.
+   uint8_t *optr[4] = {outs[0], outs[1], outs[2], outs[3]};
+   while (out_len) {
+     if (ctx->squeeze_offset == ctx->rate_bytes) {
+@@ -535,8 +537,10 @@ KECCAK_X4_TARGET void bssl::BORINGSSL_keccak_squeeze_x4(
+       todo = remaining;
+     }
+     for (size_t i = 0; i < 4; ++i) {
+-      const uint8_t *state_bytes = (const uint8_t *)ctx[i].state;
+-      OPENSSL_memcpy(optr[i], &state_bytes[ctx->squeeze_offset], todo);
++      for (size_t j = 0; j < todo; j++) {
++        size_t byte_pos = ctx->squeeze_offset + j;
++        optr[i][j] = (ctx[i].state[byte_pos / 8] >> (8 * (byte_pos % 8))) & 0xff;
++      }
+       optr[i] += todo;
+     }
+     out_len -= todo;
+diff --git a/crypto/internal.h b/crypto/internal.h
+index dda1933..5533804 100644
+--- a/deps/src/boringssl/crypto/internal.h
++++ b/deps/src/boringssl/crypto/internal.h
+@@ -903,79 +903,140 @@ inline void *OPENSSL_memset(void *dst, int c, size_t n) {
+ inline uint16_t CRYPTO_load_u16_le(const void *in) {
+   uint16_t v;
+   OPENSSL_memcpy(&v, in, sizeof(v));
++#ifdef OPENSSL_BIGENDIAN
++  return CRYPTO_bswap2(v);
++#else
+   return v;
++#endif
+ }
+ 
+ inline void CRYPTO_store_u16_le(void *out, uint16_t v) {
++#ifdef OPENSSL_BIGENDIAN
++  v = CRYPTO_bswap2(v);
++#endif
+   OPENSSL_memcpy(out, &v, sizeof(v));
+ }
+ 
+ inline uint16_t CRYPTO_load_u16_be(const void *in) {
+   uint16_t v;
+   OPENSSL_memcpy(&v, in, sizeof(v));
++#ifdef OPENSSL_BIGENDIAN
++  return v;
++#else
+   return CRYPTO_bswap2(v);
++#endif
+ }
+ 
+ inline void CRYPTO_store_u16_be(void *out, uint16_t v) {
++#ifndef OPENSSL_BIGENDIAN
+   v = CRYPTO_bswap2(v);
++#endif
+   OPENSSL_memcpy(out, &v, sizeof(v));
+ }
+ 
+ inline uint32_t CRYPTO_load_u32_le(const void *in) {
+   uint32_t v;
+   OPENSSL_memcpy(&v, in, sizeof(v));
++#ifdef OPENSSL_BIGENDIAN
++  return CRYPTO_bswap4(v);
++#else
+   return v;
++#endif
+ }
+ 
+ inline void CRYPTO_store_u32_le(void *out, uint32_t v) {
++#ifdef OPENSSL_BIGENDIAN
++  v = CRYPTO_bswap4(v);
++#endif
+   OPENSSL_memcpy(out, &v, sizeof(v));
+ }
+ 
+ inline uint32_t CRYPTO_load_u32_be(const void *in) {
+   uint32_t v;
+   OPENSSL_memcpy(&v, in, sizeof(v));
++#ifdef OPENSSL_BIGENDIAN
++  return v;
++#else
+   return CRYPTO_bswap4(v);
++#endif
+ }
+ 
+ inline void CRYPTO_store_u32_be(void *out, uint32_t v) {
++#ifndef OPENSSL_BIGENDIAN
+   v = CRYPTO_bswap4(v);
++#endif
+   OPENSSL_memcpy(out, &v, sizeof(v));
+ }
+ 
+ inline uint64_t CRYPTO_load_u64_le(const void *in) {
+   uint64_t v;
+   OPENSSL_memcpy(&v, in, sizeof(v));
++#ifdef OPENSSL_BIGENDIAN
++  return CRYPTO_bswap8(v);
++#else
+   return v;
++#endif
+ }
+ 
+ inline void CRYPTO_store_u64_le(void *out, uint64_t v) {
++#ifdef OPENSSL_BIGENDIAN
++  v = CRYPTO_bswap8(v);
++#endif
+   OPENSSL_memcpy(out, &v, sizeof(v));
+ }
+ 
+ inline uint64_t CRYPTO_load_u64_be(const void *ptr) {
+   uint64_t ret;
+   OPENSSL_memcpy(&ret, ptr, sizeof(ret));
++#ifdef OPENSSL_BIGENDIAN
++  return ret;
++#else
+   return CRYPTO_bswap8(ret);
++#endif
+ }
+ 
+ inline void CRYPTO_store_u64_be(void *out, uint64_t v) {
++#ifndef OPENSSL_BIGENDIAN
+   v = CRYPTO_bswap8(v);
++#endif
+   OPENSSL_memcpy(out, &v, sizeof(v));
+ }
+ 
+ inline crypto_word_t CRYPTO_load_word_le(const void *in) {
+   crypto_word_t v;
+   OPENSSL_memcpy(&v, in, sizeof(v));
++#ifdef OPENSSL_BIGENDIAN
++#if defined(OPENSSL_64_BIT)
++  static_assert(sizeof(v) == 8, "crypto_word_t has unexpected size");
++  return CRYPTO_bswap8(v);
++#else
++  static_assert(sizeof(v) == 4, "crypto_word_t has unexpected size");
++  return CRYPTO_bswap4(v);
++#endif
++#else
+   return v;
++#endif
+ }
+ 
+ inline void CRYPTO_store_word_le(void *out, crypto_word_t v) {
++#ifdef OPENSSL_BIGENDIAN
++#if defined(OPENSSL_64_BIT)
++  static_assert(sizeof(v) == 8, "crypto_word_t has unexpected size");
++  v = CRYPTO_bswap8(v);
++#else
++  static_assert(sizeof(v) == 4, "crypto_word_t has unexpected size");
++  v = CRYPTO_bswap4(v);
++#endif
++#endif
+   OPENSSL_memcpy(out, &v, sizeof(v));
+ }
+ 
+ inline crypto_word_t CRYPTO_load_word_be(const void *in) {
+   crypto_word_t v;
+   OPENSSL_memcpy(&v, in, sizeof(v));
++#ifdef OPENSSL_BIGENDIAN
++  return v;
++#else
+ #if defined(OPENSSL_64_BIT)
+   static_assert(sizeof(v) == 8, "crypto_word_t has unexpected size");
+   return CRYPTO_bswap8(v);
+@@ -983,6 +1044,7 @@ inline crypto_word_t CRYPTO_load_word_be(const void *in) {
+   static_assert(sizeof(v) == 4, "crypto_word_t has unexpected size");
+   return CRYPTO_bswap4(v);
+ #endif
++#endif
+ }
+ 
+ 
+diff --git a/crypto/siphash/siphash_test.cc b/crypto/siphash/siphash_test.cc
+index 8095bb8..5b3e364 100644
+--- a/deps/src/boringssl/crypto/siphash/siphash_test.cc
++++ b/deps/src/boringssl/crypto/siphash/siphash_test.cc
+@@ -14,10 +14,13 @@
+ 
+ #include <stdint.h>
+ 
++#include <algorithm>
++
+ #include <gtest/gtest.h>
+ 
+ #include <openssl/siphash.h>
+ 
++#include "../internal.h"
+ #include "../test/file_test.h"
+ #include "../test/test_util.h"
+ 
+@@ -29,6 +32,10 @@ TEST(SipHash, Basic) {
+   }
+   uint64_t key[2];
+   memcpy(key, key_bytes, sizeof(key));
++#ifdef OPENSSL_BIGENDIAN
++  key[0] = bssl::CRYPTO_bswap8(key[0]);
++  key[1] = bssl::CRYPTO_bswap8(key[1]);
++#endif
+ 
+   uint8_t input[15];
+   for (unsigned i = 0; i < sizeof(input); i++) {
+@@ -50,6 +57,11 @@ TEST(SipHash, Vectors) {
+ 
+     uint64_t key_words[2];
+     memcpy(key_words, key.data(), key.size());
++#ifdef OPENSSL_BIGENDIAN
++    key_words[0] = bssl::CRYPTO_bswap8(key_words[0]);
++    key_words[1] = bssl::CRYPTO_bswap8(key_words[1]);
++    std::reverse(hash.begin(), hash.end());
++#endif
+     uint64_t result = SIPHASH_24(key_words, msg.data(), msg.size());
+     EXPECT_EQ(Bytes(reinterpret_cast<uint8_t *>(&result), sizeof(result)),
+               Bytes(hash));
+diff --git a/include/openssl/target.h b/include/openssl/target.h
+index 2372a05..e24fddf 100644
+--- a/deps/src/boringssl/include/openssl/target.h
++++ b/deps/src/boringssl/include/openssl/target.h
+@@ -34,6 +34,17 @@
+ #elif defined(__ARMEL__) || defined(_M_ARM)
+ #define OPENSSL_32_BIT
+ #define OPENSSL_ARM
++#elif defined(__powerpc64__) && defined(__LITTLE_ENDIAN__)
++#define OPENSSL_64_BIT
++#define OPENSSL_PPC64LE
++#elif defined(__ppc64__) || defined(__powerpc64__)
++#define OPENSSL_64_BIT
++#define OPENSSL_PPC64
++#define OPENSSL_BIGENDIAN
++#elif defined(__ppc__) || defined(__powerpc__)
++#define OPENSSL_32_BIT
++#define OPENSSL_PPC
++#define OPENSSL_BIGENDIAN
+ #elif defined(__MIPSEL__) && !defined(__LP64__)
+ #define OPENSSL_32_BIT
+ #define OPENSSL_MIPS
+
+--- a/deps/src/boringssl/CMakeLists.txt
++++ b/deps/src/boringssl/CMakeLists.txt	2026-08-05 16:55:31.000000000 +0800
+@@ -121,6 +121,10 @@
+   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+ endif()
+ 
++if(APPLE)
++  add_definitions(-D__STDC_FORMAT_MACROS)
++endif()
++
+ # pthread_rwlock_t on Linux requires a feature flag. We limit this to Linux
+ # because, on Apple platforms, it instead disables APIs we use. See compat(5)
+ # and sys/cdefs.h. Reportedly, FreeBSD also breaks when this is set. See
