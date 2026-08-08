@@ -6,7 +6,7 @@ PortGroup           gitlab  1.0
 
 gitlab.instance     https://gitlab.torproject.org/tpo
 gitlab.setup        core arti 2.5.0 arti-v
-revision            0
+revision            1
 
 homepage            https://tpo.pages.torproject.net/core/arti
 
@@ -26,14 +26,148 @@ checksums           ${distname}${extract.suffix} \
                     sha256  5bf75420fe60d64262777855617af6c2b72e3c8134ad4c7032d2f119483122e0 \
                     size    3381420
 
+set arti_user       _arti
+set arti_group      _arti
+set arti_conf_dir   ${prefix}/etc/${name}
+set arti_conf_file  ${arti_conf_dir}/${name}.toml
+set arti_confd_dir  ${arti_conf_dir}/${name}.d
+set arti_state_dir  ${prefix}/var/lib/${name}
+set arti_cache_dir  ${prefix}/var/cache/${name}
+set arti_log_dir    ${prefix}/var/log/${name}
+set arti_log_file   ${arti_log_dir}/${name}.log
+set arti_doc_dir    ${prefix}/share/doc/${name}
+set arti_examples_dir \
+                    ${arti_doc_dir}/examples
+set arti_share_dir  ${prefix}/share/${name}
+
+# arti refuses to run as root unless application.allow_running_as_root is set,
+# so the service needs a dedicated unprivileged user.
+add_users           ${arti_user} \
+                    group=${arti_group} \
+                    realname=Arti\ Tor\ Client \
+                    home=${arti_state_dir}
+
+post-extract {
+    copy ${filespath}/${name}.toml ${workpath}/${name}.toml
+}
+
+post-patch {
+    reinplace "s|@PREFIX@|${prefix}|g" ${workpath}/${name}.toml
+}
+
 destroot {
     xinstall -m 0755 \
         ${worksrcpath}/target/[cargo.rust_platform]/release/${name} \
         ${destroot}${prefix}/bin/
 
-    xinstall -d ${destroot}${prefix}/share/doc/${name}
-    file copy {*}[glob ${worksrcpath}/doc/*] ${destroot}${prefix}/share/doc/${name}/
+    xinstall -d ${destroot}${arti_doc_dir}
+    file copy {*}[glob ${worksrcpath}/doc/*] ${destroot}${arti_doc_dir}/
+
+    # Upstream's fully-commented reference configuration.
+    xinstall -d ${destroot}${arti_examples_dir}
+    xinstall -m 0644 \
+        ${worksrcpath}/crates/${name}/src/${name}-example-config.toml \
+        ${destroot}${arti_examples_dir}/
+
+    # The default configuration that post-activate installs, but only if the
+    # user does not already have one of their own.
+    xinstall -d ${destroot}${arti_share_dir}
+    xinstall -m 0644 -W ${workpath} ${name}.toml ${destroot}${arti_share_dir}/
+
+    # Drop-in directory for user overrides.  Read after arti.toml, so
+    # fragments placed here take precedence over it.
+    xinstall -d ${destroot}${arti_conf_dir}
+    xinstall -d ${destroot}${arti_confd_dir}
+
+    xinstall -m 0700 -o ${arti_user} -g ${arti_group} -d \
+        ${destroot}${arti_state_dir}
+
+    xinstall -m 0700 -o ${arti_user} -g ${arti_group} -d \
+        ${destroot}${arti_cache_dir}
+
+    xinstall -m 0750 -o ${arti_user} -g ${arti_group} -d \
+        ${destroot}${arti_log_dir}
+
+    # launchd opens StandardOutPath as the job's own user, so pre-create the
+    # log file owned by ${arti_user}.
+    touch ${destroot}${arti_log_file}
+
+    file attributes ${destroot}${arti_log_file} \
+        -owner ${arti_user} -group ${arti_group} -permissions 0640
 }
+
+destroot.keepdirs-append \
+                    ${destroot}${arti_conf_dir} \
+                    ${destroot}${arti_confd_dir} \
+                    ${destroot}${arti_state_dir} \
+                    ${destroot}${arti_cache_dir} \
+                    ${destroot}${arti_log_dir}
+
+# storage.state_dir and storage.cache_dir are passed on the command line
+# rather than written into ${arti_conf_file}, which belongs to the user and is
+# never updated by MacPorts once installed.  Changing either path here will
+# orphan an existing installation's state -- see the note below.
+startupitem.create  yes
+startupitem.name    ${name}
+startupitem.user    ${arti_user}
+startupitem.group   ${arti_group}
+startupitem.logfile ${arti_log_file}
+startupitem.executable \
+                    ${prefix}/bin/${name} proxy \
+                    --config ${arti_conf_file} \
+                    --config ${arti_confd_dir}/ \
+                    -o storage.state_dir=\"${arti_state_dir}\" \
+                    -o storage.cache_dir=\"${arti_cache_dir}\"
+
+post-activate {
+    if {![file exists ${arti_conf_file}]} {
+        copy ${arti_share_dir}/${name}.toml ${arti_conf_file}
+    }
+}
+
+notes "
+arti's configuration file is:
+
+    ${arti_conf_file}
+
+MacPorts installs it on first activation only, and never modifies or removes
+it thereafter, so your edits are preserved across upgrades. Additional .toml
+fragments may be placed in ${arti_confd_dir}/; those are
+read after arti.toml and take precedence over it.
+
+The fully-commented reference configuration, documenting every option arti
+supports, is installed at:
+
+    ${arti_examples_dir}/arti-example-config.toml
+
+To run arti as a service, use `port load`, as follows:
+
+\$ sudo port load ${name}
+
+Once enabled, the service will:
+
+  - run as the '${arti_user}' user
+
+  - listen for SOCKS connections on localhost:9150
+    (the 'tor' port uses 9050, so the two can be run side by side)
+
+  - log to: ${arti_log_file}
+
+  - keep persistent state in: ${arti_state_dir}
+
+  - keep its directory cache in: ${arti_cache_dir}
+
+IMPORTANT: ${arti_state_dir} holds arti's entry guard
+selection and its keystore, including the identity keys of any onion services
+you run. None of it is regenerable. Deleting it, or relocating it by setting
+storage.state_dir yourself, will reset your entry guards and will give every
+onion service you host a new .onion address. Back it up, and otherwise leave
+it alone.
+
+By contrast, ${arti_cache_dir} holds only the
+downloaded Tor directory consensus, and may be safely deleted at any time.
+
+"
 
 cargo.crates \
     adler2                           2.0.1  320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa \
