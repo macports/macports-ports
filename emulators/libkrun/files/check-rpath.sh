@@ -1,11 +1,12 @@
 #!/bin/sh
 
+set -x
+
 # Expects to be run with PWD as the destroot for libkrun
 
 # TODO: The `1` here is from the compatibility version and when libkrun 2 is released this will
 #       need to be templated from the Portfile depending on the version being installed.
-target_dylib="${MP_PREFIX}/lib/libkrun-efi.1.dylib"
-# target_dylib="${MP_PREFIX}/lib/libkrun.1.dylib"
+target_dylib="${MP_PREFIX}/lib/libkrun.1.dylib"
 
 # So we can print all errors before exiting.
 exit_status=0

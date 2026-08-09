@@ -231,16 +231,10 @@ proc luarocks::callback {} {
             ${deptype}
         }
         uplevel 2 {
+            proc luarocks::noop {args} {}
             foreach phase {patch configure build destroot test} {
                 foreach part {pre procedure post} {
-                    foreach p [ditem_key [set org.macports.${phase}] ${part}] {
-                        if {[info procs user${p}] ne ""} {
-                            set proc_name       user${p}
-                        } else {
-                            set proc_name       ${p}
-                        }
-                        proc ${proc_name} {{args ""}} {}
-                    }
+                    ditem_key [set org.macports.${phase}] ${part} luarocks::noop
                 }
             }
         }
