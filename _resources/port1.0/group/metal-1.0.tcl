@@ -13,6 +13,12 @@
 use_xcode   yes
 
 pre-configure {
+    set sdkroot_was_previously_set [info exists env(SDKROOT)]
+    if {!$sdkroot_was_previously_set} {
+        # The sdkroot_was_previously_set variable, this if-statement and its body can be removed when https://trac.macports.org/ticket/74310 is fixed
+        set env(SDKROOT) [option configure.sdkroot]
+    }
+
     set metal_check_command "xcrun metal --version"
     if {[catch {system ${metal_check_command}}]} {
         # The Metal toolchain is not set up correctly, let's see what we can do or recommend
@@ -33,5 +39,10 @@ pre-configure {
                 The toolchain seems to be installed, but `${metal_check_command}` still fails for the `${macportsuser}` \
                 user, even after killing the xcrun cache."
         }
+    }
+
+    if {!$sdkroot_was_previously_set} {
+        # This if statement and its body can be removed when https://trac.macports.org/ticket/74310 is fixed
+        unset -nocomplain env(SDKROOT)
     }
 }
