@@ -13,8 +13,8 @@ maintainers             {gmail.com:herby.gillot @herbygillot} \
                         openmaintainer
 
 # Set revision_client and revision_server to 0 on version bump.
-set revision_client     0
-set revision_server     0
+set revision_client     1
+set revision_server     1
 
 set name_mysql          ${name}
 set version_branch      [join [lrange [split ${version} .] 0 1] .]
@@ -76,48 +76,28 @@ if {$subport eq $name} {
 
     compiler.cxx_standard 2023
 
-    # 9.7 needs <source_location> and std::stringstream::view(), which arrive
-    # together in libc++ 17. cxx_standard 2023 admits Apple clang 15 on a
-    # language check alone, so Ventura picks it and then fails against
-    # MacOSX13.sdk's libc++ 15; no Xcode past 15 runs there, leaving only a
-    # MacPorts clang. 17, not the 16 mysql8 pins for the hang in
-    # https://trac.macports.org/ticket/70323, which does not recur here: 16
-    # has just <source_location> and dies at 71%.
-    if {${os.major} == 22} {
-        configure.compiler macports-clang-17
-    }
-
-    # Sonoma and later ship Apple clang 16 with libc++ 17 only if Xcode is
-    # current; Sonoma also runs Xcode 15, as the buildbot does. That Apple
-    # clang 15 lacks P0960 parenthesized aggregate initialisation as well as
-    # libc++ 17, and fails 22 objects in on
-    # libs/mysql/strconv/decode/parse_options.h. cxx_standard alone will not
-    # exclude it: base maps anything >= 2020 onto the same clang 16 minimum,
-    # having no C++23 row. Blacklist it so those hosts take a MacPorts clang.
+    # Apple clang 15 lacks P0960 parenthesized aggregate initialisation and
+    # fails 22 objects in on libs/mysql/strconv/decode/parse_options.h.
+    # cxx_standard will not exclude it, having no C++23 row and mapping
+    # anything >= 2020 onto the same clang 16 minimum, so blacklist it and let
+    # those hosts take a MacPorts clang.
     compiler.blacklist-append {clang < 1600}
 
     cmake.build_type    Release
 
-    # The macOS 26 (Tahoe) SDK ships a heavily modularized libc++ that no longer
-    # pulls in <type_traits> transitively through <array>/<memory>/<string>.
-    # A number of MySQL 9.7 headers (e.g. libs/mysql/gtid/tag_plain.h) and some
-    # bundled sources use std::is_trivial_v and friends without including it
-    # directly, so force <type_traits> into every C++ translation unit.
-    configure.cxxflags-append -include type_traits
-
-    # Sonoma has no Apple clang new enough for the source, so it builds with a
-    # MacPorts clang against MacOSX14.sdk's libc++. That pairing supplies fewer
-    # transitive includes than either the Ventura or the Sequoia one, and MySQL
-    # leans on them: 46 files reach std::nothrow without <new>, and the build
-    # stops on sql/server_component/mysql_file_imp.cc. The same holds for
-    # <memory>, <limits>, <optional> and <sstream>, wanted by 84, 26, 21 and 18
-    # files respectively, so force those too rather than learn them one build
-    # at a time. Confined to Sonoma; no other platform needs any of it.
-    if {${os.major} == 23} {
-        configure.cxxflags-append -include new -include memory \
-                                  -include limits -include optional \
-                                  -include sstream
-    }
+    # MySQL uses std::is_trivial_v and std::nothrow in files that include
+    # neither <type_traits> nor <new>, relying on another header to drag them
+    # in. Newer libc++ does not: 21 drops <type_traits>, 22 drops <new> too,
+    # stopping on sql/server_component/mysql_file_imp.cc and
+    # components/keyrings/common/data_file/reader.cc. Which libc++ applies
+    # follows the compiler rather than the OS, since a MacPorts clang puts its
+    # own headers ahead of the SDK's, so force both everywhere.
+    #
+    # Only these two: the files wanting <memory>, <limits> and <optional> do
+    # get them transitively. Never force <sstream>. It defines stdin, and MySQL
+    # guards includes of its own on #ifndef stdin
+    # (storage/myisammrg/myrg_static.cc), so forcing it drops those headers.
+    configure.cxxflags-append -include type_traits -include new
 
     configure.args-append \
         -DWITH_UNIT_TESTS=OFF \

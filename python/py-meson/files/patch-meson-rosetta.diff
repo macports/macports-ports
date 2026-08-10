@@ -1,0 +1,116 @@
+From a14e1360785acea53f3a6bc0351c094ac68b29ba Mon Sep 17 00:00:00 2001
+From: Jeremy Huddleston Sequoia <jeremyhu@apple.com>
+Date: Mon, 10 Aug 2026 06:34:03 -0700
+Subject: [PATCH] envconfig: detect Rosetta 2 for can_run_host_binaries on
+ Apple Silicon
+
+meson.can_run_host_binaries() always returned false when cross-compiling
+for x86_64 on an arm64 Mac, even though Rosetta 2 lets these machines
+execute x86_64 binaries transparently. machine_info_can_run() only
+compared CPU families for equality (plus narrow x86-on-x86_64 and
+mips-on-mips64 exceptions), with no awareness of Rosetta.
+
+Add has_rosetta(), which checks whether the oahd translation daemon is
+running, and consult it in machine_info_can_run() when the host is
+Darwin/aarch64 and the target is x86_64.
+
+Signed-off-by: Jeremy Huddleston Sequoia <jeremyhu@apple.com>
+---
+ .../snippets/rosetta-can-run-host-binaries.md |  8 ++++++
+ mesonbuild/envconfig.py                       | 25 ++++++++++++++++---
+ unittests/internaltests.py                    | 25 +++++++++++++++++++
+ 3 files changed, 54 insertions(+), 4 deletions(-)
+ create mode 100644 docs/markdown/snippets/rosetta-can-run-host-binaries.md
+
+diff --git a/docs/markdown/snippets/rosetta-can-run-host-binaries.md b/docs/markdown/snippets/rosetta-can-run-host-binaries.md
+new file mode 100644
+index 000000000..c08813d14
+--- /dev/null
++++ docs/markdown/snippets/rosetta-can-run-host-binaries.md
+@@ -0,0 +1,8 @@
++## `meson.can_run_host_binaries()` now accounts for Rosetta 2 on Apple Silicon
++
++Previously, when cross-compiling for `x86_64` on an `aarch64` Mac,
++[[meson.can_run_host_binaries]] (and the underlying `needs_exe_wrapper`
++logic) always returned `false`, even though Rosetta 2 lets these Macs
++execute `x86_64` binaries directly. Meson now detects whether Rosetta 2
++is installed and, if so, reports that `x86_64` host binaries can run
++natively without requiring an `exe_wrapper`.
+diff --git a/mesonbuild/envconfig.py b/mesonbuild/envconfig.py
+index 7c5aa8850..2106f7f2c 100644
+--- mesonbuild/envconfig.py
++++ mesonbuild/envconfig.py
+@@ -756,6 +756,19 @@ def detect_machine_info(compilers: T.Optional[CompilerDict] = None) -> MachineIn
+         detect_kernel(system),
+         detect_subsystem(system))
+ 
++def has_rosetta() -> bool:
++    """Whether Rosetta 2 is installed and able to translate x86_64 binaries.
++
++    oahd is the daemon that services Rosetta 2 translation requests; if it
++    can be reached, the kernel will transparently run x86_64 binaries on
++    this arm64 Mac.
++    """
++    try:
++        p, _, _ = Popen_safe(['/usr/bin/pgrep', '-q', 'oahd'])
++    except OSError:
++        return False
++    return p.returncode == 0
++
+ # TODO make this compare two `MachineInfo`s purely. How important is the
+ # `detect_cpu_family({})` distinction? It is the one impediment to that.
+ def machine_info_can_run(machine_info: MachineInfo) -> bool:
+@@ -773,7 +786,11 @@ def machine_info_can_run(machine_info: MachineInfo) -> bool:
+         return False
+     true_build_cpu_family = detect_cpu_family({})
+     assert machine_info.cpu_family is not None, 'called on incomplete machine_info'
+-    return \
+-        (machine_info.cpu_family == true_build_cpu_family) or \
+-        ((true_build_cpu_family == 'x86_64') and (machine_info.cpu_family == 'x86')) or \
+-        ((true_build_cpu_family == 'mips64') and (machine_info.cpu_family == 'mips'))
++    if machine_info.cpu_family == true_build_cpu_family or \
++            (true_build_cpu_family == 'x86_64' and machine_info.cpu_family == 'x86') or \
++            (true_build_cpu_family == 'mips64' and machine_info.cpu_family == 'mips'):
++        return True
++    # Apple Silicon Macs can run x86_64 binaries via the Rosetta 2 translator.
++    if system == 'darwin' and true_build_cpu_family == 'aarch64' and machine_info.cpu_family == 'x86_64':
++        return has_rosetta()
++    return False
+diff --git a/unittests/internaltests.py b/unittests/internaltests.py
+index 5647a0e68..cec8cc54e 100644
+--- unittests/internaltests.py
++++ unittests/internaltests.py
+@@ -1755,6 +1755,31 @@ class InternalTests(unittest.TestCase):
+                     actual = mesonbuild.envconfig.detect_cpu_family({})
+                     self.assertEqual(actual, expected)
+ 
++    def test_machine_info_can_run_rosetta(self) -> None:
++        """Rosetta 2 lets an Apple Silicon Mac run x86_64 binaries."""
++
++        def make(cpu_family: str) -> mesonbuild.envconfig.MachineInfo:
++            return mesonbuild.envconfig.MachineInfo(
++                'darwin', cpu_family, cpu_family, 'little', 'xnu', 'macos')
++
++        with mock.patch('mesonbuild.envconfig.detect_system', mock.Mock(return_value='darwin')), \
++                mock.patch('mesonbuild.envconfig.detect_cpu_family', mock.Mock(return_value='aarch64')):
++            with mock.patch('mesonbuild.envconfig.has_rosetta', mock.Mock(return_value=True)):
++                self.assertTrue(mesonbuild.envconfig.machine_info_can_run(make('x86_64')))
++            with mock.patch('mesonbuild.envconfig.has_rosetta', mock.Mock(return_value=False)):
++                self.assertFalse(mesonbuild.envconfig.machine_info_can_run(make('x86_64')))
++            # Non-x86_64 targets never consult Rosetta.
++            with mock.patch('mesonbuild.envconfig.has_rosetta', mock.Mock(side_effect=AssertionError('should not be called'))):
++                self.assertFalse(mesonbuild.envconfig.machine_info_can_run(make('arm')))
++                self.assertTrue(mesonbuild.envconfig.machine_info_can_run(make('aarch64')))
++
++        with mock.patch('mesonbuild.envconfig.detect_system', mock.Mock(return_value='linux')), \
++                mock.patch('mesonbuild.envconfig.detect_cpu_family', mock.Mock(return_value='aarch64')), \
++                mock.patch('mesonbuild.envconfig.has_rosetta', mock.Mock(side_effect=AssertionError('should not be called'))):
++            # Rosetta is a Darwin-only concept.
++            self.assertFalse(mesonbuild.envconfig.machine_info_can_run(
++                mesonbuild.envconfig.MachineInfo('linux', 'x86_64', 'x86_64', 'little', 'linux', 'linux')))
++
+     def test_detect_cpu(self) -> None:
+ 
+         @contextlib.contextmanager
+-- 
+2.39.5 (Apple Git-154)
