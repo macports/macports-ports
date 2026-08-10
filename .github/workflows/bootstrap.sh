@@ -170,6 +170,6 @@ fi
 ## Ignore portindex errors on common ancestor
 (cd ports/ && portindex)
 git -C ports/ checkout -qf -
-(cd ports/ && portindex -e)
+(cd ports/ && portindex -e) || (cd ports/ && rm -f PortIndex PortIndex.quick && portindex -e)
 endgroup
 fi
