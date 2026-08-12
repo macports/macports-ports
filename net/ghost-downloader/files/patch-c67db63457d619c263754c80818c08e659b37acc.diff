@@ -1,0 +1,166 @@
+diff --git a/features/github_pack/pack.py b/features/github_pack/pack.py
+index 72f94c3a..69c9302d 100644
+--- a/features/github_pack/pack.py
++++ b/features/github_pack/pack.py
+@@ -8,6 +8,7 @@
+ from app.models.pack import FeaturePack, TaskParser
+ from app.models.task import Task, TaskError, TaskOptions, ResourceTaskOptions
+ from http_pack.cards import HttpTaskCard
++from http_pack.pack import HttpParser
+ from http_pack.task import HttpTask, HttpTaskStep
+ from .config import githubConfig, selectedProxySite, GITHUB_PROXY_SITES
+ 
+@@ -64,8 +65,6 @@ async def run(self, reportSpeed, waitForSpeedLimit):
+                 return
+             except CancelledError:
+                 raise
+-            except TaskError:
+-                raise
+             except Exception:
+                 if not self.fallbackUrls:
+                     raise
+@@ -77,17 +76,17 @@ async def run(self, reportSpeed, waitForSpeedLimit):
+                 self.progress = 0
+                 self.speed = 0
+                 self.error = None
++                self.canUseRangeRequests = True
++                self.isAccelerated = False
+                 self._deleteRecord()
+ 
+ 
+ class GitHubParser(TaskParser):
+     priority = 90
+-    _isFallingBack = False
+ 
+     def match(self, options: TaskOptions) -> bool:
+         return (
+-            not self._isFallingBack
+-            and githubConfig.enabled.value
++            githubConfig.enabled.value
+             and bool(selectedProxySite())
+             and isGitHubFileUrl(options.url)
+         )
+@@ -103,8 +102,10 @@ async def parse(self, options: TaskOptions) -> Task:
+                 if isResourceWithName and not isDirectUrl:
+                     await self._probeProxy(url, options.headers)
+ 
+-                self._isFallingBack = isDirectUrl
+-                task = await self.delegate(replace(options, url=url))
++                if isDirectUrl:
++                    task = await HttpParser().parse(options)
++                else:
++                    task = await self.delegate(replace(options, url=url))
+ 
+                 remaining = fallbackUrls[i + 1:]
+                 if remaining:
+@@ -120,8 +121,6 @@ async def parse(self, options: TaskOptions) -> Task:
+             except Exception as e:
+                 lastError = e
+                 logger.warning("GitHub proxy 不可用 {}: {}", url, e)
+-            finally:
+-                self._isFallingBack = False
+ 
+         raise lastError
+ 
+diff --git a/tests/test_github_fallback.py b/tests/test_github_fallback.py
+index 44aa0431..d7e9200d 100644
+--- a/tests/test_github_fallback.py
++++ b/tests/test_github_fallback.py
+@@ -77,7 +77,7 @@ async def test_fallback_on_connection_refused(self, server, tmp_path, deadUrl):
+         assert (tmp_path / "test.bin").read_bytes() == content
+         assert step.url == okUrl
+ 
+-    async def test_no_fallback_on_permanent_error(self, server, tmp_path):
++    async def test_fallback_on_proxy_http_error(self, server, tmp_path):
+         content = buildFileContent(100)
+ 
+         async def forbidden(request):
+@@ -91,6 +91,22 @@ async def forbidden(request):
+         )
+         task.setStatus(TaskStatus.RUNNING)
+ 
++        await runStep(step)
++
++        assert (tmp_path / "test.bin").read_bytes() == content
++        assert step.url == okUrl
++
++    async def test_permanent_error_without_fallback(self, server, tmp_path):
++        async def forbidden(request):
++            return web.Response(status=403, text="Forbidden")
++
++        forbiddenUrl = await server(forbidden)
++
++        task, step = makeGitHubStep(
++            forbiddenUrl, tmp_path, fileSize=100,
++        )
++        task.setStatus(TaskStatus.RUNNING)
++
+         with pytest.raises(TaskError, match="403"):
+             await runStep(step)
+ 
+@@ -108,6 +124,29 @@ async def test_fallback_chain_tries_each(self, server, tmp_path, deadUrl):
+         assert (tmp_path / "test.bin").read_bytes() == content
+         assert step.url == okUrl
+ 
++    async def test_fallback_restores_range_support(self, server, tmp_path):
++        content = buildFileContent(200)
++
++        async def rangeDegradeThenReject(request):
++            if request.headers.get("Range"):
++                return web.Response(status=200, body=b"x")
++            return web.Response(status=403, text="Forbidden")
++
++        firstUrl = await server(rangeDegradeThenReject)
++        okUrl = await server(buildRangeHandler(content))
++
++        task, step = makeGitHubStep(
++            firstUrl, tmp_path, fileSize=200,
++            fallbackUrls=[okUrl], canUseRangeRequests=True,
++        )
++        task.setStatus(TaskStatus.RUNNING)
++
++        await runStep(step)
++
++        assert (tmp_path / "test.bin").read_bytes() == content
++        assert step.url == okUrl
++        assert step.canUseRangeRequests is True
++
+     async def test_all_fallbacks_exhausted(self, tmp_path, deadUrl):
+         task, step = makeGitHubStep(
+             deadUrl, tmp_path, fileSize=100,
+@@ -167,6 +206,35 @@ async def test_step_has_remaining_fallback_urls(self, monkeypatch):
+         assert "proxy2.com" in step.fallbackUrls[0]
+         assert step.fallbackUrls[1] == options.url
+ 
++    async def test_direct_url_bypasses_delegate(self, monkeypatch):
++        from http_pack.pack import HttpParser
++
++        parser = GitHubParser()
++
++        delegateUrls = []
++        async def trackingDelegate(options):
++            delegateUrls.append(options.url)
++            if "dead-proxy.com" in options.url:
++                raise ConnectionError("refused")
++            return await passThroughDelegate(options)
++
++        parser.delegate = trackingDelegate
++        monkeypatch.setattr("github_pack.pack.selectedProxySite", lambda: "https://dead-proxy.com")
++        monkeypatch.setattr("github_pack.pack.GITHUB_PROXY_SITES", ("https://dead-proxy.com",))
++
++        async def fakeHttpParse(self, options):
++            return await passThroughDelegate(options)
++        monkeypatch.setattr(HttpParser, "parse", fakeHttpParse)
++
++        options = TaskOptions(url="https://github.com/user/repo/releases/download/v1.0/file.zip")
++        task = await parser.parse(options)
++
++        assert task.packId == "github"
++        assert task.url == options.url
++        assert all("dead-proxy.com" in u for u in delegateUrls), (
++            "direct URL should not go through delegate"
++        )
++
+     async def test_resource_options_probes_proxy(self, monkeypatch):
+         parser = GitHubParser()
+         probedUrls = []
