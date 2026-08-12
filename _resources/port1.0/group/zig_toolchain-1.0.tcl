@@ -4,11 +4,14 @@
 # runs, what it builds against, and where it is installed. Plus the build of a
 # versioned toolchain port.
 #
-# One kind of port sits on top of this:
+# Two kinds of port sit on top of this:
 #
 #   lang/zig-0.NN   the toolchains, each built by zig_toolchain.setup and
 #                   installed side by side under ${prefix}/libexec/zig-0.NN,
 #                   reachable as ${prefix}/bin/zig-0.NN
+#
+#   lang/zig        a wrapper with no build of its own, linking to whichever
+#                   series zig_toolchain.current_series names
 #
 # Including this PortGroup has no side effects. It defines tables and
 # procedures and nothing else, so anything may include it purely to ask --
@@ -21,6 +24,7 @@
 # Queries
 # -------
 #
+#   current_series   the series the `zig` port provides
 #   min_darwin V     oldest darwin major the release supports
 #   llvm V           LLVM major the release builds against
 #   install_prefix V where that series' toolchain is installed
@@ -113,6 +117,13 @@ set zig_toolchain.llvm(0.16)        21
 # the toolchain's own Portfile.
 set zig_toolchain.packaged          {0.15 0.16}
 
+# The series the `zig` port provides.
+#
+# Named rather than derived from the newest packaged series, so that adding a
+# lang/zig-0.NN port does not move every `zig` user onto it in the same commit.
+# Bumping this is the separate, deliberate step that does.
+set zig_toolchain.current_series    0.16
+
 
 # The release series of a version: 0.16 from 0.16.0, and 0.16 from 0.16.
 proc zig_toolchain._series {zig_version} {
@@ -138,6 +149,14 @@ proc zig_toolchain._packaged_series {zig_version} {
             zig_toolchain.packaged has [join ${zig_toolchain.packaged} {, }]"
     }
     return ${series}
+}
+
+# The series the `zig` port provides, checked against what is packaged so a
+# typo here cannot produce a `zig` depending on a toolchain that does not exist.
+proc zig_toolchain.current_series {} {
+    global zig_toolchain.current_series
+
+    return [zig_toolchain._packaged_series ${zig_toolchain.current_series}]
 }
 
 # The oldest darwin major version a release supports.
