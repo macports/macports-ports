@@ -411,20 +411,30 @@ default test.args       {[python_get_defaults test_args]}
 # python.runtime: the port to actually depend on for this interpreter.
 # Normal versions map straight to "pythonNNN". Free-threaded versions
 # (python.suffix eq "t") do NOT map to "pythonNNNt" -- no such port
-# exists. They map to "pythonNNN-freethreading-devel" instead. The
-# "-devel" suffix is hardcoded for now since the free-threaded 3.15
-# port is still in beta; this will need revisiting once a stable
-# python315-freethreading port exists without the -devel suffix.
+# exists. They map to "pythonNNN-freethreading" instead. The
+# "-devel" suffix is added when NNN matches the "devel" value
+# which has to be updated each time a new python version goes into
+# development.
 default python.runtime  {[python_get_runtime]}
 
 proc python_get_runtime {} {
     set v [option python.version]
-    set full [option python.suffix]
-    set letter [string range $full [string length $v] end]
-    if {$letter eq "t"} {
-        return "python${v}-freethreading-devel"
+    set devel 315
+
+    set freethreading [string equal [string index $v end] "t"]
+    if {$freethreading} {
+        set v [string range $v 0 end-1]
     }
-    return "python${v}"
+
+    set name "python${v}"
+    if {$freethreading} {
+        append name "-freethreading"
+    }
+    if {$v eq $devel} {
+        append name "-devel"
+    }
+
+    return $name
 }
 
 default python.add_dependencies yes
