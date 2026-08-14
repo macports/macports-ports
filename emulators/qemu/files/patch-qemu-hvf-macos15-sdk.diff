@@ -1,0 +1,187 @@
+--- target/arm/hvf/hvf.c.orig
++++ target/arm/hvf/hvf.c
+@@ -478,6 +478,20 @@
+  */
+ #if !defined(MAC_OS_VERSION_26_0)
+ #define HV_SYS_REG_MDCR_EL2 0xe089
++#endif
++
++/*
++ * Nested virtualization and the in-kernel vGIC use Hypervisor.framework
++ * APIs and system register constants that first appeared in the macOS 15.0
++ * SDK.  Older SDKs do not declare them at all, so the -Wunguarded-availability
++ * suppression below is not enough: the code has to be compiled out entirely.
++ * Nothing is lost by doing so, as the __builtin_available() checks guarding
++ * these paths can only ever succeed on macOS 15.0 and later anyway.
++ */
++#if defined(MAC_OS_VERSION_15_0)
++#define HVF_HAVE_MACOS_15_SDK 1
++#else
++#define HVF_HAVE_MACOS_15_SDK 0
+ #endif
+ 
+ /*
+@@ -497,14 +511,19 @@
+   QEMU_BUILD_BUG_ON(HVF_ID != KVMID_TO_HVF(KVMID_AA64_SYS_REG64(__VA_ARGS__)));
+ #define DEF_SYSREG_15_02(...)
+ 
+-#define DEF_SYSREG_EL2(HVF_ID, ...) \
++#define DEF_SYSREG_VGIC(HVF_ID, ...) \
+   QEMU_BUILD_BUG_ON(HVF_ID != KVMID_TO_HVF(KVMID_AA64_SYS_REG64(__VA_ARGS__)));
+ 
+-#define DEF_SYSREG_VGIC(HVF_ID, ...) \
++#if HVF_HAVE_MACOS_15_SDK
++#define DEF_SYSREG_EL2(HVF_ID, ...) \
+   QEMU_BUILD_BUG_ON(HVF_ID != KVMID_TO_HVF(KVMID_AA64_SYS_REG64(__VA_ARGS__)));
+ 
+ #define DEF_SYSREG_VGIC_EL2(HVF_ID, ...) \
+   QEMU_BUILD_BUG_ON(HVF_ID != KVMID_TO_HVF(KVMID_AA64_SYS_REG64(__VA_ARGS__)));
++#else
++#define DEF_SYSREG_EL2(...)
++#define DEF_SYSREG_VGIC_EL2(...)
++#endif
+ 
+ #include "sysreg.c.inc"
+ 
+@@ -516,9 +535,14 @@
+ 
+ #define DEF_SYSREG(HVF_ID, op0, op1, crn, crm, op2)  {HVF_ID},
+ #define DEF_SYSREG_15_02(...)
+-#define DEF_SYSREG_EL2(HVF_ID, op0, op1, crn, crm, op2)  {HVF_ID, .el2 = true},
+ #define DEF_SYSREG_VGIC(HVF_ID, op0, op1, crn, crm, op2)  {HVF_ID, .vgic = true},
++#if HVF_HAVE_MACOS_15_SDK
++#define DEF_SYSREG_EL2(HVF_ID, op0, op1, crn, crm, op2)  {HVF_ID, .el2 = true},
+ #define DEF_SYSREG_VGIC_EL2(HVF_ID, op0, op1, crn, crm, op2)  {HVF_ID, true, true},
++#else
++#define DEF_SYSREG_EL2(...)
++#define DEF_SYSREG_VGIC_EL2(...)
++#endif
+ 
+ struct hvf_sreg {
+     hv_sys_reg_t sreg;
+@@ -1309,6 +1333,7 @@
+ 
+ static bool hvf_arm_el2_supported(void)
+ {
++#if HVF_HAVE_MACOS_15_SDK
+     bool is_nested_virt_supported;
+     if (__builtin_available(macOS 15.0, *)) {
+         hv_return_t ret = hv_vm_config_get_el2_supported(&is_nested_virt_supported);
+@@ -1317,6 +1342,9 @@
+         return false;
+     }
+     return is_nested_virt_supported;
++#else
++    return false;
++#endif
+ }
+ 
+ 
+@@ -1331,6 +1359,7 @@
+     }
+     chosen_ipa_bit_size = pa_range;
+ 
++#if HVF_HAVE_MACOS_15_SDK
+     if (__builtin_available(macOS 15.0, *)) {
+         if (hvf_nested_virt_enabled()) {
+             if (!hvf_arm_el2_supported()) {
+@@ -1343,10 +1372,18 @@
+                 goto cleanup;
+             }
+         }
++    }
++#else
++    if (hvf_nested_virt_enabled() && !hvf_arm_el2_supported()) {
++        error_report("Nested virtualization not supported on this system.");
++        ret = HV_UNSUPPORTED;
++        goto cleanup;
+     }
++#endif
+ 
+     ret = hv_vm_create(config);
+     if (hvf_irqchip_in_kernel()) {
++#if HVF_HAVE_MACOS_15_SDK
+         if (__builtin_available(macOS 15.0, *)) {
+             /*
+              * Instantiate GIC.
+@@ -1367,6 +1404,11 @@
+             ret = HV_UNSUPPORTED;
+             goto cleanup;
+         }
++#else
++        error_report("HVF: Unsupported OS for platform vGIC.");
++        ret = HV_UNSUPPORTED;
++        goto cleanup;
++#endif
+     }
+ 
+ cleanup:
+@@ -1749,9 +1791,11 @@
+         /* Dummy register */
+         return 0;
+     case SYSREG_CNTHCTL_EL2:
++#if HVF_HAVE_MACOS_15_SDK
+         if (__builtin_available(macOS 15.0, *)) {
+             assert_hvf_ok(hv_vcpu_get_sys_reg(cpu->accel->fd, HV_SYS_REG_CNTHCTL_EL2, val));
+         }
++#endif
+         return 0;
+     case SYSREG_MDCCINT_EL1:
+         assert_hvf_ok(hv_vcpu_get_sys_reg(cpu->accel->fd, HV_SYS_REG_MDCCINT_EL1, val));
+@@ -2047,9 +2091,11 @@
+         /* Dummy register */
+         return 0;
+     case SYSREG_CNTHCTL_EL2:
++#if HVF_HAVE_MACOS_15_SDK
+         if (__builtin_available(macOS 15.0, *)) {
+             assert_hvf_ok(hv_vcpu_set_sys_reg(cpu->accel->fd, HV_SYS_REG_CNTHCTL_EL2, val));
+         }
++#endif
+         return 0;
+     case SYSREG_MDCCINT_EL1:
+         assert_hvf_ok(hv_vcpu_set_sys_reg(cpu->accel->fd, HV_SYS_REG_MDCCINT_EL1, val));
+--- hw/intc/arm_gicv3_hvf.c.orig
++++ hw/intc/arm_gicv3_hvf.c
+@@ -30,6 +30,15 @@
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wunguarded-availability"
+ 
++/*
++ * The whole hv_gic_* API first appeared in the macOS 15.0 SDK; older SDKs do
++ * not declare it at all, so suppressing the availability diagnostic above is
++ * not enough and the implementation has to be compiled out.  Nothing is lost:
++ * hvf_arch_vm_create() refuses to start with the in-kernel vGIC enabled when
++ * built this way, exactly as it does at run time on macOS versions before 15.
++ */
++#if defined(MAC_OS_VERSION_15_0)
++
+ struct HVFARMGICv3Class {
+     ARMGICv3CommonClass parent_class;
+     DeviceRealize parent_realize;
+@@ -831,5 +840,26 @@
+ }
+ 
+ type_init(hvf_gicv3_register_types)
++
++#else /* !defined(MAC_OS_VERSION_15_0) */
++
++/*
++ * Migration state only, mirroring hw/intc/arm_gicv3_hvf_stub.c.  The device
++ * type itself is never instantiated, as TYPE_HVF_GICV3 is only selected when
++ * hvf_irqchip_in_kernel() is set, which cannot be reached here.
++ */
++static bool gicv3_is_hvf(void *opaque)
++{
++    return false;
++}
+ 
++const VMStateDescription vmstate_gicv3_hvf = {
++    .name = "arm_gicv3/hvf_gic_state",
++    .version_id = 1,
++    .minimum_version_id = 1,
++    .needed = gicv3_is_hvf,
++};
++
++#endif /* defined(MAC_OS_VERSION_15_0) */
++
+ #pragma clang diagnostic pop
