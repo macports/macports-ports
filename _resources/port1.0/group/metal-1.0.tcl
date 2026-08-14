@@ -13,14 +13,13 @@
 use_xcode   yes
 
 pre-configure {
-    # Workaround for https://trac.macports.org/ticket/74310
-    # Make sure that the `SDKROOT` environment variable is set to `configure.sdkroot` for the `xcrun` commands in this `pre-configure`
-    if {[info exists env(SDKROOT)]} {
-        set previous_sdkroot $env(SDKROOT)
+    set sdkroot [option configure.sdkroot]
+    if {$sdkroot ne ""} {
+        set metal_check_command "env SDKROOT=[shellescape $sdkroot] xcrun metal --version"
+    } else {
+        set metal_check_command "xcrun metal --version"
     }
-    set env(SDKROOT) [option configure.sdkroot]
 
-    set metal_check_command "xcrun metal --version"
     if {[catch {system ${metal_check_command}}]} {
         # The Metal toolchain is not set up correctly, let's see what we can do or recommend
 
@@ -40,13 +39,5 @@ pre-configure {
                 The toolchain seems to be installed, but `${metal_check_command}` still fails for the `${macportsuser}` \
                 user, even after killing the xcrun cache."
         }
-    }
-
-    # Workaround for https://trac.macports.org/ticket/74310
-    # Restore the SDKROOT environment to it previous state
-    if {[info exists previous_sdkroot]} {
-        set env(SDKROOT) $previous_sdkroot
-    } else {
-        unset -nocomplain env(SDKROOT)
     }
 }
