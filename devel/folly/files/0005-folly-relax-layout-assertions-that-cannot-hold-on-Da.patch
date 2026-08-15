@@ -1,0 +1,76 @@
+From 04c23bb556cf416e11637fd83c6d524f42841c24 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Wed, 29 Jul 2026 07:42:07 +0000
+Subject: [PATCH 05/13] folly: relax layout assertions that cannot hold on
+ Darwin ppc32
+
+Darwin ppc32 'power' alignment (8-byte scalars get natural alignment
+as a struct's first member, 4-byte alignment elsewhere) breaks two
+compile-time assumptions:
+
+- Synchronized's aligned-storage Simulacrum may not reproduce the exact
+  size/alignment of Synchronized itself.  The offsetof(mutex_) that
+  LockedPtr::parent() actually relies on still matches for folly's
+  mutex types, so skip only the size/alignment asserts there.
+
+- make_atomic_ref required alignof(T) == alignof(std::atomic<T>), which
+  fails for 8-byte scalars.  8-byte atomics are not lock-free on ppc32
+  and take libatomic's locked path, which tolerates any alignment, so
+  relax that condition on ppc32.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013G8CDpEyDCCgV4jaMM9WME
+---
+ folly/Synchronized.h              | 7 +++++++
+ folly/synchronization/AtomicRef.h | 8 +++++++-
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/folly/Synchronized.h b/folly/Synchronized.h
+index 00ec928be..9c1cb8c90 100644
+--- a/folly/Synchronized.h
++++ b/folly/Synchronized.h
+@@ -1520,8 +1520,15 @@ class LockedPtr {
+ 
+   SynchronizedType* parent() const {
+     using simulacrum = typename SynchronizedType::Simulacrum;
++#if !(defined(__APPLE__) && defined(__ppc__))
++    // Darwin ppc32 "power" alignment gives a struct's first member natural
++    // alignment but embeds 8-byte scalars at 4-byte alignment elsewhere, so
++    // the aligned-storage simulacrum may not reproduce Synchronized's size
++    // and alignment exactly.  offsetof(simulacrum, mutex_) still matches for
++    // the mutex types folly uses, whose alignment does not exceed 4 there.
+     static_assert(sizeof(simulacrum) == sizeof(SynchronizedType), "mismatch");
+     static_assert(alignof(simulacrum) == alignof(SynchronizedType), "mismatch");
++#endif
+     auto off = offsetof(simulacrum, mutex_);
+     const auto raw = reinterpret_cast<char*>(lock_.mutex());
+     return reinterpret_cast<SynchronizedType*>(raw - (raw ? off : 0));
+diff --git a/folly/synchronization/AtomicRef.h b/folly/synchronization/AtomicRef.h
+index 3a5d23b88..7d9e57493 100644
+--- a/folly/synchronization/AtomicRef.h
++++ b/folly/synchronization/AtomicRef.h
+@@ -21,6 +21,7 @@
+ #include <cstddef>
+ #include <type_traits>
+ 
++#include <folly/Portability.h>
+ #include <folly/Traits.h>
+ #include <folly/lang/SafeAssert.h>
+ 
+@@ -186,7 +187,12 @@ struct make_atomic_ref_t {
+       typename ATD = std::atomic<TD>>
+     requires(
+         std::is_trivially_copyable_v<TD> && //
+-        sizeof(TD) == sizeof(ATD) && alignof(TD) == alignof(ATD))
++        sizeof(TD) == sizeof(ATD) &&
++        // Darwin ppc32 aligns 8-byte scalars to 4 bytes, while std::atomic
++        // of them is 8-byte-aligned; 8-byte atomics are never lock-free
++        // there and go through libatomic's locked path, which tolerates any
++        // alignment, so the alignment match cannot and need not hold.
++        (kIsArchPPC || alignof(TD) == alignof(ATD)))
+   atomic_ref<T> operator()(T& ref) const {
+     return atomic_ref<T>{ref};
+   }
+-- 
+2.43.0
+
