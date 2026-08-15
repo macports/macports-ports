@@ -34,6 +34,33 @@ default     rust_build.stage0_versions          {[rust_build.default_stage0_vers
 options     rust_build.components
 default     rust_build.components       {rust-std rustc cargo}
 
+# These ports compile the LLVM bundled in the Rust source tree, so they need a
+# compiler new enough for it -- the same requirement lang/llvm-NN enforces for
+# the very same sources with `compiler.blacklist-append {clang < 1204}`.
+#
+# The rust PortGroup asks only for `compiler.cxx_standard 2017`, whose Apple
+# clang minimum in base is 1000.11.45.2.  That admits Apple clang 11 and 12,
+# which are too old for LLVM 21, so `rust` picked Xcode Clang on exactly the
+# macOS versions whose newest Apple clang falls in that gap:
+#
+#   10.13 and older : Apple clang < 1000.11.45.2  -> already fell back to MP clang
+#   10.14 Mojave    : Apple clang 1100.0.33.17    -> admitted, BROKEN
+#   10.15 Catalina  : Apple clang 1200.0.32.29    -> admitted
+#   11 and newer    : Apple clang >= 1300         -> new enough anyway
+#
+# Measured on macOS 10.14.6 with Apple clang 11.0.0: building rust 1.97.1 fails
+# in AMDGPU/SIInstrInfo.cpp with "use of overloaded operator '!=' is ambiguous",
+# because that clang mis-ranks the integral promotion of a TableGen
+# `enum : uint16_t` against llvm::Register's operator!= overload set.  With this
+# blacklist the build selects MacPorts Clang 17 and completes cleanly.
+# See https://trac.macports.org/ticket/73957
+#
+# NOTE: Apple clang 12 (10.15) was measured to build 1.97.1 successfully, so the
+# empirically-required bound is `< 1200`.  1204 is used here for parity with
+# lang/llvm-NN rather than being derived from these two data points; dial it
+# back to 1200 if keeping Catalina on Xcode Clang is preferred.
+compiler.blacklist-append   {clang < 1204}
+
 options     rust_build.use_cctools \
             rust_build.archiver \
             rust_build.ranlib
