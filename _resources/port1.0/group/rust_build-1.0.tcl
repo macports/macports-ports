@@ -104,7 +104,9 @@ proc rust_build.stage0_versions_for_mdt {{mdt {}}} {
     if {$mdt eq {}} {
         set mdt [option macosx_deployment_target]
     }
-    if {[option os.platform] eq "darwin" && [vercmp $mdt "10.12"] <= 0} {
+    # 10.12 is NOT frozen: upstream supports x86_64-apple-darwin back to 10.12
+    # and ships stage0 binaries built for it.  See lang/rust and trac #73775.
+    if {[option os.platform] eq "darwin" && [vercmp $mdt "10.12"] < 0} {
         return [option rust_build.frozen_stage0_versions]
     }
     return [option rust_build.stage0_versions]
@@ -114,7 +116,7 @@ proc rust_build.macports_release_for_mdt {{mdt {}}} {
     if {$mdt eq {}} {
         set mdt [option macosx_deployment_target]
     }
-    if {[option os.platform] eq "darwin" && [vercmp $mdt "10.12"] <= 0} {
+    if {[option os.platform] eq "darwin" && [vercmp $mdt "10.12"] < 0} {
         return [option rust_build.frozen_release]
     }
     if {[vercmp [option rust_build.version] [option rust_build.frozen_release]] <= 0} {
@@ -143,7 +145,9 @@ proc rust_build::callback {} {
             if {$arch eq "arm64"} {
                 set mdts [list 11.0]
             } else {
-                set mdts [list 10.5 10.6 10.7 10.12]
+                # 10.12 is absent deliberately: x86_64 there uses the upstream
+                # ("apple") stage0, and i386 is not a supported arch at 10.12.
+                set mdts [list 10.5 10.6 10.7]
             }
             foreach mdt $mdts {
                 lappend macports_releases [rust_build.macports_release_for_mdt $mdt]
@@ -415,7 +419,9 @@ proc rust_build::callback {} {
             if {$arch eq "arm64"} {
                 set mdts [list 11.0]
             } else {
-                set mdts [list 10.5 10.6 10.7 10.12]
+                # 10.12 is absent deliberately: x86_64 there uses the upstream
+                # ("apple") stage0, and i386 is not a supported arch at 10.12.
+                set mdts [list 10.5 10.6 10.7]
             }
             foreach mdt $mdts {
                 lassign [rust_build.stage0_info ${arch} ${mdt}] stage0_version stage0_arch stage0_vendor stage0_os_version
