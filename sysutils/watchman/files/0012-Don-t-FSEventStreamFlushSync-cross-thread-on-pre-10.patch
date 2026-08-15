@@ -1,0 +1,48 @@
+From b4584319978ff85c87dacd7c25df5da292075ab6 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Thu, 30 Jul 2026 00:46:55 +0000
+Subject: [PATCH] Don't FSEventStreamFlushSync cross-thread on pre-10.7
+ CarbonCore
+
+flushPendingEvents() calls FSEventStreamFlushSync from the io/client
+thread while the stream runs on the fsevents thread's run loop. On
+Darwin < 11 CarbonCore does not tolerate this: it logs "FlushSync
+called from a different run loop (...) than the stream run loop" and
+races its internal state -- observed on 10.6 as repeated malloc
+"incorrect checksum for freed object" heap corruption reports in the
+daemon, one cluster per synced query.
+
+The stream flush is a latency optimization for cookie sync, and the
+enableStreamFlush_ escape hatch already exists (callers handle the
+empty future); cookie events still arrive through normal stream
+delivery. Default fsevents_enable_stream_flush to off on pre-10.7
+kernels, reusing the existing osSupportsFileEvents() runtime check.
+The config option can still force it on.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K6JXw8CwYRiXvqHMBGZRgP
+---
+ watchman/watcher/fsevents.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/watchman/watcher/fsevents.cpp b/watchman/watcher/fsevents.cpp
+index 05f51b8..0f81f94 100644
+--- a/watchman/watcher/fsevents.cpp
++++ b/watchman/watcher/fsevents.cpp
+@@ -649,7 +649,15 @@ FSEventsWatcher::FSEventsWatcher(
+               : 0),
+       attemptResyncOnDrop_{config.getBool("fsevents_try_resync", false)},
+       hasFileWatching_{hasFileWatching && osSupportsFileEvents()},
+-      enableStreamFlush_{config.getBool("fsevents_enable_stream_flush", true)},
++      // On Darwin < 11 (pre-10.7), CarbonCore's FSEvents does not tolerate
++      // FSEventStreamFlushSync from a thread other than the one running the
++      // stream's run loop: it logs "FlushSync called from a different run
++      // loop" and races its internal state (observed as heap corruption on
++      // 10.6). Default the flush off there; cookie sync still completes via
++      // normal event delivery. The config option can still force it.
++      enableStreamFlush_{config.getBool(
++          "fsevents_enable_stream_flush",
++          osSupportsFileEvents())},
+       subdir{std::move(dir)} {
+   // TODO: Add ring buffer logging for events in the shared kqueue+fsevents
+   // logger.
