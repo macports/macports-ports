@@ -1,0 +1,51 @@
+Two related gaps in target/i386/hvf on older SDKs.
+
+HV_DEADLINE_FOREVER was added in the macOS 11 SDK; its value (~0ull) is taken
+verbatim from the 11.1 SDK's Hypervisor/hv.h.
+
+hv_vcpu_run_until() is annotated __HV_10_15, so below 10.15 the function itself
+is absent and no #define can help.  Its guard tests
+MAC_OS_X_VERSION_MIN_REQUIRED, since it is a function; the HV_DEADLINE_FOREVER
+guard above tests MAC_OS_X_VERSION_MAX_ALLOWED, since a constant only needs to
+be declared by the SDK.  Apple's macOS 11 header deprecates
+hv_vcpu_run() with "Use hv_vcpu_run_until(..., HV_DEADLINE_FOREVER) instead",
+establishing the two as equivalent for an infinite deadline, and that is the
+only deadline qemu passes.  The shim preserves semantics and keeps HVF
+available below 10.15 rather than falling back to TCG.
+
+Compile-verified on 10.14; not exercised by a running guest.
+
+--- target/i386/hvf/hvf.c.orig
++++ target/i386/hvf/hvf.c
+@@ -47,6 +47,31 @@
+  */
+ 
+ #include "qemu/osdep.h"
++
++#include <Hypervisor/hv.h>
++
++/* HV_DEADLINE_FOREVER was added to Hypervisor.framework in the macOS 11 SDK.
++ * Value taken verbatim from the 11.1 SDK's hv.h. */
++#if !defined(MAC_OS_VERSION_11_0) || \
++    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_VERSION_11_0
++#define HV_DEADLINE_FOREVER (~0ull)
++#endif
++
++/* hv_vcpu_run_until() is annotated __HV_10_15, so it is absent from the 10.14
++ * and older SDKs, which provide only hv_vcpu_run().  Apple documents the two
++ * as equivalent for an infinite deadline: the macOS 11 header deprecates
++ * hv_vcpu_run() with "Use hv_vcpu_run_until(..., HV_DEADLINE_FOREVER)
++ * instead".  HV_DEADLINE_FOREVER is the only deadline qemu ever passes, so
++ * this shim preserves semantics rather than degrading them, and keeps HVF
++ * acceleration available below 10.15 instead of falling back to TCG. */
++#if !defined(MAC_OS_X_VERSION_10_15) || \
++    MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_15
++static inline hv_return_t hv_vcpu_run_until(hv_vcpuid_t vcpu, uint64_t deadline)
++{
++    assert(deadline == HV_DEADLINE_FOREVER);
++    return hv_vcpu_run(vcpu);
++}
++#endif
+ #include "qemu/error-report.h"
+ #include "qemu/memalign.h"
+ #include "qapi/error.h"
