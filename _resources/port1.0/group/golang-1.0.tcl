@@ -289,8 +289,12 @@ default worksrcdir      {gopath/src/${go.package}}
 # before it would have quietly fetched 1.26.7. Keep the toolchain ports
 # current. Note also that go.toolchain_min compares by series and so will not
 # catch that case for you.
+# -modcacherw keeps the module cache writable. Go otherwise creates those
+# directories mode 0555, and unlinking an entry needs write permission on the
+# directory holding it, so base cannot wipe the work directory when a Portfile
+# changes -- that runs unprivileged, and only root can ignore the write bit.
 set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} GOPROXY=off GO111MODULE=off \
-                GOTOOLCHAIN=local \
+                GOTOOLCHAIN=local GOFLAGS=-modcacherw \
                 CC=${configure.cc} CXX=${configure.cxx} FC=${configure.fc} \
                 OBJC=${configure.objc} OBJCXX=${configure.objcxx} }
 
