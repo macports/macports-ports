@@ -1,0 +1,2166 @@
+diff --git a/dist/packs/bili_pack.zip b/dist/packs/bili_pack.zip
+index 77bb8555..a76ae3d8 100644
+Binary files a/dist/packs/bili_pack.zip and b/dist/packs/bili_pack.zip differ
+diff --git a/features/bili_pack/cards.py b/features/bili_pack/cards.py
+index b9e6fb9b..2df3c49b 100644
+--- a/features/bili_pack/cards.py
++++ b/features/bili_pack/cards.py
+@@ -13,13 +13,15 @@
+ )
+ 
+ from app.format import toReadableSize
++from app.models.task import TaskStatus
+ from app.view.cards.draft_cards import MultiFileDraftCard
+ from app.view.cards.task_cards import MultiFileTaskCard
+ from app.view.components.range_slider import RangeSlider
+ from app.view.components.track_bar import TrackBar, TrackButton
+ from app.view.components.tree_view import AutoSizingTreeView
+ from app.view.dialogs.subtitle_select import SubtitleSelectDialog
+-from .task import AUDIO_QUALITY_LABELS, BilibiliTask, streamUrl
++from .stream import toStreamUrl
++from .task import AUDIO_QUALITY_LABELS, BilibiliTask, setEpisodeTitle, setPagePart, setTimeRanges
+ 
+ CODEC_NAMES = {7: "H.264", 12: "H.265", 13: "AV1"}
+ 
+@@ -27,6 +29,8 @@
+ 
+ COL_START = 2
+ COL_END = 3
++ROLE_PAGES = Qt.ItemDataRole.UserRole + 1
++ROLE_LABEL = Qt.ItemDataRole.UserRole + 2
+ 
+ 
+ def parseTimeInput(text: str) -> int:
+@@ -51,13 +55,17 @@ def toTimeText(seconds: int) -> str:
+     return f"{m}:{s:02d}"
+ 
+ 
+-class PageSelectDialog(MessageBoxBase):
++class SelectDialog(MessageBoxBase):
+ 
+     def __init__(self, task: BilibiliTask, parent=None):
+         super().__init__(parent)
+         self._pages = task.files or []
++        self._isSeason = task.isSeason
++        self._groups = task.episodeGroups() if self._isSeason else [[p] for p in self._pages]
++        self._isSyncing = False
+ 
+-        self.titleLabel = SubtitleLabel(self.tr("选择分P"), self)
++        title = self.tr("选择合集") if self._isSeason else self.tr("选择分P")
++        self.titleLabel = SubtitleLabel(title, self)
+         self.summaryLabel = BodyLabel("", self)
+ 
+         self.selectAllButton = PrimaryPushButton(self.tr("全选"), self)
+@@ -73,16 +81,17 @@ def __init__(self, task: BilibiliTask, parent=None):
+         self._refreshSummary()
+ 
+     def _initWidget(self) -> None:
+-        self.widget.setMinimumWidth(600)
++        self.widget.setMinimumWidth(640)
+         self.yesButton.setText(self.tr("确定"))
+         self.cancelButton.setText(self.tr("取消"))
+ 
+-        self.treeView.setRootIsDecorated(False)
++        self.treeView.setRootIsDecorated(self._isSeason)
+         self.treeView.setUniformRowHeights(True)
+         self.treeView.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
+ 
++        firstCol = self.tr("合集") if self._isSeason else self.tr("分P")
+         self.treeModel.setHorizontalHeaderLabels([
+-            self.tr("分P"), self.tr("大小"), self.tr("开始"), self.tr("结束"),
++            firstCol, self.tr("大小"), self.tr("开始"), self.tr("结束"),
+         ])
+         self.treeView.setModel(self.treeModel)
+         self.treeView.header().setStretchLastSection(False)
+@@ -91,29 +100,63 @@ def _initWidget(self) -> None:
+         self.treeView.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+         self.treeView.header().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+ 
+-        for page in self._pages:
+-            pageNumber = page.pageNumber
+-            pagePart = page.pagePart.strip()
+-            totalSize = page.size
+-
+-            label = f"P{pageNumber}"
+-            if pagePart:
+-                label += f": {pagePart}"
+-
+-            nameItem = QStandardItem(label)
+-            nameItem.setCheckable(True)
+-            nameItem.setCheckState(Qt.CheckState.Checked if page.selected else Qt.CheckState.Unchecked)
+-            nameItem.setData(pageNumber, Qt.ItemDataRole.UserRole)
+-
+-            sizeItem = QStandardItem(toReadableSize(totalSize) if totalSize > 0 else "")
+-            sizeItem.setEditable(False)
+-
+-            startItem = QStandardItem(toTimeText(page.startTime))
+-            startItem.setData(pageNumber, Qt.ItemDataRole.UserRole)
+-            endItem = QStandardItem(toTimeText(page.endTime))
+-            endItem.setData(pageNumber, Qt.ItemDataRole.UserRole)
+-
++        for pages in self._groups:
++            if not self._isSeason or len(pages) == 1:
++                page = pages[0]
++                if self._isSeason:
++                    label = page.episodeTitle or page.bvid or f"#{page.index}"
++                else:
++                    label = page.pagePart.strip() or f"P{page.pageNumber}"
++                self._addLeaf(None, page, label)
++                continue
++            title = pages[0].episodeTitle or pages[0].bvid or f"#{pages[0].index}"
++            parent = QStandardItem(title)
++            parent.setCheckable(True)
++            parent.setEditable(True)
++            parent.setData(pages, ROLE_PAGES)
++            parent.setData(title, ROLE_LABEL)
++            parentSize = QStandardItem(toReadableSize(sum(p.size for p in pages if p.size > 0)) or "")
++            parentSize.setEditable(False)
++            sharedTimes = {(p.startTime, p.endTime) for p in pages}
++            if len(sharedTimes) == 1:
++                start, end = next(iter(sharedTimes))
++                parentStart = QStandardItem(toTimeText(start))
++                parentEnd = QStandardItem(toTimeText(end))
++            else:
++                parentStart = QStandardItem("")
++                parentEnd = QStandardItem("")
++            if pages[0].sectionTitle:
++                parent.setToolTip(pages[0].sectionTitle)
++            self.treeModel.appendRow([parent, parentSize, parentStart, parentEnd])
++            placeholder = QStandardItem("")
++            placeholder.setEnabled(False)
++            parent.appendRow(placeholder)
++            if all(p.selected for p in pages):
++                parent.setCheckState(Qt.CheckState.Checked)
++            elif any(p.selected for p in pages):
++                parent.setCheckState(Qt.CheckState.PartiallyChecked)
++            else:
++                parent.setCheckState(Qt.CheckState.Unchecked)
++
++    def _addLeaf(self, parent: QStandardItem | None, page, label: str) -> None:
++        nameItem = QStandardItem(label)
++        nameItem.setCheckable(True)
++        nameItem.setEditable(True)
++        nameItem.setCheckState(Qt.CheckState.Checked if page.selected else Qt.CheckState.Unchecked)
++        nameItem.setData(page.index, Qt.ItemDataRole.UserRole)
++        nameItem.setData(label, ROLE_LABEL)
++        if page.sectionTitle:
++            nameItem.setToolTip(page.sectionTitle)
++
++        sizeItem = QStandardItem(toReadableSize(page.size) if page.size > 0 else "")
++        sizeItem.setEditable(False)
++        startItem = QStandardItem(toTimeText(page.startTime))
++        endItem = QStandardItem(toTimeText(page.endTime))
++
++        if parent is None:
+             self.treeModel.appendRow([nameItem, sizeItem, startItem, endItem])
++        else:
++            parent.appendRow([nameItem, sizeItem, startItem, endItem])
+ 
+     def _initLayout(self) -> None:
+         actionsLayout = QHBoxLayout()
+@@ -136,54 +179,259 @@ def _bind(self) -> None:
+         self.clearButton.clicked.connect(lambda: self._setAll(False))
+         self.invertButton.clicked.connect(self._onInvert)
+         self.treeModel.itemChanged.connect(self._onItemChanged)
++        self.treeView.expanded.connect(self._onExpanded)
++
++    def _onExpanded(self, index) -> None:
++        item = self.treeModel.itemFromIndex(index)
++        if item is None:
++            return
++        pages = item.data(ROLE_PAGES)
++        if not pages or item.child(0, 0) is None:
++            return
++        if item.child(0, 0).data(Qt.ItemDataRole.UserRole) is not None:
++            return
++        self._isSyncing = True
++        try:
++            item.removeRow(0)
++            for page in pages:
++                self._addLeaf(item, page, page.pagePart.strip() or f"P{page.pageNumber}")
++            self._syncParent(item)
++        finally:
++            self._isSyncing = False
++        self._refreshSummary()
+ 
+     def _onItemChanged(self, item: QStandardItem) -> None:
+         if item.column() in (COL_START, COL_END):
+             formatted = toTimeText(parseTimeInput(item.text()))
+             if item.text() != formatted:
+                 item.setText(formatted)
++            self._setTime(item)
++            self._refreshSummary()
++            return
++        if self._isSyncing or item.column() != 0:
++            return
++        oldLabel = item.data(ROLE_LABEL)
++        if oldLabel is not None and item.text() != oldLabel:
++            self._setName(item)
++            item.setData(item.text(), ROLE_LABEL)
++            self._refreshSummary()
++            return
++        self._isSyncing = True
++        try:
++            pages = item.data(ROLE_PAGES)
++            if pages is not None:
++                state = Qt.CheckState.Checked if item.checkState() != Qt.CheckState.Unchecked else Qt.CheckState.Unchecked
++                if item.checkState() == Qt.CheckState.PartiallyChecked:
++                    item.setCheckState(Qt.CheckState.Checked)
++                    state = Qt.CheckState.Checked
++                selected = state == Qt.CheckState.Checked
++                for page in pages:
++                    page.selected = selected
++                if item.child(0, 0) and item.child(0, 0).data(Qt.ItemDataRole.UserRole) is not None:
++                    for i in range(item.rowCount()):
++                        item.child(i, 0).setCheckState(state)
++            elif item.parent():
++                self._syncParent(item.parent())
++                parentPages = item.parent().data(ROLE_PAGES)
++                if parentPages:
++                    fileIndex = item.data(Qt.ItemDataRole.UserRole)
++                    for page in parentPages:
++                        if page.index == fileIndex:
++                            page.selected = item.checkState() == Qt.CheckState.Checked
++            elif item.rowCount() > 0:
++                state = Qt.CheckState.Checked if item.checkState() != Qt.CheckState.Unchecked else Qt.CheckState.Unchecked
++                for i in range(item.rowCount()):
++                    child = item.child(i, 0)
++                    if child.data(Qt.ItemDataRole.UserRole) is not None:
++                        child.setCheckState(state)
++        finally:
++            self._isSyncing = False
+         self._refreshSummary()
+ 
++    def _setTime(self, item: QStandardItem) -> None:
++        itemRow = item.row()
++        parent = item.parent()
++        if parent is None:
++            startItem = self.treeModel.item(itemRow, COL_START)
++            endItem = self.treeModel.item(itemRow, COL_END)
++            top = self.treeModel.item(itemRow, 0)
++            pages = top.data(ROLE_PAGES) if top else None
++            start = parseTimeInput(startItem.text() if startItem else "")
++            end = parseTimeInput(endItem.text() if endItem else "")
++            if pages:
++                for page in pages:
++                    page.startTime, page.endTime = start, end
++                return
++            fileIndex = top.data(Qt.ItemDataRole.UserRole) if top else None
++        else:
++            startItem = parent.child(itemRow, COL_START)
++            endItem = parent.child(itemRow, COL_END)
++            start = parseTimeInput(startItem.text() if startItem else "")
++            end = parseTimeInput(endItem.text() if endItem else "")
++            fileIndex = parent.child(itemRow, 0).data(Qt.ItemDataRole.UserRole)
++        if fileIndex is None:
++            return
++        for page in self._pages:
++            if page.index == fileIndex:
++                page.startTime, page.endTime = start, end
++                return
++
++    def _setName(self, item: QStandardItem) -> None:
++        text = item.text().strip()
++        pages = item.data(ROLE_PAGES)
++        if pages:
++            setEpisodeTitle(pages, text)
++            return
++        fileIndex = item.data(Qt.ItemDataRole.UserRole)
++        if fileIndex is None:
++            return
++        page = next((p for p in self._pages if p.index == fileIndex), None)
++        if page is None:
++            return
++        if item.parent() is None and page.episodeTitle:
++            setEpisodeTitle([page], text)
++        else:
++            setPagePart(page, text)
++
++    def _syncParent(self, parent: QStandardItem) -> None:
++        states = [parent.child(i, 0).checkState() for i in range(parent.rowCount())]
++        if all(s == Qt.CheckState.Checked for s in states):
++            parent.setCheckState(Qt.CheckState.Checked)
++        elif all(s == Qt.CheckState.Unchecked for s in states):
++            parent.setCheckState(Qt.CheckState.Unchecked)
++        else:
++            parent.setCheckState(Qt.CheckState.PartiallyChecked)
++
++    def _isLazy(self, item: QStandardItem) -> bool:
++        pages = item.data(ROLE_PAGES)
++        child = item.child(0, 0) if item.rowCount() else None
++        return bool(pages) and child is not None and child.data(Qt.ItemDataRole.UserRole) is None
++
+     def _setAll(self, checked: bool) -> None:
+         state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+-        for row in range(self.treeModel.rowCount()):
+-            self.treeModel.item(row, 0).setCheckState(state)
++        self._isSyncing = True
++        try:
++            for row in range(self.treeModel.rowCount()):
++                top = self.treeModel.item(row, 0)
++                pages = top.data(ROLE_PAGES)
++                if self._isLazy(top):
++                    top.setCheckState(state)
++                    for page in pages:
++                        page.selected = checked
++                elif top.rowCount() == 0:
++                    top.setCheckState(state)
++                else:
++                    for i in range(top.rowCount()):
++                        child = top.child(i, 0)
++                        if child.data(Qt.ItemDataRole.UserRole) is not None:
++                            child.setCheckState(state)
++                    if pages:
++                        for page in pages:
++                            page.selected = checked
++                    self._syncParent(top)
++        finally:
++            self._isSyncing = False
++        self._refreshSummary()
+ 
+     def _onInvert(self) -> None:
+-        for row in range(self.treeModel.rowCount()):
+-            item = self.treeModel.item(row, 0)
+-            item.setCheckState(
+-                Qt.CheckState.Unchecked if item.checkState() == Qt.CheckState.Checked else Qt.CheckState.Checked
+-            )
++        self._isSyncing = True
++        try:
++            for row in range(self.treeModel.rowCount()):
++                top = self.treeModel.item(row, 0)
++                pages = top.data(ROLE_PAGES)
++                if self._isLazy(top):
++                    for page in pages:
++                        page.selected = not page.selected
++                    if all(p.selected for p in pages):
++                        top.setCheckState(Qt.CheckState.Checked)
++                    elif any(p.selected for p in pages):
++                        top.setCheckState(Qt.CheckState.PartiallyChecked)
++                    else:
++                        top.setCheckState(Qt.CheckState.Unchecked)
++                elif top.rowCount() == 0:
++                    top.setCheckState(
++                        Qt.CheckState.Unchecked if top.checkState() == Qt.CheckState.Checked else Qt.CheckState.Checked
++                    )
++                else:
++                    for i in range(top.rowCount()):
++                        child = top.child(i, 0)
++                        if child.data(Qt.ItemDataRole.UserRole) is not None:
++                            child.setCheckState(
++                                Qt.CheckState.Unchecked if child.checkState() == Qt.CheckState.Checked else Qt.CheckState.Checked
++                            )
++                    self._syncParent(top)
++                    if pages:
++                        for i in range(top.rowCount()):
++                            child = top.child(i, 0)
++                            fileIndex = child.data(Qt.ItemDataRole.UserRole)
++                            for page in pages:
++                                if page.index == fileIndex:
++                                    page.selected = child.checkState() == Qt.CheckState.Checked
++        finally:
++            self._isSyncing = False
++        self._refreshSummary()
+ 
+     def _refreshSummary(self) -> None:
+-        count = sum(
+-            1 for row in range(self.treeModel.rowCount())
+-            if self.treeModel.item(row, 0).checkState() == Qt.CheckState.Checked
+-        )
+-        self.summaryLabel.setText(self.tr("{0}/{1} 个分P").format(count, self.treeModel.rowCount()))
+-        self.yesButton.setEnabled(count > 0)
+-
+-    def selectedPageNumbers(self) -> set[int]:
+-        return {
+-            self.treeModel.item(row, 0).data(Qt.ItemDataRole.UserRole)
+-            for row in range(self.treeModel.rowCount())
+-            if self.treeModel.item(row, 0).checkState() == Qt.CheckState.Checked
+-        }
++        selected = self.selectedIndexes()
++        if self._isSeason:
++            selectedEps = sum(1 for pages in self._groups if any(p.index in selected for p in pages))
++            self.summaryLabel.setText(self.tr("{0}/{1} 集").format(selectedEps, len(self._groups)))
++        else:
++            self.summaryLabel.setText(self.tr("{0}/{1} 个分P").format(len(selected), len(self._pages)))
++        self.yesButton.setEnabled(len(selected) > 0)
+ 
+     def selectedIndexes(self) -> set[int]:
+-        return {n - 1 for n in self.selectedPageNumbers()}
++        result: set[int] = set()
++        for row in range(self.treeModel.rowCount()):
++            top = self.treeModel.item(row, 0)
++            pages = top.data(ROLE_PAGES)
++            if self._isLazy(top):
++                if top.checkState() == Qt.CheckState.Checked:
++                    result.update(p.index for p in pages)
++                elif top.checkState() == Qt.CheckState.PartiallyChecked:
++                    result.update(p.index for p in pages if p.selected)
++            elif top.rowCount() == 0:
++                fileIndex = top.data(Qt.ItemDataRole.UserRole)
++                if fileIndex is not None and top.checkState() == Qt.CheckState.Checked:
++                    result.add(fileIndex)
++            else:
++                for i in range(top.rowCount()):
++                    child = top.child(i, 0)
++                    fileIndex = child.data(Qt.ItemDataRole.UserRole)
++                    if fileIndex is not None and child.checkState() == Qt.CheckState.Checked:
++                        result.add(fileIndex)
++        return result
+ 
+     def timeRanges(self) -> dict[int, tuple[int, int]]:
+         result: dict[int, tuple[int, int]] = {}
+         for row in range(self.treeModel.rowCount()):
+-            pageNumber = self.treeModel.item(row, 0).data(Qt.ItemDataRole.UserRole)
+-            startText = self.treeModel.item(row, COL_START).text() if self.treeModel.item(row, COL_START) else ""
+-            endText = self.treeModel.item(row, COL_END).text() if self.treeModel.item(row, COL_END) else ""
+-            start = parseTimeInput(startText)
+-            end = parseTimeInput(endText)
+-            if start or end:
+-                result[pageNumber] = (start, end)
++            top = self.treeModel.item(row, 0)
++            pages = top.data(ROLE_PAGES)
++            if self._isLazy(top):
++                start = parseTimeInput(self.treeModel.item(row, COL_START).text() or "")
++                end = parseTimeInput(self.treeModel.item(row, COL_END).text() or "")
++                if start or end:
++                    result.update((p.index, (start, end)) for p in pages)
++                continue
++            if top.rowCount() == 0:
++                items = [top]
++            else:
++                items = [top.child(i, 0) for i in range(top.rowCount())]
++            for item in items:
++                fileIndex = item.data(Qt.ItemDataRole.UserRole)
++                if fileIndex is None:
++                    continue
++                parent = item.parent()
++                itemRow = item.row()
++                if parent is None:
++                    startItem = self.treeModel.item(itemRow, COL_START)
++                    endItem = self.treeModel.item(itemRow, COL_END)
++                else:
++                    startItem = parent.child(itemRow, COL_START)
++                    endItem = parent.child(itemRow, COL_END)
++                start = parseTimeInput(startItem.text() if startItem else "")
++                end = parseTimeInput(endItem.text() if endItem else "")
++                result[fileIndex] = (start, end)
+         return result
+ 
+ 
+@@ -201,8 +449,8 @@ def _initWidget(self) -> None:
+         initialVideoKey = None
+         initialAudioKey = None
+ 
+-        if task.files:
+-            page = task.files[0]
++        page = next((p for p in task.files or [] if p._videoStreams or p._audioStreams), None)
++        if page:
+             qualityMap = dict(zip(task._acceptQualities, task._qualityLabels))
+ 
+             videoTiers = []
+@@ -214,7 +462,7 @@ def _initWidget(self) -> None:
+                 bitrate = f'{kbps / 1000:.1f}Mbps' if kbps >= 1000 else f'{int(kbps)}Kbps'
+                 label = f'{qualityName} ({codec}, {bitrate})'
+                 videoTiers.append((key, label))
+-                if streamUrl(s) == page.videoUrl:
++                if toStreamUrl(s) == page.videoUrl:
+                     initialVideoKey = key
+ 
+             seen = set()
+@@ -225,7 +473,7 @@ def _initWidget(self) -> None:
+                     kbps = f'{s["bandwidth"] // 1000}Kbps'
+                     name = AUDIO_QUALITY_LABELS.get(s["id"], str(s["id"]))
+                     audioTiers.append((str(s["id"]), f'{name} ({kbps})'))
+-                    if streamUrl(s) == page.audioUrl:
++                    if toStreamUrl(s) == page.audioUrl:
+                         initialAudioKey = str(s["id"])
+ 
+         self._trackBar.videoButton.setOptions(videoTiers, selected=initialVideoKey)
+@@ -252,7 +500,8 @@ def _initWidget(self) -> None:
+                 self._rangeSlider.setValues(0, page._duration)
+ 
+         if self._selectFilesButton is not None:
+-            self._selectFilesButton.setToolTip(self.tr("选择分P"))
++            tip = self.tr("选择合集") if task.isSeason else self.tr("选择分P")
++            self._selectFilesButton.setToolTip(tip)
+         self._refreshButtonVisibility()
+ 
+     def _initLayout(self) -> None:
+@@ -304,7 +553,7 @@ def _onTrackToggled(self) -> None:
+             task.isVideoEnabled = isVideo
+             task.isAudioEnabled = isAudio
+             task.isCoverEnabled = isCover
+-            task._rebuildSteps()
++            task.update()
+         self._refreshSummary()
+         self._refreshButtonVisibility()
+ 
+@@ -325,7 +574,7 @@ def _onTrimToggled(self) -> None:
+             if file:
+                 file.startTime = 0
+                 file.endTime = 0
+-                self._task._rebuildSteps()
++                self._task.update()
+         w = self
+         while w := w.parentWidget():
+             w.updateGeometry()
+@@ -335,7 +584,7 @@ def _onRangeChanged(self, start: int, end: int) -> None:
+         if file:
+             file.startTime = start
+             file.endTime = end
+-            self._task._rebuildSteps()
++            self._task.update()
+             self._refreshSummary()
+ 
+     def resizeEvent(self, event) -> None:
+@@ -344,19 +593,14 @@ def resizeEvent(self, event) -> None:
+ 
+     def _onSelectFilesClicked(self) -> None:
+         task: BilibiliTask = self._task
+-        dialog = PageSelectDialog(task, self.window())
++        dialog = SelectDialog(task, self.window())
+         try:
+             if dialog.exec():
+-                selected = dialog.selectedPageNumbers()
++                selected = dialog.selectedIndexes()
+                 if selected:
+-                    for page in task.files or []:
+-                        ranges = dialog.timeRanges()
+-                        if page.pageNumber in ranges:
+-                            page.startTime, page.endTime = ranges[page.pageNumber]
+-                        else:
+-                            page.startTime = page.endTime = 0
+-                    task.setSelection({n - 1 for n in selected})
+-                    task._rebuildSteps()
++                    setTimeRanges(task.files or [], dialog.timeRanges())
++                    task.setSelection(selected)
++                    task.update()
+                     self._refreshSummary()
+         finally:
+             dialog.deleteLater()
+@@ -469,7 +713,10 @@ def _refreshSummary(self) -> None:
+         size = toReadableSize(self._task.fileSize)
+         if self._isSizeEstimated:
+             size = f"~{size}"
+-        self.sizeLabel.setText(size)
++        if self._task.isSeason:
++            self.sizeLabel.setText(f"{self._task.seasonSummary()} · {size}")
++        else:
++            self.sizeLabel.setText(size)
+         self.nameLabel.setText(self._task.name)
+         self._refreshFileIcon()
+ 
+@@ -498,18 +745,21 @@ def _refreshButtonVisibility(self) -> None:
+ 
+ 
+ class BilibiliTaskCard(MultiFileTaskCard):
+-    fileSelectDialog = PageSelectDialog
++    fileSelectDialog = SelectDialog
++
++    def _refreshForStatus(self, task: BilibiliTask) -> None:
++        super()._refreshForStatus(task)
++        if (task.isSeason
++                and task.files and len(task.files) > 1
++                and not self._isFileMissing
++                and task.status in {TaskStatus.WAITING, TaskStatus.COMPLETED}):
++            self.statusLabel.setText(task.seasonSummary())
+ 
+     def _onSelectFilesClicked(self) -> None:
+-        dialog = PageSelectDialog(self._task, self.window())
++        dialog = SelectDialog(self._task, self.window())
+         try:
+             if dialog.exec():
+-                ranges = dialog.timeRanges()
+-                for page in self._task.files or []:
+-                    if page.pageNumber in ranges:
+-                        page.startTime, page.endTime = ranges[page.pageNumber]
+-                    else:
+-                        page.startTime = page.endTime = 0
++                setTimeRanges(self._task.files or [], dialog.timeRanges())
+                 self._taskService.applySelection(self._task, dialog.selectedIndexes())
+                 self.refresh(force=True)
+         finally:
+@@ -520,5 +770,6 @@ def _initWidget(self) -> None:
+         task: BilibiliTask = self._task
+         if not task.isVideoEnabled and not task.isAudioEnabled:
+             self.selectFilesButton.hide()
+-        self.selectFilesButton.setToolTip(self.tr("选择分P"))
++        tip = self.tr("选择合集") if task.isSeason else self.tr("选择分P")
++        self.selectFilesButton.setToolTip(tip)
+         self.selectFilesButton.installEventFilter(ToolTipFilter(self.selectFilesButton))
+diff --git a/features/bili_pack/manifest.toml b/features/bili_pack/manifest.toml
+index a36a640f..70b88e8e 100644
+--- a/features/bili_pack/manifest.toml
++++ b/features/bili_pack/manifest.toml
+@@ -2,5 +2,5 @@
+ entry = "pack.py"
+ class = "BilibiliPack"
+ dependencies = ["http_pack", "ffmpeg_pack"]
+-version = "1.0.0"
++version = "1.1.0"
+ gdMinVersion = "4.2.0"
+diff --git a/features/bili_pack/pack.py b/features/bili_pack/pack.py
+index ce99b6b3..e86baa2c 100644
+--- a/features/bili_pack/pack.py
++++ b/features/bili_pack/pack.py
+@@ -1,20 +1,17 @@
+ from __future__ import annotations
+ 
+-import re
+-import urllib.parse
+-from urllib.parse import parse_qs, urlparse
++from urllib.parse import urlparse
+ 
+-from loguru import logger
+-
+-from app.client import buildClient, toEmulation
+-from app.config.cfg import cfg
++from app.client import buildClient
+ from app.models.pack import FeaturePack, TaskParser
+ from app.models.task import TaskOptions
+ from app.platform.filesystem import toSafeFilename
+ from .account import BilibiliAccount
+ from .cards import BilibiliDraftCard, BilibiliTaskCard
+ from .config import bilibiliConfig
+-from .task import BiliPage, BilibiliTask, streamUrl
++from .parse import buildPages, parseBiliUrl
++from .stream import buildSize, fetchPlayurl, toStreamUrl
++from .task import BilibiliTask
+ 
+ 
+ class BilibiliParser(TaskParser):
+@@ -25,11 +22,13 @@ def match(self, options: TaskOptions) -> bool:
+         return hostname == "bilibili.com" or hostname.endswith(".bilibili.com")
+ 
+     def matchPassive(self, options: TaskOptions) -> bool:
+-        parsed = urlparse(options.url)
+-        hostname = (parsed.hostname or "").lower()
+-        if hostname != "bilibili.com" and not hostname.endswith(".bilibili.com"):
++        if not self.match(options):
++            return False
++        try:
++            biliUrl = parseBiliUrl(options.url)
++        except ValueError:
+             return False
+-        return bool(re.match(r"/video/(BV[a-zA-Z0-9]+|av\d+)", parsed.path))
++        return bool(biliUrl.videoId or biliUrl.seasonId)
+ 
+     async def parse(self, options: TaskOptions) -> Task:
+         url = options.url
+@@ -55,136 +54,44 @@ async def parse(self, options: TaskOptions) -> Task:
+         if cookie:
+             downloadHeaders["cookie"] = cookie
+ 
+-        emulation = toEmulation(
+-            options.clientProfile or cfg.clientProfile.value,
+-            options.sourceUserAgent,
+-        )
+         client = buildClient(emulation=None, headers=apiHeaders)
+ 
+         try:
+-            videoIdMatch = re.match(r"/video/(BV[a-zA-Z0-9]+|av\d+)", parsed.path)
+-            if not videoIdMatch:
++            biliUrl = parseBiliUrl(url)
++            if not biliUrl.videoId and not biliUrl.seasonId:
+                 raise ValueError("不是有效的 Bilibili 视频链接")
+-            videoId = videoIdMatch.group(1)
+-
+-            pageParam = parse_qs(parsed.query).get("p", [""])[0].strip()
+-            selectedPages: list[int] | None = None
+-            if pageParam:
+-                selectedPages = []
+-                for part in pageParam.split(","):
+-                    part = part.strip()
+-                    if "-" in part:
+-                        start, end = map(int, part.split("-", 1))
+-                        if start > end:
+-                            start, end = end, start
+-                        selectedPages.extend(range(start, end + 1))
+-                    else:
+-                        selectedPages.append(int(part))
+ 
+-            viewApiUrl = (
+-                f"https://api.bilibili.com/x/web-interface/view?avid={videoId[2:]}"
+-                if videoId.startswith("av")
+-                else f"https://api.bilibili.com/x/web-interface/view?bvid={videoId}"
+-            )
+-
+-            response = await client.get(viewApiUrl)
+-            response.raise_for_status()
+-            viewPayload = await response.json()
+-            if viewPayload.get("code") not in {None, 0}:
+-                raise ValueError(viewPayload.get("message") or "获取 Bilibili 视频信息失败")
+-
+-            viewData = viewPayload.get("data") or {}
+-            pages = list(viewData.get("pages") or [])
+-            if not pages:
++            viewData = await fetchView(client, biliUrl)
++            parsedPages, title, coverUrl = buildPages(viewData, biliUrl)
++            if not parsedPages:
+                 raise ValueError("未获取到视频分P信息")
+ 
+-            if selectedPages is None:
+-                selectedPages = list(range(1, len(pages) + 1))
+-            selectedPages = [p for p in dict.fromkeys(selectedPages) if 1 <= p <= len(pages)]
+-            if not selectedPages:
+-                raise ValueError("未找到有效的分P编号")
+-
+-            videoTitle = str(viewData.get("title", "")).strip() or "bilibili_video"
+             requestedQuality = bilibiliConfig.defaultQuality.value
+-            baseName = toSafeFilename(videoTitle, fallback="bilibili_video")
+-            taskName = f"{baseName}.mp4"
+-
+-            fnval = 16
+-            if bilibiliConfig.shouldIncludeHdr.value:
+-                fnval |= 64
+-            if bilibiliConfig.shouldIncludeDolby.value:
+-                fnval |= 256 | 512
+-            if requestedQuality == 128:
+-                fnval |= 1024
+-            if requestedQuality == 120:
+-                fnval |= 128
+-
+-            totalSize = 0
+-            parsedPages = []
+-            acceptQuality = []
+-            acceptDescription = []
+-
+-            for pageNumber in range(1, len(pages) + 1):
+-                page = pages[pageNumber - 1]
+-                pagePart = str(page.get("part", "")).strip()
+-                cid = int(page["cid"])
+-
+-                playParams = {"cid": cid, "qn": requestedQuality, "fnval": fnval, "fourk": 1}
+-                if videoId.startswith("av"):
+-                    playParams["avid"] = videoId[2:]
+-                else:
+-                    playParams["bvid"] = videoId
+-                playParams = self.pack.account.signParams(playParams)
+-                playApiUrl = f"https://api.bilibili.com/x/player/wbi/playurl?{urllib.parse.urlencode(playParams)}"
+-
+-                response = await client.get(playApiUrl)
+-                response.raise_for_status()
+-                playPayload = await response.json()
+-                if playPayload.get("code") not in {None, 0}:
+-                    raise ValueError(playPayload.get("message") or "获取 Bilibili 音视频流失败")
+-
+-                pageData = playPayload.get("data") or {}
+-                dash = pageData.get("dash") or {}
+-                videoStreams = dash.get("video") or []
+-                audioStreams = dash.get("audio") or []
+-
+-                videoUrl = self._selectStream(
+-                    videoStreams,
+-                    requestedQuality,
+-                    list(pageData.get("accept_quality") or []),
+-                )
+-                audioUrl = self._selectStream(audioStreams)
+-                if not videoUrl or not audioUrl:
+-                    raise ValueError("未能解析出完整的音视频下载链接")
+-
+-                if not parsedPages:
+-                    acceptQuality = list(pageData.get("accept_quality") or [])
+-                    acceptDescription = list(pageData.get("accept_description") or [])
+-
+-                videoSize = await self._fetchSize(client, videoUrl, downloadHeaders)
+-                audioSize = await self._fetchSize(client, audioUrl, downloadHeaders)
+-                totalSize += videoSize + audioSize
+-
+-                subtitles = await self._fetchSubtitles(client, videoId, cid)
+-
+-                parsedPages.append(BiliPage(
+-                    index=pageNumber - 1,
+-                    relativePath=pagePart or f"P{pageNumber}",
+-                    cid=cid,
+-                    pagePart=pagePart,
+-                    videoUrl=videoUrl,
+-                    audioUrl=audioUrl,
+-                    videoSize=videoSize,
+-                    audioSize=audioSize,
+-                    subtitles=subtitles,
+-                    _duration=int(page.get("duration") or 0),
+-                    _videoStreams=videoStreams,
+-                    _audioStreams=audioStreams,
+-                ))
++            baseName = toSafeFilename(title, fallback="bilibili_video")
++            for page in parsedPages:
++                page.headers = dict(downloadHeaders)
++                page.subworkerCount = subworkerCount
++            template = next((p for p in parsedPages if p.selected), parsedPages[0])
++            acceptQuality, acceptDescription, requestedQuality = await fetchPlayurl(
++                template,
++                qn=requestedQuality,
++                signParams=self.pack.account.signParams,
++                headers=template.headers,
++            )
++            for page in parsedPages:
++                page.headers["cookie"] = template.headers.get("cookie", "")
+ 
+-            coverUrl = str(viewData.get("pic") or "").strip()
+-            if coverUrl.startswith("http://"):
+-                coverUrl = "https://" + coverUrl[7:]
++            videoStream = next(
++                (s for s in template._videoStreams if toStreamUrl(s) == template.videoUrl), None
++            )
++            audioStream = next(
++                (s for s in template._audioStreams if toStreamUrl(s) == template.audioUrl), None
++            )
++            for page in parsedPages:
++                if page is template:
++                    continue
++                page.videoSize = buildSize(videoStream, page._duration)
++                page.audioSize = buildSize(audioStream, page._duration)
+ 
+             coverSize = 0
+             if coverUrl:
+@@ -196,93 +103,54 @@ async def parse(self, options: TaskOptions) -> Task:
+                 except Exception:
+                     pass
+ 
+-            for page in parsedPages:
+-                page.headers = dict(downloadHeaders)
+-                page.subworkerCount = subworkerCount
+-                page.selected = page.pageNumber in selectedPages
+-
+             task = BilibiliTask(
+-                name=taskName,
++                name=f"{baseName}.mp4",
+                 url=url,
+-                fileSize=totalSize,
++                fileSize=0,
+                 outputFolder=outputFolder,
+                 coverUrl=coverUrl,
+                 coverSize=coverSize,
+                 files=parsedPages,
++                requestedQn=requestedQuality,
+                 _baseName=baseName,
+                 _acceptQualities=acceptQuality,
+                 _qualityLabels=acceptDescription,
+             )
+-            task._rebuildSteps()
++            task.update()
+ 
+             return task
+         finally:
+             client.close()
+ 
+-    async def _fetchSubtitles(self, client, videoId: str, cid: int) -> list[dict]:
+-        try:
+-            params: dict = {"cid": cid}
+-            if videoId.startswith("av"):
+-                params["aid"] = videoId[2:]
+-            else:
+-                params["bvid"] = videoId
+-
+-            url = f"https://api.bilibili.com/x/player/v2?{urllib.parse.urlencode(params)}"
+-            response = await client.get(url)
+-            response.raise_for_status()
+-            payload = await response.json()
+-
+-            subtitleData = (payload.get("data") or {}).get("subtitle") or {}
+-            rawList = subtitleData.get("subtitles") or []
+-            return [
+-                {
+-                    "lan": s["lan"],
+-                    "lan_doc": s.get("lan_doc", s["lan"]),
+-                    "subtitle_url": s.get("subtitle_url", ""),
+-                    "isAi": s.get("type", 0) == 1,
+-                }
+-                for s in rawList if s.get("lan") and s.get("subtitle_url")
+-            ]
+-        except Exception:
+-            logger.opt(exception=True).debug("Failed to fetch subtitles for cid={}", cid)
+-            return []
+-
+-    def _selectStream(
+-        self,
+-        streams: list[dict],
+-        quality: int | None = None,
+-        acceptQuality: list[int] | None = None,
+-    ) -> str:
+-        if not streams:
+-            raise ValueError("Bilibili 返回结果中不存在可用的媒体流")
+-
+-        if quality is not None and acceptQuality:
+-            targetQuality = quality
+-            if targetQuality not in acceptQuality:
+-                targetQuality = max(acceptQuality) if bilibiliConfig.alternativeQuality.value == "max" else min(acceptQuality)
+-            for s in streams:
+-                if s.get("id") == targetQuality and streamUrl(s):
+-                    return streamUrl(s)
+ 
+-        for s in streams:
+-            url = streamUrl(s)
+-            if url:
+-                return url
+-
+-        raise ValueError("未找到可用的媒体流")
+-
+-    async def _fetchSize(self, client, url: str, headers: dict) -> int:
+-        response = await client.get(url, headers={**headers, "range": "bytes=0-0"})
+-        try:
+-            response.raise_for_status()
+-            head = {k.decode().lower(): v.decode() for k, v in response.headers}
+-            if response.status.as_int() == 206 and "content-range" in head:
+-                _, _, total = head["content-range"].rpartition("/")
+-                if total != "*":
+-                    return int(total)
+-            raise ValueError("音视频流不支持范围请求，当前实现无法下载")
+-        finally:
+-            response.close()
++async def fetchView(client, biliUrl) -> dict:
++    videoId = biliUrl.videoId
++    if not videoId and biliUrl.seasonId:
++        listUrl = (
++            "https://api.bilibili.com/x/polymer/web-space/seasons_archives_list"
++            f"?mid={biliUrl.mid}&season_id={biliUrl.seasonId}&page_num=1&page_size=1"
++        )
++        response = await client.get(listUrl, headers={"referer": "https://www.bilibili.com"})
++        response.raise_for_status()
++        payload = await response.json()
++        archives = ((payload.get("data") or {}).get("archives") or [])
++        if not archives:
++            raise ValueError("未获取到合集信息")
++        videoId = str(archives[0].get("bvid") or "")
++        if not videoId:
++            raise ValueError("未获取到合集信息")
++
++    viewApiUrl = (
++        f"https://api.bilibili.com/x/web-interface/view?avid={videoId[2:]}"
++        if videoId.startswith("av")
++        else f"https://api.bilibili.com/x/web-interface/view?bvid={videoId}"
++    )
++    response = await client.get(viewApiUrl)
++    response.raise_for_status()
++    viewPayload = await response.json()
++    if viewPayload.get("code") not in {None, 0}:
++        raise ValueError(viewPayload.get("message") or "获取 Bilibili 视频信息失败")
++    return viewPayload.get("data") or {}
+ 
+ 
+ class BilibiliPack(FeaturePack):
+diff --git a/features/bili_pack/parse.py b/features/bili_pack/parse.py
+new file mode 100644
+index 00000000..9c48d0d2
+--- /dev/null
++++ b/features/bili_pack/parse.py
+@@ -0,0 +1,156 @@
++from __future__ import annotations
++
++import re
++from dataclasses import dataclass
++from urllib.parse import parse_qs, urlparse
++
++from .task import BiliPage
++
++
++@dataclass(frozen=True)
++class BiliUrl:
++    videoId: str = ""
++    mid: int = 0
++    seasonId: int = 0
++    selectedPages: list[int] | None = None
++
++
++def parseBiliUrl(url: str) -> BiliUrl:
++    parsed = urlparse(url)
++    videoIdMatch = re.match(r"/video/(BV[a-zA-Z0-9]+|av\d+)", parsed.path)
++    if videoIdMatch:
++        return BiliUrl(videoId=videoIdMatch.group(1), selectedPages=parsePageSpec(parsed.query))
++
++    listsMatch = re.match(r"/(\d+)/lists/(\d+)", parsed.path)
++    if listsMatch:
++        return BiliUrl(mid=int(listsMatch.group(1)), seasonId=int(listsMatch.group(2)))
++
++    detailMatch = re.match(r"/(\d+)/channel/collectiondetail", parsed.path)
++    if detailMatch:
++        sid = parse_qs(parsed.query).get("sid", [""])[0]
++        if sid.isdigit():
++            return BiliUrl(mid=int(detailMatch.group(1)), seasonId=int(sid))
++
++    raise ValueError("不是有效的 Bilibili 视频链接")
++
++
++def buildPages(viewData: dict, biliUrl: BiliUrl) -> tuple[list[BiliPage], str, str]:
++    season = viewData.get("ugc_season") or None
++    if season:
++        title = str(season.get("title") or "").strip() or "bilibili_video"
++        coverUrl = toHttps(season.get("cover") or viewData.get("pic") or "")
++        pages = buildSeasonPages(season)
++        setSeasonSelection(pages, biliUrl, str(viewData.get("bvid") or biliUrl.videoId))
++    else:
++        title = str(viewData.get("title", "")).strip() or "bilibili_video"
++        coverUrl = toHttps(viewData.get("pic") or "")
++        bvid = str(viewData.get("bvid") or biliUrl.videoId)
++        pages = [buildPage(index, raw, bvid=bvid) for index, raw in enumerate(viewData.get("pages") or [])]
++        setVideoSelection(pages, biliUrl.selectedPages)
++
++    return pages, title, coverUrl
++
++
++def toHttps(url: str) -> str:
++    url = str(url or "").strip()
++    if url.startswith("http://"):
++        return "https://" + url[7:]
++    return url
++
++
++def buildSeasonPages(season: dict) -> list[BiliPage]:
++    sections = list(season.get("sections") or [])
++    hasManySections = len(sections) > 1
++    pages: list[BiliPage] = []
++    for section in sections:
++        sectionTitle = str(section.get("title") or "").strip() if hasManySections else ""
++        for episode in section.get("episodes") or []:
++            bvid = str(episode.get("bvid") or "")
++            episodeTitle = str(episode.get("title") or "").strip()
++            rawPages = list(episode.get("pages") or [])
++            if not rawPages and episode.get("page"):
++                rawPages = [episode["page"]]
++            coverUrl = episodeCover(episode)
++            for raw in rawPages:
++                pages.append(buildPage(
++                    len(pages), raw, bvid=bvid,
++                    episodeTitle=episodeTitle, sectionTitle=sectionTitle,
++                    coverUrl=coverUrl,
++                ))
++    byBvid: dict[str, list[BiliPage]] = {}
++    for page in pages:
++        byBvid.setdefault(page.bvid, []).append(page)
++    for group in byBvid.values():
++        multi = len(group) > 1
++        for page in group:
++            if not page.episodeTitle:
++                continue
++            page.relativePath = (
++                f"{page.episodeTitle} - P{page.pageNumber}" if multi else page.episodeTitle
++            )
++    return pages
++
++
++def setVideoSelection(pages: list[BiliPage], selectedPages: list[int] | None) -> None:
++    if selectedPages is None:
++        selectedPages = [page.pageNumber for page in pages]
++    selectedSet = set(selectedPages)
++    for page in pages:
++        page.selected = page.pageNumber in selectedSet
++
++
++def setSeasonSelection(pages: list[BiliPage], biliUrl: BiliUrl, currentBvid: str) -> None:
++    if biliUrl.seasonId:
++        for page in pages:
++            page.selected = True
++        return
++    wanted = set(biliUrl.selectedPages) if biliUrl.selectedPages is not None else None
++    for page in pages:
++        if page.bvid != currentBvid:
++            page.selected = False
++        elif wanted is None:
++            page.selected = True
++        else:
++            page.selected = page.pageNumber in wanted
++
++
++def episodeCover(episode: dict) -> str:
++    arc = episode.get("arc") or {}
++    return toHttps(str(arc.get("pic") or episode.get("cover") or episode.get("pic") or ""))
++
++
++def buildPage(
++    index: int, raw: dict, *, bvid: str, episodeTitle: str = "",
++    sectionTitle: str = "", coverUrl: str = "",
++) -> BiliPage:
++    pageNumber = int(raw.get("page") or index + 1)
++    pagePart = str(raw.get("part", "")).strip()
++    return BiliPage(
++        index=index,
++        relativePath=pagePart or f"P{pageNumber}",
++        cid=int(raw["cid"]),
++        pagePart=pagePart,
++        pageNumber=pageNumber,
++        bvid=bvid,
++        episodeTitle=episodeTitle,
++        sectionTitle=sectionTitle,
++        coverUrl=coverUrl,
++        _duration=int(raw.get("duration") or 0),
++    )
++
++
++def parsePageSpec(query: str) -> list[int] | None:
++    pageParam = parse_qs(query).get("p", [""])[0].strip()
++    if not pageParam:
++        return None
++    selected: list[int] = []
++    for part in pageParam.split(","):
++        part = part.strip()
++        if "-" in part:
++            start, end = map(int, part.split("-", 1))
++            if start > end:
++                start, end = end, start
++            selected.extend(range(start, end + 1))
++        else:
++            selected.append(int(part))
++    return selected
+diff --git a/features/bili_pack/stream.py b/features/bili_pack/stream.py
+new file mode 100644
+index 00000000..35b2dfc4
+--- /dev/null
++++ b/features/bili_pack/stream.py
+@@ -0,0 +1,205 @@
++from __future__ import annotations
++
++import urllib.parse
++from typing import TYPE_CHECKING
++
++from loguru import logger
++
++from app.client import buildClient
++from .config import bilibiliConfig
++
++if TYPE_CHECKING:
++    from .task import BiliPage
++
++
++class NoopRunner:
++    def submit(self, *a, **k):
++        return ""
++
++    def cancel(self, *a, **k):
++        pass
++
++    def post(self, *a, **k):
++        pass
++
++
++def toStreamUrl(s: dict) -> str:
++    url = s.get("baseUrl") or ""
++    if url:
++        return url
++    for item in (s.get("backupUrl") or []):
++        if item:
++            return item
++    return ""
++
++
++def buildSize(stream: dict | None, duration: int) -> int:
++    if not stream or duration <= 0:
++        return 0
++    return int(stream.get("bandwidth") or 0) * duration // 8
++
++
++async def probeSize(url: str, headers: dict | None = None) -> int:
++    if not url:
++        return 0
++    client = buildClient()
++    try:
++        response = await client.get(
++            url,
++            headers={**(headers or {}), "range": "bytes=0-0", "accept-encoding": "identity"},
++        )
++        try:
++            raw = response.headers.get("content-range")
++            if raw is None:
++                return 0
++            cr = raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw)
++            if "/" not in cr:
++                return 0
++            total = cr.rsplit("/", 1)[-1].strip()
++            if not total or total == "*":
++                return 0
++            size = int(total)
++            return size if size > 0 else 0
++        finally:
++            response.close()
++    except Exception:
++        logger.opt(exception=True).debug("probeSize failed for {}", url)
++        return 0
++    finally:
++        client.close()
++
++
++def buildFnval(qn: int) -> int:
++    fnval = 16
++    if bilibiliConfig.shouldIncludeHdr.value:
++        fnval |= 64
++    if bilibiliConfig.shouldIncludeDolby.value:
++        fnval |= 256 | 512
++    if qn == 128:
++        fnval |= 1024
++    if qn == 120:
++        fnval |= 128
++    return fnval
++
++
++def matchStream(
++    streams: list[dict],
++    quality: int | None = None,
++    acceptQuality: list[int] | None = None,
++) -> dict:
++    if not streams:
++        raise ValueError("Bilibili 返回结果中不存在可用的媒体流")
++
++    if quality is not None and acceptQuality:
++        targetQuality = quality
++        if targetQuality not in acceptQuality:
++            targetQuality = (
++                max(acceptQuality) if bilibiliConfig.alternativeQuality.value == "max"
++                else min(acceptQuality)
++            )
++        for s in streams:
++            if s.get("id") == targetQuality and toStreamUrl(s):
++                return s
++
++    for s in streams:
++        if toStreamUrl(s):
++            return s
++    raise ValueError("未找到可用的媒体流")
++
++
++async def fetchPlayurl(
++    page: BiliPage,
++    *,
++    qn: int,
++    headers: dict,
++    signParams=None,
++) -> tuple[list[int], list[str], int]:
++    if signParams is None:
++        from .account import BilibiliAccount
++        account = BilibiliAccount(NoopRunner())
++        await account.fetchWbiKeys()
++        signParams = account.signParams
++
++    cookie = headers.get("cookie") or headers.get("Cookie") or ""
++    client = buildClient(headers={"cookie": cookie} if cookie else None)
++    try:
++        if cookie and "buvid3=" not in cookie.lower():
++            buvid = await fetchBuvid(client)
++            if buvid:
++                cookie = f"{cookie}; buvid3={buvid}"
++                page.headers["cookie"] = cookie
++                client.close()
++                client = buildClient(headers={"cookie": cookie})
++
++        playParams = {"cid": page.cid, "qn": qn, "fnval": buildFnval(qn), "fourk": 1}
++        if page.bvid:
++            playParams["bvid"] = page.bvid
++        playParams = signParams(playParams)
++        playApiUrl = f"https://api.bilibili.com/x/player/wbi/playurl?{urllib.parse.urlencode(playParams)}"
++
++        response = await client.get(playApiUrl)
++        status = response.status.as_int()
++        if status == 412:
++            raise ValueError("Bilibili 拦截了取流请求（412 风控）。请稍后再试，登录 Cookie 建议带上 buvid3")
++        response.raise_for_status()
++        playPayload = await response.json()
++        if playPayload.get("code") not in {None, 0}:
++            if qn != 80:
++                return await fetchPlayurl(page, qn=80, headers=headers, signParams=signParams)
++            raise ValueError(playPayload.get("message") or "获取 Bilibili 音视频流失败")
++
++        pageData = playPayload.get("data") or {}
++        dash = pageData.get("dash") or {}
++        videoStreams = dash.get("video") or []
++        audioStreams = dash.get("audio") or []
++        if (not videoStreams or not audioStreams) and qn != 80:
++            return await fetchPlayurl(page, qn=80, headers=headers, signParams=signParams)
++
++        acceptQuality = list(pageData.get("accept_quality") or [])
++        video = matchStream(videoStreams, qn, acceptQuality)
++        audio = matchStream(audioStreams)
++        page.videoUrl = toStreamUrl(video)
++        page.audioUrl = toStreamUrl(audio)
++        page._videoStreams = videoStreams
++        page._audioStreams = audioStreams
++        page.videoSize = buildSize(video, page._duration)
++        page.audioSize = buildSize(audio, page._duration)
++        if not page.subtitles:
++            page.subtitles = await fetchSubtitles(client, page)
++        return acceptQuality, list(pageData.get("accept_description") or []), qn
++    finally:
++        client.close()
++
++
++async def fetchBuvid(client) -> str:
++    try:
++        response = await client.get("https://api.bilibili.com/x/frontend/finger/spi")
++        payload = await response.json()
++        return str(((payload.get("data") or {}).get("b_3") or "")).strip()
++    except Exception:
++        logger.opt(exception=True).debug("Failed to fetch buvid3")
++        return ""
++
++
++async def fetchSubtitles(client, page: BiliPage) -> list[dict]:
++    try:
++        params: dict = {"cid": page.cid}
++        if page.bvid:
++            params["bvid"] = page.bvid
++        url = f"https://api.bilibili.com/x/player/v2?{urllib.parse.urlencode(params)}"
++        response = await client.get(url)
++        response.raise_for_status()
++        payload = await response.json()
++        rawList = ((payload.get("data") or {}).get("subtitle") or {}).get("subtitles") or []
++        return [
++            {
++                "lan": s["lan"],
++                "lan_doc": s.get("lan_doc", s["lan"]),
++                "subtitle_url": s.get("subtitle_url", ""),
++                "isAi": s.get("type", 0) == 1,
++            }
++            for s in rawList if s.get("lan") and s.get("subtitle_url")
++        ]
++    except Exception:
++        logger.opt(exception=True).debug("Failed to fetch subtitles for cid={}", page.cid)
++        return []
+diff --git a/features/bili_pack/task.py b/features/bili_pack/task.py
+index 195ff02e..39d81903 100644
+--- a/features/bili_pack/task.py
++++ b/features/bili_pack/task.py
+@@ -8,24 +8,15 @@
+ 
+ from loguru import logger
+ 
+-from app.models.task import Task, TaskError, TaskFile, TaskStep, TaskStatus
++from app.models.task import Task, TaskError, TaskFile, TaskStep, TaskStatus, SpecialFileSize
+ from app.platform.filesystem import toSafeFilename
+ from http_pack.task import HttpTaskStep
+ from ffmpeg_pack.task import FFmpegStep
++from .stream import buildSize, fetchPlayurl, probeSize, toStreamUrl
+ 
+ AUDIO_QUALITY_LABELS = {30216: "64K", 30232: "132K", 30280: "192K", 30250: "杜比全景声", 30251: "Hi-Res"}
+ 
+ 
+-def streamUrl(s: dict) -> str:
+-    url = s.get("baseUrl") or ""
+-    if url:
+-        return url
+-    for item in (s.get("backupUrl") or []):
+-        if item:
+-            return item
+-    return ""
+-
+-
+ def buildTimeSuffix(startTime: int, endTime: int) -> str:
+     def fmt(sec: int) -> str:
+         m, s = divmod(sec, 60)
+@@ -35,7 +26,7 @@ def fmt(sec: int) -> str:
+ 
+ def parseSegmentBaseEndByte(streams: list[dict], url: str) -> int:
+     for s in streams:
+-        if streamUrl(s) == url:
++        if toStreamUrl(s) == url:
+             segBase = s.get("SegmentBase") or s.get("segment_base") or {}
+             indexRange = segBase.get("indexRange") or segBase.get("index_range") or ""
+             if indexRange and "-" in indexRange:
+@@ -47,10 +38,40 @@ def pageByIndex(task, fileIndex: int):
+     return next((f for f in task.files or [] if f.index == fileIndex), None)
+ 
+ 
++def setEpisodeTitle(pages: list[BiliPage], name: str) -> None:
++    name = name.strip()
++    if not pages or not name:
++        return
++    multi = len(pages) > 1
++    for page in pages:
++        page.episodeTitle = name
++        page.relativePath = f"{name} - P{page.pageNumber}" if multi else name
++
++
++def setTimeRanges(pages: list[BiliPage], ranges: dict[int, tuple[int, int]]) -> None:
++    for page in pages:
++        if page.index in ranges:
++            page.startTime, page.endTime = ranges[page.index]
++
++
++def setPagePart(page: BiliPage, name: str) -> None:
++    name = name.strip()
++    page.pagePart = name
++    if page.episodeTitle:
++        page.relativePath = f"{page.episodeTitle} - P{page.pageNumber}"
++    else:
++        page.relativePath = name or f"P{page.pageNumber}"
++
++
+ @dataclass(kw_only=True)
+ class BiliPage(TaskFile):
+     cid: int = 0
+     pagePart: str = ""
++    pageNumber: int = 1
++    bvid: str = ""
++    episodeTitle: str = ""
++    sectionTitle: str = ""
++    coverUrl: str = ""
+     videoUrl: str = ""
+     audioUrl: str = ""
+     videoSize: int = 0
+@@ -64,10 +85,6 @@ class BiliPage(TaskFile):
+     _videoStreams: list[dict] = field(default_factory=list, repr=False)
+     _audioStreams: list[dict] = field(default_factory=list, repr=False)
+ 
+-    @property
+-    def pageNumber(self) -> int:
+-        return self.index + 1
+-
+ 
+ @dataclass(kw_only=True, eq=False)
+ class BilibiliTask(Task):
+@@ -80,6 +97,9 @@ class BilibiliTask(Task):
+     isAudioEnabled: bool = True
+     isCoverEnabled: bool = False
+     subtitleLanguages: list[str] = field(default_factory=list)
++    requestedQn: int = 0
++    requestedCodecid: int = 0
++    requestedAudioQn: int = 0
+     _baseName: str = ""
+     _acceptQualities: list[int] = field(default_factory=list, repr=False)
+     _qualityLabels: list[str] = field(default_factory=list, repr=False)
+@@ -96,40 +116,93 @@ def filesFolder(self) -> Path:
+             return Path(self.outputPath)
+         return self.outputFolder
+ 
++    @property
++    def isSeason(self) -> bool:
++        files = self.files or []
++        return any(f.episodeTitle for f in files) or len({f.bvid for f in files if f.bvid}) > 1
++
++    def episodeGroups(self) -> list[list[BiliPage]]:
++        groups: dict[str, list[BiliPage]] = {}
++        order: list[str] = []
++        for page in self.files or []:
++            key = page.bvid or f"#{page.index}"
++            if key not in groups:
++                groups[key] = []
++                order.append(key)
++            groups[key].append(page)
++        return [groups[k] for k in order]
++
++    def seasonSummary(self) -> str:
++        groups = self.episodeGroups()
++        selected = sum(1 for g in groups if any(p.selected for p in g))
++        return f"{selected}/{len(groups)} 集"
++
+     def setSelection(self, selectedIndexes) -> None:
+         super().setSelection(selectedIndexes)
+         if self.isCoverEnabled:
+             self.fileSize += self.coverSize
++        have = {s.fileIndex for s in self.steps if s.fileIndex is not None}
++        stepIndex = max((s.stepIndex for s in self.steps), default=0)
++        for file in (self.files or []):
++            if file.selected and file.index not in have:
++                stepIndex = self._addFileSteps(file, stepIndex)
++        self._addCoverSteps(stepIndex)
++        self.updateSuffixes()
++        self.updateStatus()
++
++    def updateSuffixes(self) -> None:
++        for step in self.steps:
++            fileIndex = getattr(step, "fileIndex", None)
++            if fileIndex is None or not hasattr(step, "pageSuffix"):
++                continue
++            page = pageByIndex(self, fileIndex)
++            if page is not None:
++                step.pageSuffix = self._pageSuffix(page)
+ 
+     def setName(self, name: str):
+         super().setName(name)
+         self._baseName = Path(self.name).stem
+ 
+     def setVideoQuality(self, qn: int, codecid: int) -> None:
++        self.requestedQn = qn
++        self.requestedCodecid = codecid
++        template = None
+         for page in (self.files or []):
+             stream = next((s for s in page._videoStreams if s["id"] == qn and s["codecid"] == codecid), None)
+-            if stream and streamUrl(stream):
+-                page.videoUrl = streamUrl(stream)
+-                page.videoSize = stream["bandwidth"] * page._duration // 8
+-        self._rebuildSteps()
++            if stream and toStreamUrl(stream):
++                template = stream
++                page.videoUrl = toStreamUrl(stream)
++                page.videoSize = buildSize(stream, page._duration)
++        if template:
++            for page in (self.files or []):
++                if not page._videoStreams:
++                    page.videoUrl = ""
++                    page.videoSize = buildSize(template, page._duration)
++        self.update()
+ 
+     def setAudioQuality(self, qn: int) -> None:
++        self.requestedAudioQn = qn
++        template = None
+         for page in (self.files or []):
+             stream = next((s for s in page._audioStreams if s["id"] == qn), None)
+-            if stream and streamUrl(stream):
+-                page.audioUrl = streamUrl(stream)
+-                page.audioSize = stream["bandwidth"] * page._duration // 8
+-        self._rebuildSteps()
++            if stream and toStreamUrl(stream):
++                template = stream
++                page.audioUrl = toStreamUrl(stream)
++                page.audioSize = buildSize(stream, page._duration)
++        if template:
++            for page in (self.files or []):
++                if not page._audioStreams:
++                    page.audioUrl = ""
++                    page.audioSize = buildSize(template, page._duration)
++        self.update()
+ 
+     def setSubtitleLanguages(self, languages: list[str]) -> None:
+         self.subtitleLanguages = languages
+-        self._rebuildSteps()
++        self.update()
+ 
+-    def _rebuildSteps(self) -> None:
++    def update(self) -> None:
+         self.steps.clear()
+         files: list[BiliPage] = self.files or []
+-        hasSubs = bool(self.subtitleLanguages)
+-        needsMerge = self.isVideoEnabled and self.isAudioEnabled
+ 
+         timeSuffix = ""
+         if len(files) == 1 and (files[0].startTime or files[0].endTime):
+@@ -156,66 +229,116 @@ def _rebuildSteps(self) -> None:
+ 
+         stepIndex = 0
+         for file in files:
+-            pageSuffix = self._pageSuffix(file)
+-            fileTrim = bool(file.startTime or file.endTime)
+-            if self.isVideoEnabled:
+-                stepIndex += 1
+-                self.addStep(BilibiliVideoStep(
+-                    stepIndex=stepIndex,
+-                    url=file.videoUrl,
+-                    fileSize=file.videoSize,
+-                    headers=dict(file.headers),
+-                    subworkerCount=file.subworkerCount,
+-                    canUseRangeRequests=True,
+-                    fileIndex=file.index,
+-                    pageSuffix=pageSuffix,
+-                ))
+-            if self.isAudioEnabled:
+-                stepIndex += 1
+-                self.addStep(BilibiliAudioStep(
+-                    stepIndex=stepIndex,
+-                    url=file.audioUrl,
+-                    fileSize=file.audioSize,
+-                    headers=dict(file.headers),
+-                    subworkerCount=file.subworkerCount,
+-                    canUseRangeRequests=True,
+-                    fileIndex=file.index,
+-                    pageSuffix=pageSuffix,
+-                ))
+-            if needsMerge or fileTrim:
+-                stepIndex += 1
+-                self.addStep(BilibiliMergeStep(
+-                    stepIndex=stepIndex,
+-                    fileIndex=file.index,
+-                    pageSuffix=pageSuffix,
+-                ))
+-            if hasSubs and file.subtitles and (self.isVideoEnabled or self.isAudioEnabled):
+-                stepIndex += 1
+-                self.addStep(BilibiliSubtitleStep(
+-                    stepIndex=stepIndex,
+-                    fileIndex=file.index,
+-                    pageSuffix=pageSuffix,
+-                ))
+-
+-        if self.isCoverEnabled and self.coverUrl:
++            if file.selected:
++                stepIndex = self._addFileSteps(file, stepIndex)
++        self._addCoverSteps(stepIndex)
++        self.updateStatus()
++
++    def _addCoverSteps(self, stepIndex: int) -> int:
++        if not self.isCoverEnabled:
++            return stepIndex
++        have = {getattr(s, "outputFile", "") for s in self.steps}
++        covers: list[tuple[str, int, str]] = []
++        if self.coverUrl:
++            covers.append((self.coverUrl, self.coverSize, f"{self._baseName}.jpg"))
++        if self.isSeason:
++            seen: set[str] = set()
++            for page in self.files or []:
++                if not page.selected or not page.coverUrl:
++                    continue
++                key = page.bvid or f"#{page.index}"
++                if key in seen:
++                    continue
++                seen.add(key)
++                title = page.episodeTitle or key
++                name = toSafeFilename(f"{self._baseName} - {title}.jpg", fallback="cover.jpg")
++                covers.append((page.coverUrl, 0, name))
++        referer = next((p.headers.get("referer") for p in (self.files or []) if p.headers.get("referer")), "")
++        headers = {"referer": referer} if referer else {}
++        for url, size, name in covers:
++            outputFile = str(self.filesFolder / name)
++            if outputFile in have:
++                continue
+             stepIndex += 1
+-            self.addStep(HttpTaskStep(
++            self.steps.append(HttpTaskStep(
+                 stepIndex=stepIndex,
+-                url=self.coverUrl,
+-                fileSize=self.coverSize,
+-                headers={},
+-                canUseRangeRequests=self.coverSize > 0,
++                url=url,
++                fileSize=size,
++                headers=headers,
++                canUseRangeRequests=size > 0,
+                 subworkerCount=1,
+-                outputFile=str(self.filesFolder / f"{self._baseName}.jpg"),
++                outputFile=outputFile,
+             ))
++            self.steps[-1]._bindTask(self)
++        return stepIndex
++
++    def _addFileSteps(self, file: BiliPage, stepIndex: int) -> int:
++        hasSubs = bool(self.subtitleLanguages)
++        needsMerge = self.isVideoEnabled and self.isAudioEnabled
++        pageSuffix = self._pageSuffix(file)
++        fileTrim = bool(file.startTime or file.endTime)
++        if self.isVideoEnabled:
++            stepIndex += 1
++            self.steps.append(BilibiliVideoStep(
++                stepIndex=stepIndex,
++                url=file.videoUrl,
++                fileSize=file.videoSize,
++                headers=dict(file.headers),
++                subworkerCount=file.subworkerCount,
++                canUseRangeRequests=True,
++                fileIndex=file.index,
++                pageSuffix=pageSuffix,
++            ))
++            self.steps[-1]._bindTask(self)
++        if self.isAudioEnabled:
++            stepIndex += 1
++            self.steps.append(BilibiliAudioStep(
++                stepIndex=stepIndex,
++                url=file.audioUrl,
++                fileSize=file.audioSize,
++                headers=dict(file.headers),
++                subworkerCount=file.subworkerCount,
++                canUseRangeRequests=True,
++                fileIndex=file.index,
++                pageSuffix=pageSuffix,
++            ))
++            self.steps[-1]._bindTask(self)
++        if needsMerge or fileTrim:
++            stepIndex += 1
++            self.steps.append(BilibiliMergeStep(
++                stepIndex=stepIndex,
++                fileIndex=file.index,
++                pageSuffix=pageSuffix,
++            ))
++            self.steps[-1]._bindTask(self)
++        if hasSubs and (self.isVideoEnabled or self.isAudioEnabled):
++            stepIndex += 1
++            self.steps.append(BilibiliSubtitleStep(
++                stepIndex=stepIndex,
++                fileIndex=file.index,
++                pageSuffix=pageSuffix,
++            ))
++            self.steps[-1]._bindTask(self)
++        return stepIndex
+ 
+     def _pageSuffix(self, page: BiliPage) -> str:
+         if len(self.files or []) <= 1:
+             return ""
+-        suffix = f" - P{page.pageNumber}"
+-        part = page.pagePart.strip()
+-        if part and part != self._baseName:
+-            suffix += f" {part}"
++        if page.episodeTitle:
++            title = toSafeFilename(page.episodeTitle, fallback=page.bvid or "video")
++            same = sum(1 for f in (self.files or []) if f.bvid == page.bvid)
++            if same > 1:
++                suffix = f" - {title} - P{page.pageNumber}"
++                part = toSafeFilename(page.pagePart.strip(), fallback="") if page.pagePart.strip() else ""
++                if part and part != title:
++                    suffix += f" {part}"
++            else:
++                suffix = f" - {title}"
++        else:
++            suffix = f" - P{page.pageNumber}"
++            part = page.pagePart.strip()
++            if part and part != self._baseName:
++                suffix += f" {toSafeFilename(part, fallback=part)}"
+         if page.startTime or page.endTime:
+             suffix += f" {buildTimeSuffix(page.startTime, page.endTime)}"
+         return suffix
+@@ -242,8 +365,22 @@ def outputPath(self) -> str:
+ 
+     async def run(self, reportSpeed, waitForSpeedLimit) -> None:
+         page = pageByIndex(self.task, self.fileIndex)
++        if page and not page.videoUrl:
++            from .config import bilibiliConfig
++            qn = self.task.requestedQn or bilibiliConfig.defaultQuality.value
++            _, _, usedQn = await fetchPlayurl(page, qn=qn, headers=page.headers)
++            self.task.requestedQn = usedQn
++        if page:
++            self.url = page.videoUrl
++            self.fileSize = page.videoSize
++            self.headers = dict(page.headers)
++        if not self.url:
++            raise TaskError("未获取到视频流地址")
+         if page and (page.startTime or page.endTime):
+             await self._updateSegmentRange(page)
++        else:
++            size = await probeSize(self.url, self.headers)
++            self.fileSize = size if size > 0 else SpecialFileSize.UNKNOWN
+         await super().run(reportSpeed, waitForSpeedLimit)
+ 
+     async def _updateSegmentRange(self, page: BiliPage) -> None:
+@@ -294,8 +431,22 @@ def outputPath(self) -> str:
+ 
+     async def run(self, reportSpeed, waitForSpeedLimit) -> None:
+         page = pageByIndex(self.task, self.fileIndex)
++        if page and not page.audioUrl:
++            from .config import bilibiliConfig
++            qn = self.task.requestedQn or bilibiliConfig.defaultQuality.value
++            _, _, usedQn = await fetchPlayurl(page, qn=qn, headers=page.headers)
++            self.task.requestedQn = usedQn
++        if page:
++            self.url = page.audioUrl
++            self.fileSize = page.audioSize
++            self.headers = dict(page.headers)
++        if not self.url:
++            raise TaskError("未获取到音频流地址")
+         if page and (page.startTime or page.endTime):
+             await self._updateSegmentRange(page)
++        else:
++            size = await probeSize(self.url, self.headers)
++            self.fileSize = size if size > 0 else SpecialFileSize.UNKNOWN
+         await super().run(reportSpeed, waitForSpeedLimit)
+ 
+     async def _updateSegmentRange(self, page: BiliPage) -> None:
+@@ -493,6 +644,20 @@ async def run(self, reportSpeed, waitForSpeedLimit) -> None:
+ 
+         task: BilibiliTask = self.task
+         page = next((f for f in task.files or [] if f.index == self.fileIndex), None)
++        pageHeaders = dict(page.headers) if page and page.headers else {}
++        referer = pageHeaders.get("referer") or "https://www.bilibili.com"
++        cookie = pageHeaders.get("cookie") or ""
++        listHeaders = {"referer": referer}
++        if cookie:
++            listHeaders["cookie"] = cookie
++
++        if page and not page.subtitles:
++            from .stream import fetchSubtitles
++            subClient = buildClient(emulation=None, headers=listHeaders)
++            try:
++                page.subtitles = await fetchSubtitles(subClient, page)
++            finally:
++                subClient.close()
+         subtitles = page.subtitles if page else []
+         selectedLangs = set(task.subtitleLanguages)
+ 
+@@ -511,7 +676,8 @@ def toSrtTime(seconds: float) -> str:
+             m, s = divmod(rem, 60)
+             return f"{h:02d}:{m:02d}:{s:02d},{total_ms % 1000:03d}"
+ 
+-        client = buildClient()
++        client = buildClient(headers={"referer": referer})
++        written = 0
+         try:
+             for sub in matching:
+                 url = sub.get("subtitle_url", "")
+@@ -539,11 +705,16 @@ def toSrtTime(seconds: float) -> str:
+                         lines.append(f"{toSrtTime(start)} --> {toSrtTime(end)}")
+                         lines.append(content)
+                         lines.append("")
++                    if not seq:
++                        continue
+                     srtFile = folder / f"{stem}.{sub['lan']}.srt"
+                     srtFile.write_text("\n".join(lines), encoding="utf-8")
++                    written += 1
+                 except Exception:
+                     logger.opt(exception=True).debug("Subtitle download failed: {}", sub.get("lan"))
+         finally:
+             client.close()
+ 
++        if written == 0:
++            raise TaskError("字幕下载失败")
+         self.setStatus(TaskStatus.COMPLETED)
+diff --git a/tests/test_bili_parse.py b/tests/test_bili_parse.py
+new file mode 100644
+index 00000000..17463cca
+--- /dev/null
++++ b/tests/test_bili_parse.py
+@@ -0,0 +1,376 @@
++"""Bilibili URL and view → files.
++
++Seam: parseBiliUrl, buildPages
++"""
++from __future__ import annotations
++
++import pytest
++
++from bili_pack.parse import BiliUrl, buildPages, parseBiliUrl
++from bili_pack.stream import buildSize
++
++
++class TestParseBiliUrl:
++
++    def test_video_bvid(self):
++        biliUrl = parseBiliUrl("https://www.bilibili.com/video/BV1eugW6DEYT/")
++        assert biliUrl.videoId == "BV1eugW6DEYT"
++        assert biliUrl.seasonId == 0
++        assert biliUrl.selectedPages is None
++
++    def test_video_page_spec(self):
++        biliUrl = parseBiliUrl("https://www.bilibili.com/video/BV1eugW6DEYT/?p=1,3,5-7")
++        assert biliUrl.videoId == "BV1eugW6DEYT"
++        assert biliUrl.selectedPages == [1, 3, 5, 6, 7]
++
++    def test_video_avid(self):
++        biliUrl = parseBiliUrl("https://www.bilibili.com/video/av12345")
++        assert biliUrl.videoId == "av12345"
++
++    def test_space_lists(self):
++        biliUrl = parseBiliUrl(
++            "https://space.bilibili.com/1992978115/lists/4831253?type=season"
++        )
++        assert biliUrl.mid == 1992978115
++        assert biliUrl.seasonId == 4831253
++        assert biliUrl.videoId == ""
++        assert biliUrl.selectedPages is None
++
++    def test_space_collectiondetail(self):
++        biliUrl = parseBiliUrl(
++            "https://space.bilibili.com/1992978115/channel/collectiondetail?sid=4831253"
++        )
++        assert biliUrl.mid == 1992978115
++        assert biliUrl.seasonId == 4831253
++
++    def test_rejects_other_paths(self):
++        with pytest.raises(ValueError):
++            parseBiliUrl("https://live.bilibili.com/123")
++
++
++def _page(cid: int, page: int, part: str, duration: int = 10) -> dict:
++    return {"cid": cid, "page": page, "part": part, "duration": duration}
++
++
++def _episode(bvid: str, title: str, pages: list[dict]) -> dict:
++    return {
++        "bvid": bvid,
++        "title": title,
++        "cid": pages[0]["cid"],
++        "page": pages[0],
++        "pages": pages,
++        "arc": {"pic": f"http://i0.hdslb.com/bfs/{bvid}.jpg"},
++    }
++
++
++def _seasonView(currentBvid: str, extraSection: bool = False) -> dict:
++    sections = [
++        {
++            "title": "正片",
++            "episodes": [
++                _episode("BV1aaa", "第一集", [_page(11, 1, "p1")]),
++                _episode("BV2bbb", "第二集", [_page(21, 1, "上"), _page(22, 2, "下")]),
++                _episode("BV3ccc", "第三集", [_page(31, 1, "p1")]),
++            ],
++        }
++    ]
++    if extraSection:
++        sections.append({
++            "title": "花絮",
++            "episodes": [_episode("BV4ddd", "花絮1", [_page(41, 1, "p1")])],
++        })
++    current = next(e for s in sections for e in s["episodes"] if e["bvid"] == currentBvid)
++    return {
++        "title": current["title"],
++        "pic": "http://i0.hdslb.com/bfs/video.jpg",
++        "bvid": currentBvid,
++        "pages": current["pages"],
++        "ugc_season": {
++            "id": 9,
++            "title": "原神",
++            "cover": "http://i0.hdslb.com/bfs/season.jpg",
++            "sections": sections,
++        },
++    }
++
++
++class TestBuildPages:
++
++    def test_video_pages_all_selected(self):
++        viewData = {
++            "title": "三P稿件",
++            "pic": "http://i0.hdslb.com/bfs/cover.jpg",
++            "bvid": "BV1xxx",
++            "pages": [
++                _page(11, 1, "开场"),
++                _page(12, 2, "正片"),
++                _page(13, 3, "彩蛋"),
++            ],
++        }
++        pages, title, coverUrl = buildPages(viewData, BiliUrl(videoId="BV1xxx"))
++        assert title == "三P稿件"
++        assert coverUrl == "https://i0.hdslb.com/bfs/cover.jpg"
++        assert [p.pageNumber for p in pages] == [1, 2, 3]
++        assert [p.cid for p in pages] == [11, 12, 13]
++        assert [p.pagePart for p in pages] == ["开场", "正片", "彩蛋"]
++        assert [p.index for p in pages] == [0, 1, 2]
++        assert all(p.selected for p in pages)
++        assert all(p.bvid == "BV1xxx" for p in pages)
++        assert all(p.episodeTitle == "" for p in pages)
++
++    def test_video_pages_honors_p(self):
++        viewData = {
++            "title": "三P稿件",
++            "bvid": "BV1xxx",
++            "pages": [_page(11, 1, "开场"), _page(12, 2, "正片"), _page(13, 3, "彩蛋")],
++        }
++        pages, _, _ = buildPages(viewData, BiliUrl(videoId="BV1xxx", selectedPages=[2]))
++        assert [p.selected for p in pages] == [False, True, False]
++
++    def test_season_selects_current_episode(self):
++        viewData = _seasonView("BV2bbb")
++        pages, title, coverUrl = buildPages(viewData, BiliUrl(videoId="BV2bbb"))
++        assert title == "原神"
++        assert coverUrl == "https://i0.hdslb.com/bfs/season.jpg"
++        assert [p.bvid for p in pages] == ["BV1aaa", "BV2bbb", "BV2bbb", "BV3ccc"]
++        assert [p.pageNumber for p in pages] == [1, 1, 2, 1]
++        assert [p.index for p in pages] == [0, 1, 2, 3]
++        assert [p.episodeTitle for p in pages] == ["第一集", "第二集", "第二集", "第三集"]
++        assert [p.selected for p in pages] == [False, True, True, False]
++        assert all(p.sectionTitle == "" for p in pages)
++        assert pages[1].relativePath == "第二集 - P1"
++        assert pages[2].relativePath == "第二集 - P2"
++        assert pages[0].coverUrl == "https://i0.hdslb.com/bfs/BV1aaa.jpg"
++        assert pages[1].coverUrl == pages[2].coverUrl == "https://i0.hdslb.com/bfs/BV2bbb.jpg"
++
++    def test_season_honors_p_on_current_episode(self):
++        viewData = _seasonView("BV2bbb")
++        pages, _, _ = buildPages(viewData, BiliUrl(videoId="BV2bbb", selectedPages=[2]))
++        assert [p.selected for p in pages] == [False, False, True, False]
++
++    def test_season_url_selects_all(self):
++        viewData = _seasonView("BV1aaa")
++        pages, _, _ = buildPages(viewData, BiliUrl(mid=1, seasonId=9))
++        assert len(pages) == 4
++        assert all(p.selected for p in pages)
++
++    def test_season_section_labels_when_multiple(self):
++        viewData = _seasonView("BV1aaa", extraSection=True)
++        pages, _, _ = buildPages(viewData, BiliUrl(videoId="BV1aaa"))
++        assert [p.sectionTitle for p in pages] == ["正片", "正片", "正片", "正片", "花絮"]
++
++
++def test_buildSize_from_bandwidth_and_duration():
++    assert buildSize({"bandwidth": 8000}, 10) == 10000
++    assert buildSize(None, 10) == 0
++    assert buildSize({"bandwidth": 8000}, 0) == 0
++
++
++async def test_probeSize_reads_content_range(server):
++    from aiohttp import web
++    from bili_pack.stream import probeSize
++
++    async def handler(request):
++        return web.Response(
++            status=206,
++            body=b"x",
++            headers={"Content-Range": "bytes 0-0/415000000", "Content-Length": "1"},
++        )
++
++    url = await server(handler)
++    assert await probeSize(url, {}) == 415000000
++
++
++async def test_probeSize_returns_zero_without_range(server):
++    from aiohttp import web
++    from bili_pack.stream import probeSize
++
++    async def handler(request):
++        return web.Response(status=200, body=b"x", headers={"Content-Length": "1"})
++
++    url = await server(handler)
++    assert await probeSize(url, {}) == 0
++
++
++async def test_audio_step_binds_url_already_on_page(tmp_path, monkeypatch):
++    from bili_pack.task import BiliPage, BilibiliAudioStep, BilibiliTask, HttpTaskStep
++
++    page = BiliPage(
++        index=0,
++        relativePath="ep",
++        audioUrl="https://example.com/a.m4s",
++        videoUrl="https://example.com/v.m4s",
++        audioSize=8,
++        headers={"referer": "https://www.bilibili.com"},
++    )
++    task = BilibiliTask(
++        name="合集.mp4",
++        url="https://www.bilibili.com/video/BV1",
++        outputFolder=tmp_path,
++        files=[page],
++        _baseName="合集",
++    )
++    step = BilibiliAudioStep(stepIndex=1, fileIndex=0, url="", fileSize=0)
++    step._bindTask(task)
++
++    async def fakeProbe(url, headers=None):
++        assert url == "https://example.com/a.m4s"
++        return 8
++
++    async def fakeRun(self, reportSpeed, waitForSpeedLimit):
++        assert self.url == "https://example.com/a.m4s"
++
++    monkeypatch.setattr("bili_pack.task.probeSize", fakeProbe)
++    monkeypatch.setattr(HttpTaskStep, "run", fakeRun)
++    await step.run(lambda n: None, lambda: None)
++    assert step.url == "https://example.com/a.m4s"
++
++
++def test_update_only_for_selected():
++    from pathlib import Path
++    from bili_pack.task import BiliPage, BilibiliTask
++
++    files = [
++        BiliPage(
++            index=i,
++            relativePath=f"p{i}",
++            episodeTitle=f"集{i // 2}",
++            bvid=f"BV{i // 2}",
++            selected=i < 2,
++        )
++        for i in range(4)
++    ]
++    task = BilibiliTask(
++        name="合集.mp4",
++        url="https://www.bilibili.com/video/BV1",
++        outputFolder=Path("."),
++        files=files,
++        _baseName="合集",
++    )
++    task.update()
++    assert {s.fileIndex for s in task.steps if s.fileIndex is not None} == {0, 1}
++
++    task.setSelection({0, 1, 2})
++    assert {s.fileIndex for s in task.steps if s.fileIndex is not None} == {0, 1, 2}
++
++    task.setSelection({0})
++    assert {s.fileIndex for s in task.steps if s.fileIndex is not None} == {0, 1, 2}
++
++    task.update()
++    assert {s.fileIndex for s in task.steps if s.fileIndex is not None} == {0}
++
++
++def test_seasonSummary_one_episode():
++    from pathlib import Path
++    from bili_pack.task import BiliPage, BilibiliTask
++
++    files = [
++        BiliPage(index=0, relativePath="a", episodeTitle="游戏王5DS", bvid="BV1", selected=True),
++        BiliPage(index=1, relativePath="b", episodeTitle="棋魂", bvid="BV2", selected=False),
++    ]
++    task = BilibiliTask(
++        name="各种番.mp4",
++        url="u",
++        outputFolder=Path("."),
++        files=files,
++        _baseName="各种番",
++    )
++    assert [[p.bvid for p in g] for g in task.episodeGroups()] == [["BV1"], ["BV2"]]
++    assert task.seasonSummary() == "1/2 集"
++
++    files[0].selected = False
++    assert task.seasonSummary() == "0/2 集"
++
++    files[0].selected = True
++    files[1].selected = True
++    assert task.seasonSummary() == "2/2 集"
++
++
++def test_cover_steps_season_and_selected_episodes():
++    from pathlib import Path
++    from bili_pack.task import BiliPage, BilibiliTask
++
++    files = [
++        BiliPage(
++            index=0, relativePath="a", episodeTitle="游戏王5DS", bvid="BV1",
++            selected=True, coverUrl="https://i0.hdslb.com/bfs/ep1.jpg",
++        ),
++        BiliPage(
++            index=1, relativePath="b", episodeTitle="棋魂", bvid="BV2",
++            selected=False, coverUrl="https://i0.hdslb.com/bfs/ep2.jpg",
++        ),
++    ]
++    task = BilibiliTask(
++        name="各种番.mp4",
++        url="u",
++        outputFolder=Path("."),
++        files=files,
++        _baseName="各种番",
++        coverUrl="https://i0.hdslb.com/bfs/season.jpg",
++        isCoverEnabled=True,
++    )
++    task.update()
++    coverFiles = [getattr(s, "outputFile", "") for s in task.steps if getattr(s, "outputFile", "")]
++    assert any(p.endswith("各种番.jpg") for p in coverFiles)
++    assert any(p.endswith("各种番 - 游戏王5DS.jpg") for p in coverFiles)
++    assert not any("棋魂" in p for p in coverFiles)
++
++    task.setSelection({0, 1})
++    coverFiles = [getattr(s, "outputFile", "") for s in task.steps if getattr(s, "outputFile", "")]
++    assert any(p.endswith("各种番 - 棋魂.jpg") for p in coverFiles)
++
++
++def test_setEpisodeTitle_updates_relativePath():
++    from bili_pack.task import BiliPage, setEpisodeTitle, setPagePart
++
++    pages = [
++        BiliPage(index=0, relativePath="旧 - P1", episodeTitle="旧",
++                 bvid="BV1", pageNumber=1, pagePart="上"),
++        BiliPage(index=1, relativePath="旧 - P2", episodeTitle="旧",
++                 bvid="BV1", pageNumber=2, pagePart="下"),
++    ]
++    setEpisodeTitle(pages, "游戏王")
++    assert [p.episodeTitle for p in pages] == ["游戏王", "游戏王"]
++    assert [p.relativePath for p in pages] == ["游戏王 - P1", "游戏王 - P2"]
++
++    setPagePart(pages[0], "第1话")
++    assert pages[0].pagePart == "第1话"
++    assert pages[0].relativePath == "游戏王 - P1"
++
++
++def test_updateSuffixes_after_rename_and_trim():
++    from pathlib import Path
++    from bili_pack.task import BiliPage, BilibiliTask
++
++    files = [
++        BiliPage(index=0, relativePath="a", episodeTitle="旧名", bvid="BV1", selected=True),
++        BiliPage(index=1, relativePath="b", episodeTitle="另一集", bvid="BV2", selected=False),
++    ]
++    task = BilibiliTask(
++        name="各种番.mp4", url="u", outputFolder=Path("."),
++        files=files, _baseName="各种番",
++    )
++    task.update()
++    suffixes = {s.pageSuffix for s in task.steps if getattr(s, "pageSuffix", None)}
++    assert suffixes == {" - 旧名"}
++
++    files[0].episodeTitle = "新名"
++    files[0].startTime = 10
++    files[0].endTime = 20
++    task.updateSuffixes()
++    suffixes = {s.pageSuffix for s in task.steps if getattr(s, "pageSuffix", None)}
++    assert suffixes == {" - 新名 [00m10s-00m20s]"}
++
++
++def test_setTimeRanges_only_touches_listed_pages():
++    from bili_pack.task import BiliPage, setTimeRanges
++
++    pages = [
++        BiliPage(index=0, relativePath="a", startTime=1, endTime=2),
++        BiliPage(index=1, relativePath="b", startTime=3, endTime=4),
++        BiliPage(index=2, relativePath="c", startTime=5, endTime=6),
++    ]
++    setTimeRanges(pages, {0: (10, 20), 1: (0, 0)})
++    assert (pages[0].startTime, pages[0].endTime) == (10, 20)
++    assert (pages[1].startTime, pages[1].endTime) == (0, 0)
++    assert (pages[2].startTime, pages[2].endTime) == (5, 6)
