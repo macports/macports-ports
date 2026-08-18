@@ -418,7 +418,7 @@ default test.args       {[python_get_defaults test_args]}
 default python.runtime  {[python_get_runtime]}
 
 proc python_get_runtime {} {
-    set v [option python.version]
+    set v [option python.suffix]
     set devel 315
 
     set freethreading [string equal [string index $v end] "t"]
