@@ -13,12 +13,14 @@
 use_xcode   yes
 
 pre-configure {
+    set xcrun_command "xcrun"
+
     set sdkroot [option configure.sdkroot]
     if {$sdkroot ne ""} {
-        set metal_check_command "env SDKROOT=[shellescape $sdkroot] xcrun metal --version"
-    } else {
-        set metal_check_command "xcrun metal --version"
+        set xcrun_command "env SDKROOT=[shellescape $sdkroot] $xcrun_command"
     }
+
+    set metal_check_command "$xcrun_command metal --version"
 
     if {[catch {system ${metal_check_command}}]} {
         # The Metal toolchain is not set up correctly, let's see what we can do or recommend
@@ -32,7 +34,7 @@ pre-configure {
 
         # The Metal toolchain check could be failing due to a corrupt xcrun cache
         # Let's kill the xcrun cache to see if this fixes the problem
-        system "xcrun --kill-cache"
+        system "$xcrun_command --kill-cache"
 
         if {[catch {system ${metal_check_command}}]} {
             return -code error "Required Metal toolchain not set up properly for use with MacPorts. \
