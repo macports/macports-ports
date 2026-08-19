@@ -26,13 +26,15 @@ pre-configure {
         # The Metal toolchain is not set up correctly, let's see what we can do or recommend
         
         set xcodebuild "/usr/bin/xcodebuild"
-        set grep "/usr/bin/grep"
 
-        if {[vercmp ${xcodeversion} 26] >= 0 \
-                && [catch {exec ${xcodebuild} -json -showComponent MetalToolchain | ${grep} -qz {"status"[[:space:]]*:[[:space:]]*"installed"}}]} {
-            # The Metal toolchain is provided as an optional component since Xcode 26, but it isn't installed yet
-            return -code error "Required Metal toolchain component not installed, \
-                run `${xcodebuild} -downloadComponent MetalToolchain` and try again."
+        if {[vercmp ${xcodeversion} 26] >= 0} {
+            # The Metal toolchain is an optional component since Xcode 26
+            catch {exec ${xcodebuild} -json -showComponent MetalToolchain} metal_toolchain_component_info
+
+            if {![regexp {"status"[[:space:]]*:[[:space:]]*"installed"} ${metal_toolchain_component_info}]} {
+                return -code error "Required Metal toolchain component is not installed, \
+                    run `${xcodebuild} -downloadComponent MetalToolchain` and try again."
+            }
         }
 
         # The Metal toolchain check could be failing due to a corrupt xcrun cache
