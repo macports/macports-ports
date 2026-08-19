@@ -1,0 +1,146 @@
+diff --git a/app/services/clipboard_listener.py b/app/services/clipboard_listener.py
+index 931c81e3..77dd8e1e 100644
+--- a/app/services/clipboard_listener.py
++++ b/app/services/clipboard_listener.py
+@@ -2,10 +2,20 @@
+ 
+ from urllib.parse import urlparse
+ 
+-from PySide6.QtCore import QObject, Signal
++from PySide6.QtCore import QMimeData, QObject, Signal
+ from PySide6.QtWidgets import QApplication
+ from loguru import logger
+ 
++GHOST_URLS_MIME = "application/x-ghost-downloader-urls"
++
++
++def setClipboardUrls(urls: list[str]) -> None:
++    mimeData = QMimeData()
++    mimeData.setText("\n".join(urls))
++    mimeData.setData(GHOST_URLS_MIME, b"1")
++    QApplication.clipboard().setMimeData(mimeData)
++
++
+ class ClipboardListener(QObject):
+     urlsDetected = Signal(list)
+ 
+@@ -29,6 +39,8 @@ def setEnabled(self, enabled: bool) -> None:
+     def _onDataChanged(self) -> None:
+         if self._clipboard.ownsClipboard():
+             return
++        if self._clipboard.mimeData().hasFormat(GHOST_URLS_MIME):
++            return
+ 
+         urls = self._downloadableUrls()
+         if not urls:
+diff --git a/app/view/cards/task_cards.py b/app/view/cards/task_cards.py
+index c3be7bca..553aa6c0 100644
+--- a/app/view/cards/task_cards.py
++++ b/app/view/cards/task_cards.py
+@@ -19,6 +19,7 @@
+ from app.format import toReadableSize, toReadableTime
+ from app.models.task import TaskStatus, SpecialFileSize
+ from app.platform.desktop import openFile, revealInFolder
++from app.services.clipboard_listener import setClipboardUrls
+ from app.view.components.labels import IconBodyLabel, IconStrongBodyLabel
+ from app.view.error_catalog import toLocalizedError
+ 
+@@ -370,7 +371,7 @@ def createContextMenu(self) -> RoundMenu:
+         menu = RoundMenu(parent=self)
+ 
+         copyUrl = Action(FluentIcon.COPY, self.tr("复制下载链接"), self)
+-        copyUrl.triggered.connect(lambda: QApplication.clipboard().setText(self._task.url))
++        copyUrl.triggered.connect(lambda: setClipboardUrls([self._task.url]))
+         menu.addAction(copyUrl)
+ 
+         if self._hashDigest:
+diff --git a/app/view/pages/task_page.py b/app/view/pages/task_page.py
+index e6619284..fd75a60c 100644
+--- a/app/view/pages/task_page.py
++++ b/app/view/pages/task_page.py
+@@ -6,7 +6,7 @@
+ 
+ from PySide6.QtCore import Qt, QSize, QThread, QTimer, QUrl
+ from PySide6.QtGui import QActionGroup, QColor, QCursor, QDesktopServices, QKeySequence, QPainter
+-from PySide6.QtWidgets import QApplication, QGraphicsDropShadowEffect, QHBoxLayout, QVBoxLayout, QWidget
++from PySide6.QtWidgets import QGraphicsDropShadowEffect, QHBoxLayout, QVBoxLayout, QWidget
+ from qfluentwidgets import (
+     Action, CaptionLabel, CheckableMenu, CommandBarView, DropDownToolButton,
+     FluentIcon, IconWidget, InfoBar, InfoBarPosition, MenuIndicatorType, PushButton,
+@@ -20,6 +20,7 @@
+ from app.config.cfg import cfg
+ from app.format import toReadableSize
+ from app.models.task import TaskStatus
++from app.services.clipboard_listener import setClipboardUrls
+ from app.view.cards.task_cards import TaskCard
+ from app.view.components.labels import IconBodyLabel
+ 
+@@ -504,7 +505,7 @@ def _onCopyUrlSelected(self) -> None:
+             task.url for taskId in self._displayOrder
+             if taskId in self._selectedIds and (task := self._taskService.taskById(taskId))
+         ]
+-        QApplication.clipboard().setText("\n".join(urls))
++        setClipboardUrls(urls)
+ 
+     def _onRedownloadSelected(self) -> None:
+         for taskId in self._displayOrder:
+diff --git a/tests/test_clipboard_listener.py b/tests/test_clipboard_listener.py
+new file mode 100644
+index 00000000..461eedbe
+--- /dev/null
++++ b/tests/test_clipboard_listener.py
+@@ -0,0 +1,54 @@
++from PySide6.QtCore import QMimeData
++
++import app.services.clipboard_listener as clipboardListenerModule
++from app.services.clipboard_listener import ClipboardListener, GHOST_URLS_MIME, setClipboardUrls
++
++
++class StubClipboard:
++    def __init__(self, text: str, mimeType: str = ""):
++        self._mimeData = QMimeData()
++        self._mimeData.setText(text)
++        if mimeType:
++            self._mimeData.setData(mimeType, b"1")
++
++    def ownsClipboard(self) -> bool:
++        return False
++
++    def mimeData(self) -> QMimeData:
++        return self._mimeData
++
++    def text(self) -> str:
++        return self._mimeData.text()
++
++
++def test_set_clipboard_urls_marks_ghost_urls(monkeypatch):
++    clipboard = StubClipboard("")
++    clipboard.setMimeData = lambda mimeData: setattr(clipboard, "_mimeData", mimeData)
++    monkeypatch.setattr(
++        clipboardListenerModule.QApplication,
++        "clipboard",
++        lambda: clipboard,
++    )
++
++    setClipboardUrls(["https://example.com/one", "https://example.com/two"])
++
++    assert clipboard.text() == "https://example.com/one\nhttps://example.com/two"
++    assert clipboard.mimeData().hasFormat(GHOST_URLS_MIME)
++
++
++def test_ignores_ghost_urls(qapp, qtbot):
++    listener = ClipboardListener(lambda url: True)
++    listener._clipboard = StubClipboard("https://example.com/file", GHOST_URLS_MIME)
++
++    with qtbot.assertNotEmitted(listener.urlsDetected):
++        listener._onDataChanged()
++
++
++def test_detects_external_urls(qapp, qtbot):
++    listener = ClipboardListener(lambda url: True)
++    listener._clipboard = StubClipboard("https://example.com/file")
++
++    with qtbot.waitSignal(listener.urlsDetected, timeout=1000) as signal:
++        listener._onDataChanged()
++
++    assert signal.args == [["https://example.com/file"]]
