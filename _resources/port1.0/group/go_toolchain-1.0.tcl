@@ -149,7 +149,7 @@
 # LC_BUILD_VERSION is not the limit: 1.24.8 declares minos 11.0 and ran on
 # 10.13 through 11 for the nine months MacPorts shipped it, because macOS dyld
 # loads a binary whose minos exceeds the running system. Only the missing
-# symbol is fatal, which is why these tables follow the imports. 1.27rc3
+# symbol is fatal, which is why these tables follow the imports. 1.27.0
 # declares minos 13.0 and imports nothing newer than macOS 12.
 #
 # See https://trac.macports.org/ticket/73086.
@@ -195,9 +195,10 @@ set go_toolchain.min_darwin(1.27)   21  ;# 12    Monterey     (see below)
 # is the limit of that: 10.6 cannot build it, because its dsymutil aborts on
 # the debug information Go's linker emits. See lang/go-1.17.
 #
-# 1.27 is read from the prerelease, and is below upstream's floor of 13
-# Ventura. Its imports are those of 1.25 and 1.26, the newest being
-# SecTrustCopyCertificateChain, which macOS 12 provides. Reread them at 1.27.0.
+# 1.27 is below upstream's floor of 13 Ventura. Its imports are those of 1.25
+# and 1.26, the newest being SecTrustCopyCertificateChain, which macOS 12
+# provides. Reread at 1.27.0: the directives and the shipped binaries' undefined
+# symbols are unchanged from the prerelease, and from 1.26.
 #
 # This entry decides where go-devel is offered, setup deriving its platforms
 # from it. It is never returned as a ceiling, being the newest series here, and
@@ -206,8 +207,7 @@ set go_toolchain.min_darwin(1.27)   21  ;# 12    Monterey     (see below)
 # The series MacPorts packages as go-1.NN ports.
 #
 # This cannot be derived from the table above, which records the releases that
-# exist rather than the ones shipped: 1.18, 1.19 and 1.21 have no port, and
-# 1.27 exists only as the prerelease.
+# exist rather than the ones shipped: 1.18, 1.19 and 1.21 have no port.
 #
 # A list of series rather than of versions, so that a patch update touches only
 # the toolchain's own Portfile.
@@ -215,11 +215,11 @@ set go_toolchain.min_darwin(1.27)   21  ;# 12    Monterey     (see below)
 # Packaging a series does not mean `go` ever selects it. `go` takes the newest
 # series a system is offered, so a series is only ever chosen where no newer
 # packaged series is offered as well -- which means one sharing a floor with a
-# newer series is never what `go` provides. Today that is 1.20, 1.22, 1.23 and
-# 1.25; they are packaged so that a build can pin them, not because anything
+# newer series is never what `go` provides. Today that is 1.20, 1.22, 1.23,
+# 1.25 and 1.26; they are packaged so that a build can pin them, not because anything
 # reaches them by default. This recomputes from the tables and is worth
 # rechecking whenever a floor moves.
-set go_toolchain.packaged {1.17 1.20 1.22 1.23 1.24 1.25 1.26}
+set go_toolchain.packaged {1.17 1.20 1.22 1.23 1.24 1.25 1.26 1.27}
 
 # The newest series MacPorts packages.
 proc go_toolchain._newest_packaged {} {
