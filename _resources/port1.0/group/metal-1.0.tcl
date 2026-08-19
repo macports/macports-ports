@@ -29,7 +29,7 @@ pre-configure {
         set grep "/usr/bin/grep"
 
         if {[vercmp ${xcodeversion} 26] >= 0 \
-                && [catch {system {${xcodebuild} -json -showComponent MetalToolchain | ${grep} -qz '"status"[[:space:]]*:[[:space:]]*"installed"'}}]} {
+                && [catch {exec ${xcodebuild} -json -showComponent MetalToolchain | ${grep} -qz {"status"[[:space:]]*:[[:space:]]*"installed"}}]} {
             # The Metal toolchain is provided as an optional component since Xcode 26, but it isn't installed yet
             return -code error "Required Metal toolchain component not installed, \
                 run `${xcodebuild} -downloadComponent MetalToolchain` and try again."
@@ -37,7 +37,7 @@ pre-configure {
 
         # The Metal toolchain check could be failing due to a corrupt xcrun cache
         # Let's kill the xcrun cache to see if this fixes the problem
-        system "${xcrun} --kill-cache"
+        catch {system "${xcrun} --kill-cache"}
 
         if {[catch {system ${metal_check}}]} {
             return -code error "Required Metal toolchain not set up properly for use with MacPorts. \
