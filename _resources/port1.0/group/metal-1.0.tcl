@@ -13,10 +13,10 @@
 use_xcode   yes
 
 pre-configure {
-    set xcrun_command "xcrun"
+    set xcrun_command "/usr/bin/xcrun"
 
     set sdkroot [option configure.sdkroot]
-    if {$sdkroot ne ""} {
+    if {[file isdirectory $sdkroot]} {
         set xcrun_command "env SDKROOT=[shellescape $sdkroot] $xcrun_command"
     }
 
