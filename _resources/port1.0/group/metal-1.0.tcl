@@ -24,11 +24,10 @@ pre-configure {
 
     if {[catch {system ${metal_check}}]} {
         # The Metal toolchain is not set up correctly, let's see what we can do or recommend
-        
-        set xcodebuild "/usr/bin/xcodebuild"
 
         if {[vercmp ${xcodeversion} 26] >= 0} {
             # The Metal toolchain is an optional component since Xcode 26
+            set xcodebuild "/usr/bin/xcodebuild"
             if {[catch {exec ${xcodebuild} -json -showComponent MetalToolchain} metal_toolchain_component_info] \
                     || ![regexp {"status"[[:space:]]*:[[:space:]]*"installed"} ${metal_toolchain_component_info}]} {
                 return -code error "Required Metal toolchain component is not installed, \
