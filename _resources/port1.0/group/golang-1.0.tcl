@@ -153,6 +153,7 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
         gitea.com {
             uplevel "PortGroup gitea 1.0"
             gitea.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+            go._share_gitea_distfile [option gitea.homepage]
         }
         default {
             if {![info exists PortInfo(name)]} {
@@ -493,9 +494,13 @@ proc handle_set_go_vendors {vendors_str} {
                         set master_site https://${vdomain}/${vauthor}/${vproject}/-/archive/${vversion}
                     }
                     git.sr.ht {
-                        set vdistname ${distversion}
+                        # Sourcehut and Gitea name an archive for the ref
+                        # alone, which no two of them can share a dist_subdir
+                        # under; ?dummy= names the local file for the package
+                        # instead. See go._share_gitea_distfile.
+                        set vdistname ${vproject}-${distversion}
                         set distfile ${vdistname}.tar.gz
-                        set master_site https://${vdomain}/~${vauthor}/${vproject}/archive
+                        set master_site https://${vdomain}/~${vauthor}/${vproject}/archive/${vversion}.tar.gz?dummy=
                     }
                     codeberg.org -
                     gitea.com {
