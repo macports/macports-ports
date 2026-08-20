@@ -22,9 +22,9 @@
 #
 # go.setup recognizes the domain of the package ID and applies the portgroup
 # for that host itself, calling its setup proc with the author, project and
-# version it just parsed. github.com, gitlab.com, bitbucket.org, git.sr.ht and
-# gitea.com are handled this way, so neither the PortGroup line nor the
-# github.setup/sourcehut.setup/... call needs to be written out:
+# version it just parsed. github.com, gitlab.com, bitbucket.org, git.sr.ht,
+# codeberg.org and gitea.com are handled this way, so neither the PortGroup
+# line nor the github.setup/sourcehut.setup/... call needs to be written out:
 #
 # PortGroup     golang 1.0
 # go.setup      github.com/author/project 1.0.0 v
@@ -145,6 +145,11 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             # outranks either default.
             default worksrcdir {gopath/src/${go.package}}
         }
+        codeberg.org {
+            uplevel "PortGroup codeberg 1.0"
+            codeberg.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+            go._share_gitea_distfile [option codeberg.homepage]
+        }
         gitea.com {
             uplevel "PortGroup gitea 1.0"
             gitea.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
@@ -156,6 +161,25 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             version     ${go.version}
         }
     }
+}
+
+# Gitea, and so codeberg-1.0 and gitea-1.0, names an archive for the tag alone
+# -- v1.4.0.tar.gz -- and keeps that from colliding with the next project's
+# v1.4.0.tar.gz by giving each port a dist_subdir of its own. Go ports instead
+# share one dist_subdir, so that a vendored dependency pulled by many of them is
+# fetched and mirrored once, and a bare tag name cannot survive there. Name the
+# distfile for the project so that it can, and put the shared subdir back.
+#
+# The tag stays in the URL, where the server requires it, and ?dummy= lets base
+# name the local file something else; the github.com case and go.vendors below
+# both do the same. homepage is passed in rather than read here because only the
+# caller knows which of the two portgroups was applied.
+proc go._share_gitea_distfile {homepage} {
+    global go.project go.version
+
+    dist_subdir             go
+    distname                ${go.project}-${go.version}
+    default master_sites    "${homepage}/archive/\${git.branch}\${extract.suffix}?dummy="
 }
 
 proc go._translate_package_id {package_id} {
@@ -472,6 +496,12 @@ proc handle_set_go_vendors {vendors_str} {
                         set vdistname ${distversion}
                         set distfile ${vdistname}.tar.gz
                         set master_site https://${vdomain}/~${vauthor}/${vproject}/archive
+                    }
+                    codeberg.org -
+                    gitea.com {
+                        set vdistname ${vproject}-${distversion}
+                        set distfile ${vdistname}.tar.gz
+                        set master_site https://${vdomain}/${vauthor}/${vproject}/archive/${vversion}.tar.gz?dummy=
                     }
                     default {
                         ui_error "go.vendors can't handle dependencies from ${vdomain}"
