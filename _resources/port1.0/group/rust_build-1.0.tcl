@@ -35,13 +35,15 @@ options     rust_build.components
 default     rust_build.components       {rust-std rustc cargo}
 
 # These ports compile the LLVM bundled in the Rust source tree, so they need a
-# compiler new enough for it -- the same requirement lang/llvm-NN enforces for
-# the very same sources with `compiler.blacklist-append {clang < 1204}`.
+# compiler new enough for it.  lang/llvm-NN builds those very same sources and
+# blacklists `{clang < 1204} {macports-clang-[5-9].0} {macports-clang-1[0-3]}`;
+# only the Apple clang bound is mirrored here.
 #
 # The rust PortGroup asks only for `compiler.cxx_standard 2017`, whose Apple
 # clang minimum in base is 1000.11.45.2.  That admits Apple clang 11 and 12,
-# which are too old for LLVM 21, so `rust` picked Xcode Clang on exactly the
-# macOS versions whose newest Apple clang falls in that gap:
+# which are too old for the LLVM bundled in the Rust tree, so `rust` picked
+# Xcode Clang on exactly the macOS versions whose newest Apple clang falls in
+# that gap:
 #
 #   10.13 and older : Apple clang < 1000.11.45.2  -> already fell back to MP clang
 #   10.14 Mojave    : Apple clang 1100.0.33.17    -> admitted, BROKEN
@@ -507,7 +509,7 @@ proc rust_build.stage0_info {arch {mdt {}}} {
     if { [option os.platform] eq "darwin" && [vercmp $mdt >= "10.12"] } {
         if { ${arch} in "arm64 x86_64" } {
             # upstream support
-            # see https://doc.rust-lang.org/nightly/rustc/platform-support.html
+            # see https://doc.rust-lang.org/rustc/platform-support.html
             if { ${building_stage0} } {
                 # cross-compiling with upstream compiler is possible
                 return      [list ${stage0_version} [option configure.build_arch] "apple" ""]
@@ -525,7 +527,7 @@ proc rust_build.stage0_info {arch {mdt {}}} {
         }
     } elseif { [option os.platform] eq "darwin" && [vercmp $mdt >= "10.7"] } {
         if { ${building_stage0} } {
-            # use `platforms` in rust-bootstap port to ensure upstream compiler runs
+            # use `platforms` in rust-bootstrap port to ensure upstream compiler runs
             return      [list ${stage0_version} "x86_64" "apple" ""]
         } else {
             # no upstream support; use MacPorts compiler
@@ -533,7 +535,7 @@ proc rust_build.stage0_info {arch {mdt {}}} {
         }
     } elseif { [option os.platform] eq "darwin" && [vercmp $mdt >= "10.6"] } {
         if { ${building_stage0} } {
-            # use local port since it must be build without thread-local storage even of OS supports it
+            # use local port since it must be built without thread-local storage even if the OS supports it
             return      [list [option rust_build.version] [option configure.build_arch] "" ""]
         } else {
             # no upstream support; use MacPorts compiler
@@ -541,7 +543,7 @@ proc rust_build.stage0_info {arch {mdt {}}} {
         }
     } elseif { [option os.platform] eq "darwin" && [vercmp $mdt >= "10.5"] } {
         if { ${building_stage0} } {
-            # use local port since it must be built without thread-local storage even of OS supports it
+            # use local port since it must be built without thread-local storage even if the OS supports it
             return       [list [option rust_build.version] [option configure.build_arch] "" ""]
         } else {
             # no upstream support; use MacPorts compiler
