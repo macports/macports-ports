@@ -20,10 +20,11 @@
 #                   sha256 fedcba654321... \
 #                   size   4321
 #
-# The github-1.0 or bitbucket-1.0 portgroups are automatically applied and set
-# up for projects hosted on GitHub or Bitbucket; in these cases it is not
-# necessary to specify the portgroups or call github.setup or bitbucket.setup,
-# i.e. the following are sufficient:
+# go.setup recognizes the domain of the package ID and applies the portgroup
+# for that host itself, calling its setup proc with the author, project and
+# version it just parsed. github.com, gitlab.com, bitbucket.org, git.sr.ht and
+# gitea.com are handled this way, so neither the PortGroup line nor the
+# github.setup/sourcehut.setup/... call needs to be written out:
 #
 # PortGroup     golang 1.0
 # go.setup      github.com/author/project 1.0.0 v
@@ -32,6 +33,19 @@
 #
 # PortGroup     golang 1.0
 # go.setup      bitbucket.com/author/project 1.0.0 v
+#
+# or, for sourcehut, with the ~ that belongs to the package ID:
+#
+# PortGroup     golang 1.0
+# go.setup      git.sr.ht/~author/project 1.0.0 v
+#
+# A package ID that is not the place the source is fetched from -- an author
+# who has moved hosts but kept the old repo as a mirror, or a vanity import
+# path -- is spelled by naming the host in go.setup and the import path in
+# go.package afterwards:
+#
+# go.setup      gitea.com/author/project 1.0.0 v
+# go.package    example.org/author/project
 #
 # The go.vendors option expects a list of package IDs, each followed by these
 # labeled values:
@@ -122,6 +136,14 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
         git.sr.ht {
             uplevel "PortGroup sourcehut 1.0"
             sourcehut.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+            # Alone among the host portgroups, sourcehut-1.0 points worksrcdir
+            # at the extracted tarball. That is right for a port that builds
+            # where it unpacked, but here post-extract moves the source into
+            # the GOPATH and the build has to follow it, so put back the
+            # worksrcdir this portgroup set before go.setup was called. A port
+            # needing something else still sets worksrcdir outright, which
+            # outranks either default.
+            default worksrcdir {gopath/src/${go.package}}
         }
         gitea.com {
             uplevel "PortGroup gitea 1.0"
