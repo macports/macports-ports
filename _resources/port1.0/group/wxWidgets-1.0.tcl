@@ -59,6 +59,8 @@
 #   If you already want to provide a special variant for your port with
 #   'wxWidgtes-3.2', you might only need a revbump after the switch to 3.2
 #
+# * 'wxGTK-3.2'
+#   Modern wx for legacy systems, and also for development purposes.
 #
 # You should note an important aspect of 'wxWidgets.use' though:
 # it does not actually do anything useful yet other than failing during
@@ -170,6 +172,7 @@ option_proc wxWidgets.use wxWidgets._set
 ## - wxPython-3.0
 ## - wxWidgets-3.0-cxx11
 ## - wxWidgets-3.2
+## - wxGTK-3.2
 proc wxWidgets._set {option action args} {
     global prefix frameworks_dir os.major
     global wxWidgets.name wxWidgets.version wxWidgets.prefix wxWidgets.wxdir
@@ -257,6 +260,10 @@ proc wxWidgets._set {option action args} {
                 return -code error "incompatible macOS version"
             }
         }
+    } elseif {${args} eq "wxGTK-3.2"} {
+        wxWidgets.name      "wxGTK"
+        wxWidgets.version   "3.2"
+        wxWidgets.port      "wxgtk-3.2"
     } else {
         # throw an error
         ui_error "invalid parameter for wxWidgets.use; use one of:\n\twxWidgets-2.8/wxGTK-2.8/wxWidgets-3.0/wxGTK-3.0/wxPython-3.0/wxWidgets-3.2"
