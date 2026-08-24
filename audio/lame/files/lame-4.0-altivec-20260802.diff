@@ -1,13 +1,64 @@
-# https://tmkk.undo.jp/lame/lame-3.100-altivec-20171014.diff
-
---- libmp3lame/fft.c.orig	2017-09-07 04:33:36.000000000 +0900
-+++ libmp3lame/fft.c	2017-10-14 18:02:08.000000000 +0900
-@@ -38,6 +38,12 @@
+--- frontend/parse.c
++++ frontend/parse.c
+@@ -403,24 +423,34 @@ static int getIntValue(char const* token, char const* arg, int* ptr)
+ 
+ #ifdef ID3TAGS_EXTENDED
+ static int
+-set_id3v2tag(lame_global_flags* gfp, TextEncoding enc, int type, unsigned short const* str)
++set_id3v2tag(lame_global_flags* gfp, TextEncoding enc, int type, void const* ptr)
+ {
+     switch (enc)
+     {
+         case TENC_UTF8:
++        {
++            /* the id3tag_set_*_ucs2() names this branch used before were
++               removed from the library API; the string here really is UTF-8
++               (produced by toUtf8()), so use the utf8 setters.  There is no
++               id3tag_set_fieldvalue_utf8(), fall back to the latin1-based
++               one for 'v'. */
++            char const* str = ptr;
+             switch (type)
+             {
+                 case 'a': return id3tag_set_textinfo_utf8(gfp, "TPE1", str);
+                 case 't': return id3tag_set_textinfo_utf8(gfp, "TIT2", str);
+                 case 'l': return id3tag_set_textinfo_utf8(gfp, "TALB", str);
+                 case 'g': return id3tag_set_textinfo_utf8(gfp, "TCON", str);
+-                case 'c': return id3tag_set_comment_ucs2(gfp, 0, 0, str);
++                case 'c': return id3tag_set_comment_utf8(gfp, 0, 0, str);
+                 case 'n': return id3tag_set_textinfo_utf8(gfp, "TRCK", str);
+                 case 'y': return id3tag_set_textinfo_utf8(gfp, "TYER", str);
+-                case 'v': return id3tag_set_fieldvalue_ucs2(gfp, str);
++                case 'v': return id3tag_set_fieldvalue(gfp, str);
+             }
+-            ;;
++            return -3;
++        }
+         case TENC_UTF16:
++        {
++            unsigned short const* str = ptr;
+             switch (type)
+             {
+                 case 'a': return id3tag_set_textinfo_utf16(gfp, "TPE1", str);
+@@ -432,7 +462,8 @@ set_id3v2tag(lame_global_flags* gfp, TextEncoding enc, int type, unsigned short
+                 case 'y': return id3tag_set_textinfo_utf16(gfp, "TYER", str);
+                 case 'v': return id3tag_set_fieldvalue_utf16(gfp, str);
+             }
+-            ;;
++            return -3;
++        }
+         default:
+             return -3;
+     }
+--- libmp3lame/fft.c
++++ libmp3lame/fft.c
+@@ -38,6 +38,14 @@
  # include <config.h>
  #endif
  
-+#ifdef ALTIVEC
-+#ifndef __APPLE_CC__
++#if __ALTIVEC__
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
@@ -15,11 +66,11 @@
  #include "lame.h"
  #include "machine.h"
  #include "encoder.h"
-@@ -66,6 +72,17 @@ fht(FLOAT * fz, int n)
+@@ -66,6 +74,17 @@ fht(FLOAT * fz, int n)
      int     k4;
      FLOAT  *fi, *gi;
      FLOAT const *fn;
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    float csvec[16] __attribute__ ((aligned (16)));
 +    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
 +    vector float vfi0,vfi1,vfi2,vfi3,vgi0,vgi1,vgi2,vgi3,vf0,vf1,vf2,vf3,vg0,vg1,vg2,vg3;
@@ -28,16 +79,16 @@
 +    
 +    vperm1 = (vector unsigned char)VINIT16(16,17,18,19,12,13,14,15,8,9,10,11,4,5,6,7);
 +    vperm2 = (vector unsigned char)VINIT16(16,17,18,19,4,5,6,7,8,9,10,11,12,13,14,15);
-+    vzero = vec_xor(vzero,vzero);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
 +#endif
  
      n <<= 1;            /* to get BLKSIZE, because of 3DNow! ASM routine */
      fn = fz + n;
-@@ -103,6 +120,238 @@ fht(FLOAT * fz, int n)
+@@ -103,6 +122,238 @@ fht(FLOAT * fz, int n)
          } while (fi < fn);
          c1 = tri[0];
          s1 = tri[1];
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +        if(kx < 4) {
 +            for (i = 1; i < kx; i++) {
 +                FLOAT   c2, s2;
@@ -272,7 +323,7 @@
          for (i = 1; i < kx; i++) {
              FLOAT   c2, s2;
              c2 = 1 - (2 * s1) * s1;
-@@ -142,6 +391,7 @@ fht(FLOAT * fz, int n)
+@@ -142,6 +393,7 @@ fht(FLOAT * fz, int n)
              c1 = c2 * tri[0] - s1 * tri[1];
              s1 = c2 * tri[1] + s1 * tri[0];
          }
@@ -280,14 +331,16 @@
          tri += 2;
      } while (k4 < n);
  }
---- libmp3lame/gain_analysis.c.orig	2017-10-11 04:08:39.000000000 +0900
-+++ libmp3lame/gain_analysis.c	2017-10-14 18:04:59.000000000 +0900
-@@ -92,6 +92,12 @@
+--- libmp3lame/gain_analysis.c
++++ libmp3lame/gain_analysis.c
+@@ -92,6 +92,14 @@
  #include <config.h>
  #endif
  
-+#ifdef ALTIVEC
-+#ifndef __APPLE_CC__
++#if __ALTIVEC__
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
@@ -295,11 +348,11 @@
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
-@@ -109,6 +115,67 @@
+@@ -109,6 +117,67 @@
  
  
  /*lint -save -e736 loss of precision */
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +static const Float_t ABYule[9][2 * YULE_ORDER + 1 + 3] __attribute__ ((aligned (16))) = {
 +    {0.03857599435200, -3.84664617118067, -0.02160367184185, 7.81501653005538, -0.00123395316851,
 +     -11.34170355132042, -0.00009291677959, 13.05504219327545, -0.01655260341619,
@@ -363,7 +416,7 @@
  static const Float_t ABYule[9][multiple_of(4, 2 * YULE_ORDER + 1)] = {
      /* 20                 18                 16                 14                 12                 10                 8                  6                  4                  2                 0                 19                 17                 15                 13                 11                 9                  7                  5                  3                  1              */
      { 0.00288463683916,  0.00012025322027,  0.00306428023191,  0.00594298065125, -0.02074045215285,  0.02161526843274, -0.01655260341619, -0.00009291677959, -0.00123395316851, -0.02160367184185, 0.03857599435200, 0.13919314567432, -0.86984376593551,  2.75465861874613, -5.87257861775999,  9.48293806319790,-12.28759895145294, 13.05504219327545,-11.34170355132042,  7.81501653005538, -3.84664617118067},
-@@ -134,6 +201,7 @@ static const Float_t ABButter[9][multipl
+@@ -134,6 +203,7 @@ static const Float_t ABButter[9][multiple_of(4, 2 * BUTTER_ORDER + 1)] = {
      {0.95856916599601, 0.91885558323625, -1.91713833199203, -1.91542108074780, 0.95856916599601},
      {0.94597685600279, 0.89487434461664, -1.89195371200558, -1.88903307939452, 0.94597685600279}
  };
@@ -371,11 +424,11 @@
  
  /*lint -restore */
  
-@@ -143,6 +211,191 @@ static const Float_t ABButter[9][multipl
+@@ -143,6 +213,191 @@ static const Float_t ABButter[9][multiple_of(4, 2 * BUTTER_ORDER + 1)] = {
  
  /* When calling this procedure, make sure that ip[-order] and op[-order] point to real data! */
  
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +
 +static void
 +filterIntegrated (const Float_t* input, Float_t* output, Float_t* output2, size_t nSamples, const Float_t* kernel, const Float_t* kernel2)
@@ -396,7 +449,7 @@
 +	v1 = (vector float)vec_splat_s32(-1);
 +	vmask1 = vec_sro(v1,vc3);
 +	vmask2 = vec_sro(v1,vc4);
-+	vzero = vec_xor(vzero,vzero);
++	vzero = (__typeof__(vzero))vec_splat_u32(0);
 +	
 +	v1 = vec_ld(0,kernel);
 +	v2 = vec_ld(16,kernel);
@@ -563,7 +616,7 @@
  static void
  filterYule(const Float_t * input, Float_t * output, size_t nSamples, const Float_t * const kernel)
  {
-@@ -189,7 +442,7 @@ filterButter(const Float_t * input, Floa
+@@ -189,7 +444,7 @@ filterButter(const Float_t * input, Float_t * output, size_t nSamples, const Flo
      }
  }
  
@@ -572,18 +625,18 @@
  
  static int ResetSampleFrequency(replaygain_t * rgData, long samplefreq);
  
-@@ -323,6 +576,10 @@ AnalyzeSamples(replaygain_t * rgData, co
+@@ -323,6 +578,10 @@ AnalyzeSamples(replaygain_t * rgData, const Float_t * left_samples, const Float_
              curright = right_samples + cursamplepos;
          }
  
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +        filterIntegrated(curleft, rgData->lstep + rgData->totsamp, rgData->lout + rgData->totsamp, cursamples, ABYule[rgData->freqindex], ABButter[rgData->freqindex]);
 +        filterIntegrated(curright, rgData->rstep + rgData->totsamp, rgData->rout + rgData->totsamp, cursamples, ABYule[rgData->freqindex], ABButter[rgData->freqindex]);
 +#else
          YULE_FILTER(curleft, rgData->lstep + rgData->totsamp, cursamples,
                      ABYule[rgData->freqindex]);
          YULE_FILTER(curright, rgData->rstep + rgData->totsamp, cursamples,
-@@ -332,6 +589,7 @@ AnalyzeSamples(replaygain_t * rgData, co
+@@ -332,6 +591,7 @@ AnalyzeSamples(replaygain_t * rgData, const Float_t * left_samples, const Float_
                        ABButter[rgData->freqindex]);
          BUTTER_FILTER(rgData->rstep + rgData->totsamp, rgData->rout + rgData->totsamp, cursamples,
                        ABButter[rgData->freqindex]);
@@ -591,26 +644,28 @@
  
          curleft = rgData->lout + rgData->totsamp; /* Get the squared values */
          curright = rgData->rout + rgData->totsamp;
---- libmp3lame/lame.c.orig	2017-10-11 04:08:39.000000000 +0900
-+++ libmp3lame/lame.c	2017-10-14 18:02:08.000000000 +0900
-@@ -30,6 +30,11 @@
+--- libmp3lame/lame.c
++++ libmp3lame/lame.c
+@@ -30,6 +30,13 @@
  # include <config.h>
  #endif
  
-+#ifdef ALTIVEC
-+#ifndef __APPLE_CC__
++#if __ALTIVEC__
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
  
  #include "lame.h"
  #include "machine.h"
-@@ -603,7 +608,12 @@ lame_init_params(lame_global_flags * gfp
+@@ -603,7 +610,12 @@ lame_init_params(lame_global_flags * gfp)
          gfc->CPU_features.SSE = 0;
          gfc->CPU_features.SSE2 = 0;
      }
 -
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    /* turn off JAVA mode explicitly */
 +    vector unsigned short vscr = vec_mfvscr();
 +    vscr = vec_or(vscr,(vector unsigned short)VINIT8(0,0,0,0,0,0,1,0));
@@ -619,14 +674,21 @@
  
      cfg->vbr = gfp->VBR;
      cfg->error_protection = gfp->error_protection;
---- libmp3lame/machine.h.orig	2017-10-11 04:08:39.000000000 +0900
-+++ libmp3lame/machine.h	2017-10-14 18:02:08.000000000 +0900
-@@ -184,6 +184,24 @@ typedef FLOAT sample_t;
+--- libmp3lame/machine.h
++++ libmp3lame/machine.h
+@@ -191,6 +191,31 @@ typedef FLOAT sample_t;
  #  endif
  #endif
  
-+#ifdef ALTIVEC
-+#ifdef __APPLE_CC__
++#if __ALTIVEC__
++/* Apple's -faltivec frontend (gcc-4.x / llvm-gcc) uses the Motorola
++   paren-based vector literal syntax; FSF GCC (-maltivec, e.g. MacPorts gcc)
++   only accepts the brace syntax.  Neither __APPLE_CC__ alone nor
++   __APPLE_ALTIVEC__ can distinguish the two: FSF GCC defines __APPLE_CC__=1
++   on Darwin and predefines __APPLE_ALTIVEC__ under -maltivec everywhere.
++   Genuinely Apple-built compilers set __APPLE_CC__ to their build number
++   (> 1), so test that. */
++#if defined(__APPLE_CC__) && (__APPLE_CC__ > 1)
 +#define VINIT4(a,b,c,d)                          (a,b,c,d)
 +#define VINIT8(a,b,c,d,e,f,g,h)                  (a,b,c,d,e,f,g,h)
 +#define VINIT16(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p) (a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p)
@@ -646,14 +708,16 @@
  #endif
  
  /* end of machine.h */
---- libmp3lame/newmdct.c.orig	2011-05-08 01:05:17.000000000 +0900
-+++ libmp3lame/newmdct.c	2017-10-14 18:02:08.000000000 +0900
-@@ -30,6 +30,12 @@
+--- libmp3lame/newmdct.c
++++ libmp3lame/newmdct.c
+@@ -30,6 +30,14 @@
  # include <config.h>
  #endif
  
-+#ifdef ALTIVEC
-+#ifndef __APPLE_CC__
++#if __ALTIVEC__
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
@@ -661,7 +725,7 @@
  #include "lame.h"
  #include "machine.h"
  #include "encoder.h"
-@@ -39,7 +45,7 @@
+@@ -39,7 +47,7 @@
  
  
  #ifndef USE_GOGO_SUBBAND
@@ -670,7 +734,7 @@
      -4.77e-07 * 0.740951125354959 / 2.384e-06, 1.03951e-04 * 0.740951125354959 / 2.384e-06,
      9.53674e-04 * 0.740951125354959 / 2.384e-06, 2.841473e-03 * 0.740951125354959 / 2.384e-06,
      3.5758972e-02 * 0.740951125354959 / 2.384e-06, 3.401756e-03 * 0.740951125354959 / 2.384e-06, 9.83715e-04 * 0.740951125354959 / 2.384e-06, 9.9182e-05 * 0.740951125354959 / 2.384e-06, /* 15 */
-@@ -230,7 +236,7 @@ static const FLOAT enwindow[] = {
+@@ -230,7 +238,7 @@ static const FLOAT enwindow[] = {
  #define NS 12
  #define NL 36
  
@@ -679,15 +743,15 @@
      {
       2.382191739347913e-13,
       6.423305872147834e-13,
-@@ -435,6 +441,443 @@ window_subband(const sample_t * x1, FLOA
+@@ -435,6 +443,443 @@ window_subband(const sample_t * x1, FLOAT a[SBLIMIT])
  
      const sample_t *x2 = &x1[238 - 14 - 286];
  
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
 +    vector float vw1,vw2,vw3,vw4,vw5,vw6,vw7,vw8,vs,vt,vzero;
 +    vector unsigned char vperm2,vperm3,vperm4,vperm5;
-+    vzero = vec_xor(vzero,vzero);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
 +    vperm5 = (vector unsigned char)VINIT16(12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3);
 +    vperm2 = vec_lvsl(0,wp+8);
 +    vperm3 = (vector unsigned char)VINIT16(0,1,2,3,4,5,6,7,24,25,26,27,28,29,30,31);
@@ -1123,7 +1187,7 @@
      for (i = -15; i < 0; i++) {
          FLOAT   w, s, t;
  
-@@ -501,6 +944,7 @@ window_subband(const sample_t * x1, FLOA
+@@ -501,6 +946,7 @@ window_subband(const sample_t * x1, FLOAT a[SBLIMIT])
          x1--;
          x2++;
      }
@@ -1131,14 +1195,16 @@
      {
          FLOAT   s, t, u, v;
          t = x1[-16] * wp[-10];
---- libmp3lame/psymodel.c.orig	2017-09-07 04:38:23.000000000 +0900
-+++ libmp3lame/psymodel.c	2017-10-14 18:10:00.000000000 +0900
-@@ -146,6 +146,12 @@ blocktype_d[2]        block type to use 
+--- libmp3lame/psymodel.c
++++ libmp3lame/psymodel.c
+@@ -146,6 +146,14 @@ blocktype_d[2]        block type to use for previous granule
  
  #include <float.h>
  
-+#ifdef ALTIVEC
-+#ifndef __APPLE_CC__
++#if __ALTIVEC__
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
@@ -1146,11 +1212,11 @@
  #include "lame.h"
  #include "machine.h"
  #include "encoder.h"
-@@ -164,6 +170,48 @@ blocktype_d[2]        block type to use 
+@@ -164,6 +172,48 @@ blocktype_d[2]        block type to use for previous granule
  #define  LN_TO_LOG10  0.2302585093
  #endif
  
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +static inline vector float fast_log10_altivec_2(vector float v3)
 +{
 +    vector float va,vb,vc,vhalf,vzero,vsqrt2,vconst4;
@@ -1164,7 +1230,7 @@
 +    vhalf = (vector float)VINIT4ALL(0.15051499783);
 +    vsqrt2 = (vector float)VINIT4ALL(1.4142135623731);
 +    vconst4 = (vector float)VINIT4ALL(0.301029995664);
-+    vzero = vec_xor(vzero,vzero);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
 +    vconst1 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(9));
 +    vconst2 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(7));
 +    vconst2 = vec_nor(vconst2,vconst2);
@@ -1195,40 +1261,47 @@
  
  /*
     L3psycho_anal.  Compute psycho acoustics.
-@@ -253,6 +301,11 @@ static const FLOAT ma_max_i1 = 3.6517412
+@@ -253,6 +303,18 @@ static const FLOAT ma_max_i1 = 3.6517412725483771;
  static const FLOAT ma_max_i2 = 31.622776601683793;
  /* pow(10, (MLIMIT) / 10.0); */
  static const FLOAT ma_max_m  = 31.622776601683793;
-+#ifdef ALTIVEC
++#if __ALTIVEC__
++#if defined(__APPLE_CC__) && (__APPLE_CC__ > 1)
 +static const vector float vmamax1 = (vector float)VINIT4ALL(3.651741);
 +static const vector float vmamax2 = (vector float)VINIT4ALL(31.622777);
++#else
++/* a file-scope compound literal ((vector float){...}) is not a constant
++   initializer in C23; a plain brace initializer is */
++static const vector float vmamax1 = VINIT4ALL(3.651741);
++static const vector float vmamax2 = VINIT4ALL(31.622777);
++#endif
 +#endif
 +
  
      /*This is the masking table:
         According to tonality, values are going from 0dB (TMN)
-@@ -666,6 +719,14 @@ static void
+@@ -666,6 +728,14 @@ static void
  vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2], int chn,
                       int gr_out, FLOAT fftenergy[HBLKSIZE], FLOAT(*wsamp_l)[BLKSIZE])
  {
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,vhalf,vprev,vzero,vsqrt2;
 +    vector unsigned char vperm;
 +    vhalf = vec_ctf(vec_splat_s32(1),1);
 +    vsqrt2 = (vector float)VINIT4ALL(0.7071067811865001);
-+    vzero = vec_xor(vzero,vzero);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
 +    vperm = (vector unsigned char)VINIT16(0,1,2,3,28,29,30,31,24,25,26,27,20,21,22,23);
 +#endif
      SessionConfig_t const *const cfg = &gfc->cfg;
      PsyStateVar_t *psv = &gfc->sv_psy;
      plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
-@@ -675,19 +736,80 @@ vbrpsy_compute_fft_l(lame_internal_flags
+@@ -675,19 +745,80 @@ vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2]
          fft_long(gfc, *wsamp_l, chn, buffer);
      }
      else if (chn == 2) {
 -        FLOAT const sqrt2_half = SQRT2 * 0.5f;
          /* FFT data for mid and side channel is derived from L & R */
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +        for(j = 0; j < BLKSIZE; j += 8) {
 +            v1 = vec_ld(0,wsamp_l[0]+j);
 +            v2 = vec_ld(0,wsamp_l[1]+j);
@@ -1263,7 +1336,7 @@
      /*********************************************************************
      *  compute energies
      *********************************************************************/
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vprev = vec_ld(0,(*wsamp_l));
 +    for(j = 0; j < BLKSIZE/2; j += 16) {
 +        v1 = vec_ld(0,(*wsamp_l)+j);
@@ -1304,26 +1377,26 @@
      fftenergy[0] = wsamp_l[0][0];
      fftenergy[0] *= fftenergy[0];
  
-@@ -696,13 +818,51 @@ vbrpsy_compute_fft_l(lame_internal_flags
+@@ -696,13 +827,51 @@ vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2]
          FLOAT const im = (*wsamp_l)[BLKSIZE / 2 + j];
          fftenergy[BLKSIZE / 2 - j] = (re * re + im * im) * 0.5f;
      }
 +#endif
      /* total energy */
      {
-+#ifdef ALTIVEC
-+#ifdef ALTIVEC_970
++#if __ALTIVEC__
++#if _ARCH_PPC64
 +        v5 = vec_ld(0,fftenergy+8);
 +        v6 = vec_ld(0,fftenergy+508);
 +        v7 = vec_ld(0,fftenergy+512);
-+        v8 = vec_xor(v8,v8);
++        v8 = (__typeof__(v8))vec_splat_u32(0);
 +        v5 = vec_sld(v5,v8,12);
 +        v7 = vec_sld(v8,v7,4);
 +#else
 +        v5 = vec_lde(0,fftenergy+11);
 +        v6 = vec_ld(0,fftenergy+508);
 +        v7 = vec_lde(0,fftenergy+512);
-+        v8 = vec_xor(v8,v8);
++        v8 = (__typeof__(v8))vec_splat_u32(0);
 +#endif
 +        for(j=12;j<508;j+=16) {
 +            v1 = vec_ld(0,fftenergy+j);
@@ -1356,19 +1429,19 @@
      }
  
      if (plt) {
-@@ -716,27 +876,96 @@ vbrpsy_compute_fft_l(lame_internal_flags
+@@ -716,27 +885,96 @@ vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2]
  
  static void
  vbrpsy_compute_fft_s(lame_internal_flags const *gfc, const sample_t * const buffer[2], int chn,
 -                     int sblock, FLOAT(*fftenergy_s)[HBLKSIZE_s], FLOAT(*wsamp_s)[3][BLKSIZE_s])
 +                     int sblock, FLOAT(*fftenergy_s)[HBLKSIZE_s+3], FLOAT(*wsamp_s)[3][BLKSIZE_s])
  {
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,vhalf,vprev,vzero,vsqrt2;
 +    vector unsigned char vperm;
 +    vhalf = vec_ctf(vec_splat_s32(1),1);
 +    vsqrt2 = (vector float)VINIT4ALL(0.7071067811865001);
-+    vzero = vec_xor(vzero,vzero);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
 +    vperm = (vector unsigned char)VINIT16(0,1,2,3,28,29,30,31,24,25,26,27,20,21,22,23);
 +#endif
      int     j;
@@ -1379,7 +1452,7 @@
      if (chn == 2) {
 -        FLOAT const sqrt2_half = SQRT2 * 0.5f;
          /* FFT data for mid and side channel is derived from L & R */
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +        for(j = 0; j < BLKSIZE_s; j += 8) {
 +            v1 = vec_ld(0,wsamp_s[0][sblock]+j);
 +            v2 = vec_ld(0,wsamp_s[1][sblock]+j);
@@ -1414,7 +1487,7 @@
      /*********************************************************************
      *  compute energies
      *********************************************************************/
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vprev = vec_ld(0,(*wsamp_s)[sblock]);
 +    for(j = 0; j < BLKSIZE_s/2; j += 16) {
 +        v1 = vec_ld(0,(*wsamp_s)[sblock]+j);
@@ -1455,7 +1528,7 @@
      fftenergy_s[sblock][0] = (*wsamp_s)[sblock][0];
      fftenergy_s[sblock][0] *= fftenergy_s[sblock][0];
      for (j = BLKSIZE_s / 2 - 1; j >= 0; --j) {
-@@ -744,6 +973,7 @@ vbrpsy_compute_fft_s(lame_internal_flags
+@@ -744,6 +982,7 @@ vbrpsy_compute_fft_s(lame_internal_flags const *gfc, const sample_t * const buff
          FLOAT const im = (*wsamp_s)[sblock][BLKSIZE_s / 2 + j];
          fftenergy_s[sblock][BLKSIZE_s / 2 - j] = (re * re + im * im) * 0.5f;
      }
@@ -1463,12 +1536,12 @@
  }
  
  
-@@ -772,7 +1002,24 @@ vbrpsy_attack_detection(lame_internal_fl
+@@ -772,7 +1011,24 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
                          FLOAT energy[4], FLOAT sub_short_factor[4][3], int ns_attacks[4][4],
                          int uselongblock[2])
  {
 -    FLOAT   ns_hpfsmpl[2][576];
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
 +    vector float vsum,vsum1,vsum2,vsuma,vsumb,vsumc,vsumd,vmaska,vmaskb,vmaskc,vmaskd;
 +    vector unsigned char vmask1,vmask2,vmask3,vmask4,vmask1inv,vmask2inv,vmask3inv,vmask4inv,vperm,vs4,vs8,vs12;
@@ -1489,7 +1562,7 @@
      SessionConfig_t const *const cfg = &gfc->cfg;
      PsyStateVar_t *const psv = &gfc->sv_psy;
      plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
-@@ -785,14 +1032,142 @@ vbrpsy_attack_detection(lame_internal_fl
+@@ -785,14 +1041,142 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
      /* Don't copy the input buffer into a temporary buffer */
      /* unroll the loop 2 times */
      for (chn = 0; chn < n_chn_out; chn++) {
@@ -1504,7 +1577,7 @@
          const sample_t *const firbuf = &buffer[chn][576 - 350 - NSFIRLEN + 192];
 -        assert(dimension_of(fircoef) == ((NSFIRLEN - 1) / 2));
 +        //assert(dimension_of(fircoef) == ((NSFIRLEN - 1) / 2));
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +        v1 = vec_ld(0, firbuf+10);
 +        vmask1 = vec_lvsl(0, firbuf);
 +        vmask2 = vec_lvsl(0, firbuf+1);
@@ -1635,7 +1708,7 @@
          for (i = 0; i < 576; i++) {
              FLOAT   sum1, sum2;
              sum1 = firbuf[i + 10];
-@@ -803,6 +1178,7 @@ vbrpsy_attack_detection(lame_internal_fl
+@@ -803,6 +1187,7 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
              }
              ns_hpfsmpl[chn][i] = sum1 + sum2;
          }
@@ -1643,11 +1716,11 @@
          masking_ratio[gr_out][chn].en = psv->en[chn];
          masking_ratio[gr_out][chn].thm = psv->thm[chn];
          if (n_chn_psy > 2) {
-@@ -841,9 +1217,28 @@ vbrpsy_attack_detection(lame_internal_fl
+@@ -841,9 +1226,28 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
          for (i = 0; i < 9; i++) {
              FLOAT const *const pfe = pf + 576 / 9;
              FLOAT   p = 1.;
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +            FLOAT vmax[4] __attribute__ ((aligned (16)));
 +            v1 = (vector float)vec_splat_s32(1);
 +            v2 = vec_ctf((vector signed int)v1,0);
@@ -1672,7 +1745,7 @@
              psv->last_en_subshort[chn][i] = en_subshort[i + 3] = p;
              en_short[1 + i / 3] += p;
              if (p > en_subshort[i + 3 - 2]) {
-@@ -1039,7 +1434,7 @@ vbrpsy_calc_mask_index_s(lame_internal_f
+@@ -1039,7 +1443,7 @@ vbrpsy_calc_mask_index_s(lame_internal_flags const *gfc, FLOAT const *max,
  
  
  static void
@@ -1681,7 +1754,7 @@
                           FLOAT * eb, FLOAT * thr, int chn, int sblock)
  {
      PsyStateVar_t *const psv = &gfc->sv_psy;
-@@ -1147,24 +1542,286 @@ vbrpsy_compute_masking_l(lame_internal_f
+@@ -1147,24 +1551,286 @@ vbrpsy_compute_masking_l(lame_internal_flags * gfc, const FLOAT fftenergy[HBLKSI
  {
      PsyStateVar_t *const psv = &gfc->sv_psy;
      PsyConst_CB2SB_t const *const gdl = &gfc->cd_psy->l;
@@ -1690,7 +1763,7 @@
 +    FLOAT   max[CBANDS] __attribute__ ((aligned (16))), avg[CBANDS];
 +    unsigned char mask_idx_l[CBANDS + 2] __attribute__ ((aligned (16)));
      int     k, b;
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    float tmp[4] __attribute__ ((aligned (16)));
 +    const vector unsigned char v31 = (vector unsigned char)VINIT16ALL(31);
 +    const vector unsigned int vmask1 = (vector unsigned int)VINIT4ALL(0xff);
@@ -1701,7 +1774,7 @@
 +    const vector unsigned int vtable1 = (vector unsigned int)VINIT4(0x3fe39e89,0x3fec53e5,0x3ff55ea7,0x3ff9149b);
 +    const vector unsigned int vtable2 = (vector unsigned int)VINIT4(0x3ffcd90e,0x3fea8f7b,0x3fd997da,0x3fbf84e2);
 +    const vector unsigned int vtable3 = (vector unsigned int)VINIT4(0x3fa8917c,0x3f800000,0,0);
-+    const vector float vzero = vec_xor(vzero,vzero);
++    const vector float vzero = (__typeof__(vzero))vec_splat_u32(0);
 +#endif
  
   /*********************************************************************
@@ -1709,7 +1782,7 @@
   *********************************************************************/
      calc_energy(gdl, fftenergy, eb_l, max, avg);
      calc_mask_index_l(gfc, max, avg, mask_idx_l);
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    const vector unsigned char vmaskidx1 = vec_ld(0,mask_idx_l); //needs to be aligned
 +    const vector unsigned char vmaskidx2 = vec_ld(16,mask_idx_l);
 +    const vector unsigned char vmaskidx3 = vec_ld(32,mask_idx_l);
@@ -1725,7 +1798,7 @@
   ********************************************************************/
      k = 0;
 -    for (b = 0; b < gdl->npart; b++) {
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    for (b = 0; b < gdl->npart-3; b+=4) {
 +        vector signed int v1,v2,v3,v4,v5,vkk,vkk2,vlast,vdd,vdd_n,vk,vk2;
 +        vector float vf1,vf2,vf3,vf4,vecb,vx,veb,vavgmask,vmasking_lower;
@@ -1955,10 +2028,10 @@
 +        }
 +		v1 = (vector signed int)vec_cmpgt(vmasking_lower,(vector float)VINIT4ALL(1.0f));
 +		vf1 = vec_madd(vf3,vmasking_lower,vzero);
-+		vf3 = vec_sel(vf3,vf1,v1);
++		vf3 = vec_sel(vf3,vf1,(vector unsigned int)v1);
 +        vf3 = vec_sel(vf3,vf4,vec_cmpgt(vf3,vf4));
 +		vf1 = vec_madd(vf3,vmasking_lower,vzero);
-+		vf3 = vec_sel(vf1,vf3,v1);
++		vf3 = vec_sel(vf1,vf3,(vector unsigned int)v1);
 +        vec_st(vf3,0,thr+b); //needs to be aligned
 +    }
 +#else
@@ -1971,7 +2044,7 @@
          /* convolve the partitioned energy with the spreading function */
          int     kk = gdl->s3ind[b][0];
          int const last = gdl->s3ind[b][1];
-@@ -1423,11 +2080,11 @@ L3psycho_anal_vbr(lame_internal_flags * 
+@@ -1423,11 +2089,11 @@ L3psycho_anal_vbr(lame_internal_flags * gfc,
      /* fft and energy calculation   */
      FLOAT(*wsamp_l)[BLKSIZE];
      FLOAT(*wsamp_s)[3][BLKSIZE_s];
@@ -1988,7 +2061,7 @@
  
      FLOAT   sub_short_factor[4][3];
      FLOAT   thmm;
-@@ -1436,7 +2093,7 @@ L3psycho_anal_vbr(lame_internal_flags * 
+@@ -1436,7 +2102,7 @@ L3psycho_anal_vbr(lame_internal_flags * gfc,
          (cfg->msfix > 0.f) ? (cfg->ATH_offset_factor * gfc->ATH->adjust_factor) : 1.f;
  
      const   FLOAT(*const_eb)[CBANDS] = (const FLOAT(*)[CBANDS]) eb;
@@ -1997,7 +2070,7 @@
  
      /* block type  */
      int     ns_attacks[4][4] = { {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0} };
-@@ -1824,7 +2481,7 @@ compute_bark_values(PsyConst_CB2SB_t con
+@@ -1824,7 +2490,7 @@ compute_bark_values(PsyConst_CB2SB_t const *gd, FLOAT sfreq, int fft_size,
  }
  
  static int
@@ -2006,14 +2079,16 @@
                 FLOAT const *bval, FLOAT const *bval_width, FLOAT const *norm)
  {
      FLOAT   s3[CBANDS][CBANDS];
---- libmp3lame/quantize.c.orig	2017-08-15 22:40:45.000000000 +0900
-+++ libmp3lame/quantize.c	2017-10-14 18:02:08.000000000 +0900
-@@ -28,6 +28,12 @@
+--- libmp3lame/quantize.c
++++ libmp3lame/quantize.c
+@@ -28,6 +28,14 @@
  # include <config.h>
  #endif
  
-+#ifdef ALTIVEC
-+#ifndef __APPLE_CC__
++#if __ALTIVEC__
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
@@ -2021,19 +2096,25 @@
  #include "lame.h"
  #include "machine.h"
  #include "encoder.h"
-@@ -42,7 +48,26 @@
+@@ -42,7 +50,34 @@
  #endif
  
  
--
-+#ifdef PPC_FRSQRTE
++#if defined(__powerpc__) || defined(__ppc__) || defined(__POWERPC__)
++#if _ARCH_PPC64
++static inline double ppc_sqrt(double x) {
++    double y;
++    asm("fsqrt %0,%1" : "=f" (y) : "f" (x));
++    return y;
++}
++#else
 +static inline double __frsqrte(double number)
 +{
 +    double y;
 +    asm("frsqrte %0,%1" : "=f" (y) : "f" (number));
 +    return y;
 +}
-+
+ 
 +static inline double ppc_sqrt(double x) {
 +    double y;
 +    const double halfx = 0.5 * x;
@@ -2046,14 +2127,15 @@
 +    return (x == 0.0) ? 0 : y;
 +}
 +#endif
++#endif /* __powerpc__ */
  
  /* convert from L/R <-> Mid/Side */
  static void
-@@ -72,9 +97,162 @@ ms_convert(III_side_info_t * l3_side, in
+@@ -72,9 +107,163 @@ ms_convert(III_side_info_t * l3_side, int gr)
  static void
  init_xrpow_core_c(gr_info * const cod_info, FLOAT xrpow[576], int upper, FLOAT * sum)
  {
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vector float v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16,v17,v18,v19,v20;
 +    vector float vsum,vsum2,vsum3,vsum4,vmax,vmax2,vmax3,vmax4,vzero;
 +    vector unsigned char vc1,vc2,vc3,vc4,vc5,vperm;
@@ -2063,21 +2145,21 @@
      int     i;
      FLOAT   tmp;
      *sum = 0;
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vc1 = vec_splat_u8(1);
 +    vc2 = vec_splat_u8(5);
 +    vc3 = vec_sl(vc1,vc2);
 +    vc4 = vec_sl(vc3,vc1);
 +    vc5 = vec_or(vc3,vc4);
-+    vsum = vec_xor(vsum,vsum);
-+    vzero = vec_xor(vzero,vzero);
-+    vmax = vec_xor(vmax,vmax);
-+    vsum2 = vec_xor(vsum2,vsum2);
-+    vmax2 = vec_xor(vmax2,vmax2);
-+    vsum3 = vec_xor(vsum3,vsum3);
-+    vmax3 = vec_xor(vmax3,vmax3);
-+    vsum4 = vec_xor(vsum4,vsum4);
-+    vmax4 = vec_xor(vmax4,vmax4);
++    vsum = (__typeof__(vsum))vec_splat_u32(0);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
++    vmax = (__typeof__(vmax))vec_splat_u32(0);
++    vsum2 = (__typeof__(vsum2))vec_splat_u32(0);
++    vmax2 = (__typeof__(vmax2))vec_splat_u32(0);
++    vsum3 = (__typeof__(vsum3))vec_splat_u32(0);
++    vmax3 = (__typeof__(vmax3))vec_splat_u32(0);
++    vsum4 = (__typeof__(vsum4))vec_splat_u32(0);
++    vmax4 = (__typeof__(vmax4))vec_splat_u32(0);
 +    
 +    v0 = vec_ld(0,(cod_info->xr));
 +    vperm = vec_lvsl(0,(cod_info->xr));
@@ -2172,7 +2254,8 @@
 +        cod_info->xrpow_max = xrpow[i];
 +    }
 +#else
-+#ifdef PPC_FRSQRTE
++#if defined(__powerpc__) || defined(__ppc__) || defined(__POWERPC__)
++    /* scalar PPC path (G3): fsqrt/frsqrte-based, still much faster than libm */
 +    FLOAT   tmp2,tmp3,tmp4;
 +    
 +    for (i = 0; i <= upper-3; i+=4) {
@@ -2212,7 +2295,7 @@
      for (i = 0; i <= upper; ++i) {
          tmp = fabs(cod_info->xr[i]);
          *sum += tmp;
-@@ -83,6 +261,8 @@ init_xrpow_core_c(gr_info * const cod_in
+@@ -83,6 +272,8 @@ init_xrpow_core_c(gr_info * const cod_info, FLOAT xrpow[576], int upper, FLOAT *
          if (xrpow[i] > cod_info->xrpow_max)
              cod_info->xrpow_max = xrpow[i];
      }
@@ -2221,25 +2304,25 @@
  }
  
  
-@@ -1495,7 +1675,7 @@ VBR_old_iteration_loop(lame_internal_fla
+@@ -1495,7 +1686,7 @@ VBR_old_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
      EncResult_t *const eov = &gfc->ov_enc;
      FLOAT   l3_xmin[2][2][SFBMAX];
  
 -    FLOAT   xrpow[576];
 +    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
      int     bands[2][2];
-     int     frameBits[15];
+     int     frameBits[16];
      int     used_bits;
-@@ -1650,7 +1830,7 @@ VBR_new_iteration_loop(lame_internal_fla
+@@ -1650,7 +1841,7 @@ VBR_new_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
      EncResult_t *const eov = &gfc->ov_enc;
      FLOAT   l3_xmin[2][2][SFBMAX];
  
 -    FLOAT   xrpow[2][2][576];
 +    FLOAT   xrpow[2][2][576] __attribute__ ((aligned (16)));
-     int     frameBits[15];
+     int     frameBits[16];
      int     used_bits;
      int     max_bits[2][2];
-@@ -1904,7 +2084,7 @@ ABR_iteration_loop(lame_internal_flags *
+@@ -1923,7 +2114,7 @@ ABR_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
      SessionConfig_t const *const cfg = &gfc->cfg;
      EncResult_t *const eov = &gfc->ov_enc;
      FLOAT   l3_xmin[SFBMAX];
@@ -2248,7 +2331,7 @@
      int     targ_bits[2][2];
      int     mean_bits, max_frame_bits;
      int     ch, gr, ath_over;
-@@ -1991,7 +2171,7 @@ CBR_iteration_loop(lame_internal_flags *
+@@ -2012,7 +2203,7 @@ CBR_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
  {
      SessionConfig_t const *const cfg = &gfc->cfg;
      FLOAT   l3_xmin[SFBMAX];
@@ -2257,15 +2340,17 @@
      int     targ_bits[2];
      int     mean_bits, max_bits;
      int     gr, ch;
---- libmp3lame/quantize_pvt.c.orig	2017-09-07 04:33:36.000000000 +0900
-+++ libmp3lame/quantize_pvt.c	2017-10-14 18:02:08.000000000 +0900
-@@ -27,6 +27,13 @@
+--- libmp3lame/quantize_pvt.c
++++ libmp3lame/quantize_pvt.c
+@@ -27,6 +27,15 @@
  # include <config.h>
  #endif
  
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +#undef TAKEHIRO_IEEE754_HACK
-+#ifndef __APPLE_CC__
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
@@ -2273,15 +2358,15 @@
  
  #include "lame.h"
  #include "machine.h"
-@@ -751,6 +758,39 @@ calc_xmin(lame_internal_flags const *gfc
+@@ -751,6 +760,39 @@ calc_xmin(lame_internal_flags const *gfc,
  static  FLOAT
  calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT step)
  {
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,va,vb,vstep,vzero,vnoise1,vnoise2,vix01;
 +    vector unsigned char vperm1,vperm2,vperm5,vperm6;
 +    vector signed int vx1,vx2,vx3,vx4,vx5,vx6,vx7,vshamt,vone;
-+#ifdef ALTIVEC_970
++#if _ARCH_PPC64
 +    vector unsigned int vmask1,vmask2,vmask3;
 +    vector float v10,v11,v12,v13,v14,v15,v16,v17;
 +#else
@@ -2291,10 +2376,10 @@
 +    
 +    temp[0] = step;
 +    vstep = vec_ld(0,temp);
-+    vzero = vec_xor(vzero,vzero);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
 +    vperm6 = (vector unsigned char)VINIT16(0,0,3,19,0,0,7,23,0,0,11,27,0,0,15,31);
 +    vperm5 = vec_sld(vperm6,vperm6,2);
-+#ifdef ALTIVEC_970
++#if _ARCH_PPC64
 +    vmask1 = vec_splat_u32(-1);
 +    vmask2 = vec_sld((vector unsigned int)vzero,vmask1,8);
 +    vmask3 = vec_sld((vector unsigned int)vzero,vmask1,4);
@@ -2305,15 +2390,15 @@
 +    vmask = (vector unsigned char)VINIT16ALL(16);
 +#endif
 +    vstep = vec_splat(vstep,0);
-+    vnoise1 = vec_xor(vnoise1,vnoise1);
-+    vnoise2 = vec_xor(vnoise2,vnoise2);
++    vnoise1 = (__typeof__(vnoise1))vec_splat_u32(0);
++    vnoise2 = (__typeof__(vnoise2))vec_splat_u32(0);
 +    vone = vec_splat_s32(1);
 +    vshamt = vec_splat_s32(2);
 +#endif
      FLOAT   noise = 0;
      int     j = *startline;
      const int *const ix = cod_info->l3_enc;
-@@ -767,9 +807,55 @@ calc_noise_core_c(const gr_info * const 
+@@ -767,9 +809,55 @@ calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT s
          }
      }
      else if (j > cod_info->big_values) {
@@ -2321,7 +2406,7 @@
 +        FLOAT   ix01[4] __attribute__ ((aligned (16)));
          ix01[0] = 0;
          ix01[1] = step;
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +        vix01 = vec_ld(0,ix01);
 +        v1 = vec_ld(0,cod_info->xr+j);
 +        vperm1 = vec_lvsl(0,cod_info->xr+j);
@@ -2370,14 +2455,14 @@
          while (l--) {
              FLOAT   temp;
              temp = fabs(cod_info->xr[j]) - ix01[ix[j]];
-@@ -779,8 +865,138 @@ calc_noise_core_c(const gr_info * const 
+@@ -779,8 +867,138 @@ calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT s
              j++;
              noise += temp * temp;
          }
 +#endif
      }
      else {
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +        vperm1 = vec_lvsl(0,cod_info->xr+j);
 +        v1 = vec_ld(0,cod_info->xr+j);
 +        for(;l>3;l-=4) {
@@ -2389,7 +2474,7 @@
 +            vb = vec_abs(v5);
 +            v1 = v3;
 +            
-+#ifdef ALTIVEC_970
++#if _ARCH_PPC64
 +            v2 = vec_lde(0,pow43+ix[j]);
 +            v6 = vec_lde(0,pow43+ix[j+1]);
 +            v10 = vec_lde(0,pow43+ix[j+2]);
@@ -2422,7 +2507,7 @@
 +#endif
 +            j+=4;
 +            
-+#ifdef ALTIVEC_970
++#if _ARCH_PPC64
 +            v3 = vec_lde(0,pow43+ix[j]);
 +            v7 = vec_lde(0,pow43+ix[j+1]);
 +            v11 = vec_lde(0,pow43+ix[j+2]);
@@ -2475,7 +2560,7 @@
 +            v7 = vec_perm(v3,v3,vec_lvsl(-4,pow43+ix[j+1]));
 +            v8 = vec_perm(v4,v4,vec_lvsl(-8,pow43+ix[j+2]));
 +            v9 = vec_perm(v5,v5,vec_lvsl(-12,pow43+ix[j+3]));
-+#ifdef ALTIVEC_970
++#if _ARCH_PPC64
 +            v6 = vec_sel(v6,v7,vmask1);
 +            v6 = vec_sel(v6,v8,vmask2);
 +            v6 = vec_sel(v6,v9,vmask3);
@@ -2509,7 +2594,7 @@
          while (l--) {
              FLOAT   temp;
              temp = fabs(cod_info->xr[j]) - pow43[ix[j]] * step;
-@@ -790,6 +1006,7 @@ calc_noise_core_c(const gr_info * const 
+@@ -790,6 +1008,7 @@ calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT s
              j++;
              noise += temp * temp;
          }
@@ -2517,8 +2602,8 @@
      }
  
      *startline = j;
---- libmp3lame/tables.c.orig	2011-05-08 01:05:17.000000000 +0900
-+++ libmp3lame/tables.c	2017-10-14 18:02:08.000000000 +0900
+--- libmp3lame/tables.c
++++ libmp3lame/tables.c
 @@ -406,7 +406,7 @@ const uint8_t t33l[] = {
  };
  
@@ -2528,38 +2613,40 @@
      /* xlen, linmax, table, hlen */
      {0, 0, NULL, NULL},
      {2, 0, t1HB, t1l},
---- libmp3lame/takehiro.c.orig	2017-09-07 04:33:36.000000000 +0900
-+++ libmp3lame/takehiro.c	2017-10-14 18:02:08.000000000 +0900
-@@ -26,6 +26,12 @@
+--- libmp3lame/takehiro.c
++++ libmp3lame/takehiro.c
+@@ -26,6 +26,14 @@
  # include <config.h>
  #endif
  
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +#undef TAKEHIRO_IEEE754_HACK
-+#ifndef __APPLE_CC__
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
  
  #include "lame.h"
  #include "machine.h"
-@@ -222,6 +228,150 @@ quantize_lines_xrpow(unsigned int l, FLO
+@@ -222,6 +230,150 @@ quantize_lines_xrpow(unsigned int l, FLOAT istep, const FLOAT * xp, int *pi)
  static void
  quantize_lines_xrpow(unsigned int l, FLOAT istep, const FLOAT * xr, int *ix)
  {
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,va,vb,vistep,vzero;
 +    vector signed int vx1,vx2,vx3,vx4,vprev;
 +    vector unsigned char vperm1,vperm2;
 +    const vector float const1 = (vector float)VINIT4(0.4053964553387788,3.404263724373839,5.465086767819913,1.0);
 +    const vector float const2 = (vector float)VINIT4(7.719205369637751,10.93017829043677,0,0);
-+#ifndef ALTIVEC_970
++#ifndef _ARCH_PPC64
 +    unsigned int temp[4] __attribute__ ((aligned (16)));
 +#endif
 +    float temp2[4] __attribute__ ((aligned (16)));
 +    temp2[0] = istep;
 +    vistep = vec_ld(0,temp2);
-+    vzero = vec_xor(vzero,vzero);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
 +    vistep = vec_splat(vistep,0);
 +    
 +    l = l >> 1;
@@ -2621,7 +2708,7 @@
 +    vx4 = vec_perm(vprev,vx3,vperm2);
 +    vec_st(vx4,0,ix);
 +    
-+#ifdef ALTIVEC_970
++#if _ARCH_PPC64
 +    for(;l>1;l-=2) {
 +        FLOAT   x0, x1, x2, x3;
 +        int     rx0, rx1, rx2, rx3;
@@ -2694,7 +2781,7 @@
      unsigned int remaining;
  
      assert(l > 0);
-@@ -263,7 +413,7 @@ quantize_lines_xrpow(unsigned int l, FLO
+@@ -263,7 +415,7 @@ quantize_lines_xrpow(unsigned int l, FLOAT istep, const FLOAT * xr, int *ix)
          XRPOW_FTOI(x0, *ix++);
          XRPOW_FTOI(x1, *ix++);
      }
@@ -2703,11 +2790,11 @@
  }
  
  
-@@ -420,6 +570,60 @@ quantize_xrpow(const FLOAT * xp, int *pi
+@@ -420,6 +572,60 @@ quantize_xrpow(const FLOAT * xp, int *pi, FLOAT istep, gr_info const *const cod_
  /*	      ix_max							 */
  /*************************************************************************/
  
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +int
 +ix_max_vec(const int *ix, const int *end)
 +{
@@ -2764,7 +2851,7 @@
  static int
  ix_max(const int *ix, const int *end)
  {
-@@ -438,14 +642,14 @@ ix_max(const int *ix, const int *end)
+@@ -438,14 +644,14 @@ ix_max(const int *ix, const int *end)
          max1 = max2;
      return max1;
  }
@@ -2777,11 +2864,11 @@
  
 -
 -
-+#if !defined(ALTIVEC) || (defined(ALTIVEC) && !defined(ALTIVEC_970))
++#if !defined(__ALTIVEC__) || (defined(__ALTIVEC__) && !defined(_ARCH_PPC64))
  static int
  count_bit_ESC(const int *ix, const int *const end, int t1, const int t2, unsigned int *const s)
  {
-@@ -481,6 +685,7 @@ count_bit_ESC(const int *ix, const int *
+@@ -481,6 +687,7 @@ count_bit_ESC(const int *ix, const int *const end, int t1, const int t2, unsigne
      *s += sum;
      return t1;
  }
@@ -2789,15 +2876,15 @@
  
  
  static int
-@@ -507,6 +712,7 @@ static const int huf_tbl_noESC[] = {
+@@ -507,6 +714,7 @@ static const int huf_tbl_noESC[] = {
  };
  
  
-+#if !defined(ALTIVEC)
++#if !defined(__ALTIVEC__)
  static int
  count_bit_noESC_from2(const int *ix, const int *end, int max, unsigned int *s)
  {
-@@ -533,6 +739,7 @@ count_bit_noESC_from2(const int *ix, con
+@@ -533,6 +741,7 @@ count_bit_noESC_from2(const int *ix, const int *end, int max, unsigned int *s)
      *s += sum;
      return t1;
  }
@@ -2805,12 +2892,12 @@
  
  
  inline static int
-@@ -572,6 +779,651 @@ count_bit_noESC_from3(const int *ix, con
+@@ -572,6 +781,651 @@ count_bit_noESC_from3(const int *ix, const int *end, int max, unsigned int * s)
      return t;  
  }
  
-+#ifdef ALTIVEC
-+#ifdef ALTIVEC_970
++#if __ALTIVEC__
++#if _ARCH_PPC64
 +static int
 +count_bit_ESC_altivec(const int *ix, const int *const end, int t1, const int t2, int *const s)
 +{
@@ -2830,8 +2917,8 @@
 +    vlimit2 = vec_splat_u8(15);
 +    vone = vec_splat_u8(1);
 +    vshamt = vec_splat_u8(4);
-+    vzero = vec_xor(vzero,vzero);
-+    vsum = vec_xor(vsum,vsum);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
++    vsum = (__typeof__(vsum))vec_splat_u32(0);
 +    
 +    if((int)(end - ix) < 32) goto normal;
 +    v0 = vec_ld(0,ix);
@@ -2959,7 +3046,7 @@
 +    int t1 = huf_tbl_noESC[max - 1];
 +    /* No ESC-words */
 +    unsigned int sum = 0;
-+    int sum1, sum2;
++    int sum1 = 0, sum2 = 0; /* written back via vec_ste; init silences -Wmaybe-uninitialized */
 +    const unsigned int xlen = 3;
 +    const unsigned int *table = table23;
 +    vector signed int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
@@ -2973,9 +3060,9 @@
 +    vperm1 = (vector unsigned char)VINIT16(0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27);
 +    vperm2 = (vector unsigned char)VINIT16(4,5,6,7,12,13,14,15,20,21,22,23,28,29,30,31);
 +    vxlen = vec_splat_s32(3);
-+    vzero = vec_xor(vzero,vzero);
-+    vsum1 = vec_xor(vsum1,vsum1);
-+    vsum2 = vec_xor(vsum2,vsum2);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
++    vsum1 = (__typeof__(vsum1))vec_splat_u32(0);
++    vsum2 = (__typeof__(vsum2))vec_splat_u32(0);
 +    
 +    if((int)(end - ix) < 32) goto normal;
 +    v0 = vec_ld(0,ix);
@@ -3068,7 +3155,7 @@
 +    int t1 = huf_tbl_noESC[max - 1];
 +    /* No ESC-words */
 +    unsigned int sum = 0;
-+    int sum1, sum2;
++    int sum1 = 0, sum2 = 0; /* written back via vec_ste; init silences -Wmaybe-uninitialized */
 +    const unsigned int xlen = 4;
 +    const unsigned int *table = table56;
 +    vector signed int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
@@ -3082,9 +3169,9 @@
 +    vperm1 = (vector unsigned char)VINIT16(0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27);
 +    vperm2 = (vector unsigned char)VINIT16(4,5,6,7,12,13,14,15,20,21,22,23,28,29,30,31);
 +    vxlen = vec_splat_s32(4);
-+    vzero = vec_xor(vzero,vzero);
-+    vsum1 = vec_xor(vsum1,vsum1);
-+    vsum2 = vec_xor(vsum2,vsum2);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
++    vsum1 = (__typeof__(vsum1))vec_splat_u32(0);
++    vsum2 = (__typeof__(vsum2))vec_splat_u32(0);
 +    
 +    if((int)(end - ix) < 32) goto normal;
 +    v0 = vec_ld(0,ix);
@@ -3204,10 +3291,10 @@
 +    vperm2 = (vector unsigned char)VINIT16(4,5,6,7,12,13,14,15,20,21,22,23,28,29,30,31);
 +    v31 = (vector unsigned char)VINIT16ALL(31);
 +    vxlen = vec_splat_s32(6);
-+    vzero = vec_xor(vzero,vzero);
-+    vsum1 = vec_xor(vsum1,vsum1);
-+    vsum2 = vec_xor(vsum2,vsum2);
-+    vsum3 = vec_xor(vsum3,vsum3);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
++    vsum1 = (__typeof__(vsum1))vec_splat_u32(0);
++    vsum2 = (__typeof__(vsum2))vec_splat_u32(0);
++    vsum3 = (__typeof__(vsum3))vec_splat_u32(0);
 +    
 +    if((int)(end - ix) < 32) goto normal;
 +    //int *end2 = ix + 32*((int)(end - ix)/32);
@@ -3272,9 +3359,9 @@
 +    vsum1 = vec_perm(vsum1,vsum1,vec_lvsr(4,&sum1));
 +    vsum2 = vec_perm(vsum2,vsum2,vec_lvsr(4,&sum2));
 +    vsum3 = vec_perm(vsum3,vsum3,vec_lvsr(4,&sum3));
-+    vec_ste(vsum1,0,&sum1);
-+    vec_ste(vsum2,0,&sum2);
-+    vec_ste(vsum3,0,&sum3);
++    vec_ste(vsum1,0,(signed int *)&sum1);
++    vec_ste(vsum2,0,(signed int *)&sum2);
++    vec_ste(vsum3,0,(signed int *)&sum3);
 +    
 +    while (ix < end) {
 +        int x = ix[0] * xlen + ix[1];
@@ -3346,10 +3433,10 @@
 +    vperm2 = (vector unsigned char)VINIT16(4,5,6,7,12,13,14,15,20,21,22,23,28,29,30,31);
 +    v31 = (vector unsigned char)VINIT16ALL(31);
 +    vxlen = vec_splat_s32(8);
-+    vzero = vec_xor(vzero,vzero);
-+    vsum1 = vec_xor(vsum1,vsum1);
-+    vsum2 = vec_xor(vsum2,vsum2);
-+    vsum3 = vec_xor(vsum3,vsum3);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
++    vsum1 = (__typeof__(vsum1))vec_splat_u32(0);
++    vsum2 = (__typeof__(vsum2))vec_splat_u32(0);
++    vsum3 = (__typeof__(vsum3))vec_splat_u32(0);
 +    
 +    if((int)(end - ix) < 32) goto normal;
 +    //int *end2 = ix + 32*((int)(end - ix)/32);
@@ -3415,9 +3502,9 @@
 +    vsum1 = vec_perm(vsum1,vsum1,vec_lvsr(4,&sum1));
 +    vsum2 = vec_perm(vsum2,vsum2,vec_lvsr(4,&sum2));
 +    vsum3 = vec_perm(vsum3,vsum3,vec_lvsr(4,&sum3));
-+    vec_ste(vsum1,0,&sum1);
-+    vec_ste(vsum2,0,&sum2);
-+    vec_ste(vsum3,0,&sum3);
++    vec_ste(vsum1,0,(signed int *)&sum1);
++    vec_ste(vsum2,0,(signed int *)&sum2);
++    vec_ste(vsum3,0,(signed int *)&sum3);
 +    
 +    while (ix < end) {
 +        int x = ix[0] * xlen + ix[1];
@@ -3457,11 +3544,11 @@
  
  /*************************************************************************/
  /*	      choose table						 */
-@@ -599,12 +1451,21 @@ typedef int (*count_fnc)(const int* ix, 
+@@ -599,12 +1453,21 @@ typedef int (*count_fnc)(const int* ix, const int* end, int max, unsigned int* s
  static const count_fnc count_fncs[] = 
  { &count_bit_null
  , &count_bit_noESC
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +, &count_bit_noESC_from2_altivec1
 +, &count_bit_noESC_from2_altivec2
 +, &count_bit_noESC_from3_altivec1
@@ -3479,11 +3566,11 @@
  , &count_bit_noESC_from3
  , &count_bit_noESC_from3
  , &count_bit_noESC_from3
-@@ -621,7 +1482,11 @@ choose_table_nonMMX(const int *ix, const
+@@ -621,7 +1484,11 @@ choose_table_nonMMX(const int *ix, const int *const end, int *const _s)
      unsigned int* s = (unsigned int*)_s;
      unsigned int  max;
      int     choice, choice2;
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    max = ix_max_vec(ix, end);
 +#else
      max = ix_max(ix, end);
@@ -3491,11 +3578,11 @@
  
      if (max <= 15) {
        return count_fncs[max](ix, end, max, s);
-@@ -643,7 +1508,11 @@ choose_table_nonMMX(const int *ix, const
+@@ -643,7 +1510,11 @@ choose_table_nonMMX(const int *ix, const int *const end, int *const _s)
              break;
          }
      }
-+#if defined(ALTIVEC) && defined(ALTIVEC_970)
++#if defined(__ALTIVEC__) && defined(_ARCH_PPC64)
 +    return count_bit_ESC_altivec(ix, end, choice, choice2, s);
 +#else
      return count_bit_ESC(ix, end, choice, choice2, s);
@@ -3503,14 +3590,16 @@
  }
  
  
---- libmp3lame/util.c.orig	2017-09-07 04:33:36.000000000 +0900
-+++ libmp3lame/util.c	2017-10-14 18:11:48.000000000 +0900
-@@ -26,6 +26,12 @@
+--- libmp3lame/util.c
++++ libmp3lame/util.c
+@@ -26,6 +26,14 @@
  # include <config.h>
  #endif
  
-+#if defined(ALTIVEC) && !defined(ALTIVEC_970)
-+#ifndef __APPLE_CC__
++#if defined(__ALTIVEC__) && !defined(_ARCH_PPC64)
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
@@ -3518,11 +3607,11 @@
  #include <float.h>
  #include "lame.h"
  #include "machine.h"
-@@ -954,6 +960,108 @@ disable_FPE(void)
+@@ -964,6 +972,108 @@ disable_FPE(void)
   *
   ***********************************************************************/
  
-+#if defined(ALTIVEC) && !defined(ALTIVEC_970)
++#if defined(__ALTIVEC__) && !defined(_ARCH_PPC64)
 +
 +inline ieee754_float32_t fast_log10_altivec(ieee754_float32_t x)
 +{
@@ -3538,7 +3627,7 @@
 +    vhalf = (vector float)VINIT4ALL(0.15051499783);
 +    vsqrt2 = (vector float)VINIT4ALL(1.4142135623731);
 +    vconst4 = (vector float)VINIT4ALL(0.301029995664);
-+    vzero = vec_xor(vzero,vzero);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
 +    vconst1 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(9));
 +    vconst2 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(7));
 +    vconst2 = vec_nor(vconst2,vconst2);
@@ -3585,7 +3674,7 @@
 +    vhalf = (vector float)VINIT4ALL(0.34657359028);
 +    vsqrt2 = (vector float)VINIT4ALL(1.4142135623731);
 +    vconst4 = (vector float)VINIT4ALL(0.6931471805599);
-+    vzero = vec_xor(vzero,vzero);
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
 +    vconst1 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(9));
 +    vconst2 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(7));
 +    vconst2 = vec_nor(vconst2,vconst2);
@@ -3627,7 +3716,7 @@
  
  #define LOG2_SIZE       (512)
  #define LOG2_SIZE_L2    (9)
-@@ -1004,6 +1112,8 @@ fast_log2(ieee754_float32_t x)
+@@ -1014,6 +1124,8 @@ fast_log2(ieee754_float32_t x)
      return log2val;
  }
  
@@ -3636,13 +3725,13 @@
  #else /* Don't use FAST_LOG */
  
  
---- libmp3lame/util.h.orig	2017-09-07 04:33:36.000000000 +0900
-+++ libmp3lame/util.h	2017-10-14 18:02:08.000000000 +0900
+--- libmp3lame/util.h
++++ libmp3lame/util.h
 @@ -93,10 +93,17 @@ extern  "C" {
  
  /* log/log10 approximations */
  #ifdef USE_FAST_LOG
-+#if defined(ALTIVEC) && !defined(ALTIVEC_970)
++#if defined(__ALTIVEC__) && !defined(_ARCH_PPC64)
 +#define         FAST_LOG10(x)       (fast_log10_altivec(x))
 +#define         FAST_LOG(x)         (fast_loge_altivec(x))
 +#define         FAST_LOG10_X(x,y)   (fast_log10_altivec(x)*(y))
@@ -3704,7 +3793,7 @@
  
  /* log/log10 approximations */
      extern void init_log_table(void);
-+#if defined(ALTIVEC) && !defined(ALTIVEC_970)
++#if defined(__ALTIVEC__) && !defined(_ARCH_PPC64)
 +    extern ieee754_float32_t fast_log10_altivec(ieee754_float32_t x);
 +    extern ieee754_float32_t fast_loge_altivec(ieee754_float32_t x);
 +#else
@@ -3713,26 +3802,28 @@
  
      int     isResamplingNecessary(SessionConfig_t const* cfg);
  
---- libmp3lame/vbrquantize.c.orig	2012-02-07 22:36:35.000000000 +0900
-+++ libmp3lame/vbrquantize.c	2017-10-14 18:02:08.000000000 +0900
-@@ -26,6 +26,12 @@
+--- libmp3lame/vbrquantize.c
++++ libmp3lame/vbrquantize.c
+@@ -26,6 +26,14 @@
  #  include <config.h>
  #endif
  
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +#undef TAKEHIRO_IEEE754_HACK
-+#ifndef __APPLE_CC__
++#if !(defined(__APPLE_CC__) && (__APPLE_CC__ > 1))
++/* FSF GCC needs the header for the vec_* names; Apple's -faltivec
++   frontend provides them natively and warns the include is ignored */
 +#include <altivec.h>
 +#endif
 +#endif
  
  #include "lame.h"
  #include "machine.h"
-@@ -217,8 +223,23 @@ k_34_4(DOUBLEX x[4], int l3[4])
+@@ -217,8 +225,23 @@ k_34_4(DOUBLEX x[4], int l3[4])
  static  FLOAT
  calc_sfb_noise_x34(const FLOAT * xr, const FLOAT * xr34, unsigned int bw, uint8_t sf)
  {
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    float vpow[8] __attribute__ ((aligned (16)));
 +    vector float v0, v1, v2, v3, v4, v5, v6,v7,v8,v9,v10,v11,v12,v13;
 +    vector unsigned char vperm1, vperm2,vc1,vc2,vc3;
@@ -3741,7 +3832,7 @@
 +    unsigned int s1,s2,s3,s4,s5,s6,s7,s8;
 +    const vector float const1 = (vector float)VINIT4(0.4053964553387788,3.404263724373839,5.465086767819913,1.0);
 +    const vector float const2 = (vector float)VINIT4(7.719205369637751,10.93017829043677,0,0);
-+#ifdef ALTIVEC_970
++#if _ARCH_PPC64
 +    vector unsigned int vmask1,vmask2,vmask3;
 +#else
 +    vector unsigned char vperm3,vperm4,vc4,vc5,vc6,vmask;
@@ -3753,15 +3844,15 @@
      const FLOAT sfpow = pow20[sf + Q_MAX2]; /*pow(2.0,sf/4.0); */
      const FLOAT sfpow34 = ipow20[sf]; /*pow(sfpow,-3.0/4.0); */
  
-@@ -226,6 +247,239 @@ calc_sfb_noise_x34(const FLOAT * xr, con
+@@ -226,6 +249,239 @@ calc_sfb_noise_x34(const FLOAT * xr, const FLOAT * xr34, unsigned int bw, uint8_
      unsigned int i = bw >> 2u;
      unsigned int const remaining = (bw & 0x03u);
  
-+#ifdef ALTIVEC
++#if __ALTIVEC__
 +    vpow[0] = sfpow;
 +    vpow[1] = sfpow34;
 +    vsfpow = vec_ld(0,vpow);
-+    vxfsf = vec_xor(vxfsf,vxfsf);
++    vxfsf = (__typeof__(vxfsf))vec_splat_u32(0);
 +    vsfpow34 = vec_splat(vsfpow,1);
 +    vsfpow = vec_splat(vsfpow,0);
 +    vperm1 = vec_lvsl(0,xr);
@@ -3770,8 +3861,8 @@
 +    v1 = vec_ld(0,xr34);
 +    vabs = (vector float)vec_splat_s32(-1);
 +    vabs = (vector float)vec_sl((vector unsigned int)vabs, (vector unsigned int)vabs);
-+    vzero = vec_xor(vzero,vzero);
-+#ifdef ALTIVEC_970
++    vzero = (__typeof__(vzero))vec_splat_u32(0);
++#if _ARCH_PPC64
 +    vc1 = vec_splat_u8(1);
 +    vc2 = vec_splat_u8(5);
 +    vc3 = vec_sl(vc1,vc2);
@@ -3833,7 +3924,7 @@
 +        s7 = l3[3] >> 16;
 +        s8 = l3[3] & 0xffff;
 +        
-+#ifdef ALTIVEC_970
++#if _ARCH_PPC64
 +        v2 = vec_lde(0,pow43+s1);
 +        v3 = vec_lde(0,pow43+s2);
 +        v4 = vec_lde(0,pow43+s3);
@@ -3907,7 +3998,7 @@
 +        xr34 += 8;
 +    }
 +    if (i) {
-+#ifdef ALTIVEC_970
++#if _ARCH_PPC64
 +        x[0] = sfpow34 * xr34[0];
 +        x[1] = sfpow34 * xr34[1];
 +        x[2] = sfpow34 * xr34[2];
@@ -3993,7 +4084,7 @@
      while (i-- > 0) {
          x[0] = sfpow34 * xr34[0];
          x[1] = sfpow34 * xr34[1];
-@@ -262,6 +516,7 @@ calc_sfb_noise_x34(const FLOAT * xr, con
+@@ -262,6 +518,7 @@ calc_sfb_noise_x34(const FLOAT * xr, const FLOAT * xr34, unsigned int bw, uint8_
          xfsf += (x[0] * x[0] + x[1] * x[1]) + (x[2] * x[2] + x[3] * x[3]);
      }
      return xfsf;
