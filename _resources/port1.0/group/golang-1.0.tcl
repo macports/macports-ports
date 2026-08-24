@@ -20,10 +20,11 @@
 #                   sha256 fedcba654321... \
 #                   size   4321
 #
-# The github-1.0 or bitbucket-1.0 portgroups are automatically applied and set
-# up for projects hosted on GitHub or Bitbucket; in these cases it is not
-# necessary to specify the portgroups or call github.setup or bitbucket.setup,
-# i.e. the following are sufficient:
+# go.setup recognizes the domain of the package ID and applies the portgroup
+# for that host itself, calling its setup proc with the author, project and
+# version it just parsed. github.com, gitlab.com, bitbucket.org, git.sr.ht,
+# codeberg.org and gitea.com are handled this way, so neither the PortGroup
+# line nor the github.setup/sourcehut.setup/... call needs to be written out:
 #
 # PortGroup     golang 1.0
 # go.setup      github.com/author/project 1.0.0 v
@@ -32,6 +33,19 @@
 #
 # PortGroup     golang 1.0
 # go.setup      bitbucket.com/author/project 1.0.0 v
+#
+# or, for sourcehut, with the ~ that belongs to the package ID:
+#
+# PortGroup     golang 1.0
+# go.setup      git.sr.ht/~author/project 1.0.0 v
+#
+# A package ID that is not the place the source is fetched from -- an author
+# who has moved hosts but kept the old repo as a mirror, or a vanity import
+# path -- is spelled by naming the host in go.setup and the import path in
+# go.package afterwards:
+#
+# go.setup      gitea.com/author/project 1.0.0 v
+# go.package    example.org/author/project
 #
 # The go.vendors option expects a list of package IDs, each followed by these
 # labeled values:
@@ -122,10 +136,24 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
         git.sr.ht {
             uplevel "PortGroup sourcehut 1.0"
             sourcehut.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+            # Alone among the host portgroups, sourcehut-1.0 points worksrcdir
+            # at the extracted tarball. That is right for a port that builds
+            # where it unpacked, but here post-extract moves the source into
+            # the GOPATH and the build has to follow it, so put back the
+            # worksrcdir this portgroup set before go.setup was called. A port
+            # needing something else still sets worksrcdir outright, which
+            # outranks either default.
+            default worksrcdir {gopath/src/${go.package}}
+        }
+        codeberg.org {
+            uplevel "PortGroup codeberg 1.0"
+            codeberg.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+            go._share_gitea_distfile [option codeberg.homepage]
         }
         gitea.com {
             uplevel "PortGroup gitea 1.0"
             gitea.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+            go._share_gitea_distfile [option gitea.homepage]
         }
         default {
             if {![info exists PortInfo(name)]} {
@@ -134,6 +162,25 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             version     ${go.version}
         }
     }
+}
+
+# Gitea, and so codeberg-1.0 and gitea-1.0, names an archive for the tag alone
+# -- v1.4.0.tar.gz -- and keeps that from colliding with the next project's
+# v1.4.0.tar.gz by giving each port a dist_subdir of its own. Go ports instead
+# share one dist_subdir, so that a vendored dependency pulled by many of them is
+# fetched and mirrored once, and a bare tag name cannot survive there. Name the
+# distfile for the project so that it can, and put the shared subdir back.
+#
+# The tag stays in the URL, where the server requires it, and ?dummy= lets base
+# name the local file something else; the github.com case and go.vendors below
+# both do the same. homepage is passed in rather than read here because only the
+# caller knows which of the two portgroups was applied.
+proc go._share_gitea_distfile {homepage} {
+    global go.project go.version
+
+    dist_subdir             go
+    distname                ${go.project}-${go.version}
+    default master_sites    "${homepage}/archive/\${git.branch}\${extract.suffix}?dummy="
 }
 
 proc go._translate_package_id {package_id} {
@@ -289,8 +336,12 @@ default worksrcdir      {gopath/src/${go.package}}
 # before it would have quietly fetched 1.26.7. Keep the toolchain ports
 # current. Note also that go.toolchain_min compares by series and so will not
 # catch that case for you.
+# -modcacherw keeps the module cache writable. Go otherwise creates those
+# directories mode 0555, and unlinking an entry needs write permission on the
+# directory holding it, so base cannot wipe the work directory when a Portfile
+# changes -- that runs unprivileged, and only root can ignore the write bit.
 set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} GOPROXY=off GO111MODULE=off \
-                GOTOOLCHAIN=local \
+                GOTOOLCHAIN=local GOFLAGS=-modcacherw \
                 CC=${configure.cc} CXX=${configure.cxx} FC=${configure.fc} \
                 OBJC=${configure.objc} OBJCXX=${configure.objcxx} }
 
@@ -443,9 +494,19 @@ proc handle_set_go_vendors {vendors_str} {
                         set master_site https://${vdomain}/${vauthor}/${vproject}/-/archive/${vversion}
                     }
                     git.sr.ht {
-                        set vdistname ${distversion}
+                        # Sourcehut and Gitea name an archive for the ref
+                        # alone, which no two of them can share a dist_subdir
+                        # under; ?dummy= names the local file for the package
+                        # instead. See go._share_gitea_distfile.
+                        set vdistname ${vproject}-${distversion}
                         set distfile ${vdistname}.tar.gz
-                        set master_site https://${vdomain}/~${vauthor}/${vproject}/archive
+                        set master_site https://${vdomain}/~${vauthor}/${vproject}/archive/${vversion}.tar.gz?dummy=
+                    }
+                    codeberg.org -
+                    gitea.com {
+                        set vdistname ${vproject}-${distversion}
+                        set distfile ${vdistname}.tar.gz
+                        set master_site https://${vdomain}/${vauthor}/${vproject}/archive/${vversion}.tar.gz?dummy=
                     }
                     default {
                         ui_error "go.vendors can't handle dependencies from ${vdomain}"
