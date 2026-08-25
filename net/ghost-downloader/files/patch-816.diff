@@ -1,0 +1,463 @@
+diff --git a/features/ed2k_pack/session.py b/features/ed2k_pack/session.py
+index a676633b..bc094a27 100644
+--- a/features/ed2k_pack/session.py
++++ b/features/ed2k_pack/session.py
+@@ -3,6 +3,7 @@
+ import asyncio
+ from collections.abc import Callable
+ from dataclasses import dataclass
++from os.path import abspath, normcase
+ from pathlib import Path
+ from urllib.parse import quote, unquote
+ 
+@@ -39,6 +40,7 @@ async def run(
+         fileHash: str,
+         name: str,
+         outputFolder: Path,
++        onStarted: Callable[[RunResult], None] | None = None,
+         onProgress: Callable[[Transfer, int], None] | None = None,
+         sharingTimeSeconds: int = 0,
+     ) -> RunResult:
+@@ -52,27 +54,47 @@ async def run(
+             await self._open()
+             client = self._client
+ 
++            wasCancelled = False
+             if fileHash:
+-                await client.resume(fileHash)
++                transfer = await client.resume(fileHash)
+             else:
+                 try:
+-                    await client.remove(linkHash.upper(), deleteFile=False)
+-                except Error as e:
+-                    if e.code != ErrorCode.TRANSFER_NOT_FOUND:
+-                        raise
+-                try:
+-                    transfer = await client.addLink(
+-                        buildEd2kLink(link, name), outputFolder,
++                    addTask = asyncio.create_task(
++                        client.addLink(buildEd2kLink(link, name), outputFolder)
+                     )
++                    try:
++                        transfer = await asyncio.shield(addTask)
++                    except asyncio.CancelledError:
++                        wasCancelled = True
++                        transfer = await addTask
+                 except Error as e:
++                    if wasCancelled:
++                        raise asyncio.CancelledError() from e
+                     if e.code == ErrorCode.TRANSFER_EXISTS:
+-                        raise TaskError("该 eD2k 传输已存在于 daemon 中") from e
+-                    raise TaskError("ED2k 错误：{detail}", detail=str(e)) from e
+-                fileHash = transfer.hash
+-                name = transfer.name or name
++                        expectedPath = normcase(abspath(outputFolder / name))
++                        transfer = next((
++                            t for t in (await client.snapshot()).transfers
++                            if toTransferKey(t.hash, t.size) == identity
++                            and normcase(abspath(t.path)) == expectedPath
++                        ), None)
++                        if transfer is None:
++                            raise TaskError(
++                                "该 eD2k 传输已存在于 daemon 中"
++                            ) from e
++                        transfer = await client.resume(transfer.hash)
++                    else:
++                        raise TaskError("ED2k 错误：{detail}", detail=str(e)) from e
+ 
+             sharingStart = 0.0
+-            fileSize = 0
++            fileHash = transfer.hash
++            name = transfer.name or name
++            fileSize = transfer.size
++            if onStarted:
++                onStarted(RunResult(
++                    fileHash=fileHash, name=name, fileSize=fileSize,
++                ))
++            if wasCancelled:
++                raise asyncio.CancelledError()
+             loop = asyncio.get_running_loop()
+             async for snapshot in client.snapshots():
+                 for t in snapshot.transfers:
+diff --git a/features/ed2k_pack/task.py b/features/ed2k_pack/task.py
+index 46276326..c3190df9 100644
+--- a/features/ed2k_pack/task.py
++++ b/features/ed2k_pack/task.py
+@@ -36,23 +36,29 @@ def remove(self) -> None:
+ @dataclass(kw_only=True)
+ class ED2kTaskStep(TaskStep):
+     async def run(self, reportSpeed, waitForSpeedLimit) -> None:
+-        from .session import ed2kSession
+-        from .python_ed2k import Transfer
++        from .session import ed2kSession, RunResult
++        from .python_ed2k import Transfer, TransferState
+ 
+         task: ED2kTask = self.task
+ 
++        def onStarted(result: RunResult):
++            task.fileHash = result.fileHash
++            task.name = result.name
++            if result.fileSize:
++                task.fileSize = result.fileSize
++
+         def onProgress(t: Transfer, sharingElapsed: int):
+-            isSharing = sharingElapsed > 0
++            isSharing = t.state == TransferState.FINISHED
+             task.isSharing = isSharing
+             task.uploadRate = t.uploadRate
+             task.activePeerCount = t.activePeers
+             task.totalPeerCount = t.peers
++            self.receivedBytes = t.received
+             if isSharing:
+                 task.sharingTimeSeconds = sharingElapsed
+                 self.speed = 0
+                 reportSpeed(0)
+             else:
+-                self.receivedBytes = t.received
+                 self.speed = t.downloadRate
+                 reportSpeed(t.downloadRate)
+                 if t.size > 0:
+@@ -60,14 +66,12 @@ def onProgress(t: Transfer, sharingElapsed: int):
+                     self.progress = min(99.9, t.received / t.size * 100)
+ 
+         try:
+-            result = await ed2kSession.run(
++            await ed2kSession.run(
+                 task.url, task.fileHash, task.name, task.outputFolder,
+-                onProgress, sharingTimeSeconds=task.sharingTimeSeconds,
++                onStarted=onStarted,
++                onProgress=onProgress,
++                sharingTimeSeconds=task.sharingTimeSeconds,
+             )
+-            task.fileHash = result.fileHash
+-            task.name = result.name
+-            if result.fileSize:
+-                task.fileSize = result.fileSize
+             self.setStatus(TaskStatus.COMPLETED)
+         except asyncio.CancelledError:
+             task.isSharing = False
+diff --git a/tests/test_ed2k_session.py b/tests/test_ed2k_session.py
+index 4b3dd6f3..d97148a8 100644
+--- a/tests/test_ed2k_session.py
++++ b/tests/test_ed2k_session.py
+@@ -40,18 +40,18 @@ async def test_open_replaces_stopped_client(fake_client):
+     stopped = fake_client("/tmp/old", "/tmp/data")
+     session._client = stopped
+ 
+-    await session.open()
++    await session._open()
+ 
+-    assert session.client() is not stopped
+-    assert session.client().isRunning
+-    assert session.client().startCalls == 1
++    assert session._client is not stopped
++    assert session._client.isRunning
++    assert session._client.startCalls == 1
+ 
+ 
+ @pytest.mark.asyncio
+ async def test_concurrent_open_starts_one_client(fake_client):
+     session = session_module.ED2kSession()
+ 
+-    await asyncio.gather(session.open(), session.open())
++    await asyncio.gather(session._open(), session._open())
+ 
+     assert len(fake_client.instances) == 1
+     assert fake_client.instances[0].startCalls == 1
+diff --git a/tests/test_ed2k_task.py b/tests/test_ed2k_task.py
+index 2637370e..5f4578b4 100644
+--- a/tests/test_ed2k_task.py
++++ b/tests/test_ed2k_task.py
+@@ -1,3 +1,5 @@
++import asyncio
++from dataclasses import replace
+ from pathlib import Path
+ 
+ import pytest
+@@ -7,12 +9,8 @@
+ from ed2k_pack.pack import ED2kParser
+ from ed2k_pack.python_ed2k import Snapshot, Transfer, TransferState
+ from ed2k_pack.python_ed2k.errors import Error, ErrorCode
+-from ed2k_pack.task import (
+-    ED2kTask,
+-    ED2kTaskStep,
+-    parseEd2kLink,
+-    buildEd2kLink,
+-)
++from ed2k_pack.session import buildEd2kLink, parseEd2kLink, toTransferKey
++from ed2k_pack.task import ED2kTask, ED2kTaskStep
+ 
+ 
+ FILE_HASH = "D6E4FE0BA5FD8A2F22FC9C0326481791"
+@@ -26,11 +24,14 @@ def __init__(self):
+         self.added: list[tuple[str, Path]] = []
+         self.paused: list[str] = []
+         self.removed: list[str] = []
++        self.resumed: list[str] = []
++        self.snapshotStarted = asyncio.Event()
++        self.transfer: Transfer | None = None
+ 
+     async def addLink(self, link: str, outputDir: Path) -> Transfer:
+         self.added.append((link, outputDir))
+         name, size, fileHash = parseEd2kLink(link)
+-        return Transfer(
++        self.transfer = Transfer(
+             hash=fileHash,
+             name=name,
+             path=outputDir / name,
+@@ -43,23 +44,16 @@ async def addLink(self, link: str, outputDir: Path) -> Transfer:
+             activePeers=0,
+             peers=0,
+         )
++        return self.transfer
+ 
+     async def snapshots(self):
+-        link, outputDir = self.added[-1]
+-        name, size, fileHash = parseEd2kLink(link)
+-        yield Snapshot(transfers=(Transfer(
+-            hash=fileHash,
+-            name=name,
+-            path=outputDir / name,
+-            size=size,
+-            state=TransferState.FINISHED,
+-            done=size,
+-            received=size,
+-            downloadRate=0,
+-            uploadRate=0,
+-            activePeers=0,
+-            peers=1,
+-        ),))
++        self.snapshotStarted.set()
++        yield Snapshot(transfers=(self.transfer,))
++        await asyncio.Event().wait()
++
++    async def snapshot(self) -> Snapshot:
++        transfers = () if self.transfer is None else (self.transfer,)
++        return Snapshot(transfers=transfers)
+ 
+     async def pause(self, fileHash: str) -> None:
+         self.paused.append(fileHash)
+@@ -67,6 +61,29 @@ async def pause(self, fileHash: str) -> None:
+     async def remove(self, fileHash: str, deleteFile: bool = False) -> None:
+         self.removed.append(fileHash)
+ 
++    async def resume(self, fileHash: str) -> Transfer:
++        self.resumed.append(fileHash)
++        return self.transfer
++
++
++class DuplicateClient(FakeClient):
++    async def addLink(self, link: str, outputDir: Path) -> Transfer:
++        _, size, fileHash = parseEd2kLink(link)
++        self.transfer = Transfer(
++            hash=fileHash,
++            name="payload.bin",
++            path=outputDir / "payload.bin",
++            size=size,
++            state=TransferState.PAUSED,
++            done=0,
++            received=0,
++            downloadRate=0,
++            uploadRate=0,
++            activePeers=0,
++            peers=0,
++        )
++        raise Error(ErrorCode.TRANSFER_EXISTS, "transfer already exists")
++
+ 
+ def makeTask(tmp_path: Path, name: str = "payload(1).bin") -> ED2kTask:
+     task = ED2kTask(
+@@ -89,17 +106,14 @@ def test_build_ed2k_link_preserves_content_identity():
+ 
+ def test_session_rejects_duplicate_hash_and_size():
+     session = session_module.ED2kSession()
+-    identity = session.acquireTransfer(FILE_HASH.lower(), 1234)
++    identity = toTransferKey(FILE_HASH.lower(), 1234)
++    session._activeTransfers.add(identity)
+ 
+-    with pytest.raises(TaskError, match="该 eD2k 链接已在下载中"):
+-        session.acquireTransfer(FILE_HASH, 1234)
++    assert session.hasActiveTransfer(FILE_HASH, 1234)
++    assert not session.hasActiveTransfer(FILE_HASH, 4321)
+ 
+-    differentSize = session.acquireTransfer(FILE_HASH, 4321)
+-    session.releaseTransfer(differentSize)
+-    session.releaseTransfer(identity)
+-
+-    identity = session.acquireTransfer(FILE_HASH, 1234)
+-    session.releaseTransfer(identity)
++    session._activeTransfers.discard(identity)
++    assert not session.hasActiveTransfer(FILE_HASH, 1234)
+ 
+ 
+ async def test_step_submits_deduplicated_task_filename(monkeypatch, tmp_path):
+@@ -109,31 +123,126 @@ async def test_step_submits_deduplicated_task_filename(monkeypatch, tmp_path):
+     monkeypatch.setattr(session_module, "ed2kSession", session)
+     task = makeTask(tmp_path)
+ 
+-    await task.steps[0].run(lambda _: None, None)
++    running = asyncio.create_task(task.steps[0].run(lambda _: None, None))
++    await fakeClient.snapshotStarted.wait()
++    running.cancel()
++    with pytest.raises(asyncio.CancelledError):
++        await running
+ 
+     submittedLink, submittedFolder = fakeClient.added[0]
+     assert parseEd2kLink(submittedLink)[0] == "payload(1).bin"
+     assert submittedFolder == tmp_path
++    assert task.fileHash == FILE_HASH
+     assert fakeClient.paused == [FILE_HASH]
+     assert not session._activeTransfers
+ 
+ 
++async def test_resume_uses_saved_hash_after_output_is_created(monkeypatch, tmp_path):
++    fakeClient = FakeClient()
++    session = session_module.ED2kSession()
++    session._client = fakeClient
++    monkeypatch.setattr(session_module, "ed2kSession", session)
++    task = makeTask(tmp_path)
++
++    firstRun = asyncio.create_task(task.steps[0].run(lambda _: None, None))
++    await fakeClient.snapshotStarted.wait()
++    firstRun.cancel()
++    with pytest.raises(asyncio.CancelledError):
++        await firstRun
++
++    (tmp_path / task.name).touch()
++    fakeClient.snapshotStarted.clear()
++    secondRun = asyncio.create_task(task.steps[0].run(lambda _: None, None))
++    await fakeClient.snapshotStarted.wait()
++    secondRun.cancel()
++    with pytest.raises(asyncio.CancelledError):
++        await secondRun
++
++    assert len(fakeClient.added) == 1
++    assert fakeClient.resumed == [FILE_HASH]
++
++
++async def test_pause_waits_for_transfer_identity_during_add(monkeypatch, tmp_path):
++    class SlowAddClient(FakeClient):
++        def __init__(self):
++            super().__init__()
++            self.addStarted = asyncio.Event()
++            self.addReady = asyncio.Event()
++
++        async def addLink(self, link: str, outputDir: Path) -> Transfer:
++            self.addStarted.set()
++            await self.addReady.wait()
++            return await super().addLink(link, outputDir)
++
++    fakeClient = SlowAddClient()
++    session = session_module.ED2kSession()
++    session._client = fakeClient
++    monkeypatch.setattr(session_module, "ed2kSession", session)
++    task = makeTask(tmp_path)
++
++    running = asyncio.create_task(task.steps[0].run(lambda _: None, None))
++    await fakeClient.addStarted.wait()
++    running.cancel()
++    await asyncio.sleep(0)
++
++    assert not running.done()
++
++    fakeClient.addReady.set()
++    with pytest.raises(asyncio.CancelledError):
++        await running
++
++    assert task.fileHash == FILE_HASH
++    assert fakeClient.paused == [FILE_HASH]
++
++
++async def test_finished_transfer_enters_sharing_immediately(monkeypatch, tmp_path):
++    class FinishedClient(FakeClient):
++        async def addLink(self, link: str, outputDir: Path) -> Transfer:
++            transfer = await super().addLink(link, outputDir)
++            self.transfer = replace(
++                transfer,
++                state=TransferState.FINISHED,
++                done=transfer.size,
++                received=transfer.size,
++            )
++            return self.transfer
++
++    fakeClient = FinishedClient()
++    session = session_module.ED2kSession()
++    session._client = fakeClient
++    monkeypatch.setattr(session_module, "ed2kSession", session)
++    task = makeTask(tmp_path)
++
++    running = asyncio.create_task(task.steps[0].run(lambda _: None, None))
++    await fakeClient.snapshotStarted.wait()
++
++    assert task.isSharing
++    assert task.sharingTimeSeconds == 0
++    assert task.steps[0].receivedBytes == 1234
++
++    running.cancel()
++    with pytest.raises(asyncio.CancelledError):
++        await running
++
++
+ async def test_parser_rejects_active_duplicate_on_add_task_page(monkeypatch, tmp_path):
+     session = session_module.ED2kSession()
+-    identity = session.acquireTransfer(FILE_HASH, 1234)
++    identity = toTransferKey(FILE_HASH, 1234)
++    session._activeTransfers.add(identity)
+     monkeypatch.setattr(session_module, "ed2kSession", session)
+ 
+     with pytest.raises(TaskError, match="该 eD2k 链接已在下载中"):
+         await ED2kParser().parse(TaskOptions(url=LINK, outputFolder=tmp_path))
+ 
+-    session.releaseTransfer(identity)
++    session._activeTransfers.discard(identity)
+ 
+ 
+ async def test_active_duplicate_never_reaches_daemon(monkeypatch, tmp_path):
+     fakeClient = FakeClient()
+     session = session_module.ED2kSession()
+     session._client = fakeClient
+-    identity = session.acquireTransfer(FILE_HASH, 1234)
++    identity = toTransferKey(FILE_HASH, 1234)
++    session._activeTransfers.add(identity)
+     monkeypatch.setattr(session_module, "ed2kSession", session)
+     task = makeTask(tmp_path)
+ 
+@@ -141,14 +250,10 @@ async def test_active_duplicate_never_reaches_daemon(monkeypatch, tmp_path):
+         await task.steps[0].run(lambda _: None, None)
+ 
+     assert fakeClient.added == []
+-    session.releaseTransfer(identity)
+-
++    session._activeTransfers.discard(identity)
+ 
+-async def test_transfer_exists_does_not_remove_first_download(monkeypatch, tmp_path):
+-    class DuplicateClient(FakeClient):
+-        async def addLink(self, link: str, outputDir: Path) -> Transfer:
+-            raise Error(ErrorCode.TRANSFER_EXISTS, "transfer already exists")
+ 
++async def test_transfer_exists_does_not_remove_paused_transfer(monkeypatch, tmp_path):
+     fakeClient = DuplicateClient()
+     session = session_module.ED2kSession()
+     session._client = fakeClient
+@@ -160,3 +265,21 @@ async def addLink(self, link: str, outputDir: Path) -> Transfer:
+ 
+     assert fakeClient.removed == []
+     assert not session._activeTransfers
++
++
++async def test_matching_daemon_transfer_is_resumed(monkeypatch, tmp_path):
++    fakeClient = DuplicateClient()
++    session = session_module.ED2kSession()
++    session._client = fakeClient
++    monkeypatch.setattr(session_module, "ed2kSession", session)
++    task = makeTask(tmp_path, name="payload.bin")
++
++    running = asyncio.create_task(task.steps[0].run(lambda _: None, None))
++    await fakeClient.snapshotStarted.wait()
++    running.cancel()
++    with pytest.raises(asyncio.CancelledError):
++        await running
++
++    assert task.fileHash == FILE_HASH
++    assert fakeClient.resumed == [FILE_HASH]
++    assert fakeClient.removed == []
