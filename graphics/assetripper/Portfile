@@ -1,0 +1,179 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; truncate-lines: t; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           app 1.1
+
+github.setup        AssetRipper AssetRipper 2.0.0
+github.tarball_from archive
+name                [string tolower ${github.project}]
+revision            0
+
+categories          graphics devel dotnet
+platforms           {darwin >= 21}
+supported_archs     arm64 x86_64
+license             GPL-3
+maintainers         nomaintainer
+
+description         WebUI application for extracting and converting Unity assets
+long_description    AssetRipper extracts assets from Unity serialized files and asset \
+                    bundles and converts them into the native Unity engine format.
+
+homepage            https://assetripper.github.io/AssetRipper/
+
+checksums           rmd160  767733b9b6d1431debedc9c70f7af872f14d1d52 \
+                    sha256  889c041aef269c1f26af1452b22f85e08c6903dbf6657d611f3ca9f3f2259bb6 \
+                    size    19964027
+
+patchfiles          patch-user-data-directory.diff
+
+universal_variant   no
+
+set dotnet_sdk_ver_maj \
+                    10
+set llvm_version    22
+depends_build-append \
+                    port:dotnet-sdk-${dotnet_sdk_ver_maj} \
+                    path:bin/dotnet:dotnet-cli
+
+if {[variant_isset nativeaot]} {
+    depends_build-append \
+                    port:clang-${llvm_version}
+
+    # Xcode ld fails with 
+    # Assertion failed: (_addend == uniqueIndex && "too many large addends"), function setAddend, file Fixup.cpp, line 1510.
+    # on the NativeAOT object.
+    # Patching in -ld_classic works but it's getting removed soon.
+    set var_deployment_args \
+                    [list \
+                        -property:LinkerFlavor=${prefix}/libexec/llvm-${llvm_version}/bin/ld64.lld \
+                    ]
+} else {
+    depends_lib-append \
+                    port:dotnet-runtime-${dotnet_sdk_ver_maj} \
+                    port:aspnetcore-runtime-${dotnet_sdk_ver_maj}
+
+    set var_deployment_args \
+                    [list \
+                        -property:PublishAot=false \
+                        -property:PublishTrimmed=false \
+                        -property:SelfContained=false \
+                    ]
+}
+
+set dotnet_root_env DOTNET_ROOT=${prefix}/share/dotnet
+set shared_env "
+    ${dotnet_root_env} \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_CLI_HOME=${workpath} \
+    NUGET_PACKAGES=${workpath}/.nuget/packages \
+    DOTNET_CLI_USE_MSBUILD_SERVER=0 \
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+"
+
+configure.env-append \
+                    {*}$shared_env
+build.env-append    {*}$shared_env
+
+set dotnet_cmd      ${prefix}/bin/dotnet
+set project_file    Source/AssetRipper.GUI.Free/AssetRipper.GUI.Free.csproj
+set publish_path    ${worksrcpath}/publish
+
+if {${build_arch} eq "x86_64"} {
+    set dotnet_arch x64
+} else {
+    set dotnet_arch ${build_arch}
+}
+set dotnet_rid      osx-${dotnet_arch}
+
+configure {
+    ui_debug "configure - restore project"
+    system -W ${worksrcpath} \
+        "${configure.env} ${dotnet_cmd} restore ${project_file} \
+         --disable-build-servers \
+         --nologo \
+         -r ${dotnet_rid} \
+         ${var_deployment_args}"
+}
+
+build.cmd           ${dotnet_cmd} publish
+build.target        ${project_file}
+build.args          --disable-build-servers \
+                    --nologo \
+                    --no-restore \
+                    -c Release \
+                    -r ${dotnet_rid} \
+                    -o ${publish_path} \
+                    -nodeReuse:false \
+                    -property:UseSharedCompilation=false \
+                    -property:DebugType=none \
+                    -property:DebugSymbols=false \
+                    -property:CopyOutputSymbolsToPublishDirectory=false
+build.args-append   {*}${var_deployment_args}
+
+post-build {
+    set launcher_source ${worksrcpath}/assetripper-app-launcher.applescript
+    set launcher ${worksrcpath}/assetripper-app-launcher.app
+    set fh [open ${launcher_source} w]
+    puts ${fh} [format {do shell script "open -a Terminal %s"} \
+        [shellescape ${prefix}/bin/${name}]]
+    close ${fh}
+
+    system -W ${worksrcpath} \
+        "/usr/bin/osacompile -o [shellescape ${launcher}] \
+         [shellescape ${launcher_source}]"
+}
+
+destroot {
+    xinstall -d ${destroot}${prefix}/bin \
+        ${destroot}${prefix}/libexec
+    copy ${publish_path} ${destroot}${prefix}/libexec/${name}
+
+    if {[variant_isset nativeaot]} {
+        ln -s ../libexec/${name}/AssetRipper.GUI.Free \
+            ${destroot}${prefix}/bin/${name}
+    } else {
+        set wrapper ${destroot}${prefix}/bin/${name}
+        set fh [open ${wrapper} w]
+        puts ${fh} "#!/bin/sh"
+        puts ${fh} "export ${dotnet_root_env}"
+        puts ${fh} "exec ${prefix}/libexec/${name}/AssetRipper.GUI.Free \"\$@\""
+        close ${fh}
+        file attributes ${wrapper} -permissions 0755
+    }
+}
+
+post-destroot {
+    app::post_destroot
+
+    set applet_resources ${worksrcpath}/assetripper-app-launcher.app/Contents/Resources
+    set app_contents ${destroot}${applications_dir}/[option app.name].app/Contents
+    set app_resources ${app_contents}/Resources
+
+    xinstall -m 0644 ${applet_resources}/applet.rsrc \
+        ${applet_resources}/Assets.car \
+        ${app_resources}
+    xinstall -d ${app_resources}/Scripts
+    xinstall -m 0644 ${applet_resources}/Scripts/main.scpt \
+        ${app_resources}/Scripts
+
+    system "/usr/libexec/PlistBuddy \
+        -c [shellescape {Add :OSAAppletShowStartupScreen bool false}] \
+        [shellescape ${app_contents}/Info.plist]"
+
+    app::sign
+}
+
+app.executable      ${worksrcpath}/assetripper-app-launcher.app/Contents/MacOS/applet
+app.icon            ${worksrcpath}/Media/Images/LogoReimagined/LogoReimaginedTransparent.png
+app.name            ${github.project}
+app.identifier      io.github.[string tolower ${github.author}].${github.project}
+app.sign            yes
+app.signing_args    --force
+app.manual_post_destroot \
+                    yes
+
+variant nativeaot description {Build a self-contained NativeAOT executable, trading size for performance} {}
+
+github.livecheck.regex \
+                    {([0-9]+(?:\.[0-9]+)*)}
