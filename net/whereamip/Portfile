@@ -1,0 +1,175 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+PortGroup           github 1.0
+
+github.setup        frinsen whereamip 0.6 v
+github.tarball_from archive
+revision            0
+
+categories          net aqua
+license             MIT
+maintainers         @frinsen openmaintainer
+
+description         Menu bar indicator for the current exit IP address
+
+long_description    ${name} shows, in the menu bar, the country flag of the \
+                    public IP address that traffic currently leaves the Mac \
+                    from, and reports whether a VPN or iCloud Private Relay \
+                    is carrying that traffic and whether DNS queries are \
+                    resolving outside it. The same information is available \
+                    as one-shot text or JSON from the command line tool of \
+                    the same name.
+
+# macOS 13 Ventura (darwin 22) or later. The menu bar app is built on SwiftUI
+# MenuBarExtra and SMAppService, both 13.0-only, and Package.swift declares
+# .macOS(.v13). A version-qualified platforms line is the documented way to
+# say this: base flips the default of known_fail to yes on older systems
+# (portutil.tcl, _handle_platforms), which is what the guide asks for instead
+# of setting known_fail directly.
+platforms           {darwin >= 22}
+
+checksums           rmd160  02dbadac8c889e5adabd8ac02a234714c929b231 \
+                    sha256  26327534cacc51958ca7d8caf784ca6024282a1ac2a4fe35a98e3260044ff396 \
+                    size    2697032
+
+installs_libs       no
+
+# make-app-bundle.sh assembles the app from .build/release, which SwiftPM only
+# maintains as a symlink for a single-architecture build; passing two --arch
+# flags moves the products to .build/apple/Products/Release instead. Universal
+# builds are therefore not supported.
+universal_variant   no
+
+set appname         WhereAmIP
+set clidir          ${prefix}/libexec/${name}
+
+# swift-tools-version 5.9 puts the floor at Xcode 15. Checked against the
+# active Xcode rather than the darwin version because the two are decoupled:
+# a current macOS can still have an old Xcode selected.
+set xcodeversion_min_required 15.0
+pre-fetch {
+    if {![info exists xcodeversion] || ${xcodeversion} eq "none"} {
+        ui_error "${name} @${version} requires Xcode ${xcodeversion_min_required} or later but you have none installed."
+        ui_error "See https://guide.macports.org/chunked/installing.xcode.html for download links."
+        return -code error "unable to find Xcode"
+    }
+    if {[vercmp ${xcodeversion} < ${xcodeversion_min_required}]} {
+        ui_error "${name} @${version} requires Xcode ${xcodeversion_min_required} or later but you have Xcode ${xcodeversion}."
+        ui_error "See https://guide.macports.org/chunked/installing.xcode.html for download links."
+        return -code error "incompatible Xcode version"
+    }
+}
+
+# The bundled update notifier only tells the user how to upgrade, it never
+# installs anything itself, but the command it offers is hardcoded to
+# Homebrew upstream. Point it at port instead so a MacPorts install is not
+# told to fetch a second copy through another package manager. The test that
+# guards the string against regressions gets the same substitution so that
+# port test stays meaningful.
+
+use_configure       no
+
+# Full Xcode is required for the app target. use_xcode also makes base export
+# DEVELOPER_DIR=${developer_dir} for the build phase and around the pre-/post-
+# blocks in this file, which is what the bundled build script needs in order
+# to find a Swift driver that can compile SwiftUI.
+use_xcode           yes
+
+# Clearing CPATH: headers in ${prefix}/include collide with the macOS SDK's
+# when SwiftPM drives the clang importer. Same workaround as devel/swiftformat,
+# devel/swiftlint and devel/csv2strings.
+compiler.cpath
+
+# SwiftPM dependencies, deliberately not vendored.
+#
+# This package has one remote dependency, apple/swift-argument-parser, used by
+# the command line target. MacPorts has portgroups that pre-fetch language
+# level dependencies as checksummed distfiles - cargo_fetch-1.0 (cargo.crates)
+# and golang-1.0 (go.vendors) - but there is no swift or swiftpm equivalent,
+# and every SwiftPM port in the tree that has package dependencies
+# (devel/swiftlint, devel/tuist, devel/vapor-toolbox, sysutils/mas) lets
+# swift build resolve them over the network in the build phase. That is what
+# gets merged today, so this port does the same rather than inventing a
+# vendoring scheme no other port uses or can be updated by an existing tool.
+#
+# It works on a stock installation because macports.conf's sandbox_network
+# defaults to no, so base does not add "(deny network*)" to the build sandbox
+# profile (portsandbox.tcl), and SwiftPM's caches land under
+# ${workpath}/.home, which the profile already allows.
+#
+# It is as reproducible as SwiftPM allows without pinning the toolchain: the
+# distfile ships Package.resolved, and SwiftPM re-resolves only when that file
+# cannot be satisfied, so on a current Xcode the exact revision recorded there
+# is what gets fetched. Forcing that with --disable-automatic-resolution was
+# considered and rejected: the pinned swift-argument-parser 1.8.2 declares
+# swift-tools-version 6.0, so an Xcode 15 toolchain cannot read its manifest
+# at all. Left to resolve, SwiftPM skips it and falls back to the 1.7 series
+# (tools 5.7), which is what keeps this buildable on macOS 13, where Xcode
+# 15.2 is the newest available. A hard pin would silently raise the real
+# floor to macOS 14.5.
+#
+# --disable-sandbox is SwiftPM's own sandbox, which cannot be nested inside
+# the MacPorts one; every SwiftPM port in the tree passes it.
+set swift_build_flags "--arch ${configure.build_arch} --disable-sandbox"
+
+build.cmd           swift
+build.target        build
+build.args          --configuration release {*}${swift_build_flags}
+
+# Assemble WhereAmIP.app with the script upstream ships, so the bundle layout,
+# Info.plist and icons have a single definition. Its inner swift build sees an
+# already-resolved, already-built .build directory from the build phase above;
+# SWIFT_BUILD_FLAGS threads the same flags through so it reuses those products
+# instead of relinking with different settings.
+post-build {
+    system -W ${worksrcpath} \
+        "SWIFT_BUILD_FLAGS='${swift_build_flags}' ./scripts/make-app-bundle.sh ${worksrcpath}/dist"
+}
+
+test.run            yes
+test.cmd            swift
+test.target         test
+test.args           {*}${swift_build_flags}
+
+destroot {
+    xinstall -d ${destroot}${applications_dir}
+    file copy ${worksrcpath}/dist/${appname}.app ${destroot}${applications_dir}
+
+    # The app is already ad-hoc signed by make-app-bundle.sh and nothing here
+    # modifies the bundle, but re-sign in place anyway, last, as the ports
+    # that ship .app bundles do (net/sniffnet, editors/emacs, devel/MaciASL):
+    # an unsigned or stale-signed bundle will not launch from the Finder on
+    # recent macOS, and --force makes this idempotent.
+    system -W ${destroot}${applications_dir} \
+        "/usr/bin/codesign --force --deep --sign - ${appname}.app"
+
+    # The command line tool loads its iCloud Private Relay address ranges from
+    # the SwiftPM resource bundle that swift build emits next to the
+    # executable, so the two have to stay together in libexec; ${prefix}/bin
+    # gets a symlink rather than a copy of the binary.
+    xinstall -d ${destroot}${clidir}
+    xinstall -m 0755 ${worksrcpath}/.build/release/${name} ${destroot}${clidir}
+    file copy ${worksrcpath}/.build/release/${name}_WhereAmIPCore.bundle \
+        ${destroot}${clidir}
+
+    xinstall -d ${destroot}${prefix}/bin
+    ln -s ${clidir}/${name} ${destroot}${prefix}/bin/${name}
+
+    xinstall -d ${destroot}${prefix}/share/doc/${name}
+    xinstall -m 0644 -W ${worksrcpath} LICENSE README.md CHANGELOG.md \
+        ${destroot}${prefix}/share/doc/${name}
+}
+
+notes "
+Start the menu bar app with:
+
+    open ${applications_dir}/${appname}.app
+
+then turn on Settings > Launch at Login inside the app to have it start on
+every login. The app has no Dock icon and no window; it lives in the menu bar.
+
+The command line tool is ${prefix}/bin/${name}: '${name} status' prints a
+one-shot report and '${name} status --json' prints the same thing as JSON.
+"
