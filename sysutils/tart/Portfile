@@ -1,0 +1,103 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           xcodeversion 1.0
+
+github.setup        openai tart 2.36.0
+github.tarball_from archive
+revision            0
+
+homepage            https://tart.run
+
+categories          sysutils emulators
+# Functional Source License 1.1, converting to Apache-2 two years after release
+license             Restrictive/Distributable
+maintainers         {gmail.com:herby.gillot @herbygillot} \
+                    openmaintainer
+
+description         macOS and Linux VMs on Apple Silicon
+long_description    Tart is a virtualization toolset to build, run and manage \
+                    macOS and Linux virtual machines on Apple Silicon, built on \
+                    Apple's Virtualization.Framework. Virtual machine images can \
+                    be pushed to and pulled from OCI-compatible container \
+                    registries.
+
+checksums           rmd160  2cf84f92d326f8498002c40ef34c108a8bdb7f1e \
+                    sha256  ec971351908037ae993b78a3bf8d17306c498df5cfb2b7764100dd8c8c1be186 \
+                    size    9622974
+
+# Upstream targets macOS 13, but grpc-swift 1.27.1 needs Swift 6.1, first shipped in Xcode 16.3
+# The version number for macosx is the darwin version number (os.major)
+platforms           {macosx >= 24}
+supported_archs     arm64
+
+minimum_xcodeversions \
+                    {24 16.3} \
+                    {25 16.3}
+
+if {${os.platform} eq "darwin" && (${os.major} < 24 || ${os.arch} ne "arm")} {
+    known_fail yes
+    pre-fetch {
+        ui_error "${name} requires macOS 15 or later on Apple Silicon (arm64)."
+        return -code error "incompatible macOS version or architecture"
+    }
+}
+
+# Clearing CPATH because of header conflicts with the macOS SDK when using the SwiftPM build system
+compiler.cpath
+
+use_configure       no
+use_parallel_build  no
+use_xcode           yes
+installs_libs       no
+
+build.cmd           swift
+build.target        build
+# Disable the SwiftPM sandbox since the port build already runs in a sandbox
+build.args          --configuration release \
+                    --product tart \
+                    --disable-sandbox \
+                    --cache-path ${workpath}/.swiftpm/cache \
+                    --config-path ${workpath}/.swiftpm/config \
+                    --security-path ${workpath}/.swiftpm/security
+
+# Equivalent of upstream's .ci/set-version.sh
+post-patch {
+    reinplace "s|\\\${VERSION}|${version}|g" ${worksrcpath}/Sources/tart/CI/CI.swift
+    system -W ${worksrcpath} "/usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string ${version}' Resources/Info.plist"
+}
+
+set appdir          ${prefix}/libexec/${name}/${name}.app
+
+destroot {
+    xinstall -d ${destroot}${appdir}/Contents/MacOS
+    xinstall -d ${destroot}${appdir}/Contents/Resources
+
+    xinstall -m 0755 ${worksrcpath}/.build/release/${name} \
+        ${destroot}${appdir}/Contents/MacOS/${name}
+    xinstall -m 0644 ${worksrcpath}/Resources/Info.plist \
+        ${destroot}${appdir}/Contents/Info.plist
+    xinstall -m 0644 ${worksrcpath}/Resources/actool/Assets.car \
+        ${destroot}${appdir}/Contents/Resources/Assets.car
+    xinstall -m 0644 "${worksrcpath}/Resources/actool/UPW Tart.icns" \
+        "${destroot}${appdir}/Contents/Resources/UPW Tart.icns"
+
+    # Virtualization.Framework refuses to run without the entitlement; ad-hoc signing grants it
+    system "/usr/bin/codesign --force --sign - --entitlements ${filespath}/${name}.entitlements ${destroot}${appdir}"
+
+    xinstall -m 0755 ${filespath}/${name}.sh ${destroot}${prefix}/bin/${name}
+    reinplace "s|@APPDIR@|${appdir}|g" ${destroot}${prefix}/bin/${name}
+}
+
+notes "
+    Bridged networking (--net-bridged) is unavailable in this build. It requires the\
+    com.apple.vm.networking entitlement, which Apple grants only to binaries signed\
+    with an approved Developer ID. Softnet networking (--net-softnet) needs the\
+    softnet helper, which is not packaged. NAT networking is unaffected.
+
+    To avoid DHCP address shortage when running many VMs per day, consider reducing\
+    the default lease time from 86400 to 600 seconds:
+
+    sudo defaults write /Library/Preferences/SystemConfiguration/com.apple.InternetSharing.default.plist bootpd -dict DHCPLeaseTimeSecs -int 600
+"
