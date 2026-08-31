@@ -1,0 +1,104 @@
+diff --git a/src-tauri/src/auth/storage.rs b/src-tauri/src/auth/storage.rs
+index 21d3c24..5289619 100644
+--- a/src-tauri/src/auth/storage.rs
++++ b/src-tauri/src/auth/storage.rs
+@@ -165,6 +165,15 @@ pub fn save_accounts(store: &AccountsStore) -> Result<()> {
+ pub fn add_account(account: StoredAccount) -> Result<StoredAccount> {
+     let mut store = load_accounts()?;
+ 
++    let stored = add_account_to_store(&mut store, account)?;
++    save_accounts(&store)?;
++    Ok(stored)
++}
++
++fn add_account_to_store(
++    store: &mut AccountsStore,
++    account: StoredAccount,
++) -> Result<StoredAccount> {
+     // Check for duplicate names
+     if store.accounts.iter().any(|a| a.name == account.name) {
+         anyhow::bail!("An account with name '{}' already exists", account.name);
+@@ -172,13 +181,6 @@ pub fn add_account(account: StoredAccount) -> Result<StoredAccount> {
+ 
+     let account_clone = account.clone();
+     store.accounts.push(account);
+-
+-    // If this is the first account, make it active
+-    if store.accounts.len() == 1 {
+-        store.active_account_id = Some(account_clone.id.clone());
+-    }
+-
+-    save_accounts(&store)?;
+     Ok(account_clone)
+ }
+ 
+@@ -364,7 +366,7 @@ pub fn set_masked_account_ids(ids: Vec<String>) -> Result<()> {
+ 
+ #[cfg(test)]
+ mod tests {
+-    use super::sync_active_account_tokens;
++    use super::{add_account_to_store, sync_active_account_tokens};
+     use crate::types::{AccountsStore, AuthData, AuthDotJson, StoredAccount, TokenData};
+     use base64::Engine;
+ 
+@@ -408,6 +410,32 @@ mod tests {
+         format!("header.{encoded}.{suffix}")
+     }
+ 
++    #[test]
++    fn adding_account_does_not_change_the_active_account() {
++        let active = StoredAccount::new_api_key("A".into(), "sk-a".into());
++        let active_id = active.id.clone();
++        let stores = [
++            AccountsStore::default(),
++            AccountsStore {
++                accounts: vec![active],
++                active_account_id: Some(active_id),
++                ..AccountsStore::default()
++            },
++        ];
++
++        for mut store in stores {
++            let expected_active_id = store.active_account_id.clone();
++
++            add_account_to_store(
++                &mut store,
++                StoredAccount::new_api_key("B".into(), "sk-b".into()),
++            )
++            .unwrap();
++
++            assert_eq!(store.active_account_id, expected_active_id);
++        }
++    }
++
+     #[test]
+     fn preserves_rotated_tokens_before_switching_away_and_back() {
+         let account_a = account("A", "workspace-a", "a1");
+diff --git a/src-tauri/src/commands/oauth.rs b/src-tauri/src/commands/oauth.rs
+index 8950132..85c299b 100644
+--- a/src-tauri/src/commands/oauth.rs
++++ b/src-tauri/src/commands/oauth.rs
+@@ -5,10 +5,7 @@ use std::sync::{Arc, Mutex};
+ use tokio::sync::oneshot;
+ 
+ use crate::auth::oauth_server::{start_oauth_login, wait_for_oauth_login, OAuthLoginResult};
+-use crate::auth::{
+-    add_account, load_accounts, set_active_account, switch_to_account, touch_account,
+-    AUTH_OPERATION_LOCK,
+-};
++use crate::auth::{add_account, load_accounts, AUTH_OPERATION_LOCK};
+ use crate::types::{AccountInfo, OAuthLoginInfo};
+ 
+ struct PendingOAuth {
+@@ -62,11 +59,6 @@ pub async fn complete_login() -> Result<AccountInfo, String> {
+     // Add the account to storage
+     let stored = add_account(account).map_err(|e| e.to_string())?;
+ 
+-    // Make it active and switch to it
+-    set_active_account(&stored.id).map_err(|e| e.to_string())?;
+-    switch_to_account(&stored).map_err(|e| e.to_string())?;
+-    touch_account(&stored.id).map_err(|e| e.to_string())?;
+-
+     let store = load_accounts().map_err(|e| e.to_string())?;
+     let active_id = store.active_account_id.as_deref();
+ 

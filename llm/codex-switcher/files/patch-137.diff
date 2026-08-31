@@ -1,0 +1,452 @@
+diff --git a/src-tauri/src/auth/token_refresh.rs b/src-tauri/src/auth/token_refresh.rs
+index 24ab2b5..cbb2fbd 100644
+--- a/src-tauri/src/auth/token_refresh.rs
++++ b/src-tauri/src/auth/token_refresh.rs
+@@ -26,6 +26,20 @@ struct RefreshTokenResponse {
+     refresh_token: Option<String>,
+ }
+ 
++#[derive(Debug, serde::Deserialize)]
++struct RefreshTokenErrorResponse {
++    #[serde(default)]
++    error: Option<RefreshTokenErrorDetails>,
++}
++
++#[derive(Debug, serde::Deserialize)]
++struct RefreshTokenErrorDetails {
++    #[serde(default)]
++    message: Option<String>,
++    #[serde(default)]
++    code: Option<String>,
++}
++
+ #[derive(Debug)]
+ struct TokenRefreshUpdate {
+     id_token: String,
+@@ -34,20 +48,52 @@ struct TokenRefreshUpdate {
+     id_token_error: Option<anyhow::Error>,
+ }
+ 
+-/// Ensure the account has non-expired ChatGPT OAuth tokens.
+-/// Returns an updated account when a refresh was performed.
++/// Ensure the account has a usable ChatGPT access token for background API calls.
++///
++/// Usage polling and warm-up do not need a fresh ID token. Refreshing only because
++/// an ID token expired can unnecessarily consume a single-use refresh token while
++/// the access token and the live Codex session are still perfectly valid.
+ pub async fn ensure_chatgpt_tokens_fresh(account: &StoredAccount) -> Result<StoredAccount> {
+-    if !chatgpt_tokens_need_refresh(account) {
++    if !chatgpt_access_token_needs_refresh(account) {
+         return Ok(account.clone());
+     }
+ 
+     let _auth_guard = AUTH_OPERATION_LOCK.lock().await;
+-    ensure_chatgpt_tokens_fresh_locked(account).await
++    ensure_chatgpt_tokens_fresh_with_policy_locked(account, false).await
+ }
+ 
+-/// Ensure ChatGPT OAuth tokens are fresh while the caller holds AUTH_OPERATION_LOCK.
++/// Ensure the full ChatGPT OAuth token set is fresh while the caller holds
++/// AUTH_OPERATION_LOCK. Account switching still needs a fresh ID token because
++/// Codex can reject auth.json when its ID token is expired.
+ pub(crate) async fn ensure_chatgpt_tokens_fresh_locked(
+     account: &StoredAccount,
++) -> Result<StoredAccount> {
++    match ensure_chatgpt_tokens_fresh_with_policy_locked(account, true).await {
++        Ok(account) => Ok(account),
++        Err(refresh_error) => {
++            // A stale/invalidated refresh token must not make the Switch button
++            // unusable while the stored access token is still accepted. We still
++            // prefer a full refresh first (fresh ID token is best for Codex), but
++            // if that cannot be done, fall back to the latest stored/live account
++            // as long as its access token is still usable.
++            let (fallback, _) = load_account_reconciling_live_auth(&account.id)?;
++            if can_switch_with_existing_access_token(&fallback) {
++                eprintln!(
++                    "[Auth] Full OAuth refresh failed before switch for account {}: {refresh_error:#}. \
++Proceeding with the existing usable access token.",
++                    fallback.name
++                );
++                Ok(fallback)
++            } else {
++                Err(refresh_error)
++            }
++        }
++    }
++}
++
++async fn ensure_chatgpt_tokens_fresh_with_policy_locked(
++    account: &StoredAccount,
++    require_fresh_id_token: bool,
+ ) -> Result<StoredAccount> {
+     if matches!(account.auth_data, AuthData::ApiKey { .. }) {
+         return Ok(account.clone());
+@@ -64,9 +110,20 @@ pub(crate) async fn ensure_chatgpt_tokens_fresh_locked(
+             access_token,
+             ..
+         } => {
+-            if chatgpt_tokens_need_refresh_at(id_token, access_token, Utc::now().timestamp()) {
++            let needs_refresh = if require_fresh_id_token {
++                chatgpt_tokens_need_refresh_at(id_token, access_token, Utc::now().timestamp())
++            } else {
++                token_expired_or_near_expiry_at(access_token, Utc::now().timestamp())
++            };
++
++            if needs_refresh {
++                let reason = if require_fresh_id_token {
++                    "OAuth token"
++                } else {
++                    "access token"
++                };
+                 println!(
+-                    "[Auth] OAuth token expired/near expiry for account {}, refreshing",
++                    "[Auth] {reason} expired/near expiry for account {}, refreshing",
+                     current.name
+                 );
+                 refresh_chatgpt_tokens_locked(&current).await
+@@ -212,6 +269,19 @@ pub async fn create_chatgpt_account_from_refresh_token(
+     ))
+ }
+ 
++fn chatgpt_access_token_needs_refresh(account: &StoredAccount) -> bool {
++    match &account.auth_data {
++        AuthData::ApiKey { .. } => false,
++        AuthData::ChatGPT { access_token, .. } => {
++            token_expired_or_near_expiry_at(access_token, Utc::now().timestamp())
++        }
++    }
++}
++
++fn can_switch_with_existing_access_token(account: &StoredAccount) -> bool {
++    !chatgpt_access_token_needs_refresh(account)
++}
++
+ fn chatgpt_tokens_need_refresh(account: &StoredAccount) -> bool {
+     match &account.auth_data {
+         AuthData::ApiKey { .. } => false,
+@@ -293,6 +363,30 @@ fn parse_jwt_exp(token: &str) -> Option<i64> {
+     json.get("exp").and_then(|v| v.as_i64())
+ }
+ 
++fn format_token_refresh_error(status: reqwest::StatusCode, body: &str) -> String {
++    let parsed = serde_json::from_str::<RefreshTokenErrorResponse>(body).ok();
++    let details = parsed.as_ref().and_then(|payload| payload.error.as_ref());
++    let code = details.and_then(|error| error.code.as_deref());
++
++    match code {
++        Some("refresh_token_invalidated") => {
++            "Session expired. Re-authenticate this account.".to_string()
++        }
++        Some("refresh_token_reused") => {
++            "Session expired. Re-authenticate this account.".to_string()
++        }
++        _ => {
++            if let Some(message) = details.and_then(|error| error.message.as_deref()) {
++                format!("Could not refresh the saved Codex Switcher session ({status}). {message}")
++            } else {
++                format!(
++                    "Could not refresh the saved Codex Switcher session ({status}). Please try again."
++                )
++            }
++        }
++    }
++}
++
+ async fn refresh_tokens_with_refresh_token(refresh_token: &str) -> Result<RefreshTokenResponse> {
+     let client = reqwest::Client::new();
+     let body = format!(
+@@ -337,7 +431,8 @@ async fn refresh_tokens_with_refresh_token(refresh_token: &str) -> Result<Refres
+     if !response.status().is_success() {
+         let status = response.status();
+         let body = response.text().await.unwrap_or_default();
+-        anyhow::bail!("Token refresh failed: {status} - {body}");
++        eprintln!("[Auth] Token refresh failed: {status} - {body}");
++        anyhow::bail!("{}", format_token_refresh_error(status, &body));
+     }
+ 
+     response
+@@ -349,7 +444,9 @@ async fn refresh_tokens_with_refresh_token(refresh_token: &str) -> Result<Refres
+ #[cfg(test)]
+ mod tests {
+     use super::{
+-        chatgpt_tokens_need_refresh, chatgpt_tokens_need_refresh_at, merge_refresh_response,
++        can_switch_with_existing_access_token, chatgpt_access_token_needs_refresh,
++        chatgpt_tokens_need_refresh,
++        chatgpt_tokens_need_refresh_at, format_token_refresh_error, merge_refresh_response,
+         reconcile_active_account_from_auth, resolve_refreshed_id_token, RefreshTokenResponse,
+     };
+     use crate::types::{AccountsStore, AuthData, AuthDotJson, StoredAccount, TokenData};
+@@ -368,7 +465,59 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn refresh_required_when_id_token_expired_but_access_token_valid() {
++    fn background_refresh_ignores_expired_id_token_when_access_token_is_valid() {
++        let now = chrono::Utc::now().timestamp();
++        let account = StoredAccount::new_chatgpt(
++            "Background".into(),
++            None,
++            None,
++            None,
++            jwt_with_exp(now - 3_600),
++            jwt_with_exp(now + 3_600),
++            "refresh".into(),
++            None,
++        );
++
++        assert!(!chatgpt_access_token_needs_refresh(&account));
++        assert!(chatgpt_tokens_need_refresh(&account));
++    }
++
++    #[test]
++    fn switch_fallback_allows_valid_access_token_when_full_refresh_fails() {
++        let now = chrono::Utc::now().timestamp();
++        let account = StoredAccount::new_chatgpt(
++            "Switch fallback".into(),
++            None,
++            None,
++            None,
++            jwt_with_exp(now - 3_600),
++            jwt_with_exp(now + 3_600),
++            "stale-refresh".into(),
++            None,
++        );
++
++        assert!(can_switch_with_existing_access_token(&account));
++    }
++
++    #[test]
++    fn switch_fallback_rejects_expired_access_token() {
++        let now = chrono::Utc::now().timestamp();
++        let account = StoredAccount::new_chatgpt(
++            "Expired access".into(),
++            None,
++            None,
++            None,
++            jwt_with_exp(now - 3_600),
++            jwt_with_exp(now - 3_600),
++            "stale-refresh".into(),
++            None,
++        );
++
++        assert!(!can_switch_with_existing_access_token(&account));
++    }
++
++    #[test]
++    fn refresh_required_when_id_token_expired_but_access_token_valid_for_switching() {
+         let now = 1_800_000_000;
+         let id_token = jwt_with_exp(now - 3_600);
+         let access_token = jwt_with_exp(now + 3_600);
+@@ -531,4 +680,22 @@ mod tests {
+         assert_eq!(update.refresh_token, "rotated-refresh");
+         assert!(update.id_token_error.is_some());
+     }
++
++    #[test]
++    fn refresh_token_invalidated_error_is_human_readable() {
++        let body = r#"{"error":{"message":"Your session has ended. Please log in again.","type":"invalid_request_error","param":null,"code":"refresh_token_invalidated"}}"#;
++        let message = format_token_refresh_error(reqwest::StatusCode::UNAUTHORIZED, body);
++
++        assert_eq!(message, "Session expired. Re-authenticate this account.");
++        assert!(!message.contains("{\"error\""));
++    }
++
++    #[test]
++    fn refresh_token_reused_error_is_human_readable() {
++        let body = r#"{"error":{"message":"already used","code":"refresh_token_reused"}}"#;
++        let message = format_token_refresh_error(reqwest::StatusCode::UNAUTHORIZED, body);
++
++        assert_eq!(message, "Session expired. Re-authenticate this account.");
++        assert!(!message.contains("{\"error\""));
++    }
+ }
+diff --git a/src-tauri/src/commands/usage.rs b/src-tauri/src/commands/usage.rs
+index 045a8e5..d52b792 100644
+--- a/src-tauri/src/commands/usage.rs
++++ b/src-tauri/src/commands/usage.rs
+@@ -4,7 +4,9 @@ use crate::api::usage::{
+     fetch_chatgpt_account_metadata, get_account_usage, refresh_all_usage,
+     warmup_account as send_warmup,
+ };
+-use crate::auth::{get_account, load_accounts, refresh_chatgpt_tokens, update_account_metadata};
++use crate::auth::{
++    ensure_chatgpt_tokens_fresh, get_account, load_accounts, update_account_metadata,
++};
+ use crate::types::{AccountInfo, AuthData, UsageInfo, WarmupSummary};
+ use futures::{stream, StreamExt};
+ 
+@@ -31,8 +33,9 @@ pub async fn get_usage(app: tauri::AppHandle, account_id: String) -> Result<Usag
+     Ok(usage)
+ }
+ 
+-/// Force-refresh account metadata for a specific account.
+-/// For ChatGPT accounts this refreshes OAuth tokens and pulls live subscription metadata.
++/// Refresh account metadata for a specific account.
++/// For ChatGPT accounts, reuse the current access token whenever possible and
++/// only refresh OAuth when that access token is actually expired/near expiry.
+ /// For API key accounts this is a no-op.
+ #[tauri::command]
+ pub async fn refresh_account_metadata(account_id: String) -> Result<AccountInfo, String> {
+@@ -43,10 +46,10 @@ pub async fn refresh_account_metadata(account_id: String) -> Result<AccountInfo,
+     let updated = match &account.auth_data {
+         AuthData::ApiKey { .. } => account,
+         AuthData::ChatGPT { .. } => {
+-            let refreshed = refresh_chatgpt_tokens(&account)
++            let fresh_account = ensure_chatgpt_tokens_fresh(&account)
+                 .await
+                 .map_err(|e| e.to_string())?;
+-            let live_metadata = fetch_chatgpt_account_metadata(&refreshed)
++            let live_metadata = fetch_chatgpt_account_metadata(&fresh_account)
+                 .await
+                 .map_err(|e| e.to_string())?;
+ 
+diff --git a/src/App.tsx b/src/App.tsx
+index 65f31c4..711d39c 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -524,17 +524,22 @@ function App() {
+   }, []);
+ 
+   const handleSwitch = async (accountId: string) => {
+-    // Check processes before switching
++    // Never make the Switch button look dead. If Codex is running, reuse the
++    // existing force-close confirmation flow and automatically retry the switch.
+     const latestProcessInfo = await checkProcesses();
+     if (latestProcessInfo && !latestProcessInfo.can_switch) {
++      setPendingTraySwitchAccountId(accountId);
++      setForceCloseConfirmOpen(true);
+       return;
+     }
+ 
+     try {
+       setSwitchingId(accountId);
+       await switchAccount(accountId);
++      showWarmupToast("Switched account.");
+     } catch (err) {
+       console.error("Failed to switch account:", err);
++      showWarmupToast(`Switch failed: ${formatWarmupError(err)}`, true);
+     } finally {
+       setSwitchingId(null);
+     }
+diff --git a/src/components/AccountCard.tsx b/src/components/AccountCard.tsx
+index ecfdc3c..f985be1 100644
+--- a/src/components/AccountCard.tsx
++++ b/src/components/AccountCard.tsx
+@@ -376,15 +376,15 @@ export function AccountCard({
+         ) : (
+           <button
+             onClick={onSwitch}
+-            disabled={switching || switchDisabled}
++            disabled={switching}
+             className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ${
+               switchDisabled
+-                ? "bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed"
++                ? "bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/30 dark:hover:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-800"
+                 : "bg-gray-900 hover:bg-gray-800 dark:bg-gray-100 dark:hover:bg-gray-200 text-white dark:text-gray-900"
+             }`}
+-            title={switchDisabled ? "Close all Codex processes first" : undefined}
++            title={switchDisabled ? "Codex is running — click to close it and switch" : undefined}
+           >
+-            {switching ? "Switching..." : switchDisabled ? "Codex Running" : "Switch"}
++            {switching ? "Switching..." : "Switch"}
+           </button>
+         )}
+         <button
+@@ -415,7 +415,7 @@ export function AccountCard({
+                 ? "Auto warm-up is enabled for all accounts"
+                 : autoWarmupEnabled
+                   ? "Disable auto warm-up for this account"
+-                : "Enable auto warm-up for this account"
++                  : "Enable auto warm-up for this account"
+             }
+           >
+             <span className="flex items-center gap-1">
+@@ -462,4 +462,4 @@ export function AccountCard({
+       />
+     </div>
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/src/components/UsageBar.tsx b/src/components/UsageBar.tsx
+index deb36a8..c97662b 100644
+--- a/src/components/UsageBar.tsx
++++ b/src/components/UsageBar.tsx
+@@ -36,6 +36,40 @@ function formatWindowDuration(minutes: number | null | undefined): string {
+   return `${Math.floor(hours / 24)}d`;
+ }
+ 
++function formatUsageError(error: string): { title: string; message: string } {
++  if (
++    error.includes("refresh_token_invalidated") ||
++    error.includes("saved session is out of date")
++  ) {
++    return {
++      title: "Session expired",
++      message: "Re-authenticate this account.",
++    };
++  }
++
++  if (error.includes("refresh_token_reused") || error.includes("outdated refresh token")) {
++    return {
++      title: "Session expired",
++      message: "Re-authenticate this account.",
++    };
++  }
++
++  // Older builds may still surface a raw backend JSON payload. Never dump that
++  // into the account card; keep the UI concise while logs retain the details.
++  if (error.includes("Token refresh failed:") && error.includes('"error"')) {
++    return {
++      title: "Couldn’t refresh Switcher session",
++      message:
++        "The saved Switcher credentials could not be refreshed. Your Codex session may still be valid. Retry usage before re-authenticating.",
++    };
++  }
++
++  return {
++    title: "Usage unavailable",
++    message: error,
++  };
++}
++
+ function RateLimitBar({
+   label,
+   usedPercent,
+@@ -49,7 +83,7 @@ function RateLimitBar({
+ }) {
+   // Calculate remaining percentage
+   const remainingPercent = Math.max(0, 100 - usedPercent);
+-  
++
+   // Color based on remaining (green = plenty left, red = almost none left)
+   const colorClass =
+     remainingPercent <= 10
+@@ -105,9 +139,25 @@ export function UsageBar({ usage, loading }: UsageBarProps) {
+   }
+ 
+   if (usage.error) {
++    const friendlyError = formatUsageError(usage.error);
+     return (
+-      <div className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
+-        {usage.error}
++      <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 dark:border-amber-800/70 dark:bg-amber-950/20">
++        <div className="flex items-start gap-2">
++          <span
++            className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-100 text-[10px] font-bold text-amber-700 dark:bg-amber-900/60 dark:text-amber-300"
++            aria-hidden="true"
++          >
++            !
++          </span>
++          <div className="min-w-0">
++            <div className="text-xs font-medium text-amber-800 dark:text-amber-200">
++              {friendlyError.title}
++            </div>
++            <div className="mt-0.5 text-xs leading-relaxed text-amber-700 dark:text-amber-300/90">
++              {friendlyError.message}
++            </div>
++          </div>
++        </div>
+       </div>
+     );
+   }
