@@ -50,15 +50,25 @@
 # registry.npmjs.org. Only the top-level tarball is checksummed. This matches
 # npm-1.0.
 #
+# bun.minimum_release_age defaults to 259200 (3 days). destroot passes
+# `bun install --minimum-release-age` so registry-resolved versions newer
+# than that window are skipped (supply-chain delay; bun 1.3+). Ports may
+# raise it, or set 0 to disable. It does not checksum those deps and is
+# not a lockfile. Exact pins published inside the window fail destroot
+# rather than floating. The checksummed top-level tarball is a local file
+# and is not gated.
+#
 # Each port destroots to ${prefix}/lib/bun/${name} with bins linked into
 # ${prefix}/bin, so two bun-PG ports can activate together. bun writes
 # relative symlinks, so destroot paths do not leak into the image.
 
-options bun.rootname bun.version bun.trusted_dependencies bun.add_dependencies
+options bun.rootname bun.version bun.trusted_dependencies bun.add_dependencies \
+        bun.minimum_release_age
 default bun.rootname                {${name}}
 default bun.version                 {}
 default bun.trusted_dependencies    {}
 default bun.add_dependencies        yes
+default bun.minimum_release_age     259200
 
 default master_sites    {https://registry.npmjs.org/${bun.rootname}/-/}
 default distname        {[file tail ${bun.rootname}]-${version}}
@@ -87,8 +97,25 @@ use_configure no
 
 build   {}
 
+proc bun_minimum_release_age_seconds {} {
+    set min_age [option bun.minimum_release_age]
+    if {${min_age} eq ""} {
+        return 0
+    }
+    if {![string is entier -strict ${min_age}] || ${min_age} < 0} {
+        return -code error "bun.minimum_release_age must be a non-negative integer (seconds), got: ${min_age}"
+    }
+    return ${min_age}
+}
+
 proc bun_check_version {phase} {
     set required [option bun.version]
+    # --minimum-release-age was added in bun 1.3.
+    if {[bun_minimum_release_age_seconds] > 0} {
+        if {${required} eq "" || [vercmp ${required} 1.3.0] < 0} {
+            set required 1.3.0
+        }
+    }
     if {${required} eq ""} {
         return
     }
@@ -140,7 +167,12 @@ destroot {
     close ${fd}
 
     set distfile [lindex ${distfiles} 0]
-    system -W ${workpath} "env BUN_INSTALL_GLOBAL_DIR=[shellescape ${bun_global_dir}] BUN_INSTALL_BIN=[shellescape ${bun_bin_dir}] BUN_INSTALL_CACHE_DIR=[shellescape ${workpath}/.bun-cache] bun install -g --verbose [shellescape ${distpath}/${distfile}]"
+    set age_flag ""
+    set min_age [bun_minimum_release_age_seconds]
+    if {${min_age} > 0} {
+        set age_flag " --minimum-release-age=[shellescape ${min_age}]"
+    }
+    system -W ${workpath} "env BUN_INSTALL_GLOBAL_DIR=[shellescape ${bun_global_dir}] BUN_INSTALL_BIN=[shellescape ${bun_bin_dir}] BUN_INSTALL_CACHE_DIR=[shellescape ${workpath}/.bun-cache] bun install -g --verbose${age_flag} [shellescape ${distpath}/${distfile}]"
 
     if {[glob -nocomplain ${bun_bin_dir}/*] eq {}} {
         ui_error "${name} destroot produced no binaries in ${prefix}/bin (the package has no bin field, or its bins are created by a lifecycle script, which runs too late to be linked)"
