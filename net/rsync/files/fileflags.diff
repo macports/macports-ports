@@ -2,10 +2,11 @@ Add support for preserving BSD file flags
 
 Original patch by Rolf Grossmann <grossman@progtech.net>
 Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
+Rsync 3.5.0 port by Rodrigo Osorio <rodrigo@FreeBSD.org>, reviewed by Claude Code
 
 --- backup.c.orig
 +++ backup.c
-@@ -207,7 +207,7 @@ static inline int link_or_rename(const char *from, const char *to,
+@@ -246,7 +246,7 @@
  			return 0;
  	}
  #endif
@@ -16,7 +17,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  			 * dir, rename() might return success but do nothing! */
 --- compat.c.orig
 +++ compat.c
-@@ -40,6 +40,7 @@ extern int checksum_seed;
+@@ -40,6 +40,7 @@
  extern int basis_dir_cnt;
  extern int prune_empty_dirs;
  extern int protocol_version;
@@ -24,7 +25,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  extern int protect_args;
  extern int preserve_uid;
  extern int preserve_gid;
-@@ -47,6 +48,7 @@ extern int preserve_atimes;
+@@ -47,6 +48,7 @@
  extern int preserve_crtimes;
  extern int preserve_acls;
  extern int preserve_xattrs;
@@ -32,7 +33,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  extern int xfer_flags_as_varint;
  extern int need_messages_from_generator;
  extern int delete_mode, delete_before, delete_during, delete_after;
-@@ -87,7 +89,7 @@ struct name_num_item *xattr_sum_nni;
+@@ -87,7 +89,7 @@
  int xattr_sum_len = 0;
  
  /* These index values are for the file-list's extra-attribute array. */
@@ -41,7 +42,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  
  int receiver_symlink_times = 0; /* receiver can set the time on a symlink */
  int sender_symlink_iconv = 0;	/* sender should convert symlink content */
-@@ -589,6 +591,8 @@ void setup_protocol(int f_out,int f_in)
+@@ -645,6 +647,8 @@
  		uid_ndx = ++file_extra_cnt;
  	if (preserve_gid)
  		gid_ndx = ++file_extra_cnt;
@@ -50,7 +51,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	if (preserve_acls && !am_sender)
  		acls_ndx = ++file_extra_cnt;
  	if (preserve_xattrs)
-@@ -752,6 +756,10 @@ void setup_protocol(int f_out,int f_in)
+@@ -763,6 +767,10 @@
  			fprintf(stderr, "Both rsync versions must be at least 3.2.0 for --crtimes.\n");
  			exit_cleanup(RERR_PROTOCOL);
  		}
@@ -71,43 +72,323 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  extern char *backup_dir;
  extern char *backup_suffix;
  extern int backup_suffix_len;
-@@ -97,8 +98,12 @@ static enum delret delete_dir_contents(char *fname, uint16 flags)
- 		}
- 
- 		strlcpy(p, fp->basename, remainder);
+@@ -62,10 +63,19 @@
+ {
+ 	const char *leaf;
+ 	int dfd = del_held_dfd(fbuf, &leaf);
+-	if (dfd >= 0)
+-		do_chmod_atfd(dfd, leaf, mode);
+-	else
+-		do_chmod_at(fbuf, mode);
++	if (dfd >= 0) {
++		if (do_chmod_atfd(dfd, leaf, mode) == 0)
++			return;
 +#ifdef SUPPORT_FORCE_CHANGE
-+		if (force_change)
-+			make_mutable(fname, fp->mode, F_FFLAGS(fp), force_change);
++		/* The fd-relative wrapper cannot chflags(); let the full-path
++		 * wrapper's force-change logic have a go at an immutable target. */
++		if (!(force_change && errno == EPERM))
++			return;
++#else
++		return;
 +#endif
- 		if (!(fp->mode & S_IWUSR) && !am_root && fp->flags & FLAG_OWNED_BY_US)
--			do_chmod_at(fname, fp->mode | S_IWUSR);
-+			do_chmod_at(fname, fp->mode | S_IWUSR, NO_FFLAGS);
- 		/* Save stack by recursing to ourself directly. */
- 		if (S_ISDIR(fp->mode)) {
- 			if (delete_dir_contents(fname, flags | DEL_RECURSE) != DR_SUCCESS)
-@@ -139,11 +144,18 @@ enum delret delete_item(char *fbuf, uint16 mode, uint16 flags)
- 	}
++	}
++	do_chmod_at(fbuf, mode, NO_FFLAGS);
+ }
  
- 	if (flags & DEL_NO_UID_WRITE)
--		do_chmod_at(fbuf, mode | S_IWUSR);
-+		do_chmod_at(fbuf, mode | S_IWUSR, NO_FFLAGS);
- 
- 	if (S_ISDIR(mode) && !(flags & DEL_DIR_IS_EMPTY)) {
- 		/* This only happens on the first call to delete_item() since
- 		 * delete_dir_contents() always calls us w/DEL_DIR_IS_EMPTY. */
+ static int del_unlink(const char *fbuf)
+@@ -224,6 +234,12 @@
+ 		int dfd = del_held_dfd(fbuf, &leaf);
+ 		what = "rmdir";
+ 		ok = (dfd >= 0 ? do_unlink_atfd(dfd, leaf, AT_REMOVEDIR) : do_rmdir_at(fbuf)) == 0;
 +#ifdef SUPPORT_FORCE_CHANGE
-+		if (force_change) {
-+			STRUCT_STAT st;
-+			if (x_lstat(fbuf, &st, NULL) == 0)
-+				make_mutable(fbuf, st.st_mode, st.st_flags, force_change);
-+		}
++		/* The fd-relative wrapper cannot chflags(); retry an immutable
++		 * directory through the full-path wrapper. */
++		if (!ok && dfd >= 0 && force_change && errno == EPERM)
++			ok = do_rmdir_at(fbuf) == 0;
 +#endif
- 		ignore_perishable = 1;
- 		/* If DEL_RECURSE is not set, this just reports emptiness. */
- 		ret = delete_dir_contents(fbuf, flags);
+ 	} else {
+ 		if (make_backups > 0 && !(flags & DEL_FOR_BACKUP) && (backup_dir || !is_backup_file(fbuf))) {
+ 			what = "make_backup";
+--- testsuite/file-flags_test.py.orig
++++ testsuite/file-flags_test.py
+@@ -0,0 +1,274 @@
++#!/usr/bin/env python3
++# Test the FreeBSD "File system flags" patch: --file-flags and the
++# --force-change / --force-uchange / --force-schange family.
++#
++# --file-flags copies a file's BSD st_flags (chflags(2)) to the receiver.
++# --force-change lets the receiver update or delete a file/dir whose
++# immutable flag would otherwise make the operation fail with EPERM.
++#
++# Both need a chflags(2) platform AND a filesystem that actually stores the
++# flag, so everything here is gated behind a set-then-clear probe: ZFS, for
++# instance, keeps the system flags (schg/sappnd) but rejects the user ones
++# (uchg/uappnd), and a non-root run or securelevel >= 1 can set neither.
++
++import atexit
++import os
++import stat
++
++from rsyncfns import (
++    FROMDIR, SCRATCHDIR, TODIR,
++    makepath, run_rsync, test_fail, test_skipped,
++)
++
++
++if not hasattr(os, 'chflags'):
++    test_skipped("no chflags(2) on this platform")
++
++vv = run_rsync('-VV', check=True, capture_output=True).stdout
++if '"file_flags": true' not in vv:
++    test_skipped("rsync is configured without file-flags support")
++
++
++# --- flag probing ----------------------------------------------------------
++
++def clear_flags_tree(top) -> None:
++    """Drop every st_flag under `top` so the tree can be rewritten/removed.
++
++    Registered with atexit as well as called between sub-tests: an immutable
++    file left behind would defeat not just this test's cleanup but the
++    runner's removal of the whole scratch directory.
++    """
++    for root, dirs, files in os.walk(top, topdown=False):
++        for name in files + dirs:
++            try:
++                os.chflags(os.path.join(root, name), 0)
++            except OSError:
++                pass
++    try:
++        os.chflags(top, 0)
++    except OSError:
++        pass
++
++
++atexit.register(clear_flags_tree, SCRATCHDIR)
++
++makepath(FROMDIR, TODIR)
++
++
++def probe_flag():
++    """Return (flag_bit, name) for an immutable flag this filesystem stores,
++    or (None, None).  Must survive a set *and* a clear: securelevel >= 1
++    makes the system flags one-way, which would strand the scratch tree."""
++    probe = SCRATCHDIR / '.flagprobe'
++    probe.write_text('x\n')
++    try:
++        for bit, name in ((stat.UF_IMMUTABLE, 'uchg'),
++                          (stat.SF_IMMUTABLE, 'schg')):
++            try:
++                os.chflags(probe, bit)
++            except (OSError, AttributeError):
++                continue
++            if not os.lstat(probe).st_flags & bit:
++                continue
++            try:
++                os.chflags(probe, 0)
++            except OSError:
++                continue        # cannot be cleared -- unusable for testing
++            return bit, name
++        return None, None
++    finally:
++        try:
++            os.chflags(probe, 0)
++        except OSError:
++            pass
++        probe.unlink(missing_ok=True)
++
++
++IMMUTABLE, FLAGNAME = probe_flag()
++if IMMUTABLE is None:
++    test_skipped("this filesystem does not store a settable/clearable "
++                 "immutable flag (tried uchg and schg)")
++
++print(f"using the {FLAGNAME} flag")
++
++
++def flags_of(path) -> int:
++    return os.lstat(path).st_flags
++
++
++def reset() -> None:
++    """Empty from/ and to/ for the next sub-test."""
++    for d in (FROMDIR, TODIR):
++        clear_flags_tree(d)
++        for root, dirs, files in os.walk(d, topdown=False):
++            for name in files:
++                os.unlink(os.path.join(root, name))
++            for name in dirs:
++                os.rmdir(os.path.join(root, name))
++    makepath(FROMDIR / 'sub', TODIR)
++
++
++# --- 1: --file-flags propagates the flag to the receiver -------------------
++
++reset()
++(FROMDIR / 'sub' / 'f').write_text("hello\n")
++os.chflags(FROMDIR / 'sub' / 'f', IMMUTABLE)
++
++run_rsync('-a', '--file-flags', f'{FROMDIR}/', f'{TODIR}/')
++if not flags_of(TODIR / 'sub' / 'f') & IMMUTABLE:
++    test_fail(f"--file-flags did not copy the {FLAGNAME} flag to the receiver")
++print("ok: --file-flags propagates the flag")
++
++
++# --- 2: without --file-flags the receiver keeps no flag --------------------
++
++reset()
++(FROMDIR / 'sub' / 'f').write_text("hello\n")
++os.chflags(FROMDIR / 'sub' / 'f', IMMUTABLE)
++
++run_rsync('-a', f'{FROMDIR}/', f'{TODIR}/')
++if flags_of(TODIR / 'sub' / 'f') & IMMUTABLE:
++    test_fail("plain -a propagated a file flag; --file-flags is opt-in")
++print("ok: plain -a leaves receiver flags alone")
++
++
++# --- 3: an immutable destination blocks an update without --force-change ---
++
++reset()
++(FROMDIR / 'sub' / 'f').write_text("new-content\n")
++makepath(TODIR / 'sub')
++(TODIR / 'sub' / 'f').write_text("old\n")
++os.chflags(TODIR / 'sub' / 'f', IMMUTABLE)
++
++proc = run_rsync('-a', f'{FROMDIR}/', f'{TODIR}/', check=False,
++                 capture_output=True)
++kept = (TODIR / 'sub' / 'f').read_text()
++clear_flags_tree(TODIR)
++if kept != "old\n":
++    test_fail("an immutable destination file was updated without "
++              f"--force-change (content is now {kept!r})")
++if proc.returncode == 0:
++    test_fail("rsync reported success while failing to update an "
++              "immutable destination file")
++print(f"ok: immutable destination blocks the update (exit {proc.returncode})")
++
++
++# --- 4: --force-change pushes the update through ---------------------------
++
++reset()
++(FROMDIR / 'sub' / 'f').write_text("new-content\n")
++makepath(TODIR / 'sub')
++(TODIR / 'sub' / 'f').write_text("old\n")
++os.chflags(TODIR / 'sub' / 'f', IMMUTABLE)
++
++proc = run_rsync('-a', '--force-change', f'{FROMDIR}/', f'{TODIR}/',
++                 check=False, capture_output=True)
++got = (TODIR / 'sub' / 'f').read_text()
++clear_flags_tree(TODIR)
++if got != "new-content\n":
++    test_fail("--force-change did not update the immutable destination file "
++              f"(content is {got!r}, rsync said: {proc.stderr.strip()})")
++if proc.returncode != 0:
++    test_fail(f"--force-change exited {proc.returncode}: {proc.stderr.strip()}")
++print("ok: --force-change updates an immutable destination file")
++
++
++# --- 5: --delete needs --force-change to remove an immutable file ----------
++
++reset()
++(FROMDIR / 'sub' / 'f').write_text("keep\n")
++makepath(TODIR / 'sub')
++(TODIR / 'sub' / 'f').write_text("keep\n")
++(TODIR / 'sub' / 'extra').write_text("gone\n")
++os.chflags(TODIR / 'sub' / 'extra', IMMUTABLE)
++
++run_rsync('-a', '--delete', f'{FROMDIR}/', f'{TODIR}/', check=False)
++survived = (TODIR / 'sub' / 'extra').exists()
++if not survived:
++    clear_flags_tree(TODIR)
++    test_fail("--delete removed an immutable file without --force-change")
++print("ok: --delete alone leaves an immutable file in place")
++
++# Same tree, now with --force-change: it must go.
++proc = run_rsync('-a', '--delete', '--force-change', f'{FROMDIR}/', f'{TODIR}/',
++                 check=False, capture_output=True)
++still_there = (TODIR / 'sub' / 'extra').exists()
++clear_flags_tree(TODIR)
++if still_there:
++    test_fail("--force-change --delete did not remove the immutable file "
++              f"(rsync said: {proc.stderr.strip()})")
++if proc.returncode != 0:
++    test_fail(f"--force-change --delete exited {proc.returncode}: "
++              f"{proc.stderr.strip()}")
++print("ok: --force-change --delete removes an immutable file")
++
++
++# --- 6: an immutable *directory* is a documented limitation ----------------
++#
++# The patch clears the immutable flag on the object it is about to touch, but
++# unlinking a file also needs write permission on its *parent*, and nothing
++# makes an immutable parent directory mutable first.  do_unlink() in syscall.c
++# says so outright:
++#
++#     /* TODO: handle immutable directories */
++#
++# So --force-change does NOT descend into an immutable directory.  This test
++# pins that behaviour rather than wishing it away: if someone teaches the
++# patch to handle immutable parents, this is the test that should fail and be
++# rewritten into a positive assertion.
++
++reset()
++(FROMDIR / 'sub' / 'f').write_text("keep\n")
++makepath(TODIR / 'sub', TODIR / 'doomed')
++(TODIR / 'sub' / 'f').write_text("keep\n")
++(TODIR / 'doomed' / 'inner').write_text("x\n")
++os.chflags(TODIR / 'doomed' / 'inner', IMMUTABLE)
++os.chflags(TODIR / 'doomed', IMMUTABLE)
++
++proc = run_rsync('-a', '--delete', '--force-change', f'{FROMDIR}/', f'{TODIR}/',
++                 check=False, capture_output=True)
++still_there = (TODIR / 'doomed').exists()
++clear_flags_tree(TODIR)
++if not still_there:
++    test_fail("--force-change --delete removed a file under an immutable "
++              "directory -- immutable parents are now handled, so this "
++              "known-limitation test needs to become a positive assertion")
++print("ok: immutable parent directory still blocks deletion "
++      "(known limitation, see do_unlink()'s TODO)")
++
++
++# --- 7: the itemized output grows an 'f' column for a flag change ----------
++
++reset()
++(FROMDIR / 'sub' / 'f').write_text("hello\n")
++run_rsync('-a', '--file-flags', f'{FROMDIR}/', f'{TODIR}/')
++
++# Change nothing but the source's flags.
++os.chflags(FROMDIR / 'sub' / 'f', IMMUTABLE)
++proc = run_rsync('-a', '--file-flags', '-i', f'{FROMDIR}/', f'{TODIR}/',
++                 capture_output=True)
++line = next((ln for ln in proc.stdout.splitlines() if ln.endswith('sub/f')), None)
++clear_flags_tree(FROMDIR)
++clear_flags_tree(TODIR)
++if line is None:
++    test_fail("a flags-only change was not itemized at all:\n" + proc.stdout)
++if 'f' not in line.split()[0]:
++    test_fail(f"itemized output has no 'f' flag column: {line!r}")
++print(f"ok: itemize reports the flag change ({line})")
++
++
++# --- 8: a second --file-flags pass is a no-op ------------------------------
++
++reset()
++(FROMDIR / 'sub' / 'f').write_text("hello\n")
++os.chflags(FROMDIR / 'sub' / 'f', IMMUTABLE)
++run_rsync('-a', '--file-flags', f'{FROMDIR}/', f'{TODIR}/')
++proc = run_rsync('-a', '--file-flags', '-i', f'{FROMDIR}/', f'{TODIR}/',
++                 capture_output=True)
++changed = [ln for ln in proc.stdout.splitlines() if ln.strip()]
++clear_flags_tree(FROMDIR)
++clear_flags_tree(TODIR)
++if changed:
++    test_fail("a second --file-flags pass was not a no-op:\n"
++              + '\n'.join(changed))
++print("ok: a second --file-flags pass is a no-op")
 --- flist.c.orig
 +++ flist.c
-@@ -52,6 +52,7 @@ extern int preserve_links;
+@@ -57,6 +57,7 @@
  extern int preserve_hard_links;
  extern int preserve_devices;
  extern int preserve_specials;
@@ -115,7 +396,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  extern int delete_during;
  extern int missing_args;
  extern int eol_nulls;
-@@ -400,6 +401,9 @@ static void send_file_entry(int f, const char *fname, struct file_struct *file,
+@@ -483,6 +484,9 @@
  	static time_t crtime;
  #endif
  	static mode_t mode;
@@ -125,7 +406,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  #ifdef SUPPORT_HARD_LINKS
  	static int64 dev;
  #endif
-@@ -443,6 +447,14 @@ static void send_file_entry(int f, const char *fname, struct file_struct *file,
+@@ -526,6 +530,14 @@
  		xflags |= XMIT_SAME_MODE;
  	else
  		mode = file->mode;
@@ -140,7 +421,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  
  	if (preserve_devices && IS_DEVICE(mode)) {
  		if (protocol_version < 28) {
-@@ -604,6 +616,10 @@ static void send_file_entry(int f, const char *fname, struct file_struct *file,
+@@ -687,6 +699,10 @@
  #endif
  	if (!(xflags & XMIT_SAME_MODE))
  		write_int(f, to_wire_mode(mode));
@@ -151,7 +432,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	if (atimes_ndx && !S_ISDIR(mode) && !(xflags & XMIT_SAME_ATIME))
  		write_varlong(f, atime, 4);
  	if (preserve_uid && !(xflags & XMIT_SAME_UID)) {
-@@ -698,6 +714,9 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
+@@ -781,6 +797,9 @@
  	static time_t crtime;
  #endif
  	static mode_t mode;
@@ -161,18 +442,18 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  #ifdef SUPPORT_HARD_LINKS
  	static int64 dev;
  #endif
-@@ -815,6 +834,10 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
- #ifdef SUPPORT_CRTIMES
+@@ -899,6 +918,10 @@
  			if (crtimes_ndx)
  				crtime = F_CRTIME(first);
-+#endif
+ #endif
 +#ifdef SUPPORT_FILE_FLAGS
 +			if (preserve_file_flags)
 +				file_flags = F_FFLAGS(first);
- #endif
++#endif
  			if (preserve_uid)
  				uid = F_OWNER(first);
-@@ -904,6 +927,10 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
+ 			if (preserve_gid)
+@@ -995,6 +1018,10 @@
  
  	if (chmod_modes && !S_ISLNK(mode) && mode)
  		mode = tweak_mode(mode, chmod_modes);
@@ -183,7 +464,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  
  	if (preserve_uid && !(xflags & XMIT_SAME_UID)) {
  		if (protocol_version < 30)
-@@ -1085,6 +1112,10 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
+@@ -1203,6 +1230,10 @@
  	}
  #endif
  	file->mode = mode;
@@ -194,7 +475,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	if (preserve_uid)
  		F_OWNER(file) = uid;
  	if (preserve_gid) {
-@@ -1506,6 +1537,10 @@ struct file_struct *make_file(const char *fname, struct file_list *flist,
+@@ -1667,6 +1698,10 @@
  	}
  #endif
  	file->mode = st.st_mode;
@@ -207,20 +488,16 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	if (preserve_gid)
 --- generator.c.orig
 +++ generator.c
-@@ -43,10 +43,12 @@ extern int preserve_devices;
- extern int preserve_specials;
+@@ -46,6 +46,8 @@
  extern int preserve_hard_links;
  extern int preserve_executability;
-+extern int preserve_file_flags;
  extern int preserve_perms;
++extern int preserve_file_flags;
++extern int force_change;
  extern int preserve_mtimes;
  extern int omit_dir_times;
  extern int omit_link_times;
-+extern int force_change;
- extern int delete_mode;
- extern int delete_before;
- extern int delete_during;
-@@ -493,6 +495,10 @@ int unchanged_attrs(const char *fname, struct file_struct *file, stat_x *sxp)
+@@ -499,6 +501,10 @@
  			return 0;
  		if (perms_differ(file, sxp))
  			return 0;
@@ -231,7 +508,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  		if (ownership_differs(file, sxp))
  			return 0;
  #ifdef SUPPORT_ACLS
-@@ -554,6 +560,11 @@ void itemize(const char *fnamecmp, struct file_struct *file, int ndx, int statre
+@@ -560,6 +566,11 @@
  			iflags |= ITEM_REPORT_OWNER;
  		if (gid_ndx && !(file->flags & FLAG_SKIP_GROUP) && sxp->st.st_gid != (gid_t)F_GROUP(file))
  			iflags |= ITEM_REPORT_GROUP;
@@ -243,84 +520,75 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  #ifdef SUPPORT_ACLS
  		if (preserve_acls && !S_ISLNK(file->mode)) {
  			if (!ACL_READY(*sxp))
-@@ -1466,6 +1477,10 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
- 		if (!preserve_perms) { /* See comment in non-dir code below. */
- 			file->mode = dest_mode(file->mode, sx.st.st_mode, dflt_perms, statret == 0);
- 		}
+@@ -1414,9 +1425,16 @@
+ 	int dfd = held_dfd_for(fname, file);
+ 	if (dfd >= 0) {
+ 		const char *slash = strrchr(fname, '/');
+-		return do_chmod_atfd(dfd, slash ? slash + 1 : fname, mode);
++		int ret = do_chmod_atfd(dfd, slash ? slash + 1 : fname, mode);
 +#ifdef SUPPORT_FORCE_CHANGE
-+		if (force_change && !preserve_file_flags)
-+			F_FFLAGS(file) = sx.st.st_flags;
++		/* The fd-relative wrapper cannot chflags(); let the full-path
++		 * wrapper's force-change logic have a go at an immutable target. */
++		if (ret < 0 && force_change && errno == EPERM)
++			ret = do_chmod_at(fname, mode, NO_FFLAGS);
 +#endif
- 		if (statret != 0 && basis_dir[0] != NULL) {
- 			int j = try_dests_non(file, fname, ndx, fnamecmpbuf, &sx, itemizing, code);
- 			if (j == -2) {
-@@ -1508,10 +1523,15 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
- 		 * readable and writable permissions during the time we are
- 		 * putting files within them.  This is then restored to the
- 		 * former permissions after the transfer is done. */
-+#ifdef SUPPORT_FORCE_CHANGE
-+		if (force_change && F_FFLAGS(file) & force_change
-+		 && make_mutable(fname, file->mode, F_FFLAGS(file), force_change))
-+			need_retouch_dir_perms = 1;
-+#endif
- #ifdef HAVE_CHMOD
- 		if (!am_root && (file->mode & S_IRWXU) != S_IRWXU && dir_tweaking) {
- 			mode_t mode = file->mode | S_IRWXU;
--			if (do_chmod_at(fname, mode) < 0) {
-+			if (do_chmod_at(fname, mode, 0) < 0) {
- 				rsyserr(FERROR_XFER, errno,
- 					"failed to modify permissions on %s",
- 					full_fname(fname));
-@@ -1546,6 +1566,10 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
- 		int exists = statret == 0 && stype != FT_DIR;
- 		file->mode = dest_mode(file->mode, sx.st.st_mode, dflt_perms, exists);
++		return ret;
  	}
-+#ifdef SUPPORT_FORCE_CHANGE
-+	if (force_change && !preserve_file_flags)
-+		F_FFLAGS(file) = sx.st.st_flags;
-+#endif
+-	return do_chmod_at(fname, mode);
++	return do_chmod_at(fname, mode, NO_FFLAGS);
+ }
  
- #ifdef SUPPORT_HARD_LINKS
- 	if (preserve_hard_links && F_HLINK_NOT_FIRST(file)
-@@ -2053,7 +2077,7 @@ int atomic_create(struct file_struct *file, char *fname, const char *slnk, const
+ static void gen_entry_set_times(const char *fname, struct file_struct *file, STRUCT_STAT *stp)
+@@ -1424,7 +1442,14 @@
+ 	int dfd = held_dfd_for(fname, file);
+ 	if (dfd >= 0) {
+ 		const char *slash = strrchr(fname, '/');
+-		if (set_times_at(dfd, slash ? slash + 1 : fname, stp) != -2)
++		int ret = set_times_at(dfd, slash ? slash + 1 : fname, stp);
++#ifdef SUPPORT_FORCE_CHANGE
++		/* set_times_at() has no force-change tier; fall through to the
++		 * full-path set_times(), which does. */
++		if (ret < 0 && force_change && errno == EPERM)
++			ret = -2;
++#endif
++		if (ret != -2)
+ 			return;	/* handled (success or error) by the at-on-dfd tier */
  	}
+ 	set_times(fname, stp);
+@@ -1493,7 +1518,12 @@
+ 	int dfd = held_dfd_for(path, file);
+ 	if (dfd >= 0) {
+ 		const char *slash = strrchr(path, '/');
+-		return do_unlink_atfd(dfd, slash ? slash + 1 : path, 0);
++		int ret = do_unlink_atfd(dfd, slash ? slash + 1 : path, 0);
++#ifdef SUPPORT_FORCE_CHANGE
++		if (ret < 0 && force_change && errno == EPERM)
++			ret = do_unlink_at(path);
++#endif
++		return ret;
+ 	}
+ 	return do_unlink_at(path);
+ }
+@@ -1508,9 +1538,14 @@
+ 	if (odfd >= 0 && ndfd >= 0) {
+ 		const char *os = strrchr(opath, '/');
+ 		const char *ns = strrchr(npath, '/');
+-		return do_rename_atfd(odfd, os ? os + 1 : opath, ndfd, ns ? ns + 1 : npath);
++		int ret = do_rename_atfd(odfd, os ? os + 1 : opath, ndfd, ns ? ns + 1 : npath);
++#ifdef SUPPORT_FORCE_CHANGE
++		if (ret < 0 && force_change && errno == EPERM)
++			ret = do_rename_at(opath, npath, 0, NO_FFLAGS);
++#endif
++		return ret;
+ 	}
+-	return do_rename_at(opath, npath);
++	return do_rename_at(opath, npath, 0, NO_FFLAGS);
+ }
  
- 	if (!skip_atomic) {
--		if (do_rename_at(tmpname, fname) < 0) {
-+		if (do_rename_at(tmpname, fname, file->mode, NO_FFLAGS) < 0) {
- 			char *full_tmpname = strdup(full_fname(tmpname));
- 			if (full_tmpname == NULL)
- 				out_of_memory("atomic_create");
-@@ -2124,17 +2148,25 @@ static void touch_up_dirs(struct file_list *flist, int ndx)
- 			continue;
- 		fname = f_name(file, NULL);
- 		if (fix_dir_perms)
--			do_chmod_at(fname, file->mode);
-+			do_chmod_at(fname, file->mode, 0);
- 		if (need_retouch_dir_times) {
- 			STRUCT_STAT st;
- 			if (link_stat(fname, &st, 0) == 0 && mtime_differs(&st, file)) {
- 				st.st_mtime = file->modtime;
- #ifdef ST_MTIME_NSEC
- 				st.ST_MTIME_NSEC = F_MOD_NSEC_or_0(file);
-+#endif
-+#ifdef SUPPORT_FORCE_CHANGE
-+				st.st_mode = file->mode;
-+				st.st_flags = 0;
- #endif
- 				set_times(fname, &st);
- 			}
- 		}
-+#ifdef SUPPORT_FORCE_CHANGE
-+		if (force_change && F_FFLAGS(file) & force_change)
-+			undo_make_mutable(fname, F_FFLAGS(file));
-+#endif
- 		if (counter >= loopchk_limit) {
- 			if (allowed_lull)
- 				maybe_send_keepalive(time(NULL), MSK_ALLOW_FLUSH);
+ #ifdef SUPPORT_XATTRS
 --- log.c.orig
 +++ log.c
-@@ -731,7 +731,8 @@ static void log_formatted(enum logcode code, const char *format, const char *op,
+@@ -763,7 +763,8 @@
  			     : iflags & ITEM_REPORT_ATIME ? 'u' : 'n';
  			c[9] = !(iflags & ITEM_REPORT_ACL) ? '.' : 'a';
  			c[10] = !(iflags & ITEM_REPORT_XATTR) ? '.' : 'x';
@@ -332,9 +600,9 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  				char ch = iflags & ITEM_IS_NEW ? '+' : '?';
 --- main.c.orig
 +++ main.c
-@@ -31,6 +31,9 @@
- #ifdef __TANDEM
- #include <floss.h(floss_execlp)>
+@@ -34,6 +34,9 @@
+ #ifdef HAVE_SYS_RESOURCE_H
+ #include <sys/resource.h>
  #endif
 +#ifdef SUPPORT_FORCE_CHANGE
 +#include <sys/sysctl.h>
@@ -342,15 +610,15 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  
  extern int dry_run;
  extern int list_only;
-@@ -49,6 +52,7 @@ extern int need_messages_from_generator;
- extern int kluge_around_eof;
+@@ -53,6 +56,7 @@
  extern int got_xfer_error;
+ extern volatile sig_atomic_t got_sigusr2;
  extern int old_style_args;
 +extern int force_change;
  extern int msgs2stderr;
  extern int module_id;
  extern int read_only;
-@@ -995,6 +999,22 @@ static int do_recv(int f_in, int f_out, char *local_name)
+@@ -1010,6 +1014,22 @@
  	 * points to an identical file won't be replaced by the referent. */
  	copy_links = copy_dirlinks = copy_unsafe_links = 0;
  
@@ -375,7 +643,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  		match_hard_links(first_flist);
 --- options.c.orig
 +++ options.c
-@@ -56,6 +56,7 @@ int preserve_hard_links = 0;
+@@ -57,6 +57,7 @@
  int preserve_acls = 0;
  int preserve_xattrs = 0;
  int preserve_perms = 0;
@@ -383,7 +651,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  int preserve_executability = 0;
  int preserve_devices = 0;
  int preserve_specials = 0;
-@@ -99,6 +100,7 @@ int msgs2stderr = 2; /* Default: send errors to stderr for local & remote-shell
+@@ -104,6 +105,7 @@
  int saw_stderr_opt = 0;
  int allow_8bit_chars = 0;
  int force_delete = 0;
@@ -391,7 +659,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  int io_timeout = 0;
  int prune_empty_dirs = 0;
  int use_qsort = 0;
-@@ -633,6 +635,10 @@ static struct poptOption long_options[] = {
+@@ -642,6 +644,10 @@
    {"perms",           'p', POPT_ARG_VAL,    &preserve_perms, 1, 0, 0 },
    {"no-perms",         0,  POPT_ARG_VAL,    &preserve_perms, 0, 0, 0 },
    {"no-p",             0,  POPT_ARG_VAL,    &preserve_perms, 0, 0, 0 },
@@ -402,7 +670,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
    {"executability",   'E', POPT_ARG_NONE,   &preserve_executability, 0, 0, 0 },
    {"acls",            'A', POPT_ARG_NONE,   0, 'A', 0, 0 },
    {"no-acls",          0,  POPT_ARG_VAL,    &preserve_acls, 0, 0, 0 },
-@@ -731,6 +737,12 @@ static struct poptOption long_options[] = {
+@@ -745,6 +751,12 @@
    {"remove-source-files",0,POPT_ARG_VAL,    &remove_source_files, 1, 0, 0 },
    {"force",            0,  POPT_ARG_VAL,    &force_delete, 1, 0, 0 },
    {"no-force",         0,  POPT_ARG_VAL,    &force_delete, 0, 0, 0 },
@@ -415,7 +683,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
    {"ignore-errors",    0,  POPT_ARG_VAL,    &ignore_errors, 1, 0, 0 },
    {"no-ignore-errors", 0,  POPT_ARG_VAL,    &ignore_errors, 0, 0, 0 },
    {"max-delete",       0,  POPT_ARG_INT,    &max_delete, 0, 0, 0 },
-@@ -1028,6 +1040,15 @@ static void set_refuse_options(void)
+@@ -1105,6 +1117,15 @@
  #ifndef SUPPORT_CRTIMES
  	parse_one_refuse_match(0, "crtimes", list_end);
  #endif
@@ -431,7 +699,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  
  	/* Now we use the descrip values to actually mark the options for refusal. */
  	for (op = long_options; op != list_end; op++) {
-@@ -2752,6 +2773,9 @@ void server_options(char **args, int *argc_p)
+@@ -2918,6 +2939,9 @@
  	if (xfer_dirs && !recurse && delete_mode && am_sender)
  		args[ac++] = "--no-r";
  
@@ -441,7 +709,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	if (do_compression && do_compression_level != CLVL_NOT_SPECIFIED) {
  		if (asprintf(&arg, "--compress-level=%d", do_compression_level) < 0)
  			goto oom;
-@@ -2847,6 +2871,16 @@ void server_options(char **args, int *argc_p)
+@@ -3013,6 +3037,16 @@
  			args[ac++] = "--delete-excluded";
  		if (force_delete)
  			args[ac++] = "--force";
@@ -460,39 +728,52 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  		if (am_root > 1)
 --- receiver.c.orig
 +++ receiver.c
-@@ -543,7 +543,7 @@ static void handle_delayed_updates(char *local_name)
- 			}
- 			/* We don't use robust_rename() here because the
- 			 * partial-dir must be on the same drive. */
--			if (do_rename_at(partialptr, fname) < 0) {
-+			if (do_rename_at(partialptr, fname, 0, NO_FFLAGS) < 0) {
+@@ -264,11 +264,11 @@
+ 		return -1;
+ 	}
+ 	prior_mode = cst.st_mode & CHMOD_BITS;
+-	if (do_chmod_at(fname, prior_mode | S_IWUSR) < 0)
++	if (do_chmod_at(fname, prior_mode | S_IWUSR, NO_FFLAGS) < 0)
+ 		return -1;
+ 	fd = do_open(fname, O_WRONLY, 0600);
+ 	open_errno = errno;
+-	if (do_chmod_at(fname, prior_mode) < 0) {
++	if (do_chmod_at(fname, prior_mode, NO_FFLAGS) < 0) {
+ 		restore_errno = errno;
+ 		if (fd >= 0)
+ 			close(fd);
+@@ -704,7 +704,7 @@
+ 			 * an excluded subtree. */
+ 			int rret;
+ 			operator_path_resolve = 1;
+-			rret = do_rename_at(partialptr, fname);
++			rret = do_rename_at(partialptr, fname, 0, NO_FFLAGS);
+ 			operator_path_resolve = 0;
+ 			if (rret < 0) {
  				rsyserr(FERROR_XFER, errno,
- 					"rename failed for %s (from %s)",
- 					full_fname(fname), partialptr);
---- rsync.1.md.orig
-+++ rsync.1.md
-@@ -446,6 +446,7 @@ has its own detailed description later in this manpage.
- --keep-dirlinks, -K      treat symlinked dir on receiver as dir
- --hard-links, -H         preserve hard links
- --perms, -p              preserve permissions
-+--file-flags             preserve file flags (aka chflags)
- --executability, -E      preserve executability
+--- rsync.1.md.orig	2026-08-02 21:10:00.000000000 +0000
++++ rsync.1.md	2026-08-21 20:48:04.173090000 +0000
+@@ -558,6 +558,7 @@
  --chmod=CHMOD            affect file and/or directory permissions
  --acls, -A               preserve ACLs (implies --perms)
-@@ -487,7 +488,11 @@ has its own detailed description later in this manpage.
- --ignore-missing-args    ignore missing source args without error
- --delete-missing-args    delete missing source args from destination
+ --xattrs, -X             preserve extended attributes
++--file-flags             preserve file flags (aka chflags)
+ --owner, -o              preserve owner (super-user only)
+ --group, -g              preserve group
+ --devices                preserve device files (super-user only)
+@@ -598,7 +599,10 @@
+ --ignore-missing-args    ignore missing source arguments without error
+ --delete-missing-args    delete missing source arguments from destination
  --ignore-errors          delete even if there are I/O errors
----force                  force deletion of dirs even if not empty
-+--force                  an alias for --force-delete
-+--force-delete           force deletion of directories even if not empty
+---force                  force deletion of directories even if not empty
++--force, --force-delete  force deletion of directories even if not empty
 +--force-change           affect user-/system-immutable files/dirs
 +--force-uchange          affect user-immutable files/dirs
 +--force-schange          affect system-immutable files/dirs
  --max-delete=NUM         don't delete more than NUM files
  --max-size=SIZE          don't transfer any file larger than SIZE
  --min-size=SIZE          don't transfer any file smaller than SIZE
-@@ -832,6 +837,7 @@ expand it.
+@@ -945,6 +949,7 @@
      recursion and want to preserve almost everything.  Be aware that it does
      **not** include preserving ACLs (`-A`), xattrs (`-X`), atimes (`-U`),
      crtimes (`-N`), nor the finding and preserving of hardlinks (`-H`).
@@ -500,19 +781,22 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  
      The only exception to the above equivalence is when [`--files-from`](#opt)
      is specified, in which case [`-r`](#opt) is not implied.
-@@ -1296,7 +1302,7 @@ expand it.
-     Without this option, if the sending side has replaced a directory with a
-     symlink to a directory, the receiving side will delete anything that is in
-     the way of the new symlink, including a directory hierarchy (as long as
--    [`--force`](#opt) or [`--delete`](#opt) is in effect).
-+    [`--force-delete`](#opt) or [`--delete`](#opt) is in effect).
+@@ -2246,8 +2251,8 @@
+     [`--ignore-missing-args`](#opt) option a step farther: each missing argument
+     will become a deletion request of the corresponding destination file on the
+     receiving side (should it exist).  If the destination file is a non-empty
+-    directory, it will only be successfully deleted if [`--force`](#opt) or
+-    [`--delete`](#opt) are in effect.  Other than that, this option is
++    directory, it will only be successfully deleted if [`--force-delete`](#opt)
++    or [`--delete`](#opt) are in effect.  Other than that, this option is
+     independent of any other type of delete processing.
  
-     See also [`--keep-dirlinks`](#opt) for an analogous option for the
-     receiving side.
-@@ -1491,6 +1497,37 @@ expand it.
-     those used by [`--fake-super`](#opt)) unless you repeat the option (e.g. `-XX`).
-     This "copy all xattrs" mode cannot be used with [`--fake-super`](#opt).
+     The missing source files are represented by special file-list entries which
+@@ -2258,7 +2263,38 @@
+     Tells [`--delete`](#opt) to go ahead and delete files even when there are
+     I/O errors.
  
+-0.  `--force`
 +0.  `--file-flags`
 +
 +    This option causes rsync to update the file flags to be the same as the
@@ -528,7 +812,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
 +    This option causes rsync to disable both user-immutable and
 +    system-immutable flags on files and directories that are being updated or
 +    deleted on the receiving side.  This option overrides
-+    [`--force-uchange`](#opt) and [`--force-schange`](#opt).
++    [`--force-uchange`](#opt) and [`--force-schange`](#opt)
 +
 +0.  `--force-uchange`
 +
@@ -542,42 +826,14 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
 +    This option causes rsync to disable system-immutable flags on files and
 +    directories that are being updated or deleted on the receiving side.  It
 +    does not try to affect user flags.  This option overrides
-+    [`--force-change`](#opt) and [`--force-uchange`](#opt).
++    [`--force-change`](#opt) and [`--force-uchange`](#opt). 
 +
- 0.  `--chmod=CHMOD`
- 
-     This option tells rsync to apply one or more comma-separated "chmod" modes
-@@ -2020,8 +2057,8 @@ expand it.
-     [`--ignore-missing-args`](#opt) option a step farther: each missing arg
-     will become a deletion request of the corresponding destination file on the
-     receiving side (should it exist).  If the destination file is a non-empty
--    directory, it will only be successfully deleted if [`--force`](#opt) or
--    [`--delete`](#opt) are in effect.  Other than that, this option is
-+    directory, it will only be successfully deleted if [`--force-delete`](#opt)
-+    or [`--delete`](#opt) are in effect.  Other than that, this option is
-     independent of any other type of delete processing.
- 
-     The missing source files are represented by special file-list entries which
-@@ -2032,14 +2069,14 @@ expand it.
-     Tells [`--delete`](#opt) to go ahead and delete files even when there are
-     I/O errors.
- 
--0.  `--force`
-+0.  `--force-delete`, `--force`
++0.  `--force`, `--force-delete`
  
      This option tells rsync to delete a non-empty directory when it is to be
      replaced by a non-directory.  This is only relevant if deletions are not
-     active (see [`--delete`](#opt) for details).
- 
--    Note for older rsync versions: `--force` used to still be required when
--    using [`--delete-after`](#opt), and it used to be non-functional unless the
-+    Note that some older rsync versions used to require `--force` when using
-+    [`--delete-after`](#opt), and it used to be non-functional unless the
-     [`--recursive`](#opt) option was also enabled.
- 
- 0.  `--max-delete=NUM`
-@@ -3116,7 +3153,7 @@ expand it.
-     also turns on the output of other verbose messages).
+@@ -3365,7 +3401,7 @@
+     but that also turns on the output of other verbose messages.
  
      The "%i" escape has a cryptic output that is 11 letters long.  The general
 -    format is like the string `YXcstpoguax`, where **Y** is replaced by the type
@@ -585,17 +841,108 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
      of update being done, **X** is replaced by the file-type, and the other
      letters represent attributes that may be output if they are being modified.
  
+--- rsync.1.orig	2026-08-13 00:05:31.000000000 +0000
++++ rsync.1	2026-08-21 21:22:19.276574000 +0000
+@@ -1,5 +1,5 @@
+-.TH "rsync" "1" "13 Aug 2026" "rsync 3.5.0" "User Commands"
+-.\" prefix=/usr
++.TH "rsync" "1" "7 Aug 2026" "rsync 3.5.0" "User Commands"
++.\" prefix=/usr/local
+ .P
+ .SH "NAME"
+ .P
+@@ -661,6 +661,7 @@
+ --chmod=CHMOD            affect file and/or directory permissions
+ --acls, -A               preserve ACLs (implies --perms)
+ --xattrs, -X             preserve extended attributes
++--file-flags             preserve file flags (aka chflags)
+ --owner, -o              preserve owner (super-user only)
+ --group, -g              preserve group
+ --devices                preserve device files (super-user only)
+@@ -701,7 +702,10 @@
+ --ignore-missing-args    ignore missing source arguments without error
+ --delete-missing-args    delete missing source arguments from destination
+ --ignore-errors          delete even if there are I/O errors
+---force                  force deletion of directories even if not empty
++--force, --force-delete  force deletion of directories even if not empty
++--force-change           affect user-/system-immutable files/dirs
++--force-uchange          affect user-immutable files/dirs
++--force-schange          affect system-immutable files/dirs
+ --max-delete=NUM         don't delete more than NUM files
+ --max-size=SIZE          don't transfer any file larger than SIZE
+ --min-size=SIZE          don't transfer any file smaller than SIZE
+@@ -1035,6 +1039,7 @@
+ recursion and want to preserve almost everything.  Be aware that it does
+ \fBnot\fP include preserving ACLs (\fB\-A\fP), xattrs (\fB\-X\fP), atimes (\fB\-U\fP),
+ crtimes (\fB\-N\fP), nor the finding and preserving of hardlinks (\fB\-H\fP).
++It also does \fBnot\fP imply \fB\-\-file\-flags\fP.
+ .IP
+ The only exception to the above equivalence is when \fB\-\-files\-from\fP
+ is specified, in which case \fB\-r\fP is not implied.
+@@ -2309,8 +2314,8 @@
+ \fB\-\-ignore\-missing\-args\fP option a step farther: each missing argument
+ will become a deletion request of the corresponding destination file on the
+ receiving side (should it exist).  If the destination file is a non-empty
+-directory, it will only be successfully deleted if \fB\-\-force\fP or
+-\fB\-\-delete\fP are in effect.  Other than that, this option is
++directory, it will only be successfully deleted if \fB\-\-force\-delete\fP
++or \fB\-\-delete\fP are in effect.  Other than that, this option is
+ independent of any other type of delete processing.
+ .IP
+ The missing source files are represented by special file-list entries which
+@@ -2318,7 +2323,30 @@
+ .IP "\fB\-\-ignore\-errors\fP"
+ Tells \fB\-\-delete\fP to go ahead and delete files even when there are
+ I/O errors.
+-.IP "\fB\-\-force\fP"
++.IP "\fB\-\-file\-flags\fP"
++This option causes rsync to update the file flags to be the same as the
++source files and directories (if your OS supports the \fBchflags\fP(2) system
++call).   Some flags can only be altered by the super-user and some might
++only be unset below a certain secure-level (usually single-user mode). It
++will not make files alterable that are set to immutable on the receiver.
++To do that, see \fB\-\-force\-change\fP, \fB\-\-force\-uchange\fP, and
++\fB\-\-force\-schange\fP.
++.IP "\fB\-\-force\-change\fP"
++This option causes rsync to disable both user-immutable and
++system-immutable flags on files and directories that are being updated or
++deleted on the receiving side.  This option overrides
++\fB\-\-force\-uchange\fP and \fB\-\-force\-schange\fP
++.IP "\fB\-\-force\-uchange\fP"
++This option causes rsync to disable user-immutable flags on files and
++directories that are being updated or deleted on the receiving side.  It
++does not try to affect system flags.  This option overrides
++\fB\-\-force\-change\fP and \fB\-\-force\-schange\fP.
++.IP "\fB\-\-force\-schange\fP"
++This option causes rsync to disable system-immutable flags on files and
++directories that are being updated or deleted on the receiving side.  It
++does not try to affect user flags.  This option overrides
++\fB\-\-force\-change\fP and \fB\-\-force\-uchange\fP.
++.IP "\fB\-\-force\fP, \fB\-\-force\-delete\fP"
+ This option tells rsync to delete a non-empty directory when it is to be
+ replaced by a non-directory.  This is only relevant if deletions are not
+ active (see \fB\-\-delete\fP for details).
+@@ -3425,7 +3453,7 @@
+ but that also turns on the output of other verbose messages.
+ .IP
+ The "%i" escape has a cryptic output that is 11 letters long.  The general
+-format is like the string \fBYXcstpoguax\fP, where \fBY\fP is replaced by the type
++format is like the string \fBYXcstpoguaxf\fP, where \fBY\fP is replaced by the type
+ of update being done, \fBX\fP is replaced by the file-type, and the other
+ letters represent attributes that may be output if they are being modified.
+ .IP
 --- rsync.c.orig
 +++ rsync.c
-@@ -31,6 +31,7 @@ extern int dry_run;
+@@ -31,6 +31,8 @@
  extern int preserve_acls;
  extern int preserve_xattrs;
  extern int preserve_perms;
 +extern int preserve_file_flags;
++extern int force_change;
  extern int preserve_executability;
  extern int preserve_mtimes;
  extern int omit_dir_times;
-@@ -471,6 +472,39 @@ mode_t dest_mode(mode_t flist_mode, mode_t stat_mode, int dflt_perms,
+@@ -486,6 +488,39 @@
  	return new_mode;
  }
  
@@ -635,25 +982,47 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  static int same_mtime(struct file_struct *file, STRUCT_STAT *st, int extra_accuracy)
  {
  #ifdef ST_MTIME_NSEC
-@@ -547,7 +581,7 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
+@@ -676,10 +711,19 @@
  		if (am_root >= 0) {
  			uid_t uid = change_uid ? (uid_t)F_OWNER(file) : sxp->st.st_uid;
  			gid_t gid = change_gid ? (gid_t)F_GROUP(file) : sxp->st.st_gid;
--			if (do_lchown_at(fname, uid, gid) != 0) {
-+			if (do_lchown_at(fname, uid, gid, sxp->st.st_mode, ST_FLAGS(sxp->st)) != 0) {
+-			if ((op_leaf_fd >= 0 ? do_fchown(op_leaf_fd, uid, gid)
+-			     : op_refuse ? (errno = ELOOP, -1)
+-			     : dfd >= 0 ? do_lchown_atfd(dfd, leaf, uid, gid)
+-					: do_lchown_at(fname, uid, gid)) != 0) {
++			int own_ret = op_leaf_fd >= 0 ? do_fchown(op_leaf_fd, uid, gid)
++				    : op_refuse ? (errno = ELOOP, -1)
++				    : dfd >= 0 ? do_lchown_atfd(dfd, leaf, uid, gid)
++					       : do_lchown_at(fname, uid, gid, sxp->st.st_mode, ST_FLAGS(sxp->st));
++#ifdef SUPPORT_FORCE_CHANGE
++			/* The fd-relative wrappers have no path to chflags(), so an
++			 * immutable target fails there with EPERM.  Retry through the
++			 * full-path wrapper, which carries the force-change logic. */
++			if (own_ret != 0 && force_change && errno == EPERM
++			 && !op_refuse && (op_leaf_fd >= 0 || dfd >= 0))
++				own_ret = do_lchown_at(fname, uid, gid, sxp->st.st_mode, ST_FLAGS(sxp->st));
++#endif
++			if (own_ret != 0) {
  				/* We shouldn't have attempted to change uid
  				 * or gid unless have the privilege. */
  				rsyserr(FERROR_XFER, errno, "%s %s failed",
-@@ -657,7 +691,7 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
- 
- #ifdef HAVE_CHMOD
- 	if (!BITS_EQUAL(sxp->st.st_mode, new_mode, CHMOD_BITS)) {
--		int ret = am_root < 0 ? 0 : do_chmod_at(fname, new_mode);
-+		int ret = am_root < 0 ? 0 : do_chmod_at(fname, new_mode, ST_FLAGS(sxp->st));
+@@ -809,7 +853,14 @@
+ 			: op_leaf_fd >= 0 ? do_fchmod(op_leaf_fd, new_mode)
+ 			: op_refuse ? (errno = ELOOP, -1)
+ 			: dfd >= 0 && !S_ISLNK(new_mode) ? do_chmod_atfd(dfd, leaf, new_mode)
+-			: do_chmod_at(fname, new_mode);
++			: do_chmod_at(fname, new_mode, ST_FLAGS(sxp->st));
++#ifdef SUPPORT_FORCE_CHANGE
++		/* See the chown comment above: retry an fd-relative EPERM through
++		 * the full-path wrapper so --force-change can clear the flags. */
++		if (ret < 0 && force_change && errno == EPERM && am_root >= 0
++		 && !op_refuse && (op_leaf_fd >= 0 || (dfd >= 0 && !S_ISLNK(new_mode))))
++			ret = do_chmod_at(fname, new_mode, ST_FLAGS(sxp->st));
++#endif
  		if (ret < 0) {
  			rsyserr(FERROR_XFER, errno,
  				"failed to set permissions on %s",
-@@ -669,6 +703,19 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
+@@ -821,6 +872,19 @@
  	}
  #endif
  
@@ -673,17 +1042,17 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	if (INFO_GTE(NAME, 2) && flags & ATTRS_REPORT) {
  		if (updated)
  			rprintf(FCLIENT, "%s\n", fname);
-@@ -746,7 +793,8 @@ int finish_transfer(const char *fname, const char *fnametmp,
- 
- 	/* Change permissions before putting the file into place. */
+@@ -909,7 +973,8 @@
+ 	 * (in-tree temps keep their held dirfd, so op_pin stays off there). */
+ 	operator_path_resolve = 1;
  	set_file_attrs(fnametmp, file, NULL, fnamecmp,
 -		       ok_to_set_time ? ATTRS_ACCURATE_TIME : ATTRS_SKIP_MTIME | ATTRS_SKIP_ATIME | ATTRS_SKIP_CRTIME);
 +		       ATTRS_DELAY_IMMUTABLE
 +		       | (ok_to_set_time ? ATTRS_ACCURATE_TIME : ATTRS_SKIP_MTIME | ATTRS_SKIP_ATIME | ATTRS_SKIP_CRTIME));
+ 	operator_path_resolve = 0;
  
  	/* move tmp file over real file */
- 	if (DEBUG_GTE(RECV, 1))
-@@ -763,6 +811,10 @@ int finish_transfer(const char *fname, const char *fnametmp,
+@@ -927,6 +992,10 @@
  	}
  	if (ret == 0) {
  		/* The file was moved into place (not copied), so it's done. */
@@ -694,7 +1063,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  		return 1;
  	}
  	/* The file was copied, so tweak the perms of the copied file.  If it
-@@ -774,7 +826,7 @@ int finish_transfer(const char *fname, const char *fnametmp,
+@@ -938,7 +1007,7 @@
  		       ok_to_set_time ? ATTRS_ACCURATE_TIME : ATTRS_SKIP_MTIME | ATTRS_SKIP_ATIME | ATTRS_SKIP_CRTIME);
  
  	if (temp_copy_name) {
@@ -714,7 +1083,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  #define XMIT_CRTIME_EQ_MTIME (1<<17)	/* any protocol - restricted by command-line option */
  
  /* These flags are used in the live flist data. */
-@@ -216,6 +216,7 @@
+@@ -223,6 +223,7 @@
  #define ATTRS_SKIP_MTIME	(1<<1)
  #define ATTRS_ACCURATE_TIME	(1<<2)
  #define ATTRS_SKIP_ATIME	(1<<3)
@@ -722,7 +1091,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  #define ATTRS_SKIP_CRTIME	(1<<5)
  
  #define MSG_FLUSH	2
-@@ -244,6 +245,7 @@
+@@ -251,6 +252,7 @@
  #define ITEM_REPORT_GROUP (1<<6)
  #define ITEM_REPORT_ACL (1<<7)
  #define ITEM_REPORT_XATTR (1<<8)
@@ -730,7 +1099,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  #define ITEM_REPORT_CRTIME (1<<10)
  #define ITEM_BASIS_TYPE_FOLLOWS (1<<11)
  #define ITEM_XNAME_FOLLOWS (1<<12)
-@@ -611,6 +613,31 @@ typedef unsigned int size_t;
+@@ -628,6 +630,31 @@
  #define SUPPORT_CRTIMES 1
  #endif
  
@@ -762,7 +1131,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  /* Find a variable that is either exactly 32-bits or longer.
   * If some code depends on 32-bit truncation, it will need to
   * take special action in a "#if SIZEOF_INT32 > 4" section. */
-@@ -842,6 +869,7 @@ extern int pathname_ndx;
+@@ -861,6 +888,7 @@
  extern int depth_ndx;
  extern int uid_ndx;
  extern int gid_ndx;
@@ -770,7 +1139,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  extern int acls_ndx;
  extern int xattrs_ndx;
  extern int file_sum_extra_cnt;
-@@ -897,6 +925,11 @@ extern int file_sum_extra_cnt;
+@@ -916,6 +944,11 @@
  /* When the associated option is on, all entries will have these present: */
  #define F_OWNER(f) REQ_EXTRA(f, uid_ndx)->unum
  #define F_GROUP(f) REQ_EXTRA(f, gid_ndx)->unum
@@ -782,17 +1151,67 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  #define F_ACL(f) REQ_EXTRA(f, acls_ndx)->num
  #define F_XATTR(f) REQ_EXTRA(f, xattrs_ndx)->num
  #define F_NDX(f) REQ_EXTRA(f, unsort_ndx)->num
+--- testsuite/rsyncfns.py.orig
++++ testsuite/rsyncfns.py
+@@ -176,9 +176,9 @@
+ #   all_plus   ->  +++++++++   every attribute changed (an additive create)
+ #   allspace   ->             every attribute unchanged
+ #   dots       ->  .....       trailing dots after the change columns
+-all_plus = '+++++++++'
+-allspace = '         '
+-dots = '.....'
++all_plus = '++++++++++'
++allspace = '          '
++dots = '......'
+ 
+ # The "$tmpdir/from", "$tmpdir/to", "$tmpdir/chk" layout from rsync.fns.
+ TMPDIR = SCRATCHDIR
+--- sender.c.orig
++++ sender.c
+@@ -25,6 +25,7 @@
+ extern int do_xfers;
+ extern int open_noatime;
+ extern int am_server;
++extern int force_change;
+ extern int am_daemon;
+ extern int local_server;
+ extern int inc_recurse;
+@@ -400,7 +401,7 @@
+ 	struct file_struct *file;
+ 	struct file_list *flist;
+ 	STRUCT_STAT st;
+-	int dfd = -1, secure_errno = 0;
++	int dfd = -1, secure_errno = 0, rm_ret;
+ 
+ 	if (!remove_source_files)
+ 		return;
+@@ -450,7 +451,14 @@
+ 		return;
+ 	}
+ 
+-	if (dfd >= 0 ? secure_remove_source_file(dfd, bname) < 0 : do_unlink(fname) < 0) {
++	rm_ret = dfd >= 0 ? secure_remove_source_file(dfd, bname) : do_unlink(fname);
++#ifdef SUPPORT_FORCE_CHANGE
++	/* The fd-relative wrapper cannot chflags(); retry an immutable source
++	 * through do_unlink(), which carries the force-change logic. */
++	if (rm_ret < 0 && dfd >= 0 && force_change && errno == EPERM)
++		rm_ret = do_unlink(fname);
++#endif
++	if (rm_ret < 0) {
+ 		failed_op = "remove";
+ 	  failed:
+ 		if (errno == ENOENT)
 --- syscall.c.orig
 +++ syscall.c
-@@ -45,6 +45,7 @@ extern int am_root;
+@@ -54,6 +54,7 @@
  extern int am_sender;
  extern int read_only;
  extern int list_only;
 +extern int force_change;
  extern int inplace;
  extern int preallocate_files;
- extern int preserve_perms;
-@@ -90,7 +91,23 @@ int do_unlink(const char *path)
+ extern int sparse_files;
+@@ -641,7 +642,23 @@
  {
  	if (dry_run) return 0;
  	RETURN_ERROR_IF_RO_OR_LO;
@@ -817,7 +1236,26 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  }
  
  /*
-@@ -142,6 +159,18 @@ int do_unlink_at(const char *path)
+@@ -678,6 +695,18 @@
+ 			return -1;
+ 		ret = unlinkat(dfd, bname, 0);
+ 		e = errno;
++#  ifdef SUPPORT_FORCE_CHANGE
++		if (force_change && e == EPERM) {
++			STRUCT_STAT st;
++			if (do_lstat(path, &st) == 0
++			    && make_mutable(path, st.st_mode, st.st_flags, force_change) > 0) {
++				ret = unlinkat(dfd, bname, 0);
++				e = errno;
++				if (ret != 0)
++					undo_make_mutable(path, st.st_flags);
++			}
++		}
++#  endif
+ 		close(dfd);
+ 		errno = e;
+ 		return ret;
+@@ -709,6 +738,18 @@
  
  	ret = unlinkat(dfd, bname, 0);
  	e = errno;
@@ -836,7 +1274,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	close(dfd);
  	errno = e;
  	return ret;
-@@ -399,14 +428,35 @@ int do_link_at(const char *old_path, const char *new_path)
+@@ -1078,7 +1119,7 @@
  }
  #endif
  
@@ -845,6 +1283,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  {
  	if (dry_run) return 0;
  	RETURN_ERROR_IF_RO_OR_LO;
+@@ -1086,7 +1127,28 @@
  #ifndef HAVE_LCHOWN
  #define lchown chown
  #endif
@@ -874,19 +1313,50 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  }
  
  /*
-@@ -423,7 +473,7 @@ int do_lchown(const char *path, uid_t owner, gid_t group)
+@@ -1103,7 +1165,7 @@
    Falls through to do_lchown() in the dry-run / non-daemon / chrooted /
    absolute-path / no-parent cases, identical to do_chmod_at().
  */
 -int do_lchown_at(const char *fname, uid_t owner, gid_t group)
 +int do_lchown_at(const char *fname, uid_t owner, gid_t group, UNUSED(mode_t mode), UNUSED(uint32 file_flags))
  {
- #ifdef AT_FDCWD
+ #if defined AT_FDCWD && defined AT_SYMLINK_NOFOLLOW
  	extern int am_daemon, am_chrooted;
-@@ -437,14 +487,14 @@ int do_lchown_at(const char *fname, uid_t owner, gid_t group)
- 	RETURN_ERROR_IF_RO_OR_LO;
+@@ -1123,12 +1185,29 @@
+ 	 * fall straight through to the unconfined full-path do_lchown(). */
+ 	if (operator_path_resolve && fname && *fname) {
+ 		if (symlink_optout_allowed())
+-			return do_lchown(fname, owner, group);
++			return do_lchown(fname, owner, group, mode, file_flags);
+ 		dfd = owner_walk_parent(fname, &bname);
+ 		if (dfd < 0)
+ 			return -1;
+ 		ret = fchownat(dfd, bname, owner, group, AT_SYMLINK_NOFOLLOW);
+ 		e = errno;
++#  ifdef SUPPORT_FORCE_CHANGE
++		if (force_change && e == EPERM) {
++			if (file_flags == NO_FFLAGS) {
++				STRUCT_STAT st;
++				if (do_lstat(fname, &st) == 0) {
++					mode = st.st_mode;
++					file_flags = st.st_flags;
++				}
++			}
++			if (file_flags != NO_FFLAGS
++			    && make_mutable(fname, mode, file_flags, force_change) > 0) {
++				ret = fchownat(dfd, bname, owner, group, AT_SYMLINK_NOFOLLOW);
++				e = errno;
++				undo_make_mutable(fname, file_flags);
++			}
++		}
++#  endif
+ 		close(dfd);
+ 		errno = e;
+ 		return ret;
+@@ -1136,14 +1215,14 @@
+ #endif
  
- 	if (!am_daemon || am_chrooted)
+ 	if (!secure_relpath_active())
 -		return do_lchown(fname, owner, group);
 +		return do_lchown(fname, owner, group, mode, file_flags);
  
@@ -901,7 +1371,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  
  	dlen = slash - fname;
  	if (dlen >= sizeof dirpath) {
-@@ -461,6 +511,23 @@ int do_lchown_at(const char *fname, uid_t owner, gid_t group)
+@@ -1160,11 +1239,28 @@
  
  	ret = fchownat(dfd, bname, owner, group, AT_SYMLINK_NOFOLLOW);
  	e = errno;
@@ -925,7 +1395,13 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	close(dfd);
  	errno = e;
  	return ret;
-@@ -506,7 +573,7 @@ int do_mknod(const char *pathname, mode_t mode, dev_t dev)
+ #else
+-	return do_lchown(fname, owner, group);
++	return do_lchown(fname, owner, group, mode, file_flags);
+ #endif
+ }
+ 
+@@ -1215,7 +1311,7 @@
  			return -1;
  		close(sock);
  #ifdef HAVE_CHMOD
@@ -934,7 +1410,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  #else
  		return 0;
  #endif
-@@ -618,7 +685,21 @@ int do_rmdir(const char *pathname)
+@@ -1391,7 +1487,21 @@
  {
  	if (dry_run) return 0;
  	RETURN_ERROR_IF_RO_OR_LO;
@@ -957,7 +1433,26 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  }
  
  /*
-@@ -664,6 +745,18 @@ int do_rmdir_at(const char *pathname)
+@@ -1422,6 +1532,18 @@
+ 			return -1;
+ 		ret = unlinkat(dfd, bname, AT_REMOVEDIR);
+ 		e = errno;
++#  ifdef SUPPORT_FORCE_CHANGE
++		if (force_change && e == EPERM) {
++			STRUCT_STAT st;
++			if (do_lstat(pathname, &st) == 0
++			    && make_mutable(pathname, st.st_mode, st.st_flags, force_change) > 0) {
++				ret = unlinkat(dfd, bname, AT_REMOVEDIR);
++				e = errno;
++				if (ret != 0)
++					undo_make_mutable(pathname, st.st_flags);
++			}
++		}
++#  endif
+ 		close(dfd);
+ 		errno = e;
+ 		return ret;
+@@ -1453,6 +1575,18 @@
  
  	ret = unlinkat(dfd, bname, AT_REMOVEDIR);
  	e = errno;
@@ -976,7 +1471,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	close(dfd);
  	errno = e;
  	return ret;
-@@ -758,7 +851,7 @@ int do_open_at(const char *pathname, int flags, mode_t mode)
+@@ -1563,7 +1697,7 @@
  }
  
  #ifdef HAVE_CHMOD
@@ -985,7 +1480,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  {
  	static int switch_step = 0;
  	int code;
-@@ -797,6 +890,23 @@ int do_chmod(const char *path, mode_t mode)
+@@ -1603,6 +1737,23 @@
  			code = chmod(path, mode & CHMOD_BITS); /* DISCOURAGED FUNCTION */
  		break;
  	}
@@ -1009,7 +1504,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	if (code != 0 && (preserve_perms || preserve_executability))
  		return code;
  	return 0;
-@@ -830,7 +940,7 @@ int do_chmod(const char *path, mode_t mode)
+@@ -1767,7 +1918,7 @@
    Falls back to do_chmod() for absolute paths and for paths with no parent
    component, where there is nothing to protect against.
  */
@@ -1018,10 +1513,39 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  {
  #ifdef AT_FDCWD
  	extern int am_daemon, am_chrooted;
-@@ -850,14 +960,14 @@ int do_chmod_at(const char *fname, mode_t mode)
+@@ -1788,12 +1939,27 @@
+ 	 * S_ISLNK(mode) still needs do_chmod()'s lchmod()/setattrlist() handling. */
+ 	if (operator_path_resolve && fname && *fname && !S_ISLNK(mode)) {
+ 		if (symlink_optout_allowed())
+-			return do_chmod(fname, mode);
++			return do_chmod(fname, mode, file_flags);
+ 		dfd = owner_walk_parent(fname, &bname);
+ 		if (dfd < 0)
+ 			return -1;
+ 		ret = do_fchmodat_nofollow(dfd, bname, mode);
+ 		e = errno;
++#ifdef SUPPORT_FORCE_CHANGE
++		if (ret < 0 && force_change && e == EPERM && !S_ISLNK(mode)) {
++			if (file_flags == NO_FFLAGS) {
++				STRUCT_STAT st;
++				if (do_lstat(fname, &st) == 0)
++					file_flags = st.st_flags;
++			}
++			if (file_flags != NO_FFLAGS
++			    && make_mutable(fname, mode, file_flags, force_change) > 0) {
++				ret = do_fchmodat_nofollow(dfd, bname, mode);
++				e = errno;
++				undo_make_mutable(fname, file_flags);
++			}
++		}
++#endif
+ 		close(dfd);
+ 		errno = e;
+ 		return ret;
+@@ -1807,14 +1973,14 @@
  	 * already access.  Everywhere else, fall through to plain
  	 * do_chmod() to avoid the dirfd-open overhead on every call. */
- 	if (!am_daemon || am_chrooted)
+ 	if (!secure_relpath_active())
 -		return do_chmod(fname, mode);
 +		return do_chmod(fname, mode, file_flags);
  
@@ -1036,12 +1560,9 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  
  	dlen = slash - fname;
  	if (dlen >= sizeof dirpath) {
-@@ -872,8 +982,23 @@ int do_chmod_at(const char *fname, mode_t mode)
- 	if (dfd < 0)
- 		return -1;
+@@ -1831,20 +1997,64 @@
  
--	ret = fchmodat(dfd, bname, mode, 0);
-+	ret = fchmodat(dfd, bname, mode & CHMOD_BITS, 0);
+ 	ret = do_fchmodat_nofollow(dfd, bname, mode);
  	e = errno;
 +#ifdef SUPPORT_FORCE_CHANGE
 +	if (ret < 0 && force_change && e == EPERM && !S_ISLNK(mode)) {
@@ -1052,7 +1573,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
 +		}
 +		if (file_flags != NO_FFLAGS
 +		    && make_mutable(fname, mode, file_flags, force_change) > 0) {
-+			ret = fchmodat(dfd, bname, mode & CHMOD_BITS, 0);
++			ret = do_fchmodat_nofollow(dfd, bname, mode);
 +			e = errno;
 +			undo_make_mutable(fname, file_flags);
 +		}
@@ -1061,7 +1582,10 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	close(dfd);
  	errno = e;
  	return ret;
-@@ -883,11 +1008,40 @@ int do_chmod_at(const char *fname, mode_t mode)
+ #else
+-	return do_chmod(fname, mode);
++	return do_chmod(fname, mode, file_flags);
+ #endif
  }
  #endif
  
@@ -1104,36 +1628,60 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  }
  
  /*
-@@ -907,7 +1061,7 @@ int do_rename(const char *old_path, const char *new_path)
-   parent and absolute-path cases, identical to the other do_*_at()
-   wrappers.
+@@ -1863,7 +2073,7 @@
+   Falls through to do_rename() in dry-run, non-daemon, chrooted and
+   absolute-path cases, identical to the other do_*_at() wrappers.
  */
 -int do_rename_at(const char *old_path, const char *new_path)
 +int do_rename_at(const char *old_path, const char *new_path, UNUSED(mode_t mode), UNUSED(uint32 file_flags))
  {
  #ifdef AT_FDCWD
  	extern int am_daemon, am_chrooted;
-@@ -921,16 +1075,16 @@ int do_rename_at(const char *old_path, const char *new_path)
+@@ -1879,10 +2089,10 @@
  	RETURN_ERROR_IF_RO_OR_LO;
  
- 	if (!am_daemon || am_chrooted)
+ 	if (!secure_relpath_active())
 -		return do_rename(old_path, new_path);
 +		return do_rename(old_path, new_path, mode, file_flags);
  
- 	if (!old_path || !*old_path || *old_path == '/'
- 	 || !new_path || !*new_path || *new_path == '/')
+ 	if (!old_path || !*old_path || !new_path || !*new_path)
 -		return do_rename(old_path, new_path);
 +		return do_rename(old_path, new_path, mode, file_flags);
  
- 	old_slash = strrchr(old_path, '/');
- 	new_slash = strrchr(new_path, '/');
- 	if (!old_slash || !new_slash)
--		return do_rename(old_path, new_path);
-+		return do_rename(old_path, new_path, mode, file_flags);
- 
- 	old_dlen = old_slash - old_path;
- 	new_dlen = new_slash - new_path;
-@@ -963,6 +1117,24 @@ int do_rename_at(const char *old_path, const char *new_path)
+ #if defined O_NOFOLLOW && defined O_DIRECTORY
+ 	/* Operator-supplied path (e.g. a --backup-dir destination or a --temp-dir
+@@ -1890,7 +2100,7 @@
+ 	 * uid0/euid symlinks, refuse others; absolute and relative alike). */
+ 	if (operator_path_resolve) {
+ 		if (symlink_optout_allowed())
+-			return do_rename(old_path, new_path);
++			return do_rename(old_path, new_path, mode, file_flags);
+ 		old_dfd = owner_walk_parent(old_path, &old_bname);
+ 		if (old_dfd < 0)
+ 			return -1;
+@@ -1903,6 +2113,21 @@
+ 		}
+ 		ret = renameat(old_dfd, old_bname, new_dfd, new_bname);
+ 		e = errno;
++#ifdef SUPPORT_FORCE_CHANGE
++		if (ret < 0 && force_change && e == EPERM) {
++			if (file_flags == NO_FFLAGS) {
++				STRUCT_STAT st;
++				if (do_lstat(new_path, &st) == 0)
++					file_flags = st.st_flags;
++			}
++			if (file_flags != NO_FFLAGS
++			    && make_mutable(new_path, mode, file_flags, force_change) > 0) {
++				ret = renameat(old_dfd, old_bname, new_dfd, new_bname);
++				e = errno;
++				undo_make_mutable(new_path, file_flags);
++			}
++		}
++#endif
+ 		close(new_dfd);
+ 		close(old_dfd);
+ 		errno = e;
+@@ -1996,6 +2221,24 @@
  
  	ret = renameat(old_dfd, old_bname, new_dfd, new_bname);
  	e = errno;
@@ -1155,18 +1703,27 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
 +		errno = EPERM;
 +	}
 +#endif
- 	if (new_dfd != old_dfd)
+ 	if (new_owns)
  		close(new_dfd);
- 	close(old_dfd);
+ 	if (old_owns)
+@@ -2003,7 +2246,7 @@
+ 	errno = e;
+ 	return ret;
+ #else
+-	return do_rename(old_path, new_path);
++	return do_rename(old_path, new_path, mode, file_flags);
+ #endif
+ }
+ 
 --- t_chmod_secure.c.orig
 +++ t_chmod_secure.c
-@@ -88,26 +88,26 @@ int main(int argc, char **argv)
- 	 */
- 
- 	/* Scenario A: legitimate parent dir-symlink, chmod must succeed. */
+@@ -112,26 +112,26 @@
+ 	 * Solaris, older Cygwin, HPE NonStop, pre-5.6 Linux) -- which now follows
+ 	 * an in-tree directory symlink whose target is relative and ".."-free.
+ 	 * Escapes are still rejected on both paths (Scenario B). */
 -	int rc = do_chmod_at("inside_link/sentinel", 0640);
 +	int rc = do_chmod_at("inside_link/sentinel", 0640, 0);
- 	check("A: legit dir-symlink within tree",
+ 	check("A: legit dir-symlink within tree (followed)",
  	      rc, 1, "realdir/sentinel", 0640);
  
  	/* Scenario B: parent symlink escapes the tree -- chmod must be
@@ -1191,9 +1748,47 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  	check("D: top-level file, no parent component",
  	      rc, 1, "topfile", 0640);
  
+@@ -141,7 +141,7 @@
+ 	 * (refused on Linux, lchmod-the-symlink on *BSD/macOS), so assert only that
+ 	 * the outside target's mode is unchanged. */
+ 	if (leaf_chmod_nofollow_supported()) {
+-		rc = do_chmod_at("realdir/leaflink", 0666);
++		rc = do_chmod_at("realdir/leaflink", 0666, 0);
+ 		check("E: leaf component is an escaping symlink (must not be followed)",
+ 		      rc, -1, "../trap/sentinel", 0600);
+ 	} else {
+--- t_rename_secure.c.orig
++++ t_rename_secure.c
+@@ -30,14 +30,14 @@
+ 
+ 	if (!old_path || !*old_path || *old_path == '/'
+ 	 || !new_path || !*new_path || *new_path == '/')
+-		return do_rename(old_path, new_path);
++		return do_rename(old_path, new_path, 0, NO_FFLAGS);
+ 
+ 	old_slash = strrchr(old_path, '/');
+ 	new_slash = strrchr(new_path, '/');
+ 	if (!old_slash || !new_slash)
+-		return do_rename(old_path, new_path);
++		return do_rename(old_path, new_path, 0, NO_FFLAGS);
+ 
+-	return do_rename_at(old_path, new_path);
++	return do_rename_at(old_path, new_path, 0, NO_FFLAGS);
+ }
+ #endif
+ 
+@@ -64,7 +64,7 @@
+ 	int saved_errno;
+ 
+ 	errno = 0;
+-	rc = do_rename_at(old_path, new_path);
++	rc = do_rename_at(old_path, new_path, 0, NO_FFLAGS);
+ 	saved_errno = errno;
+ 	got_ok = rc == 0;
+ 
 --- t_stub.c.orig
 +++ t_stub.c
-@@ -30,7 +30,9 @@ int preallocate_files = 0;
+@@ -32,7 +32,9 @@
  int protect_args = 0;
  int module_id = -1;
  int relative_paths = 0;
@@ -1203,7 +1798,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  int preserve_xattrs = 0;
  int preserve_perms = 0;
  int preserve_executability = 0;
-@@ -118,3 +120,23 @@ filter_rule_list daemon_filter_list;
+@@ -130,3 +132,23 @@
  {
  	return cst ? 0 : 0;
  }
@@ -1227,24 +1822,9 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
 +	return -1;
 +}
 +#endif
---- testsuite/rsync.fns.orig
-+++ testsuite/rsync.fns
-@@ -26,9 +26,9 @@ chkfile="$scratchdir/rsync.chk"
- outfile="$scratchdir/rsync.out"
- 
- # For itemized output:
--all_plus='+++++++++'
--allspace='         '
--dots='.....' # trailing dots after changes
-+all_plus='++++++++++'
-+allspace='          '
-+dots='......' # trailing dots after changes
- tab_ch='	' # a single tab character
- 
- # Berkley's nice.
 --- usage.c.orig
 +++ usage.c
-@@ -138,6 +138,11 @@ static void print_info_flags(enum logcode f)
+@@ -156,6 +156,11 @@
  #endif
  			"crtimes",
  
@@ -1258,15 +1838,15 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  #ifndef USE_ROLL_SIMD
 --- util1.c.orig
 +++ util1.c
-@@ -34,6 +34,7 @@ extern int relative_paths;
+@@ -32,6 +32,7 @@
+ extern int modify_window;
+ extern int relative_paths;
  extern int preserve_xattrs;
++extern int force_change;
  extern int omit_link_times;
  extern int preallocate_files;
-+extern int force_change;
- extern char *module_dir;
- extern unsigned int module_dirlen;
- extern char *partial_dir;
-@@ -116,6 +117,33 @@ void print_child_argv(const char *prefix, char **cmd)
+ extern int operator_path_resolve;
+@@ -117,6 +118,33 @@
  	rprintf(FCLIENT, " (%d args)\n", cnt);
  }
  
@@ -1300,7 +1880,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  /* This returns 0 for success, 1 for a symlink if symlink time-setting
   * is not possible, or -1 for any other error. */
  int set_times(const char *fname, STRUCT_STAT *stp)
-@@ -143,6 +171,10 @@ int set_times(const char *fname, STRUCT_STAT *stp)
+@@ -144,6 +172,10 @@
  #include "case_N.h"
  		if (do_utimensat_at(fname, stp) == 0)
  			break;
@@ -1311,7 +1891,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  		if (errno != ENOSYS)
  			return -1;
  		switch_step++;
-@@ -152,6 +184,10 @@ int set_times(const char *fname, STRUCT_STAT *stp)
+@@ -153,6 +185,10 @@
  #include "case_N.h"
  		if (do_lutimes(fname, stp) == 0)
  			break;
@@ -1322,7 +1902,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  		if (errno != ENOSYS)
  			return -1;
  		switch_step++;
-@@ -173,6 +209,10 @@ int set_times(const char *fname, STRUCT_STAT *stp)
+@@ -174,6 +210,10 @@
  		if (do_utime(fname, stp) == 0)
  			break;
  #endif
@@ -1333,7 +1913,7 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  
  		return -1;
  	}
-@@ -532,7 +572,7 @@ int robust_unlink(const char *fname)
+@@ -581,7 +621,7 @@
  	}
  
  	/* maybe we should return rename()'s exit status? Nah. */
@@ -1342,148 +1922,57 @@ Rsync 3.4.4 port by Dag-Erling Smørgrav <des@FreeBSD.org>
  		errno = ETXTBSY;
  		return -1;
  	}
-@@ -555,7 +595,7 @@ int robust_rename(const char *from, const char *to, const char *partialptr,
- 		return 0;
- 
- 	while (tries--) {
--		if (do_rename_at(from, to) == 0)
-+		if (do_rename_at(from, to, 0, NO_FFLAGS) == 0)
+@@ -613,8 +653,14 @@
+ 			const char *os = strrchr(from, '/');
+ 			const char *ns = strrchr(to, '/');
+ 			rr = do_rename_atfd(ofd, os ? os + 1 : from, nfd, ns ? ns + 1 : to);
++#ifdef SUPPORT_FORCE_CHANGE
++			/* The fd-relative wrapper cannot chflags(); retry an
++			 * immutable destination via the full-path wrapper. */
++			if (rr < 0 && force_change && errno == EPERM)
++				rr = do_rename_at(from, to, 0, NO_FFLAGS);
++#endif
+ 		} else
+-			rr = do_rename_at(from, to);
++			rr = do_rename_at(from, to, 0, NO_FFLAGS);
+ 		if (rr == 0)
  			return 0;
  
- 		switch (errno) {
 --- xattrs.c.orig
 +++ xattrs.c
-@@ -1094,7 +1094,7 @@ int set_xattr(const char *fname, const struct file_struct *file, const char *fna
- 	 && !S_ISLNK(sxp->st.st_mode)
+@@ -1154,7 +1154,7 @@
  #endif
  	 && access(fname, W_OK) < 0
--	 && do_chmod_at(fname, (sxp->st.st_mode & CHMOD_BITS) | S_IWUSR) == 0)
-+	 && do_chmod_at(fname, (sxp->st.st_mode & CHMOD_BITS) | S_IWUSR, ST_FLAGS(sxp->st)) == 0)
+ 	 && (fd >= 0 ? fchmod(fd, (sxp->st.st_mode & CHMOD_BITS) | S_IWUSR)
+-		     : do_chmod_at(fname, (sxp->st.st_mode & CHMOD_BITS) | S_IWUSR)) == 0)
++		     : do_chmod_at(fname, (sxp->st.st_mode & CHMOD_BITS) | S_IWUSR, ST_FLAGS(sxp->st))) == 0)
  		added_write_perm = 1;
  
  	ndx = F_XATTR(file);
-@@ -1102,7 +1102,7 @@ int set_xattr(const char *fname, const struct file_struct *file, const char *fna
- 	lst = &glst->xa_items;
- 	int return_value = rsync_xal_set(fname, lst, fnamecmp, sxp);
- 	if (added_write_perm) /* remove the temporary write permission */
--		do_chmod_at(fname, sxp->st.st_mode);
-+		do_chmod_at(fname, sxp->st.st_mode, ST_FLAGS(sxp->st));
+@@ -1166,7 +1166,7 @@
+ 			if (fd >= 0)
+ 				fchmod(fd, sxp->st.st_mode);
+ 			else
+-				do_chmod_at(fname, sxp->st.st_mode);
++				do_chmod_at(fname, sxp->st.st_mode, ST_FLAGS(sxp->st));
+ 		}
+ 		return 0;
+ 	}
+@@ -1177,7 +1177,7 @@
+ 		if (fd >= 0)
+ 			fchmod(fd, sxp->st.st_mode);
+ 		else
+-			do_chmod_at(fname, sxp->st.st_mode);
++			do_chmod_at(fname, sxp->st.st_mode, ST_FLAGS(sxp->st));
+ 	}
  	return return_value;
  }
- 
-@@ -1219,7 +1219,7 @@ int set_stat_xattr(const char *fname, struct file_struct *file, mode_t new_mode)
- 	mode = (fst.st_mode & _S_IFMT) | (fmode & ACCESSPERMS)
- 	     | (S_ISDIR(fst.st_mode) ? 0700 : 0600);
- 	if (fst.st_mode != mode)
--		do_chmod_at(fname, mode);
-+		do_chmod_at(fname, mode, ST_FLAGS(fst));
-	if (!IS_DEVICE(fst.st_mode))
-		fst.st_rdev = 0; /* just in case */
-
---- rsync.1.orig
-+++ rsync.1
-@@ -545,6 +545,7 @@
- --keep-dirlinks, -K      treat symlinked dir on receiver as dir
- --hard-links, -H         preserve hard links
- --perms, -p              preserve permissions
-+--file-flags             preserve file flags (aka chflags)
- --executability, -E      preserve executability
- --chmod=CHMOD            affect file and/or directory permissions
- --acls, -A               preserve ACLs (implies --perms)
-@@ -586,7 +587,11 @@
- --ignore-missing-args    ignore missing source args without error
- --delete-missing-args    delete missing source args from destination
- --ignore-errors          delete even if there are I/O errors
----force                  force deletion of dirs even if not empty
-+--force                  an alias for --force-delete
-+--force-delete           force deletion of directories even if not empty
-+--force-change           affect user-/system-immutable files/dirs
-+--force-uchange          affect user-immutable files/dirs
-+--force-schange          affect system-immutable files/dirs
- --max-delete=NUM         don't delete more than NUM files
- --max-size=SIZE          don't transfer any file larger than SIZE
- --min-size=SIZE          don't transfer any file smaller than SIZE
-@@ -918,6 +923,7 @@
- recursion and want to preserve almost everything.  Be aware that it does
- \fBnot\fP include preserving ACLs (\fB\-A\fP), xattrs (\fB\-X\fP), atimes (\fB\-U\fP),
- crtimes (\fB\-N\fP), nor the finding and preserving of hardlinks (\fB\-H\fP).
-+It also does \fBnot\fP imply \fB\-\-file\-flags\fP.
- .IP
- The only exception to the above equivalence is when \fB\-\-files\-from\fP
- is specified, in which case \fB\-r\fP is not implied.
-@@ -1382,7 +1388,7 @@
- Without this option, if the sending side has replaced a directory with a
- symlink to a directory, the receiving side will delete anything that is in
- the way of the new symlink, including a directory hierarchy (as long as
--\fB\-\-force\fP or \fB\-\-delete\fP is in effect).
-+\fB\-\-force\-delete\fP or \fB\-\-delete\fP is in effect).
- .IP
- See also \fB\-\-keep\-dirlinks\fP for an analogous option for the
- receiving side.
-@@ -1600,6 +1606,29 @@
- Note that the \fB\-X\fP option does not copy rsync's special xattr values (e.g.
- those used by \fB\-\-fake\-super\fP) unless you repeat the option (e.g. \fB\-XX\fP).
- This "copy all xattrs" mode cannot be used with \fB\-\-fake\-super\fP.
-+.IP "\fB\-\-file\-flags\fP"
-+This option causes rsync to update the file flags to be the same as the
-+source files and directories (if your OS supports the \fBchflags\fP(2) system
-+call).   Some flags can only be altered by the super-user and some might
-+only be unset below a certain secure-level (usually single-user mode). It
-+will not make files alterable that are set to immutable on the receiver.
-+To do that, see \fB\-\-force\-change\fP, \fB\-\-force\-uchange\fP, and
-+\fB\-\-force\-schange\fP.
-+.IP "\fB\-\-force\-change\fP"
-+This option causes rsync to disable both user-immutable and
-+system-immutable flags on files and directories that are being updated or
-+deleted on the receiving side.  This option overrides
-+\fB\-\-force\-uchange\fP and \fB\-\-force\-schange\fP.
-+.IP "\fB\-\-force\-uchange\fP"
-+This option causes rsync to disable user-immutable flags on files and
-+directories that are being updated or deleted on the receiving side.  It
-+does not try to affect system flags.  This option overrides
-+\fB\-\-force\-change\fP and \fB\-\-force\-schange\fP.
-+.IP "\fB\-\-force\-schange\fP"
-+This option causes rsync to disable system-immutable flags on files and
-+directories that are being updated or deleted on the receiving side.  It
-+does not try to affect user flags.  This option overrides
-+\fB\-\-force\-change\fP and \fB\-\-force\-uchange\fP.
- .IP "\fB\-\-chmod=CHMOD\fP"
- This option tells rsync to apply one or more comma-separated "chmod" modes
- to the permission of the files in the transfer.  The resulting value is
-@@ -2083,8 +2112,8 @@
- \fB\-\-ignore\-missing\-args\fP option a step farther: each missing arg
- will become a deletion request of the corresponding destination file on the
- receiving side (should it exist).  If the destination file is a non-empty
--directory, it will only be successfully deleted if \fB\-\-force\fP or
--\fB\-\-delete\fP are in effect.  Other than that, this option is
-+directory, it will only be successfully deleted if \fB\-\-force\-delete\fP
-+or \fB\-\-delete\fP are in effect.  Other than that, this option is
- independent of any other type of delete processing.
- .IP
- The missing source files are represented by special file-list entries which
-@@ -2092,13 +2121,13 @@
- .IP "\fB\-\-ignore\-errors\fP"
- Tells \fB\-\-delete\fP to go ahead and delete files even when there are
- I/O errors.
--.IP "\fB\-\-force\fP"
-+.IP "\fB\-\-force\-delete\fP, \fB\-\-force\fP"
- This option tells rsync to delete a non-empty directory when it is to be
- replaced by a non-directory.  This is only relevant if deletions are not
- active (see \fB\-\-delete\fP for details).
- .IP
--Note for older rsync versions: \fB\-\-force\fP used to still be required when
--using \fB\-\-delete\-after\fP, and it used to be non-functional unless the
-+Note that some older rsync versions used to require \fB\-\-force\fP when using
-+\fB\-\-delete\-after\fP, and it used to be non-functional unless the
- \fB\-\-recursive\fP option was also enabled.
- .IP "\fB\-\-max\-delete=NUM\fP"
- This tells rsync not to delete more than NUM files or directories.  If that
-@@ -3177,7 +3206,7 @@
- also turns on the output of other verbose messages).
- .IP
- The "%i" escape has a cryptic output that is 11 letters long.  The general
--format is like the string \fBYXcstpoguax\fP, where \fBY\fP is replaced by the type
-+format is like the string \fBYXcstpoguaxf\fP, where \fBY\fP is replaced by the type
- of update being done, \fBX\fP is replaced by the file-type, and the other
- letters represent attributes that may be output if they are modified.
- .IP
+@@ -1317,7 +1317,7 @@
+ 		if (fd >= 0)
+ 			fchmod(fd, mode);
+ 		else
+-			do_chmod_at(fname, mode);
++			do_chmod_at(fname, mode, ST_FLAGS(fst));
+ 	}
+ 	if (!IS_DEVICE(fst.st_mode))
+ 		fst.st_rdev = 0; /* just in case */
