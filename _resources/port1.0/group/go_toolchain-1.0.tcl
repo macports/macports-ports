@@ -200,9 +200,10 @@ set go_toolchain.min_darwin(1.27)   21  ;# 12    Monterey     (see below)
 # provides. Reread at 1.27.0: the directives and the shipped binaries' undefined
 # symbols are unchanged from the prerelease, and from 1.26.
 #
-# This entry decides where go-devel is offered, setup deriving its platforms
-# from it. It is never returned as a ceiling, being the newest series here, and
-# `go` never selects an unpackaged series, so nothing else depends on it.
+# This entry sets the platforms of go-1.27 and go-devel, setup deriving them
+# from it, and decides what `go` provides: 1.27 is the newest packaged series,
+# so `go` wraps it on darwin 21 and later. It is never returned as a ceiling,
+# being the newest series here.
 
 # The series MacPorts packages as go-1.NN ports.
 #
@@ -216,9 +217,9 @@ set go_toolchain.min_darwin(1.27)   21  ;# 12    Monterey     (see below)
 # series a system is offered, so a series is only ever chosen where no newer
 # packaged series is offered as well -- which means one sharing a floor with a
 # newer series is never what `go` provides. Today that is 1.20, 1.22, 1.23,
-# 1.25 and 1.26; they are packaged so that a build can pin them, not because anything
-# reaches them by default. This recomputes from the tables and is worth
-# rechecking whenever a floor moves.
+# 1.25 and 1.26; they are packaged so that a build can pin them, not because
+# anything reaches them by default. This recomputes from the tables and is
+# worth rechecking whenever a floor moves.
 set go_toolchain.packaged {1.17 1.20 1.22 1.23 1.24 1.25 1.26 1.27}
 
 # The newest series MacPorts packages.
