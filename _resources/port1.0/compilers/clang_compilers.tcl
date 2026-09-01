@@ -49,6 +49,7 @@ if {${os.major} >= 17 || ${os.platform} ne "darwin"} {
         # Expose clang-21+ to ports needing the newest standards
         set hint [expr {${os.major} >= 25 || ${os.platform} ne "darwin" ? {} : {${compiler.cxx_standard} >= 2020}}]
         lappend compilers [list macports-clang-22 $hint] \
+                          [list macports-clang-23 $hint] \
                           [list macports-clang-21 $hint]
         set hint [expr {${os.platform} ne "darwin" ? {} : {${compiler.cxx_standard} >= 2014}}]
         lappend compilers [list macports-clang-20 $hint] \
