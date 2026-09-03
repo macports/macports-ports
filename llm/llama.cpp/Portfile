@@ -7,7 +7,7 @@ PortGroup               legacysupport 1.1
 
 github.setup            ggerganov llama.cpp 0.3.0 v
 github.tarball_from     archive
-revision                0
+revision                1
 categories              llm
 maintainers             {i0ntempest @i0ntempest} openmaintainer
 license                 MIT
@@ -113,7 +113,7 @@ variant openmp description {enable parallelism support using OpenMP} {
     }
 }
 
-variant metal description {Enable Metal support} {
+variant metal description {Enable Metal support} conflicts vulkan {
     configure.args-append \
                         -DGGML_METAL_MACOSX_VERSION_MIN=${macos_version_major}
     configure.args-replace \
@@ -136,53 +136,54 @@ variant vulkan description {Enable Vulkan support via MoltenVK} conflicts metal 
                         
 }
 
+set ::python_branch     3.14
+set ::python_version    [string map {. ""} ${::python_branch}]
+
 variant model_converters description {install extra model conversion Python scripts} {
-    post-destroot {
-        xinstall -d ${destroot}${prefix}/share/${name}
-        xinstall -m 644 {*}[glob ${worksrcpath}/convert*.py] ${destroot}${prefix}/share/${name}
+    depends_run-append  port:python${::python_version} \
+                        port:py${::python_version}-numpy \
+                        port:py${::python_version}-pytorch \
+                        port:py${::python_version}-transformers \
+                        port:py${::python_version}-mistral-common
+
+    post-patch {
+        reinplace "s|!/usr/bin/env python3|!${prefix}/bin/python${::python_branch}|" \
+            ${worksrcpath}/conversion/base.py \
+            {*}[glob ${worksrcpath}/convert*.py] \
+            {*}[glob ${worksrcpath}/gguf-py/gguf/scripts/*.py]
     }
 
-    notes-append "
-        Model conversion scripts have been installed to:
-
-            ${prefix}/share/${name}/
-
-        These scripts should be executed in a Python virtual environment with at least\
-        these dependencies installed:
-            numpy
-            pytorch
-            transformers
-            gguf
-    "
+    post-destroot {
+        xinstall -d ${destroot}${prefix}/libexec/${name}
+        xinstall -m 755 {*}[glob ${worksrcpath}/convert*.py] ${destroot}${prefix}/libexec/${name}/
+        copy ${worksrcpath}/conversion ${worksrcpath}/gguf-py ${destroot}${prefix}/libexec/${name}/
+        delete {*}[glob ${destroot}${prefix}/libexec/${name}/*_update.py]
+        foreach file {LICENSE examples tests} {
+            delete ${destroot}${prefix}/libexec/${name}/gguf-py/${file}
+        }
+        if {![variant_isset gui]} {
+            delete {*}[glob ${destroot}${prefix}/libexec/${name}/gguf-py/gguf/scripts/*gui.py]
+        }
+        foreach file [concat \
+            [glob -directory ${destroot}${prefix}/libexec/${name} *.py] \
+            [glob -directory ${destroot}${prefix}/libexec/${name}/gguf-py/gguf/scripts/ *.py] \
+        ] {
+            set filebasename [file rootname [file tail $file]]
+            set launcher ${destroot}${prefix}/bin/[lindex [split ${name} .] 0]-[string map {_ -} ${filebasename}]
+            set target [string replace ${file} 0 [string length ${destroot}]-1]
+            ui_debug "Creating launcher: ${launcher} => ${target}"
+            set fh [open ${launcher} w]
+            puts ${fh} "#!/bin/sh"
+            puts ${fh} "exec ${target} \"\$@\""
+            close ${fh}
+            file attributes ${launcher} -permissions 0755
+        }
+    }
 }
 
-# This can replace the variant above once we have all the dependencies updated and fixed
-# See: https://github.com/macports/macports-ports/pull/27526
-#variant model_converters description {install extra model conversion Python scripts} {
-#    set ::python_branch   3.12
-#    set ::python_version  [string map {. ""} ${::python_branch}]
-#    depends_run-append    port:python${::python_version} \
-#                          port:py${::python_version}-numpy \
-#                          port:py${::python_version}-pytorch \
-#                          port:py${::python_version}-transformers \
-#                          port:py${::python_version}-gguf
-#
-#    post-patch {
-#        reinplace "s|#!/usr/bin/env python3|#!${prefix}/bin/python${::python_branch}|" {*}[glob ${worksrcpath}/convert*.py]
-#    }
-#
-#    post-destroot {
-#        xinstall -d ${destroot}${prefix}/libexec/${name}
-#        xinstall -m 755 {*}[glob ${worksrcpath}/convert*.py] ${destroot}${prefix}/libexec/${name}
-#        foreach file [glob -directory ${destroot}${prefix}/libexec/${name} *.py] {
-#            set filebasename [file rootname [file tail $file]]
-#            set link ${destroot}${prefix}/bin/[lindex [split ${name} .] 0]-[string map {_ -} ${filebasename}]
-#            set target [string replace ${file} 0 [string length ${destroot}]-1]
-#            ui_debug "Creating symlink: ${link} => ${target}"
-#            ln -s ${target} ${link}
-#        }
-#    }
-#}
+variant gui requires model_converters description {install the Qt-based gguf-editor-gui script} {
+    depends_run-append  port:py${::python_version}-pyside6
+}
 
 variant native description {Force local build and optimize for CPU} {
     configure.args-append \
@@ -196,3 +197,7 @@ if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx" && \
     (${os.major} >= 20 && ${configure.sdk_version} >= 11)} {
     default_variants    +metal
 }
+
+livecheck.type          regex
+livecheck.url           https://api.github.com/repos/ggml-org/llama.cpp/releases/latest
+livecheck.regex         {"tag_name": "v([0-9.]+)"}

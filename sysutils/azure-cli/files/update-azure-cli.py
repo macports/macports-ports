@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.13
+#!/usr/bin/env python3.14
 """Generate portfile distfiles/checksums sections for a new azure-cli release.
 
 Usage:
@@ -41,7 +41,7 @@ PYPI_TO_PORT_OVERRIDES = {
 
 # Python version used by the port. This should be invoked with the
 # matching Python interpreter. Make sure this matches the portfile.
-EXPECTED_PYTHON_VERSION = "3.13"
+EXPECTED_PYTHON_VERSION = "3.14"
 
 INDENT = " " * 20
 CS_INDENT = INDENT + "    "
