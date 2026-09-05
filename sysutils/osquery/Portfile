@@ -1,12 +1,11 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           cmake 1.1
 PortGroup           github 1.0
 
-github.setup        osquery osquery 4.3.0
-# Change github.tarball_from to 'releases' or 'archive' next update
-github.tarball_from tarball
+github.setup        osquery osquery 5.23.1
+github.tarball_from releases
+revision            0
 
 description         SQL powered operating system instrumentation, monitoring, \
                     and analytics.
@@ -28,30 +27,132 @@ categories          sysutils
 license             Apache-2 \
                     GPL-2
 
-# The osquery build process requires the git repository as it pulls in a
-# large amount of its dependencies as git submodules.
-fetch.type          git
+platforms           macosx
+supported_archs     arm64 x86_64
+universal_variant   no
 
-configure.args-append \
-    -DOSQUERY_VERSION="${version}"
+# Installed from upstream's signed package rather than built from source.
+#
+# osqueryd's es_process_events and es_process_file_events tables use the
+# EndpointSecurity APIs, which only work when the binary is code-signed with
+# Apple's EndpointSecurity Client entitlement. That entitlement is issued to an
+# organisation's Apple Developer account, so a build performed on the user's
+# machine cannot carry it, and both tables are disabled at runtime. Upstream's
+# package is signed and does carry it.
+#
+# The shipped binary is already universal (x86_64 arm64), so one distfile
+# serves both architectures.
+distname            ${name}-${version}
+extract.suffix      .pkg
+distfiles           ${distname}${extract.suffix}
 
-depends_build-append \
-    port:python38
+checksums           rmd160  bd6bf345dd9756020f0d0ea1f4e09d4c44a43950 \
+                    sha256  9f40cea0358759ab2ee871c577055657e3cc2c7cbe5c1247f764245941178aa6 \
+                    size    25917400
 
-patchfiles \
-    patch-default_paths.h.diff \
-    patch-lenses-path-augeas.cpp.diff \
-    patch-macports-cmake-packaging.cmake.diff
+set pkg_path        ${workpath}/pkg
+
+extract.cmd         pkgutil
+extract.pre_args    --expand
+extract.post_args   ${pkg_path}
+extract.mkdir       yes
+
+post-extract {
+    system -W ${pkg_path} "cat ./Payload | gzip -d > ./Payload.cpio"
+    system -W ${pkg_path} "cat ./Payload.cpio | cpio -i"
+}
+
+use_configure       no
+build {}
+
+# Nothing is compiled, so these assert the three properties that justify
+# installing upstream's package instead of building: both architectures, an
+# intact signature, and the EndpointSecurity entitlement. They cannot fail
+# while the checksums pin this exact file, but they will speak up at the next
+# version bump if upstream stops shipping any of the three.
+test.run            yes
+test {
+    set app ${pkg_path}/opt/osquery/lib/${osq_app}
+    set bin ${app}/Contents/MacOS/osqueryd
+
+    # Every exec merges stderr into stdout: codesign and osqueryd both write
+    # informational lines there, and Tcl's exec would otherwise raise on them.
+    # That leaves the exit status and the output as the things being asserted.
+
+    if {[catch {exec lipo -archs ${bin} 2>@1} archs]} {
+        return -code error "could not read architectures: ${archs}"
+    }
+    foreach arch {x86_64 arm64} {
+        if {[lsearch ${archs} ${arch}] == -1} {
+            return -code error "osqueryd is missing the ${arch} slice: ${archs}"
+        }
+    }
+
+    if {[catch {exec codesign --verify --deep --strict ${app} 2>@1} err]} {
+        return -code error "code signature is not valid: ${err}"
+    }
+
+    if {[catch {exec codesign -d --entitlements - --xml ${bin} 2>@1} ents]} {
+        return -code error "could not read entitlements: ${ents}"
+    }
+    if {![string match "*com.apple.developer.endpoint-security.client*" ${ents}]} {
+        return -code error "EndpointSecurity entitlement is absent"
+    }
+
+    if {[catch {exec ${bin} --version 2>@1} out] || \
+        ![string match "*${version}*" ${out}]} {
+        return -code error "version check failed: ${out}"
+    }
+
+    # Parse every pack this port installs. The shipped example config has them
+    # all commented out, so it has to be given a config that references them.
+    #
+    # --config_check reports a malformed pack as a warning and still exits 0,
+    # so the output is what gets asserted, not the exit status.
+    set packdir ${pkg_path}/private/var/osquery/packs
+    set entries {}
+    foreach pack [glob -nocomplain -directory ${packdir} *.conf] {
+        set stem [file rootname [file tail ${pack}]]
+        if {[string match "windows-*" ${stem}]} {
+            continue
+        }
+        lappend entries "\"${stem}\": \"${pack}\""
+    }
+    if {[llength ${entries}] == 0} {
+        return -code error "no packs found in ${packdir}"
+    }
+
+    set conf ${workpath}/packcheck.conf
+    set fd [open ${conf} w]
+    puts ${fd} "{\"options\": {\"disable_events\": \"true\"},"
+    puts ${fd} " \"packs\": {[join ${entries} ,]}}"
+    close ${fd}
+
+    # --disable_database because the test phase runs unprivileged and osqueryd
+    # otherwise exits before reading the packs, unable to open its RocksDB
+    # under /var/osquery. Both the output and the exit status are checked: a
+    # bad pack shows up only in the output, and a check that never ran shows
+    # up only in the status.
+    set rc [catch {exec ${bin} --config_check --disable_database \
+                       --config_path=${conf} 2>@1} checked]
+    if {[regexp {Error (parsing|reading)} ${checked}]} {
+        return -code error "a query pack failed to parse: ${checked}"
+    }
+    if {${rc} != 0} {
+        return -code error "pack check did not run: ${checked}"
+    }
+}
 
 set osq_data_dir    ${prefix}/var/db/${name}
 set osq_conf_dir    ${prefix}/etc/${name}
 set osq_log_dir     ${prefix}/var/log/${name}
 set osq_run_dir     ${prefix}/var/run/${name}
 set osq_share_dir   ${prefix}/share/${name}
+set osq_libexec_dir ${prefix}/libexec/${name}
+set osq_app         osquery.app
 set osq_plist_dir   org.macports.${name}
 set osq_plist_file  org.macports.${name}.plist
 set osq_flags_file  ${name}.flags
-
 
 destroot.keepdirs-append \
     ${osq_data_dir} \
@@ -61,42 +162,76 @@ destroot.keepdirs-append \
 
 post-patch {
 
-    reinplace "s|@SHAREPATH@|${osq_share_dir}|g" \
-        ${worksrcpath}/osquery/tables/system/posix/augeas.cpp
-
-    reinplace "s|@CONFPATH@|${osq_conf_dir}|g" \
-        ${worksrcpath}/osquery/utils/config/default_paths.h
-
-    reinplace "s|@DATAPATH@|${osq_data_dir}|g" \
-        ${worksrcpath}/osquery/utils/config/default_paths.h
-
-    reinplace "s|@RUNPATH@|${osq_run_dir}|g" \
-        ${worksrcpath}/osquery/utils/config/default_paths.h
-
-    reinplace "s|@LOGPATH@|${osq_log_dir}|g" \
-        ${worksrcpath}/osquery/utils/config/default_paths.h
-
-    reinplace "s|@SHAREPATH@|${osq_share_dir}|g" \
-        ${worksrcpath}/osquery/utils/config/default_paths.h
-
     copy ${filespath}/${osq_plist_file} ${workpath}/
 
     reinplace "s|@PREFIX@|${prefix}|g"          ${workpath}/${osq_plist_file}
     reinplace "s|@CONFPATH@|${osq_conf_dir}|g"  ${workpath}/${osq_plist_file}
 
+    # The shipped example config carries commented-out pack and logger paths
+    # for upstream's own layout. They are only comments, so nothing breaks as
+    # installed, but a user who uncomments one would point osquery at a
+    # directory this port does not create. Redirect them into the prefix.
+    copy ${pkg_path}/private/var/osquery/osquery.example.conf ${workpath}/
+
+    # Anchored on the opening quote so only the pack entries are rewritten;
+    # the comment block above them lists other platforms' layouts and stays
+    # as upstream wrote it, apart from the macOS line.
+    reinplace "s|\"/opt/osquery/share/osquery/packs/|\"${osq_share_dir}/packs/|g" \
+        ${workpath}/osquery.example.conf
+    reinplace "s|\"/var/osquery/packs/|\"${osq_share_dir}/packs/|g" \
+        ${workpath}/osquery.example.conf
+    reinplace "s|\"/var/log/osquery\"|\"${osq_log_dir}\"|g" \
+        ${workpath}/osquery.example.conf
+    reinplace "s|^  // OS X:.*|  // MacPorts:     ${osq_share_dir}/packs|" \
+        ${workpath}/osquery.example.conf
+
+    # Drop the two Windows pack entries: they point at C:\Program Files and
+    # cannot apply here. The pack files themselves ship in upstream's macOS
+    # package and are left alone.
+    reinplace "/\"windows-hardening\"/d" ${workpath}/osquery.example.conf
+    reinplace "/\"windows-attacks\"/d"   ${workpath}/osquery.example.conf
+
     copy ${filespath}/${osq_flags_file} ${workpath}/
 
-    reinplace "s|@CONFPATH@|${osq_conf_dir}|g"  ${workpath}/${osq_flags_file}
+    reinplace "s|@CONFPATH@|${osq_conf_dir}|g"   ${workpath}/${osq_flags_file}
+    reinplace "s|@DATAPATH@|${osq_data_dir}|g"   ${workpath}/${osq_flags_file}
+    reinplace "s|@LOGPATH@|${osq_log_dir}|g"     ${workpath}/${osq_flags_file}
+    reinplace "s|@RUNPATH@|${osq_run_dir}|g"     ${workpath}/${osq_flags_file}
+    reinplace "s|@SHAREPATH@|${osq_share_dir}|g" ${workpath}/${osq_flags_file}
 }
 
-post-destroot {
+destroot {
+
+    # The code signature seals the bundle's layout, so osqueryd has to stay
+    # inside osquery.app: moving the binary out would invalidate the signature
+    # and with it the EndpointSecurity entitlement. Install the bundle whole
+    # and symlink into bin, which is what upstream's package does.
+    xinstall -d ${destroot}${osq_libexec_dir}
+    copy ${pkg_path}/opt/osquery/lib/${osq_app} ${destroot}${osq_libexec_dir}/
+
+    set osq_bin ${osq_libexec_dir}/${osq_app}/Contents/MacOS/osqueryd
+
+    xinstall -d ${destroot}${prefix}/bin
+    ln -s ${osq_bin} ${destroot}${prefix}/bin/osqueryd
+    # osqueryd dispatches on argv[0]; upstream ships osqueryi the same way.
+    ln -s ${osq_bin} ${destroot}${prefix}/bin/osqueryi
+    ln -s ${osq_libexec_dir}/${osq_app}/Contents/Resources/osqueryctl \
+        ${destroot}${prefix}/bin/osqueryctl
 
     xinstall -m 755 -o root -g wheel -d ${destroot}${osq_conf_dir}
     xinstall -m 755 -o root -g wheel -d ${destroot}${osq_data_dir}
     xinstall -m 755 -o root -g wheel -d ${destroot}${osq_log_dir}
     xinstall -m 755 -o root -g wheel -d ${destroot}${osq_run_dir}
+    xinstall -m 755 -o root -g wheel -d ${destroot}${osq_share_dir}
 
-    copy ${workpath}/${osq_flags_file}  ${destroot}${osq_share_dir}/
+    copy ${pkg_path}/private/var/osquery/packs  ${destroot}${osq_share_dir}/
+    copy ${pkg_path}/private/var/osquery/certs  ${destroot}${osq_share_dir}/
+    copy ${pkg_path}/private/var/osquery/lenses ${destroot}${osq_share_dir}/
+
+    xinstall -m 0644 ${workpath}/osquery.example.conf \
+        ${destroot}${osq_share_dir}/
+
+    copy ${workpath}/${osq_flags_file} ${destroot}${osq_share_dir}/
 
     xinstall -d -m 755 ${destroot}${prefix}/etc/LaunchDaemons/${osq_plist_dir}
 
@@ -121,23 +256,13 @@ post-activate {
 }
 
 notes "
-osquery's configuration can be found in:
+Configuration:  ${osq_conf_dir}/osquery.conf
+Query packs:    ${osq_share_dir}/packs
+Logs:           ${osq_log_dir}
 
-    ${osq_conf_dir}
+Packs ship disabled; uncomment one in the \"packs\" section of osquery.conf.
+That file is created on first activation and never overwritten, so your
+edits survive upgrades.
 
-...and query packs can be found in:
-
-    ${osq_share_dir}/packs
-
-To enable the osquery service, use `port load`:
-
-\$ sudo port load osquery
-
-...and use `port unload` to disable:
-
-\$ sudo port unload osquery
-
-Once running, logs can be found in:
-
-    ${osq_log_dir}
+Run osquery as a service with 'sudo port load osquery'.
 "
