@@ -1,0 +1,81 @@
+From af5bae285b1053fe6e16e06e282e32112314e372 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Wed, 29 Jul 2026 20:07:07 +0000
+Subject: [PATCH] Support 32-bit platforms in w_string
+
+Both 64-bit-only static_asserts were shallow:
+
+- StringHeader's packed refcnt works as-is with a 32-bit size_t; the
+  reference count field shrinks from 61 to 29 bits, which is still more
+  simultaneous references than a 32-bit address space can hold pointers.
+  Relax the assert and update the packing comments.
+
+- hash_string computed a 64-bit std::hash and folded the halves. Compute
+  in uint64_t explicitly: identical results on 64-bit, and on 32-bit the
+  high word is zero so the fold reduces to the identity, exactly the
+  "skip the mix" plan the old comment described.
+
+Needed for the powerpc-darwin (ppc32) port, where Boost.Context is
+broken on ppc64 so the whole stack builds -arch ppc.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K6JXw8CwYRiXvqHMBGZRgP
+---
+ watchman/string.cpp        | 10 ++++------
+ watchman/watchman_string.h | 13 ++++++++-----
+ 2 files changed, 12 insertions(+), 11 deletions(-)
+
+diff --git a/watchman/string.cpp b/watchman/string.cpp
+index 9f8ba26..292c5f0 100644
+--- a/watchman/string.cpp
++++ b/watchman/string.cpp
+@@ -335,14 +335,12 @@ inline uint32_t hash_string(const char* str, size_t len) {
+   // Watchman used to use Bob Jenkins's lookup3. Many good hash functions exist,
+   // but, empirically, the standard library's are faster than lookup3 and
+   // convenient.
+-  size_t hash = std::hash<std::string_view>{}(std::string_view(str, len));
+-  // Supporting 32-bit is easy: we can skip the mix.
+-  static_assert(
+-      sizeof(size_t) == sizeof(uint64_t), "32-bit platforms are not supported");
++  uint64_t hash = std::hash<std::string_view>{}(std::string_view(str, len));
+ 
+   // We could use do fancy mixing like with twang_32from64 but a simple xor
+-  // should be sufficient for hash tables.
+-  return (hash >> 32) ^ hash;
++  // should be sufficient for hash tables. On 32-bit platforms the high word
++  // is zero, so this reduces to the identity.
++  return static_cast<uint32_t>((hash >> 32) ^ hash);
+ }
+ 
+ StringHash w_string::computeAndStoreHash() const noexcept {
+diff --git a/watchman/watchman_string.h b/watchman/watchman_string.h
+index 0a653f3..d28b4bd 100644
+--- a/watchman/watchman_string.h
++++ b/watchman/watchman_string.h
+@@ -31,9 +31,11 @@ enum w_string_type_t : uint8_t {
+   W_STRING_MIXED
+ };
+ 
+-// Assume 64-bit platforms for now. 32-bit platforms should have a separate
+-// 32-bit flag next to the reference count.
+-static_assert(sizeof(size_t) == 8);
++// StringHeader packs the string type, hash-computed flag, and reference count
++// into a single size_t: 61 bits of reference count on 64-bit platforms, 29
++// bits on 32-bit platforms. 29 bits is still more references than a 32-bit
++// address space can hold pointers to one string.
++static_assert(sizeof(size_t) == 8 || sizeof(size_t) == 4);
+ 
+ // Required for fmt 10
+ inline uint8_t format_as(w_string_type_t type) {
+@@ -57,8 +59,9 @@ using StringHash = uint32_t;
+ struct StringHeader {
+   // Bottom 2 bits are w_string_type_t.
+   // Third bit is whether _hval is computed.
+-  // Remaining 61 bits are the reference count. At 10 nanoseconds per increment,
+-  // overflow would take over 700 years.
++  // Remaining bits (61 on 64-bit platforms, 29 on 32-bit) are the reference
++  // count. At 10 nanoseconds per increment, overflowing 61 bits would take
++  // over 700 years.
+   std::atomic<size_t> refcnt;
+   uint32_t len;
+   std::atomic<StringHash> _hval;

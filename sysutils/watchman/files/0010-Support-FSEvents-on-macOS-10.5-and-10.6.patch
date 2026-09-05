@@ -1,0 +1,194 @@
+From d9d6f2208585402a02007b8e03365dae91962cf0 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Wed, 29 Jul 2026 12:07:43 +0000
+Subject: [PATCH] Support FSEvents on macOS 10.5 and 10.6
+
+The FSEvents stream API dates back to 10.5, but fsevents.cpp used a few
+later additions unconditionally, so HAVE_FSEVENTS was gated on a 10.7
+deployment target and older systems fell back to the kqueue watcher
+(which needs an open fd per file).
+
+Lower the HAVE_FSEVENTS floor to 10.5 and gate each later feature on the
+version that actually introduced it, so nothing is dropped on SDKs that
+have it:
+
+- 10.7 file-level events: define the missing
+  kFSEventStreamCreateFlagFileEvents / kFSEventStreamEventFlagItem*
+  constants when building against a pre-10.7 SDK (the bit values are
+  ABI-stable and older fseventsd never emits them), and clamp
+  hasFileWatching_ via a runtime kern.osrelease check when the
+  deployment target predates 10.7.  On older systems the watcher
+  degrades to the existing directory-level rescan mode (dirfsevents).
+- 10.9 FSEventStreamSetExclusionPaths: compile the exclusions block only
+  when the SDK has the declaration, and check the weak-linked symbol at
+  runtime when the deployment target predates 10.9.  Exclusions are an
+  optimization, so skipping them is safe.
+
+Builds targeting 10.7+ compile to exactly the previous behavior.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ECmTd2wkJqqrArR8VHCDm
+---
+ watchman/watcher/fsevents.cpp | 106 ++++++++++++++++++++++++++++++++--
+ watchman/watchman_system.h    |   5 +-
+ 2 files changed, 106 insertions(+), 5 deletions(-)
+
+diff --git a/watchman/watcher/fsevents.cpp b/watchman/watcher/fsevents.cpp
+index 6f9b1ee..05f51b8 100644
+--- a/watchman/watcher/fsevents.cpp
++++ b/watchman/watcher/fsevents.cpp
+@@ -30,10 +30,102 @@
+ #include "watchman/telemetry/LogEvent.h"
+ #include "watchman/telemetry/WatchmanStructuredLogger.h"
+ 
++#include <AvailabilityMacros.h>
++
++#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 1070
++#include <sys/sysctl.h>
++#include <sys/types.h>
++#endif
++
++// Support building against older SDKs (10.5/10.6), where only part of the
++// current FSEvents API exists.  Each feature is gated on the version that
++// introduced it, independently of the others:
++//
++// - 10.7 added file-level events: kFSEventStreamCreateFlagFileEvents and
++//   the kFSEventStreamEventFlagItem* family.  The bit values are ABI-stable
++//   and older versions of fseventsd simply never emit them, so defining the
++//   missing constants is safe; whether the flag may be used is a separate
++//   runtime question (see osSupportsFileEvents below).
++// - 10.9 added FSEventStreamSetExclusionPaths.  That is a function, not a
++//   constant, so it cannot be called at all when building against an older
++//   SDK.
++#ifndef MAC_OS_X_VERSION_10_7
++#define kFSEventStreamCreateFlagFileEvents 0x00000010
++#define kFSEventStreamEventFlagItemCreated 0x00000100
++#define kFSEventStreamEventFlagItemRemoved 0x00000200
++#define kFSEventStreamEventFlagItemInodeMetaMod 0x00000400
++#define kFSEventStreamEventFlagItemRenamed 0x00000800
++#define kFSEventStreamEventFlagItemModified 0x00001000
++#define kFSEventStreamEventFlagItemFinderInfoMod 0x00002000
++#define kFSEventStreamEventFlagItemChangeOwner 0x00004000
++#define kFSEventStreamEventFlagItemXattrMod 0x00008000
++#define kFSEventStreamEventFlagItemIsFile 0x00010000
++#define kFSEventStreamEventFlagItemIsDir 0x00020000
++#define kFSEventStreamEventFlagItemIsSymlink 0x00040000
++#endif
++
++#if defined(MAC_OS_X_VERSION_10_9) && \
++    MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_9
++#define HAVE_FSEVENTS_EXCLUSIONS 1
++#else
++#define HAVE_FSEVENTS_EXCLUSIONS 0
++#endif
++
+ namespace watchman {
+ 
+ namespace {
+ 
++/**
++ * Returns true if the OS we are running on supports file-level FSEvents
++ * (kFSEventStreamCreateFlagFileEvents), which was introduced in 10.7.
++ * On older systems the watcher degrades to directory-level events.
++ */
++bool osSupportsFileEvents() {
++#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1070
++  return true;
++#else
++  // The deployment target predates 10.7, so consult the running kernel:
++  // kern.osrelease is the Darwin version, whose major number 11
++  // corresponds to OS X 10.7.
++  static const bool supported = [] {
++    char osrelease[64];
++    size_t len = sizeof(osrelease);
++    if (sysctlbyname("kern.osrelease", osrelease, &len, nullptr, 0) != 0) {
++      return false;
++    }
++    if (atoi(osrelease) >= 11) {
++      return true;
++    }
++    logf(
++        DBG,
++        "this system (Darwin {}) predates 10.7: FSEvents will use "
++        "directory-level events\n",
++        osrelease);
++    return false;
++  }();
++  return supported;
++#endif
++}
++
++#if HAVE_FSEVENTS_EXCLUSIONS
++/**
++ * Returns true if FSEventStreamSetExclusionPaths (10.9+) is available on
++ * the running system.
++ */
++bool exclusionsAvailableAtRuntime() {
++#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1090
++  return true;
++#else
++  // Weak-linked because the deployment target predates 10.9.
++  return &FSEventStreamSetExclusionPaths != nullptr;
++#endif
++}
++#endif
++
++} // namespace
++
++namespace {
++
+ // The FSEventStreamSetExclusionPaths API has a limit of 8 items.
+ // If that limit is exceeded, it will fail.
+ constexpr inline size_t kMaxExclusions = 8;
+@@ -431,7 +523,9 @@ std::unique_ptr<FSEventsStream> FSEventsWatcher::fse_stream_make(
+   FSEventStreamScheduleWithRunLoop(
+       fse_stream->stream, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
+ 
+-  if (root->config.getBool("_use_fsevents_exclusions", true)) {
++#if HAVE_FSEVENTS_EXCLUSIONS
++  if (exclusionsAvailableAtRuntime() &&
++      root->config.getBool("_use_fsevents_exclusions", true)) {
+     auto& dirs_vec = root->ignore.getIgnoredDirs();
+ 
+     size_t nitems = std::min(dirs_vec.size(), kMaxExclusions);
+@@ -482,6 +576,7 @@ std::unique_ptr<FSEventsStream> FSEventsWatcher::fse_stream_make(
+       }
+     }
+   }
++#endif // HAVE_FSEVENTS_EXCLUSIONS
+ 
+   return fse_stream;
+ }
+@@ -547,10 +642,13 @@ FSEventsWatcher::FSEventsWatcher(
+     const Configuration& config,
+     std::optional<w_string> dir)
+     : Watcher(
+-          hasFileWatching ? "fsevents" : "dirfsevents",
+-          hasFileWatching ? WATCHER_HAS_PER_FILE_NOTIFICATIONS : 0),
++          (hasFileWatching && osSupportsFileEvents()) ? "fsevents"
++                                                      : "dirfsevents",
++          (hasFileWatching && osSupportsFileEvents())
++              ? WATCHER_HAS_PER_FILE_NOTIFICATIONS
++              : 0),
+       attemptResyncOnDrop_{config.getBool("fsevents_try_resync", false)},
+-      hasFileWatching_{hasFileWatching},
++      hasFileWatching_{hasFileWatching && osSupportsFileEvents()},
+       enableStreamFlush_{config.getBool("fsevents_enable_stream_flush", true)},
+       subdir{std::move(dir)} {
+   // TODO: Add ring buffer logging for events in the shared kqueue+fsevents
+diff --git a/watchman/watchman_system.h b/watchman/watchman_system.h
+index cd851a9..b05355b 100644
+--- a/watchman/watchman_system.h
++++ b/watchman/watchman_system.h
+@@ -149,7 +149,10 @@ char* realpath(const char* filename, char* target);
+ 
+ #ifdef HAVE_CORESERVICES_CORESERVICES_H
+ #include <CoreServices/CoreServices.h> // @manual
+-#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 1070
++// The FSEvents stream API is available from 10.5.  Later additions
++// (file-level events on 10.7, exclusion paths on 10.9) are handled with
++// per-feature gates in watcher/fsevents.cpp.
++#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 1050
+ #define HAVE_FSEVENTS 0
+ #else
+ #define HAVE_FSEVENTS 1
