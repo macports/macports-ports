@@ -1,0 +1,109 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           npm 1.0
+
+name                cdxgen
+version             13.1.0
+revision            0
+
+npm.rootname        @cdxgen/cdxgen
+# The tarball is named after the unscoped part of the package.
+distname            ${name}-${version}
+
+# package.json requires node >= 24; the PortGroup defaults to 22.
+npm.nodejs_version  24
+# npm10 depends on nodejs22, which conflicts with nodejs24.
+npm.version         11
+
+pre-fetch {
+    set node ${prefix}/bin/node
+    if {![file executable ${node}]} {
+        return
+    }
+    if {[catch {exec ${node} --version 2>@1} v]} {
+        ui_warn "could not determine the node version: ${v}"
+        return
+    }
+    if {![regexp {^v(\d+)\.} ${v} -> major]} {
+        ui_warn "could not parse the node version: ${v}"
+        return
+    }
+    if {${major} < ${npm.nodejs_version}} {
+        return -code error \
+            "${name} needs node ${npm.nodejs_version} or newer, but\
+             ${node} is ${v}. Install nodejs${npm.nodejs_version} first;\
+             the nodejs ports conflict, so the older one has to go."
+    }
+}
+
+description         Creates CycloneDX Bills of Materials from source and \
+                    container images
+
+long_description    ${name} generates CycloneDX Software Bills of Materials \
+                    (SBOM) for projects in many languages, reading manifests \
+                    and lockfiles rather than requiring a build. Companion \
+                    commands produce operations (obom), hardware (hbom), \
+                    cryptography (cbom), SaaS (saasbom) and AI (aibom) bills \
+                    of materials, emit SPDX, and convert, validate and sign \
+                    the results.
+
+categories          security
+license             Apache-2
+maintainers         @jrjsmrtn openmaintainer
+homepage            https://cyclonedx.github.io/cdxgen/
+
+platforms           any
+supported_archs     noarch
+
+checksums           rmd160  3257a625dc7849af9745a6f2bfc639d03b79f450 \
+                    sha256  c5de3e648b261ad2a273f960ffac31153e6832b9d5c587be33d2395bd46fdaf3 \
+                    size    3093006
+
+set osquery_bin     ${prefix}/bin/osqueryi
+set cdxgen_js       ${prefix}/lib/node_modules/@cdxgen/cdxgen/bin/cdxgen.js
+set osq_libexec_dir ${prefix}/libexec/${name}
+
+# A variant, not a dependency: only obom uses osquery. Untouched, cdxgen
+# downloads its own osquery binary at run time, which a port must not do.
+# No hbom counterpart -- its macOS collectors call /usr/sbin tools directly.
+variant obom description {Support operations BOMs (obom) using the osquery port} {
+    depends_run-append  port:osquery
+
+    post-destroot {
+        # cdxgen.js picks its mode from basename(process.argv[1]), so each
+        # wrapper execs a correctly named symlink rather than cdxgen.js --
+        # otherwise obom degrades to an ordinary scan.
+        xinstall -d ${destroot}${osq_libexec_dir}
+
+        foreach launcher {cdxgen obom} {
+            set alias ${osq_libexec_dir}/${launcher}
+            ln -s ${cdxgen_js} ${destroot}${alias}
+
+            set target ${destroot}${prefix}/bin/${launcher}
+            delete ${target}
+            set fd [open ${target} w]
+            puts ${fd} "#!/bin/sh"
+            puts ${fd} "# Prefer the osquery port over a downloaded plugin binary."
+            puts ${fd} ": \"\${OSQUERY_CMD:=${osquery_bin}}\""
+            puts ${fd} "export OSQUERY_CMD"
+            puts ${fd} "exec ${alias} \"\$@\""
+            close ${fd}
+            file attributes ${target} -permissions 0755
+        }
+    }
+
+    notes-append "
+The obom and cdxgen commands default OSQUERY_CMD to ${osquery_bin}; set it
+yourself to override.
+"
+}
+
+notes "
+Operations BOMs (obom) need osquery. Install with +obom to use the osquery
+port; otherwise ${name} looks for a plugin binary it does not ship.
+
+Container image scans (-t oci) use trivy for OS packages, and quietly omit
+them when it is absent. To include them, install the trivy port and set
+TRIVY_CMD=${prefix}/bin/trivy.
+"
