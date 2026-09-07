@@ -1,0 +1,116 @@
+From 8904faa34b1ab3f791ee24ffea263301b5b2292e Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Wed, 29 Jul 2026 07:43:54 +0000
+Subject: [PATCH 08/13] folly: support building networking code against legacy
+ macOS SDKs
+
+- NetOps.h: provide IPV6_TCLASS (value from later SDKs) and a benign
+  AI_NUMERICSERV fallback for SDKs that lack them.
+- TcpInfoTypes.h: detect tcp_connection_info support by
+  defined(TCP_CONNECTION_INFO) instead of assuming all Apple SDKs have
+  it (it appeared in the 10.11 SDK).
+- AsyncUDPSocket: setting IP_RECVTOS is best-effort when the SDK does
+  not define it.
+- AsyncFdSocket: on pre-11 SDKs redefine __DARWIN_ALIGN32 with the
+  integer-only definition from newer SDKs so CMSG_SPACE is usable in
+  constant expressions.
+  (Upstream review of facebook/folly#2124 suggested wrapping CMSG
+  macros in a folly portability header instead of redefining a Darwin
+  macro; kept as the minimal local fix here.)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013G8CDpEyDCCgV4jaMM9WME
+---
+ folly/io/async/AsyncUDPSocket.cpp     |  4 ++++
+ folly/io/async/fdsock/AsyncFdSocket.h | 15 +++++++++++++++
+ folly/net/NetOps.h                    | 11 +++++++++++
+ folly/net/TcpInfoTypes.h              |  3 ++-
+ 4 files changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/folly/io/async/AsyncUDPSocket.cpp b/folly/io/async/AsyncUDPSocket.cpp
+index 65f30b513..54d401660 100644
+--- a/folly/io/async/AsyncUDPSocket.cpp
++++ b/folly/io/async/AsyncUDPSocket.cpp
+@@ -285,6 +285,9 @@ void AsyncUDPSocket::init(sa_family_t family, BindOptions bindOptions) {
+             errno);
+       }
+     } else if (family == AF_INET) {
++      // IP_RECVTOS is missing from older macOS SDKs; reading the received
++      // ToS byte is best-effort there.
++#ifdef IP_RECVTOS
+       if (netops::setsockopt(
+               socket, IPPROTO_IP, IP_RECVTOS, &flag, sizeof(flag)) != 0) {
+         throw AsyncSocketException(
+@@ -292,6 +295,7 @@ void AsyncUDPSocket::init(sa_family_t family, BindOptions bindOptions) {
+             "failed to set IP_RECVTOS on the socket",
+             errno);
+       }
++#endif
+     }
+   }
+ 
+diff --git a/folly/io/async/fdsock/AsyncFdSocket.h b/folly/io/async/fdsock/AsyncFdSocket.h
+index 8973f2ad4..57d1e88d6 100644
+--- a/folly/io/async/fdsock/AsyncFdSocket.h
++++ b/folly/io/async/fdsock/AsyncFdSocket.h
+@@ -20,6 +20,21 @@
+ #include <folly/io/async/fdsock/SocketFds.h>
+ #include <folly/portability/GTestProd.h>
+ 
++#ifdef __APPLE__
++#include <AvailabilityMacros.h>
++#if MAC_OS_X_VERSION_MIN_REQUIRED < 110000
++// Older SDKs define __DARWIN_ALIGN32 with a pointer cast that is not usable
++// in constant expressions; redefine it with the integer-only definition used
++// by the macOS 11+ SDKs so that CMSG_SPACE works in constexpr contexts.
++#ifdef __DARWIN_ALIGN32
++#undef __DARWIN_ALIGN32
++#define __DARWIN_ALIGN32(p) \
++  ((__darwin_size_t)((__darwin_size_t)(p) + __DARWIN_ALIGNBYTES32) & \
++   ~__DARWIN_ALIGNBYTES32)
++#endif
++#endif
++#endif
++
+ namespace folly {
+ 
+ /**
+diff --git a/folly/net/NetOps.h b/folly/net/NetOps.h
+index 4d327a0f2..6ec36f9fd 100644
+--- a/folly/net/NetOps.h
++++ b/folly/net/NetOps.h
+@@ -316,6 +316,17 @@ struct mmsghdr {
+ #define F_COPY_CMSG_INT_DATA(cm, val, len) memcpy(CMSG_DATA(cm), val, len)
+ #endif /* _WIN32 */
+ 
++// Missing from macOS SDKs before 10.7; the value matches later SDKs.
++#if !defined(IPV6_TCLASS) && defined(__APPLE__)
++#define IPV6_TCLASS 36
++#endif
++
++// Missing from macOS SDKs before 10.6 (MacPorts legacy-support provides it
++// on 10.5).  0 disables the numeric-service optimization but stays correct.
++#ifndef AI_NUMERICSERV
++#define AI_NUMERICSERV 0
++#endif
++
+ namespace folly {
+ namespace netops {
+ // Poll descriptor is intended to be byte-for-byte identical to pollfd,
+diff --git a/folly/net/TcpInfoTypes.h b/folly/net/TcpInfoTypes.h
+index 09a8a9907..217faca1b 100644
+--- a/folly/net/TcpInfoTypes.h
++++ b/folly/net/TcpInfoTypes.h
+@@ -179,7 +179,8 @@ struct tcp_info_legacy {
+   __u32 tcpi_total_retrans;
+ };
+ 
+-#elif defined(__APPLE__)
++#elif defined(__APPLE__) && defined(TCP_CONNECTION_INFO)
++// TCP_CONNECTION_INFO appeared in the macOS 10.11 SDK.
+ #define FOLLY_HAVE_TCP_INFO 1
+ using tcp_info = ::tcp_connection_info;
+ const int tcp_info_sock_opt = TCP_CONNECTION_INFO;
+-- 
+2.43.0
+

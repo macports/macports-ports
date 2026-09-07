@@ -1,64 +1,100 @@
---- thrift/lib/cpp2/server/Cpp2ConnContext.cpp.orig	2022-08-08 09:08:18.000000000 +0700
-+++ thrift/lib/cpp2/server/Cpp2ConnContext.cpp	2022-08-15 12:40:56.000000000 +0700
-@@ -22,6 +22,14 @@
+diff --git thrift/lib/cpp2/server/Cpp2ConnContext.cpp thrift/lib/cpp2/server/Cpp2ConnContext.cpp
+index cc60e540..fb90e334 100644
+--- thrift/lib/cpp2/server/Cpp2ConnContext.cpp
++++ thrift/lib/cpp2/server/Cpp2ConnContext.cpp
+@@ -22,6 +22,10 @@
  #include <sys/ucred.h> // @manual
  #endif
  
-+#if !defined(SOL_LOCAL) && defined(__APPLE__)
++#ifndef SOL_LOCAL
 +#define SOL_LOCAL 0
-+#endif
-+
-+#if !defined(LOCAL_PEEREPID) && defined(__APPLE__)
-+#define LOCAL_PEEREPID 0x003 // retrieve eff. peer pid
 +#endif
 +
  namespace {
  
  #ifndef _WIN32
-
-
-# ParallelConcurrencyController.h:65:40: error: static assertion failed
-# static_assert(std::atomic<Counters>::is_always_lock_free);
---- thrift/lib/cpp2/server/ParallelConcurrencyController.h.orig	2022-08-08 09:08:18.000000000 +0700
-+++ thrift/lib/cpp2/server/ParallelConcurrencyController.h	2022-08-15 21:39:26.000000000 +0700
-@@ -55,12 +55,21 @@
-  private:
+@@ -62,6 +66,7 @@ Cpp2ConnContext::PeerCred Cpp2ConnContext::PeerCred::queryFromSocket(
+     return PeerCred{ErrorRetrieving, errnoToUid(errno), 0};
+   } else {
+ #ifdef __APPLE__
++#ifdef LOCAL_PEEREPID
+     pid_t epid = 0;
+     if (getsockopt(
+             socket.toFd(),
+@@ -73,6 +74,11 @@ Cpp2ConnContext::PeerCred Cpp2ConnContext::PeerCred::queryFromSocket(
+     } else {
+       return PeerCred{epid, cred.cr_uid, cred.cr_gid};
+     }
++#else
++    // Old SDKs have no LOCAL_PEEREPID and old kernels do not implement
++    // it; report the retrieved credentials with an unknown pid.
++    return PeerCred{0, cred.cr_uid, cred.cr_gid};
++#endif
+ #else
+     return PeerCred{cred.cr_pid, cred.cr_uid, cred.cr_gid};
+ #endif
+diff --git thrift/lib/cpp2/server/ParallelConcurrencyController.h thrift/lib/cpp2/server/ParallelConcurrencyController.h
+index 24c55161..bcbfd290 100644
+--- thrift/lib/cpp2/server/ParallelConcurrencyController.h
++++ thrift/lib/cpp2/server/ParallelConcurrencyController.h
+@@ -16,6 +16,7 @@
+ 
+ #pragma once
+ 
++#include <atomic>
+ #include <limits>
+ 
+ #include <folly/executors/MeteredExecutor.h>
+@@ -92,12 +93,20 @@ class ParallelConcurrencyControllerBase : public ConcurrencyControllerBase,
+ 
    struct Counters {
      constexpr Counters() noexcept = default;
-+#if defined(__ppc__)
-+    // Number of requests that are being executed
-+    // by the executor
-+    uint16_t requestInExecution{0};
-+    // Number of requests that sit in the queue waiting
-+    // to be dequeued by the ConcurrencyController
-+    uint16_t pendingDequeCalls{0};
-+#else // Everything else besides ppc32
++#if ATOMIC_LLONG_LOCK_FREE == 2
      // Number of requests that are being executed
      // by the executor
      uint32_t requestInExecution{0};
      // Number of requests that sit in the queue waiting
      // to be dequeued by the ConcurrencyController
      uint32_t pendingDequeCalls{0};
++#else
++    // Half-width counters on targets without always-lock-free 8-byte
++    // atomics (e.g. ppc32), so that the struct stays lock-free; caps
++    // concurrent and pending requests at 65535.
++    uint16_t requestInExecution{0};
++    uint16_t pendingDequeCalls{0};
 +#endif
    };
    static_assert(std::atomic<Counters>::is_always_lock_free);
  
-
-# https://trac.macports.org/attachment/ticket/50288/leopard-IPV6_TCLASS.patch
---- thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp.orig	2022-08-08 10:08:18.000000000 +0800
-+++ thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp	2022-10-15 16:36:39.000000000 +0800
-@@ -49,6 +49,14 @@
+diff --git thrift/lib/cpp2/transport/rocket/server/RefactoredRocketServerConnection.cpp thrift/lib/cpp2/transport/rocket/server/RefactoredRocketServerConnection.cpp
+index 8f398c1c..4c3b0b59 100644
+--- thrift/lib/cpp2/transport/rocket/server/RefactoredRocketServerConnection.cpp
++++ thrift/lib/cpp2/transport/rocket/server/RefactoredRocketServerConnection.cpp
+@@ -54,6 +54,11 @@
+ #include <thrift/lib/cpp2/transport/rocket/server/RocketStreamClientCallback.h>
+ #include <thrift/lib/cpp2/transport/rocket/server/detail/OutgoingFrameHandler.h>
+ 
++// Missing from SDKs before 10.7; old kernels reject the option at runtime.
++#if defined(__APPLE__) && !defined(IPV6_TCLASS)
++#define IPV6_TCLASS 36
++#endif
++
+ THRIFT_FLAG_DECLARE_bool(enable_rocket_connection_observers);
+ THRIFT_FLAG_DECLARE_bool(thrift_check_free_stream_thread);
+ THRIFT_FLAG_DEFINE_bool(rocket_use_outgoing_frame_handler, false);
+diff --git thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp
+index 61f79532..f67a1d87 100644
+--- thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp
++++ thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp
+@@ -52,6 +52,11 @@
  #include <thrift/lib/cpp2/transport/rocket/server/RocketSinkClientCallback.h>
  #include <thrift/lib/cpp2/transport/rocket/server/RocketStreamClientCallback.h>
  
-+#ifndef IPV6_TCLASS
-+#if defined(__GNU__)
-+#define IPV6_TCLASS 61
-+#elif defined(__APPLE__)
++// Missing from SDKs before 10.7; old kernels reject the option at runtime.
++#if defined(__APPLE__) && !defined(IPV6_TCLASS)
 +#define IPV6_TCLASS 36
-+#endif
 +#endif
 +
  THRIFT_FLAG_DEFINE_bool(enable_rocket_connection_observers, false);
- 
- namespace apache {
+ THRIFT_FLAG_DEFINE_bool(thrift_enable_stream_counters, true);
+ THRIFT_FLAG_DEFINE_bool(thrift_check_free_stream_thread, true);

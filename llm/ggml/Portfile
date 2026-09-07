@@ -1,0 +1,136 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               github 1.0
+PortGroup               cmake 1.1
+PortGroup               legacysupport 1.1
+
+# llama.cpp and ggml must be updated in sync
+github.setup            ggml-org ggml 0.23.0 v
+github.tarball_from     archive
+revision                0
+categories              llm
+license                 MIT
+maintainers             {i0ntempest @i0ntempest} openmaintainer
+
+description             Tensor library for machine learning
+long_description        ${name} is a portable, efficient C/C++ tensor library for machine learning.
+homepage                https://github.com/ggml-org/ggml
+
+checksums               rmd160  79597f74a2b291f175eb437a594b495ed39eba80 \
+                        sha256  ae3f37f599acc16e8213d728f66528c7ba7a9ff2d7cac09181ba1ab19adb445c \
+                        size    3931297
+
+# error: 'filesystem' file not found on 10.14
+legacysupport.newest_darwin_requires_legacy \
+                        18
+legacysupport.use_mp_libcxx \
+                        yes
+
+# fix metal backend for AMD discrete GPUs
+# see https://github.com/ggml-org/llama.cpp/issues/19563 and https://github.com/ggml-org/llama.cpp/pull/19567
+# also see (related but unused for now) https://github.com/Cerid-AI/quenchforge/blob/main/patches/llama.cpp
+patchfiles-append       patch-19567.diff
+patch.args              -p2
+
+compiler.cxx_standard   2017
+cmake.build_type        Release
+
+configure.args-append   -DGGML_BUILD_EXAMPLES=OFF \
+                        -DGGML_BUILD_TESTS=OFF \
+                        -DGGML_CCACHE=OFF \
+                        -DGGML_BLAS=OFF \
+                        -DGGML_ACCELERATE=OFF \
+                        -DGGML_METAL=OFF \
+                        -DGGML_METAL_EMBED_LIBRARY=OFF \
+                        -DGGML_NATIVE=OFF \
+                        -DGGML_OPENCL=OFF \
+                        -DGGML_OPENMP=OFF \
+                        -DGGML_VULKAN=OFF
+
+variant blas description {Use BLAS for matrix multiplication} {
+    configure.args-append \
+                        -DGGML_BLAS=ON
+    if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx"} {
+        configure.args-append \
+                        -DGGML_ACCELERATE=ON \
+                        -DGGML_BLAS_VENDOR=Apple
+    } else {
+        configure.args-append \
+                        -DGGML_ACCELLERATE=OFF \
+                        -DGGML_BLAS_VENDOR=OpenBLAS
+        depends_lib-append \
+                        path:lib/libopenblas.dylib:OpenBLAS
+    }
+}
+
+variant openmp description {Enable OpenMP parallelism} {
+    compiler.openmp_version \
+                        4.5
+    compiler.blacklist-append \
+                        {macports-clang-[0-9].*}
+    configure.args-replace \
+                        -DGGML_OPENMP=OFF \
+                        -DGGML_OPENMP=ON
+    if {[string match *clang* ${configure.compiler}]} {
+        configure.ldflags-append \
+                        -L${prefix}/lib/libomp -lomp
+    }
+}
+
+variant native description {Optimize for the build host CPU} {
+    configure.args-replace \
+                        -DGGML_NATIVE=OFF \
+                        -DGGML_NATIVE=ON
+}
+
+variant opencl description {Enable the OpenCL backend with PoCL} {
+    depends_build-append \
+                        port:opencl-headers
+    depends_lib-append \
+                        port:pocl
+    # Keep ggml's source headers ahead of the OpenCL include directory.
+    post-patch {
+        reinplace -E {s|target_include_directories\(\$\{TARGET_NAME\} PRIVATE \$\{OpenCL_INCLUDE_DIRS\}\)|target_include_directories\(${TARGET_NAME} BEFORE PRIVATE ../../include ${OpenCL_INCLUDE_DIRS}\)|} \
+            ${worksrcpath}/src/ggml-opencl/CMakeLists.txt
+    }
+    configure.args-replace \
+                        -DGGML_OPENCL=OFF \
+                        -DGGML_OPENCL=ON
+    configure.args-append \
+                        -DOpenCL_INCLUDE_DIR=${prefix}/include \
+                        -DOpenCL_LIBRARY=${prefix}/lib/libOpenCL.dylib
+}
+
+variant metal description {Enable the Metal backend} conflicts vulkan {
+    configure.args-append \
+                        -DGGML_METAL_MACOSX_VERSION_MIN=${macos_version_major}
+    configure.args-replace \
+                        -DGGML_METAL=OFF \
+                        -DGGML_METAL=ON
+    configure.args-replace \
+                        -DGGML_METAL_EMBED_LIBRARY=OFF \
+                        -DGGML_METAL_EMBED_LIBRARY=ON
+}
+
+variant vulkan description {Enable the Vulkan backend} conflicts metal {
+    depends_build-append \
+                        port:vulkan-headers \
+                        port:spirv-headers
+    depends_lib-append \
+                        path:bin/glslc:shaderc \
+                        path:bin/glslang:glslang \
+                        path:lib/libMoltenVK.dylib:MoltenVK-latest \
+                        port:vulkan-loader
+    configure.args-replace \
+                        -DGGML_VULKAN=OFF \
+                        -DGGML_VULKAN=ON
+}
+
+default_variants        +blas +openmp
+
+# Newer Metal APIs used by ggml are unavailable with the 10.14 SDK.
+if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx" && \
+    (${os.major} >= 20 && ${configure.sdk_version} >= 11)} {
+    default_variants    +metal
+}

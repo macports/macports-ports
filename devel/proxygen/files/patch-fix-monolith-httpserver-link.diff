@@ -1,0 +1,161 @@
+From a507aa9792558088dcc9a1e284b41af88ce20455 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Wed, 29 Jul 2026 12:55:59 +0000
+Subject: [PATCH] Fix monolithic library aggregation to include
+ httpserver/httpclient objects
+
+proxygen_create_monolithic_library() was invoked at the end of
+proxygen/lib/CMakeLists.txt, i.e. during add_subdirectory(lib). Because
+proxygen/CMakeLists.txt processes subdirectories as lib -> httpserver ->
+httpclient, the httpserver and httpclient OBJECT libraries were registered
+into PROXYGEN_COMPONENT_TARGETS *after* the monolith had already been
+assembled. Their object files (HTTPServer.cpp.o et al.) were therefore
+orphaned and never linked into libproxygen, so the proxygen_push and
+proxygen_proxy samples failed to LINK with undefined proxygen::HTTPServer
+symbols:
+
+  Undefined symbols for architecture ppc:
+    "proxygen::HTTPServer::bind(...)"
+    "proxygen::HTTPServer::start(...)"
+    "proxygen::HTTPServer::HTTPServer(...)"
+    "proxygen::HTTPServer::~HTTPServer()"
+
+Fix, two parts:
+
+1. Move the monolith creation (plus the mvfst link and install(TARGETS
+   proxygen)) to the top-level CMakeLists.txt, after add_subdirectory(proxygen)
+   completes, so every subdirectory's OBJECT libraries are aggregated. This
+   matches the documented contract of proxygen_create_monolithic_library
+   ("call after all add_subdirectory() calls").
+
+2. Mark proxygen_hq_samples EXCLUDE_FROM_MONOLITH. It is the support library
+   for the `hq` sample executable (not a libproxygen component) and links back
+   against proxygen via proxygencurl/proxygenhttpserver. Once the monolith is
+   assembled after the httpserver subdir, aggregating it created a dependency
+   cycle (proxygen -> proxygen_hq_samples -> proxygen) that CMake rejects for
+   shared libraries. This is the same treatment already applied to proxygencurl
+   and libhttperf2. The real HQ library components (proxygen_hq_server,
+   proxygen_hq_logger_helper, proxygen_hq_insecure_verifier) stay in the
+   monolith, since monolith code (e.g. H3DatagramAsyncSocket) depends on them.
+
+Not platform-specific: the same orphaning breaks any BUILD_SHARED_LIBS=ON
+build that also builds the samples.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JxfbJ9dtjSKDGw3CWZ31Vy
+---
+ CMakeLists.txt                                | 31 ++++++++++++++++++-
+ proxygen/httpserver/samples/hq/CMakeLists.txt |  5 +++
+ proxygen/lib/CMakeLists.txt                   | 26 +++++-----------
+ 3 files changed, 42 insertions(+), 20 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 75494ab..96277a0 100644
+--- CMakeLists.txt
++++ CMakeLists.txt
+@@ -173,14 +173,43 @@ set(PROXYGEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/proxygen)
+ 
+ add_subdirectory(proxygen)
+ 
++# =============================================================================
++# Create the monolithic proxygen library from every component OBJECT target.
++#
++# This MUST run after add_subdirectory(proxygen) so that OBJECT libraries
++# registered by *all* subdirectories are aggregated -- including httpserver and
++# httpclient, which are processed after proxygen/lib. Creating it earlier (e.g.
++# inside proxygen/lib/CMakeLists.txt) orphaned the httpserver object files
++# (proxygen::HTTPServer et al.), which left the proxygen_push/proxygen_proxy
++# samples with undefined symbols at link time.
++# =============================================================================
++proxygen_create_monolithic_library()
++
++# Add mvfst/HTTP3 dependencies to the monolithic library
++target_link_libraries(proxygen
++  PUBLIC
++    mvfst::mvfst_transport
++    mvfst::mvfst_client
++    mvfst::mvfst_fizz_client
++    mvfst::mvfst_server
++    mvfst::mvfst_codec_types
++    mvfst::mvfst_state_machine
++)
++
+ # Resolve deferred dependencies for granular libraries
+-# (monolithic proxygen target is manually maintained in proxygen/lib/CMakeLists.txt)
+ proxygen_resolve_deferred_dependencies()
+ 
+ if (NOT DEFINED LIB_INSTALL_DIR)
+     set(LIB_INSTALL_DIR "lib")
+ endif()
+ 
++install(
++    TARGETS proxygen
++    EXPORT proxygen-exports
++    LIBRARY DESTINATION ${LIB_INSTALL_DIR}
++    ARCHIVE DESTINATION ${LIB_INSTALL_DIR}
++)
++
+ if (NOT DEFINED INCLUDE_INSTALL_DIR)
+     set(INCLUDE_INSTALL_DIR "include")
+ endif()
+diff --git a/proxygen/httpserver/samples/hq/CMakeLists.txt b/proxygen/httpserver/samples/hq/CMakeLists.txt
+index 947ad0e..b250647 100644
+--- proxygen/httpserver/samples/hq/CMakeLists.txt
++++ proxygen/httpserver/samples/hq/CMakeLists.txt
+@@ -59,6 +59,11 @@ proxygen_add_library(proxygen_hq_server
+ )
+ 
+ proxygen_add_library(proxygen_hq_samples
++  # This is the support library for the `hq` sample executable, not a component
++  # of libproxygen: it links against proxygen (via proxygencurl/proxygenhttpserver)
++  # and must NOT be folded into the monolith, or CMake reports a dependency cycle
++  # (proxygen -> proxygen_hq_samples -> proxygen). Same treatment as proxygencurl.
++  EXCLUDE_FROM_MONOLITH
+   SRCS
+     H2Server.cpp
+     HQClient.cpp
+diff --git a/proxygen/lib/CMakeLists.txt b/proxygen/lib/CMakeLists.txt
+index a1cc4bb..c296022 100644
+--- proxygen/lib/CMakeLists.txt
++++ proxygen/lib/CMakeLists.txt
+@@ -148,20 +148,12 @@ add_subdirectory(transport)
+ add_subdirectory(utils)
+ 
+ # =============================================================================
+-# Create monolithic proxygen library from all OBJECT targets
++# NOTE: The monolithic proxygen library is created at the top-level
++# CMakeLists.txt *after* add_subdirectory(proxygen) completes, so that OBJECT
++# targets registered by later subdirectories (httpserver, httpclient) are also
++# aggregated into libproxygen. Creating it here would orphan those object files
++# (e.g. proxygen::HTTPServer), breaking the sample executables at link time.
+ # =============================================================================
+-proxygen_create_monolithic_library()
+-
+-# Add mvfst/HTTP3 dependencies to the monolithic library
+-target_link_libraries(proxygen
+-  PUBLIC
+-    mvfst::mvfst_transport
+-    mvfst::mvfst_client
+-    mvfst::mvfst_fizz_client
+-    mvfst::mvfst_server
+-    mvfst::mvfst_codec_types
+-    mvfst::mvfst_state_machine
+-)
+ 
+ # Install the headers, excluding unit testing related headers
+ file(
+@@ -187,12 +179,8 @@ install(
+     DIRECTORY ${PROXYGEN_GENERATED_ROOT}/proxygen/
+     DESTINATION include/proxygen/
+ )
+-install(
+-    TARGETS proxygen
+-    EXPORT proxygen-exports
+-    LIBRARY DESTINATION ${LIB_INSTALL_DIR}
+-    ARCHIVE DESTINATION ${LIB_INSTALL_DIR}
+-)
++# NOTE: install(TARGETS proxygen ...) is done at the top-level CMakeLists.txt,
++# since the monolithic proxygen target is now created there.
+ 
+ add_subdirectory(test)
+ add_subdirectory(http/coro/client/samples/cocurl)

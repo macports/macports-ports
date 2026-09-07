@@ -4,10 +4,12 @@ PortSystem              1.0
 PortGroup               github 1.0
 PortGroup               cmake 1.1
 PortGroup               legacysupport 1.1
+PortGroup               active_variants 1.1
 
-github.setup            ggerganov llama.cpp 0.3.0 v
+# llama.cpp and ggml must be updated in sync
+github.setup            ggerganov llama.cpp 0.4.0 v
 github.tarball_from     archive
-revision                1
+revision                0
 categories              llm
 maintainers             {i0ntempest @i0ntempest} openmaintainer
 license                 MIT
@@ -24,12 +26,12 @@ master_sites-append     https://github.com/ggml-org/llama.cpp/releases/download/
 distfiles-append        ${nightly_tag_distfile}:nightly_tag
 
 checksums               ${source_distfile} \
-                        rmd160  19299769e173a2a7a59f28c20be4c317cb6508ed \
-                        sha256  d94c02d86db22d68692f6bb5b3854763d5091e52142868dc7251995517c666d1 \
-                        size    36951021 \
+                        rmd160  f9270dbc24f048cde4d6054dbdd4cddc15f7dab7 \
+                        sha256  9c2948aa9c79c92dd0e4c98e11ff5cf76dfdcaebdeb18e3e93409e9a98aefdab \
+                        size    37288249 \
                         ${nightly_tag_distfile} \
-                        rmd160  356208a087e093b9a0066b009874b1c8bd01ff4f \
-                        sha256  46637e1a90db3d9912a7722806c7657cc73a3965e21c0016cc6b087b3be84205 \
+                        rmd160  0ccb87e688457ad203d4f4e71c984083d8f7b22a \
+                        sha256  bd0afc13ffe4aaa2f02eb7df8882a2617907d7f232012ae2ca0f21f6b865fbe0 \
                         size    7
 
 extract.only            ${source_distfile}
@@ -42,25 +44,16 @@ legacysupport.use_mp_libcxx \
 
 depends_build-append    path:bin/pkg-config:pkgconfig
 
-depends_lib-append      port:curl
-
-# fix metal backend for AMD discrete GPUs
-# see https://github.com/ggml-org/llama.cpp/issues/19563 and https://github.com/ggml-org/llama.cpp/pull/19567
-# also see (related but unused for now) https://github.com/Cerid-AI/quenchforge/blob/main/patches/llama.cpp
-patchfiles-append       patch-19567.diff
-patch.args              -p1
+depends_lib-append      port:curl \
+                        port:ggml
 
 compiler.cxx_standard   2017
 
 # cmake relies on git for version info. We need to set them manually.
-configure.args-append   -DGGML_LTO=ON \
-                        -DGGML_CCACHE=OFF \
-                        -DGGML_OPENMP=OFF \
-                        -DLLAMA_CURL=ON \
+configure.args-append   -DLLAMA_CURL=ON \
                         -DLLAMA_BUILD_IS_DEV=OFF \
                         -DLLAMA_BUILD_TESTS=OFF \
-                        -DGGML_METAL=OFF \
-                        -DGGML_METAL_EMBED_LIBRARY=OFF
+                        -DLLAMA_USE_SYSTEM_GGML=ON
 
 pre-configure {
     set fd [open ${distpath}/${nightly_tag_distfile} r]
@@ -73,67 +66,46 @@ pre-configure {
     }
 
     set git-commit [exec curl -fsSL \
-                            -H "Accept: application/vnd.github.sha" \
-                            https://api.github.com/repos/ggml-org/llama.cpp/commits/${github.tag_prefix}${version} | \
-                            cut -c1-7]
+                        -H "Accept: application/vnd.github.sha" \
+                        https://api.github.com/repos/ggml-org/llama.cpp/commits/${github.tag_prefix}${version} | \
+                        cut -c1-7]
 
     configure.args-append \
         -DLLAMA_BUILD_COMMIT=${git-commit} \
         -DLLAMA_BUILD_NUMBER=${llama_build_number}
 }
 
-variant blas description {Uses BLAS, improves performance} {
-    configure.args-append \
-                        -DGGML_BLAS=ON
-    if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx"} {
-        configure.args-append \
-                        -DGGML_ACCELLERATE=ON \
-                        -DGGML_BLAS_VENDOR=Apple
-    } else {
-        configure.args-append \
-                        -DGGML_ACCELLERATE=OFF \
-                        -DGGML_BLAS_VENDOR=OpenBLAS
-
-        depends_lib-append \
-                        path:lib/libopenblas.dylib:OpenBLAS
-    }
+# Proxy dependency variants keep llama.cpp and ggml backend variants in sync.
+variant blas description {Use ggml with BLAS support} {
+    require_active_variants ggml blas
 }
 
-variant openmp description {enable parallelism support using OpenMP} {
-    compiler.openmp_version \
-                        4.5
-    compiler.blacklist-append \
-                        {macports-clang-[0-9].*}
-    configure.args-replace \
-                        -DGGML_OPENMP=OFF \
-                        -DGGML_OPENMP=ON
-    if {[string match *clang* ${configure.compiler}]} {
-        configure.ldflags-append \
-                        -L${prefix}/lib/libomp -lomp
-    }
+variant openmp description {Use ggml with OpenMP support} {
+    require_active_variants ggml openmp
 }
 
-variant metal description {Enable Metal support} conflicts vulkan {
-    configure.args-append \
-                        -DGGML_METAL_MACOSX_VERSION_MIN=${macos_version_major}
-    configure.args-replace \
-                        -DGGML_METAL=OFF -DGGML_METAL=ON
-    configure.args-replace \
-                        -DGGML_METAL_EMBED_LIBRARY=OFF -DGGML_METAL_EMBED_LIBRARY=ON
+variant native description {Use ggml optimized for the build host CPU} {
+    require_active_variants ggml native
 }
 
-variant vulkan description {Enable Vulkan support via MoltenVK} conflicts metal {
-    depends_build-append \
-                        port:vulkan-headers \
-                        port:spirv-headers
-    depends_lib-append \
-                        path:lib/libMoltenVK.dylib:MoltenVK-latest \
-                        path:bin/glslc:shaderc \
-                        path:bin/glslang:glslang \
-                        port:vulkan-loader
-    configure.args-append \
-                        -DGGML_VULKAN=ON
-                        
+variant opencl description {Use ggml with OpenCL support} {
+    require_active_variants ggml opencl
+}
+
+variant metal conflicts vulkan description {Use ggml with Metal support} {
+    require_active_variants ggml metal
+}
+
+variant vulkan conflicts metal description {Use ggml with Vulkan support} {
+    require_active_variants ggml vulkan
+}
+
+default_variants        +blas +openmp
+
+# Newer Metal APIs used by ggml are unavailable with the 10.14 SDK.
+if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx" && \
+    (${os.major} >= 20 && ${configure.sdk_version} >= 11)} {
+    default_variants    +metal
 }
 
 set ::python_branch     3.14
@@ -183,19 +155,6 @@ variant model_converters description {install extra model conversion Python scri
 
 variant gui requires model_converters description {install the Qt-based gguf-editor-gui script} {
     depends_run-append  port:py${::python_version}-pyside6
-}
-
-variant native description {Force local build and optimize for CPU} {
-    configure.args-append \
-                        -DGGML_NATIVE=ON
-}
-
-default_variants        +blas +openmp
-
-# error: use of undeclared identifier 'MTLGPUFamilyApple7' on 10.14
-if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx" && \
-    (${os.major} >= 20 && ${configure.sdk_version} >= 11)} {
-    default_variants    +metal
 }
 
 livecheck.type          regex
