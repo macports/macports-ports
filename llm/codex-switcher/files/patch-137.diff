@@ -1,8 +1,13 @@
+OAuth refresh and usage-error fixes from https://github.com/Lampese/codex-switcher/pull/137
+Upstream head: 20d0f9e4bd6142306ba581b68b9bb3acb194a15d
+Rebased for 0.2.14: upstream already provides force-close confirmation, switch
+error feedback, and an enabled Switch button while Codex is running. Retain
+only the missing success notification from the original switch UI changes.
+
 diff --git a/src-tauri/src/auth/token_refresh.rs b/src-tauri/src/auth/token_refresh.rs
-index 24ab2b5..cbb2fbd 100644
 --- a/src-tauri/src/auth/token_refresh.rs
 +++ b/src-tauri/src/auth/token_refresh.rs
-@@ -26,6 +26,20 @@ struct RefreshTokenResponse {
+@@ -26,6 +26,20 @@
      refresh_token: Option<String>,
  }
  
@@ -23,7 +28,7 @@ index 24ab2b5..cbb2fbd 100644
  #[derive(Debug)]
  struct TokenRefreshUpdate {
      id_token: String,
-@@ -34,20 +48,52 @@ struct TokenRefreshUpdate {
+@@ -34,20 +48,52 @@
      id_token_error: Option<anyhow::Error>,
  }
  
@@ -42,10 +47,12 @@ index 24ab2b5..cbb2fbd 100644
  
      let _auth_guard = AUTH_OPERATION_LOCK.lock().await;
 -    ensure_chatgpt_tokens_fresh_locked(account).await
-+    ensure_chatgpt_tokens_fresh_with_policy_locked(account, false).await
- }
- 
+-}
+-
 -/// Ensure ChatGPT OAuth tokens are fresh while the caller holds AUTH_OPERATION_LOCK.
++    ensure_chatgpt_tokens_fresh_with_policy_locked(account, false).await
++}
++
 +/// Ensure the full ChatGPT OAuth token set is fresh while the caller holds
 +/// AUTH_OPERATION_LOCK. Account switching still needs a fresh ID token because
 +/// Codex can reject auth.json when its ID token is expired.
@@ -81,7 +88,7 @@ index 24ab2b5..cbb2fbd 100644
  ) -> Result<StoredAccount> {
      if matches!(account.auth_data, AuthData::ApiKey { .. }) {
          return Ok(account.clone());
-@@ -64,9 +110,20 @@ pub(crate) async fn ensure_chatgpt_tokens_fresh_locked(
+@@ -64,9 +110,20 @@
              access_token,
              ..
          } => {
@@ -104,10 +111,12 @@ index 24ab2b5..cbb2fbd 100644
                      current.name
                  );
                  refresh_chatgpt_tokens_locked(&current).await
-@@ -212,6 +269,19 @@ pub async fn create_chatgpt_account_from_refresh_token(
+@@ -210,6 +267,19 @@
+         next_refresh_token,
+         claims.account_id,
      ))
- }
- 
++}
++
 +fn chatgpt_access_token_needs_refresh(account: &StoredAccount) -> bool {
 +    match &account.auth_data {
 +        AuthData::ApiKey { .. } => false,
@@ -119,15 +128,15 @@ index 24ab2b5..cbb2fbd 100644
 +
 +fn can_switch_with_existing_access_token(account: &StoredAccount) -> bool {
 +    !chatgpt_access_token_needs_refresh(account)
-+}
-+
- fn chatgpt_tokens_need_refresh(account: &StoredAccount) -> bool {
-     match &account.auth_data {
-         AuthData::ApiKey { .. } => false,
-@@ -293,6 +363,30 @@ fn parse_jwt_exp(token: &str) -> Option<i64> {
-     json.get("exp").and_then(|v| v.as_i64())
  }
  
+ fn chatgpt_tokens_need_refresh(account: &StoredAccount) -> bool {
+@@ -291,6 +361,30 @@
+         .ok()?;
+     let json: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+     json.get("exp").and_then(|v| v.as_i64())
++}
++
 +fn format_token_refresh_error(status: reqwest::StatusCode, body: &str) -> String {
 +    let parsed = serde_json::from_str::<RefreshTokenErrorResponse>(body).ok();
 +    let details = parsed.as_ref().and_then(|payload| payload.error.as_ref());
@@ -150,12 +159,10 @@ index 24ab2b5..cbb2fbd 100644
 +            }
 +        }
 +    }
-+}
-+
+ }
+ 
  async fn refresh_tokens_with_refresh_token(refresh_token: &str) -> Result<RefreshTokenResponse> {
-     let client = reqwest::Client::new();
-     let body = format!(
-@@ -337,7 +431,8 @@ async fn refresh_tokens_with_refresh_token(refresh_token: &str) -> Result<Refres
+@@ -337,7 +431,8 @@
      if !response.status().is_success() {
          let status = response.status();
          let body = response.text().await.unwrap_or_default();
@@ -165,7 +172,7 @@ index 24ab2b5..cbb2fbd 100644
      }
  
      response
-@@ -349,7 +444,9 @@ async fn refresh_tokens_with_refresh_token(refresh_token: &str) -> Result<Refres
+@@ -349,7 +444,9 @@
  #[cfg(test)]
  mod tests {
      use super::{
@@ -176,7 +183,7 @@ index 24ab2b5..cbb2fbd 100644
          reconcile_active_account_from_auth, resolve_refreshed_id_token, RefreshTokenResponse,
      };
      use crate::types::{AccountsStore, AuthData, AuthDotJson, StoredAccount, TokenData};
-@@ -368,7 +465,59 @@ mod tests {
+@@ -368,7 +465,59 @@
      }
  
      #[test]
@@ -237,10 +244,11 @@ index 24ab2b5..cbb2fbd 100644
          let now = 1_800_000_000;
          let id_token = jwt_with_exp(now - 3_600);
          let access_token = jwt_with_exp(now + 3_600);
-@@ -531,4 +680,22 @@ mod tests {
+@@ -531,4 +680,22 @@
          assert_eq!(update.refresh_token, "rotated-refresh");
          assert!(update.id_token_error.is_some());
      }
+-}
 +
 +    #[test]
 +    fn refresh_token_invalidated_error_is_human_readable() {
@@ -259,12 +267,11 @@ index 24ab2b5..cbb2fbd 100644
 +        assert_eq!(message, "Session expired. Re-authenticate this account.");
 +        assert!(!message.contains("{\"error\""));
 +    }
- }
++}
 diff --git a/src-tauri/src/commands/usage.rs b/src-tauri/src/commands/usage.rs
-index 045a8e5..d52b792 100644
 --- a/src-tauri/src/commands/usage.rs
 +++ b/src-tauri/src/commands/usage.rs
-@@ -4,7 +4,9 @@ use crate::api::usage::{
+@@ -4,7 +4,9 @@
      fetch_chatgpt_account_metadata, get_account_usage, refresh_all_usage,
      warmup_account as send_warmup,
  };
@@ -275,7 +282,7 @@ index 045a8e5..d52b792 100644
  use crate::types::{AccountInfo, AuthData, UsageInfo, WarmupSummary};
  use futures::{stream, StreamExt};
  
-@@ -31,8 +33,9 @@ pub async fn get_usage(app: tauri::AppHandle, account_id: String) -> Result<Usag
+@@ -31,8 +33,9 @@
      Ok(usage)
  }
  
@@ -287,7 +294,7 @@ index 045a8e5..d52b792 100644
  /// For API key accounts this is a no-op.
  #[tauri::command]
  pub async fn refresh_account_metadata(account_id: String) -> Result<AccountInfo, String> {
-@@ -43,10 +46,10 @@ pub async fn refresh_account_metadata(account_id: String) -> Result<AccountInfo,
+@@ -43,10 +46,10 @@
      let updated = match &account.auth_data {
          AuthData::ApiKey { .. } => account,
          AuthData::ChatGPT { .. } => {
@@ -301,81 +308,25 @@ index 045a8e5..d52b792 100644
                  .map_err(|e| e.to_string())?;
  
 diff --git a/src/App.tsx b/src/App.tsx
-index 65f31c4..711d39c 100644
 --- a/src/App.tsx
 +++ b/src/App.tsx
-@@ -524,17 +524,22 @@ function App() {
-   }, []);
+@@ -563,6 +563,7 @@
+       }
  
-   const handleSwitch = async (accountId: string) => {
--    // Check processes before switching
-+    // Never make the Switch button look dead. If Codex is running, reuse the
-+    // existing force-close confirmation flow and automatically retry the switch.
-     const latestProcessInfo = await checkProcesses();
-     if (latestProcessInfo && !latestProcessInfo.can_switch) {
-+      setPendingTraySwitchAccountId(accountId);
-+      setForceCloseConfirmOpen(true);
-       return;
-     }
- 
-     try {
-       setSwitchingId(accountId);
        await switchAccount(accountId);
 +      showWarmupToast("Switched account.");
      } catch (err) {
        console.error("Failed to switch account:", err);
-+      showWarmupToast(`Switch failed: ${formatWarmupError(err)}`, true);
-     } finally {
-       setSwitchingId(null);
-     }
-diff --git a/src/components/AccountCard.tsx b/src/components/AccountCard.tsx
-index ecfdc3c..f985be1 100644
---- a/src/components/AccountCard.tsx
-+++ b/src/components/AccountCard.tsx
-@@ -376,15 +376,15 @@ export function AccountCard({
-         ) : (
-           <button
-             onClick={onSwitch}
--            disabled={switching || switchDisabled}
-+            disabled={switching}
-             className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ${
-               switchDisabled
--                ? "bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed"
-+                ? "bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/30 dark:hover:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-800"
-                 : "bg-gray-900 hover:bg-gray-800 dark:bg-gray-100 dark:hover:bg-gray-200 text-white dark:text-gray-900"
-             }`}
--            title={switchDisabled ? "Close all Codex processes first" : undefined}
-+            title={switchDisabled ? "Codex is running — click to close it and switch" : undefined}
-           >
--            {switching ? "Switching..." : switchDisabled ? "Codex Running" : "Switch"}
-+            {switching ? "Switching..." : "Switch"}
-           </button>
-         )}
-         <button
-@@ -415,7 +415,7 @@ export function AccountCard({
-                 ? "Auto warm-up is enabled for all accounts"
-                 : autoWarmupEnabled
-                   ? "Disable auto warm-up for this account"
--                : "Enable auto warm-up for this account"
-+                  : "Enable auto warm-up for this account"
-             }
-           >
-             <span className="flex items-center gap-1">
-@@ -462,4 +462,4 @@ export function AccountCard({
-       />
-     </div>
-   );
--}
-+}
-\ No newline at end of file
+       const latestProcessInfo = await checkProcesses();
 diff --git a/src/components/UsageBar.tsx b/src/components/UsageBar.tsx
-index deb36a8..c97662b 100644
 --- a/src/components/UsageBar.tsx
 +++ b/src/components/UsageBar.tsx
-@@ -36,6 +36,40 @@ function formatWindowDuration(minutes: number | null | undefined): string {
+@@ -34,6 +34,40 @@
+   const hours = Math.floor(minutes / 60);
+   if (hours < 24) return `${hours}h`;
    return `${Math.floor(hours / 24)}d`;
- }
- 
++}
++
 +function formatUsageError(error: string): { title: string; message: string } {
 +  if (
 +    error.includes("refresh_token_invalidated") ||
@@ -408,12 +359,10 @@ index deb36a8..c97662b 100644
 +    title: "Usage unavailable",
 +    message: error,
 +  };
-+}
-+
+ }
+ 
  function RateLimitBar({
-   label,
-   usedPercent,
-@@ -49,7 +83,7 @@ function RateLimitBar({
+@@ -49,7 +83,7 @@
  }) {
    // Calculate remaining percentage
    const remainingPercent = Math.max(0, 100 - usedPercent);
@@ -422,14 +371,15 @@ index deb36a8..c97662b 100644
    // Color based on remaining (green = plenty left, red = almost none left)
    const colorClass =
      remainingPercent <= 10
-@@ -105,9 +139,25 @@ export function UsageBar({ usage, loading }: UsageBarProps) {
+@@ -105,9 +139,25 @@
    }
  
    if (usage.error) {
-+    const friendlyError = formatUsageError(usage.error);
-     return (
+-    return (
 -      <div className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
 -        {usage.error}
++    const friendlyError = formatUsageError(usage.error);
++    return (
 +      <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 dark:border-amber-800/70 dark:bg-amber-950/20">
 +        <div className="flex items-start gap-2">
 +          <span
