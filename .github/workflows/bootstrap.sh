@@ -132,11 +132,12 @@ begingroup "Installing MacPorts"
 # Set up config files to prevent the postflight script from spending a
 # lot of time running selfupdate.
 sudo mkdir -p /opt/local/etc/macports
-sudo cp ./ports/.github/workflows/macports.conf /opt/local/etc/macports
-sudo chown root:wheel /opt/local/etc/macports/macports.conf
-sudo chmod 0644 /opt/local/etc/macports/macports.conf
+sudo /usr/bin/install -o root -g wheel -m 0644 ./ports/.github/workflows/macports.conf /opt/local/etc/macports
 echo "https://github.com/macports/macports-base/releases/tag/v${MACPORTS_VERSION}" > ./RELEASE_URL
 echo "release_version_urls file://${PWD}/RELEASE_URL" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+if [ -n "$PRIVATE_PACKAGES_CREDENTIALS" ]; then
+    echo "fetch_credentials  packages-private.macports.org $PRIVATE_PACKAGES_CREDENTIALS" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+fi
 # Set ports tree to $PWD/ports and disable syncing
 echo "file://${PWD}/ports [default,nosync]" | sudo tee /opt/local/etc/macports/sources.conf >/dev/null
 # Install MacPorts
