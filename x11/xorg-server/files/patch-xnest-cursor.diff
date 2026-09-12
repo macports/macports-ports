@@ -1,0 +1,97 @@
+Handle the per-screen lifecycle of Xnest host cursors.
+
+The root cursor is created before input devices are initialized. Device
+startup realizes it only on the initial screen, but FreeCursor() calls
+UnrealizeCursor for every screen. With multiple screens, resetting Xnest
+therefore dereferences a NULL cursor private. Displaying the root cursor
+on another screen can fail the same way in xnestSetCursor().
+
+Realize cursors on demand when displaying them, reuse existing host
+cursors, and allow cleanup and recoloring before realization. Clear the
+private pointer when freeing a host cursor. The reset crash also occurs
+in vanilla xorg-server 21.1.24.
+
+Upstream report:
+https://github.com/XQuartz/XQuartz/issues/518
+
+--- a/hw/xnest/Cursor.c
++++ b/hw/xnest/Cursor.c
+@@ -41,11 +41,19 @@
+ Bool
+ xnestRealizeCursor(DeviceIntPtr pDev, ScreenPtr pScreen, CursorPtr pCursor)
+ {
++    xnestPrivCursor *priv = xnestGetCursorPriv(pCursor, pScreen);
+     XImage *ximage;
+     Pixmap source, mask;
+     XColor fg_color, bg_color;
+     unsigned long valuemask;
+     XGCValues values;
++
++    if (priv)
++        return True;
++
++    priv = malloc(sizeof(*priv));
++    if (!priv)
++        return False;
+
+     valuemask = GCFunction |
+         GCPlaneMask | GCForeground | GCBackground | GCClipMask;
+@@ -98,10 +106,10 @@
+     bg_color.green = pCursor->backGreen;
+     bg_color.blue = pCursor->backBlue;
+
+-    xnestSetCursorPriv(pCursor, pScreen, calloc(1, sizeof(xnestPrivCursor)));
+-    xnestCursor(pCursor, pScreen) =
++    priv->cursor =
+         XCreatePixmapCursor(xnestDisplay, source, mask, &fg_color, &bg_color,
+                             pCursor->bits->xhot, pCursor->bits->yhot);
++    xnestSetCursorPriv(pCursor, pScreen, priv);
+
+     XFreePixmap(xnestDisplay, source);
+     XFreePixmap(xnestDisplay, mask);
+@@ -112,15 +120,25 @@
+ Bool
+ xnestUnrealizeCursor(DeviceIntPtr pDev, ScreenPtr pScreen, CursorPtr pCursor)
+ {
+-    XFreeCursor(xnestDisplay, xnestCursor(pCursor, pScreen));
+-    free(xnestGetCursorPriv(pCursor, pScreen));
++    xnestPrivCursor *priv = xnestGetCursorPriv(pCursor, pScreen);
++
++    /* The cursor may not have been realized on this screen. */
++    if (priv) {
++        XFreeCursor(xnestDisplay, priv->cursor);
++        free(priv);
++        xnestSetCursorPriv(pCursor, pScreen, NULL);
++    }
+     return True;
+ }
+
+ void
+ xnestRecolorCursor(ScreenPtr pScreen, CursorPtr pCursor, Bool displayed)
+ {
++    xnestPrivCursor *priv = xnestGetCursorPriv(pCursor, pScreen);
+     XColor fg_color, bg_color;
++
++    if (!priv)
++        return;
+
+     fg_color.red = pCursor->foreRed;
+     fg_color.green = pCursor->foreGreen;
+@@ -131,14 +149,15 @@
+     bg_color.blue = pCursor->backBlue;
+
+     XRecolorCursor(xnestDisplay,
+-                   xnestCursor(pCursor, pScreen), &fg_color, &bg_color);
++                   priv->cursor, &fg_color, &bg_color);
+ }
+
+ void
+ xnestSetCursor(DeviceIntPtr pDev, ScreenPtr pScreen, CursorPtr pCursor, int x,
+                int y)
+ {
+-    if (pCursor) {
++    /* The root cursor may not have been realized on this screen yet. */
++    if (pCursor && xnestRealizeCursor(pDev, pScreen, pCursor)) {
+         XDefineCursor(xnestDisplay,
+                       xnestDefaultWindows[pScreen->myNum],
+                       xnestCursor(pCursor, pScreen));
