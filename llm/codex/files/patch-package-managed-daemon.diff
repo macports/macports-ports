@@ -1,0 +1,66 @@
+--- app-server-daemon/src/lib.rs.orig
++++ app-server-daemon/src/lib.rs
+@@ -34,6 +34,7 @@
+ const OPERATION_LOCK_TIMEOUT: Duration = Duration::from_secs(75);
+ const PID_FILE_NAME: &str = "app-server.pid";
+ const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
++const PACKAGE_MANAGER_CODEX_BIN: Option<&str> = option_env!("CODEX_PACKAGE_MANAGER_CODEX_BIN");
+ const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
+ const SETTINGS_FILE_NAME: &str = "settings.json";
+ const STATE_DIR_NAME: &str = "app-server-daemon";
+@@ -280,5 +281,8 @@
+             .to_path_buf();
+         let state_dir = codex_home.as_path().join(STATE_DIR_NAME);
++        let managed_codex_bin = PACKAGE_MANAGER_CODEX_BIN
++            .map(PathBuf::from)
++            .unwrap_or_else(|| managed_codex_bin(codex_home.as_path()));
+         Ok(Self {
+             socket_path,
+             pid_file: state_dir.join(PID_FILE_NAME),
+@@ -288,6 +292,6 @@
+             operation_lock_file: state_dir.join(OPERATION_LOCK_FILE_NAME),
+             settings_file: state_dir.join(SETTINGS_FILE_NAME),
+-            managed_codex_bin: managed_codex_bin(codex_home.as_path()),
++            managed_codex_bin,
+         })
+     }
+ 
+@@ -521,6 +525,13 @@
+         let _operation_lock = self.acquire_operation_lock().await?;
+         let settings = self.load_settings().await?;
+-        if self.is_bootstrapped(&settings).await? {
++        let package_manager_install = PACKAGE_MANAGER_CODEX_BIN.is_some();
++        if package_manager_install || self.is_bootstrapped(&settings).await? {
++            if package_manager_install {
++                let updater = backend::pid_update_loop_backend(self.backend_paths(&settings));
++                if updater.is_starting_or_running().await? {
++                    updater.stop().await?;
++                }
++            }
+             let _ = self
+                 .set_remote_control_locked(RemoteControlMode::Enabled)
+                 .await?;
+@@ -630,18 +642,21 @@
+ 
+         let backend = backend::pid_backend(self.backend_paths(&settings));
+         backend.start().await?;
+         let updater = backend::pid_update_loop_backend(self.backend_paths(&settings));
+         if updater.is_starting_or_running().await? {
+             updater.stop().await?;
+         }
+-        updater.start().await?;
++        let auto_update_enabled = PACKAGE_MANAGER_CODEX_BIN.is_none();
++        if auto_update_enabled {
++            updater.start().await?;
++        }
+ 
+         let info = self.wait_until_ready().await?;
+         let managed_codex_version = self.managed_codex_version_best_effort().await;
+         Ok(BootstrapOutput {
+             status: BootstrapStatus::Bootstrapped,
+             backend: BackendKind::Pid,
+-            auto_update_enabled: true,
++            auto_update_enabled,
+             remote_control_enabled: settings.remote_control_enabled,
+             managed_codex_path: self.managed_codex_bin.clone(),
+             managed_codex_version,
