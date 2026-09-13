@@ -7,7 +7,7 @@ PortGroup           github 1.0
 github.setup        openai codex 0.154.0 rust-v
 github.tarball_from archive
 extract.rename      no
-revision            0
+revision            1
 
 categories          llm
 maintainers         {@takebayashi} openmaintainer
@@ -56,9 +56,32 @@ extract.only        ${distname}${extract.suffix}
 # Disable offline mode to workaround dependencies from Git
 cargo.offline_cmd
 
+# Load the helper's GStreamer runtime directly from the MacPorts prefix.
+patchfiles-append \
+                patch-use-system-gstreamer-runtime.diff
+
+# Support daemon mode without the standalone self-updater
+# See https://github.com/openai/codex/issues/24283
+patchfiles-append \
+                patch-package-managed-daemon.diff
+
+depends_build-append \
+                port:cmake
+depends_lib-append \
+                port:glib2 \
+                port:gstreamer1 \
+                port:gstreamer1-gst-plugins-base \
+                port:gettext-runtime \
+                port:libiconv \
+                port:xz
+depends_run-append \
+                port:gstreamer1-gst-plugins-good
+
 build.env-append \
                 RUSTC_BOOTSTRAP=1 \
-                RUSTFLAGS=-Zmin-recursion-limit=256
+                RUSTFLAGS=-Zmin-recursion-limit=256 \
+                CODEX_VOICE_RUNTIME_PREFIX=${prefix} \
+                CODEX_PACKAGE_MANAGER_CODEX_BIN=${prefix}/libexec/${name}/bin/${name}
 
 pre-build {
     set rusty_v8_target [cargo.rust_platform]
@@ -70,11 +93,35 @@ pre-build {
 # https://github.com/openai/codex/issues/16017
 # https://trac.macports.org/ticket/73569
 # lto=thin reduced memory usage in 0.137
-build.mem_per_job   6000
+build.mem_per_job \
+                6000
 
 destroot {
-    xinstall -m 755 ${worksrcpath}/target/[cargo.rust_platform]/release/${name} ${destroot}${prefix}/bin/
-    xinstall -m 755 ${worksrcpath}/target/[cargo.rust_platform]/release/${name}-code-mode-host ${destroot}${prefix}/bin/
+    set package_path ${destroot}${prefix}/libexec/${name}
+    set bin_path ${package_path}/bin
+    set voice_path ${package_path}/codex-resources/voice
+    xinstall -d ${destroot}${prefix}/bin ${package_path}/codex-path ${bin_path} ${voice_path}/bin
+
+    foreach bin "${name} ${name}-code-mode-host" {
+        xinstall -m 755 ${worksrcpath}/target/[cargo.rust_platform]/release/${bin} ${bin_path}/
+        ln -s ../libexec/${name}/bin/${bin} ${destroot}${prefix}/bin/${bin}
+    }
+
+    # The patched helper loads GStreamer directly from ${prefix}.
+    xinstall -m 755 ${worksrcpath}/target/[cargo.rust_platform]/release/${name}-voice-host ${voice_path}/bin/
+
+    set metadata [open ${package_path}/codex-package.json w]
+    puts $metadata [format {{
+  "layoutVersion": 1,
+  "version": "%s",
+  "target": "%s",
+  "variant": "%s",
+  "entrypoint": "bin/%s",
+  "resourcesDir": "codex-resources",
+  "pathDir": "codex-path"
+}} ${version} [cargo.rust_platform] ${name} ${name}]
+    close $metadata
+
     # All supported shells: bash, fish, powershell, zsh, elvish
     set comp_path(bash) ${destroot}${prefix}/share/bash-completion/completions/${name}
     set comp_path(fish) ${destroot}${prefix}/share/fish/vendor_completions/${name}.fish
