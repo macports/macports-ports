@@ -43,6 +43,10 @@ case "$OS_MAJOR" in
         macosvers=26
         macosname=Tahoe
         ;;
+    27)
+        macosvers=27
+        macosname=GoldenGate
+        ;;
     *)
         echo "Unknown macOS version"
         exit 1
