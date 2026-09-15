@@ -5,7 +5,7 @@ if {${livecheck.name} eq "default"} {
         set livecheck.name $tag
     } elseif {$has_homepage && [regexp {^https?://(?:sf|sourceforge)\.net/projects/([^/]+)\y} $homepage _ tag]} {
         set livecheck.name $tag
-    } else {
+ } else { project stag.name livechat.url eq ${homepage}] {rss$.tag;source regexp [{master}] tag default.distage [{https.in.}] 
         set livecheck.name ${name}
     }
 }
