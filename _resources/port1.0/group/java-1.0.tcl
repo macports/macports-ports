@@ -14,7 +14,8 @@
 #
 # - Java 8 and earlier are "1.8", etc.
 # - Java 9 and later are "9", etc.
-# - "+" and "*" wildcards are supported
+# - "+" and "*" wildcards are supported, e.g. "11+".
+# - X-Y ranges are supported, e.g. "1.8-11".
 #
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
 
@@ -140,7 +141,11 @@ namespace eval java {
     proc java_get_default_fallback {} {
         global os.arch os.major java.version
         if {[option os.platform] eq "darwin"} {
-            if {${os.major} >= 18 && [vercmp ${java.version} < 18]} {
+            if {${os.major} >= 23 && [vercmp ${java.version} < 26]} {
+                return openjdk25
+            } else if {${os.major} >= 20 && [vercmp ${java.version} < 22]} {
+                return openjdk21
+            } else if {${os.major} >= 18 && [vercmp ${java.version} < 18]} {
                 return openjdk17
             } elseif {${os.major} >= 15 && [vercmp ${java.version} < 12]} {
                 return openjdk11
