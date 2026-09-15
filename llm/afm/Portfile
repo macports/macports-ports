@@ -1,0 +1,152 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+
+name                afm
+github.setup        scouzi1966 maclocal-api 0.9.19 v
+github.tarball_from archive
+revision            0
+
+categories          llm
+license             MIT
+maintainers         nomaintainer
+platforms           {darwin >= 25}
+supported_archs     arm64
+installs_libs       no
+
+description         Local OpenAI-compatible Apple Foundation Models and MLX server
+long_description    AFM provides a local AI server and command-line interface with \
+                    Apple Foundation Models, MLX models, and a bundled WebUI.
+
+set source_distfile ${github.project}-${version}${extract.suffix}
+# git ls-tree v${version} vendor/llama.cpp
+set llama_commit    5266f24da75dc449bd56cbed7addb9c8e4a6a73e
+set llama_distfile  llama.cpp-${llama_commit}${extract.suffix}
+
+distfiles           ${source_distfile}
+master_sites-append https://github.com/ggml-org/llama.cpp/archive/${llama_commit}/:llama
+distfiles-append    ${llama_distfile}:llama
+extract.rename      no
+checksums           ${source_distfile} \
+                    rmd160  c82ef71b51ccb42b1acd5b27930d00d11d346c1c \
+                    sha256  639bde326928b9d71ac5b4740b886f7550316498a160d9f8360e72464f2c765c \
+                    size    49052280 \
+                    ${llama_distfile} \
+                    rmd160  1a949e339ef3c84e409d383b8add5c8e8354e4ed \
+                    sha256  2de0d87eda4696e9f6bbd771d4c623267f4e95856cce6f99793f91522f993e43 \
+                    size    37302025
+set git_env         [list GIT_CONFIG_COUNT=1 \
+                          GIT_CONFIG_KEY_0=core.fsmonitor \
+                          GIT_CONFIG_VALUE_0=false]
+
+post-extract {
+    set llama_source ${workpath}/llama.cpp-${llama_commit}
+    if {![file exists ${llama_source}/tools/ui/package.json]} {
+        return -code error "Pinned llama.cpp WebUI source was not extracted"
+    }
+    file delete -force ${worksrcpath}/vendor/llama.cpp
+    ln -s ${llama_source} ${worksrcpath}/vendor/llama.cpp
+
+    system -W ${worksrcpath} \
+        "env ${git_env} swift package --disable-sandbox --force-resolved-versions resolve"
+    if {![file isdirectory ${worksrcpath}/.build/checkouts/AFMKit/Sources/AFMKitApple]} {
+        return -code error "Pinned AFMKit checkout was not resolved"
+    }
+}
+
+# AFMKit 0.1.18-rc.5 in Package.resolved uses Foundation Models APIs removed or changed in the Xcode 27 SDK.
+patchfiles          patch-afmkit-xcode27.patch
+patch.dir           ${worksrcpath}/.build/checkouts/AFMKit
+patch.args          -p1
+
+
+depends_build       port:nodejs24 \
+                    port:npm11
+
+use_configure       no
+# AFMKit's pinned Foundation Models API requires the Xcode 27 SDK.
+configure.sdk_version 27
+
+# SwiftPM sandbox blocks package/plugin subprocesses under MacPorts
+pre-build {
+    set ui_path ${worksrcpath}/vendor/llama.cpp/tools/ui
+    system -W ${ui_path} "${prefix}/bin/npm ci --cache ${workpath}/npm-cache"
+    system -W ${ui_path} "${prefix}/bin/npm run build"
+    file mkdir ${worksrcpath}/Resources
+    file delete -force ${worksrcpath}/Resources/webui
+    copy ${ui_path}/dist ${worksrcpath}/Resources/webui
+}
+
+# SwiftPM's default swiftbuild engine in Xcode 27 repeatedly fails to emit
+# afm-primary.d for this release; the native engine builds the pinned package.
+build.cmd           swift
+build.target        build
+build.env-append    {*}${git_env}
+build.args          --configuration release \
+                    --disable-sandbox \
+                    --build-system native \
+                    --product ${name} \
+                    -Xswiftc -disable-upcoming-feature \
+                    -Xswiftc MemberImportVisibility
+
+set afm_home        ${prefix}/libexec/${name}
+set config_path     ${prefix}/etc/${name}
+set env_file        ${name}_env.conf
+set args_file       ${name}_args.conf
+set wrapper_script  ${name}-wrapper.sh
+set launcher_script ${name}-launcher.sh
+set release_dir     ${worksrcpath}/.build/arm64-apple-macosx/release
+
+destroot {
+    set webui_src ${worksrcpath}/Resources/webui
+
+    xinstall -d ${destroot}${afm_home} ${destroot}${prefix}/bin \
+               ${destroot}${config_path}
+    xinstall -m 0755 ${release_dir}/${name} ${destroot}${afm_home}/${name}
+    # See Scripts/create-tarball.sh for installed bundles
+    set bundle_names \
+                    {AFMKit_AFMKitMLX.bundle AFMKit_AFMKitDwarfStar.bundle MacLocalAPI_AFMEvaluationHost.bundle}
+    foreach bundle ${bundle_names} {
+        copy ${release_dir}/${bundle} ${destroot}${afm_home}/${bundle}
+    }
+    xinstall -d ${destroot}${afm_home}/Resources
+    copy ${webui_src} ${destroot}${afm_home}/Resources/webui
+
+    xinstall -m 0755 ${filespath}/${launcher_script} ${destroot}${prefix}/bin/${name}
+    reinplace "s|@@AFM_HOME@@|${afm_home}|g" ${destroot}${prefix}/bin/${name}
+
+    xinstall -m 0755 ${filespath}/${wrapper_script} ${destroot}${afm_home}/${wrapper_script}
+    reinplace "s|@@AFM_HOME@@|${afm_home}|g" ${destroot}${afm_home}/${wrapper_script}
+    reinplace "s|@@CONFIG_PATH@@|${config_path}|g" ${destroot}${afm_home}/${wrapper_script}
+    reinplace "s|@@ENV_FILE@@|${env_file}|g" ${destroot}${afm_home}/${wrapper_script}
+    reinplace "s|@@ARGS_FILE@@|${args_file}|g" ${destroot}${afm_home}/${wrapper_script}
+
+    xinstall -m 0644 ${filespath}/${env_file} ${destroot}${config_path}/${env_file}.example
+    xinstall -m 0644 ${filespath}/${args_file} ${destroot}${config_path}/${args_file}.example
+}
+
+post-activate {
+    foreach config [list ${env_file} ${args_file}] {
+        if {![file exists ${config_path}/${config}]} {
+            copy ${config_path}/${config}.example ${config_path}/${config}
+        }
+    }
+}
+
+startupitem.create  yes
+startupitem.executable ${afm_home}/${wrapper_script}
+
+notes-append "
+    The startup item reads ${config_path}/${env_file} and
+    ${config_path}/${args_file}. Edit those files, then restart the service.
+    Each non-comment line in the args file is a command or flag, optionally
+    followed by one value on the same line. With no command, afm starts its
+    default service on localhost:9999.
+
+    The service must run as a user with Apple Intelligence enabled. The wrapper script
+    uses AFM_USER to enter that user's launchd context and runs the service as
+    that user. Set a username, or a numeric UID prefixed with #. The default
+    value #501 is usually (but not guaranteed) the primary user's UID.
+    Change it as needed.
+"
