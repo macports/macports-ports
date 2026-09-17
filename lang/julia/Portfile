@@ -10,7 +10,7 @@ compilers.setup     require_fortran -g95
 compiler.blacklist-append {clang < 900}
 
 github.setup        JuliaLang julia 1.13.0 v
-revision            0
+revision            1
 categories-append   lang math science
 maintainers         {ieee.org:s.t.smith @essandess} \
                     {b-data.ch:olivier.benz @benz0li} \
@@ -67,22 +67,65 @@ use_configure       no
 depends_build-append \
                     port:gmake
 
-build.cmd           ${prefix}/bin/gmake
-build.target        release
-
-# Julia uses lowercase `prefix`; MacPorts supplies DESTDIR separately.
-destroot.args-append \
-                    prefix=${prefix}
+# Note: system libunwind, libuv, and zstd aren't cleanly supported across Julia's build system
+depends_lib-append  port:pcre2
 
 pre-build {
     # create a `gfortran` symbolic link
     xinstall -m 0755 -d ${workpath}/bin
     ln -sf ${configure.fc} ${workpath}/bin/gfortran
 
+    # Julia's bundled LLVM tools look for their library deps via @rpath relative
+    # to usr/tools -> ../lib. Because USE_SYSTEM_* skips copying/building those
+    # libs into usr/lib, symlink to MacPorts. N.b. DYLD_FALLBACK_LIBRARY_PATH
+    # doesn't help here: MacPorts invokes the build via /bin/sh, a SIP-protected
+    # binary, so dyld strips all DYLD_* vars before the shell even starts.
+    xinstall -m 0755 -d ${worksrcpath}/usr/lib/julia
+    foreach lib [glob -nocomplain \
+                    ${prefix}/lib/libpcre2*.dylib] {
+        set dest    ${worksrcpath}/usr/lib/[file tail ${lib}]
+        if {![file exists ${dest}]} {
+            ln -sf  ${lib} ${dest}
+        }
+    }
+
+    # libwhich's dlopen()-based search doesn't check /opt/local/lib by
+    # default, so it can't resolve these USE_SYSTEM_* libraries into
+    # usr/lib/julia itself. Pre-create the symlinks it would have made,
+    # so make sees the (prerequisite-less) targets as already satisfied
+    # and skips the libwhich step for them entirely.
+    # variable names not ending in prepositions is the sort of nonsense up with which I will not put
+    set libpcre2_version_for_which_julia_looks 8
+    foreach {libname srcname} [list \
+        libpcre2-${libpcre2_version_for_which_julia_looks} libpcre2-${libpcre2_version_for_which_julia_looks}.dylib \
+    ] {
+        set dest ${worksrcpath}/usr/lib/julia/${libname}.dylib
+        if {![file exists ${dest}] && [file exists ${prefix}/lib/${srcname}]} {
+            ln -sf ${prefix}/lib/${srcname} ${dest}
+        }
+    }
+
     build.env-append \
-        PATH=$env(PATH):${workpath}/bin \
-        FC=${configure.fc}
+                    CPPFLAGS="${configure.cppflags}" \
+                    FC=${configure.fc} \
+                    LDFLAGS="${configure.ldflags}" \
+                    PATH=$env(PATH):${workpath}/bin
+
+    set make_user_fd [open ${worksrcpath}/Make.user w+]
+    foreach line [list \
+                    "USE_SYSTEM_PCRE=1" \
+        ] {
+        puts ${make_user_fd} ${line}
+    }
+    close ${make_user_fd}
 }
+
+build.cmd           ${prefix}/bin/gmake
+build.target        release
+
+# Julia uses lowercase `prefix`; MacPorts supplies DESTDIR separately.
+destroot.args-append \
+                    prefix=${prefix}
 
 set app_name "[string totitle ${name}].app"
 
@@ -126,8 +169,8 @@ default_variants-append \
 
 pre-destroot {
     destroot.env-append \
-        PATH=$env(PATH):${workpath}/bin \
-        FC=${configure.fc}
+        FC=${configure.fc} \
+        PATH=$env(PATH):${workpath}/bin
 }
 
 post-destroot {
@@ -136,13 +179,15 @@ post-destroot {
         system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force lib/libjulia.${version}.dylib"
         system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/dsymutil"
         system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/lld"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/zstd"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/7z"
     }
 }
 
 pre-test {
     test.env-append \
-        PATH=$env(PATH):${workpath}/bin \
-        FC=${configure.fc}
+        FC=${configure.fc} \
+        PATH=$env(PATH):${workpath}/bin
 }
 
 test.run            yes
