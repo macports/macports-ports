@@ -10,11 +10,15 @@
 # java.version  1.8
 #
 # The java.version option allows one to optionally specify a required Java
-# version. The syntax is the same as that accepted by /usr/libexec/java_home:
+# version. The syntax follows that accepted by /usr/libexec/java_home, with
+# the additional range form below:
 #
 # - Java 8 and earlier are "1.8", etc.
 # - Java 9 and later are "9", etc.
 # - "+" and "*" wildcards are supported
+# - An inclusive major-version range can be specified with "-", for example
+#   "1.8-24". This selects the highest installed JVM from Java 8 through
+#   Java 24, inclusive.
 #
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
 
@@ -75,6 +79,10 @@ namespace eval java {
             global os.platform os.major os.arch
 
             set big_sur_workaround [expr {${os.platform} eq "darwin" && ${os.major} >= 20}]
+            # /usr/libexec/java_home does not consistently honour an upper
+            # version bound. Select ranges from the discovered JVMs ourselves
+            # on every macOS version.
+            set version_range [regexp {^1?\.?\d+-\d+$} ${java.version}]
             if { ${os.platform} eq "darwin" && ${os.arch} eq "powerpc" && ${java.fallback} eq "openjdk8" } {
                 foreach loc { "/Library/Java/JavaVirtualMachines/openjdk8/Contents/Home" } {
                     if { [file isdirectory $loc] } {
@@ -82,8 +90,8 @@ namespace eval java {
                         ui_debug "Discovered JAVA_HOME via search path: $home_value"
                     }
                 }
-            } elseif { ${big_sur_workaround} && [catch {set val [get_jvm_bigsur ${java.version}] } ]
-            || !${big_sur_workaround} && [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}] } ] } {
+            } elseif { (${big_sur_workaround} || ${version_range}) && [catch {set val [get_jvm_bigsur ${java.version}] } ]
+            || !${big_sur_workaround} && !${version_range} && [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}] } ] } {
                 # Don't return an error because that would prevent the port from
                 # even being indexed when the required Java is missing. Instead, set
                 # a flag to be checked at pre-fetch.
@@ -239,19 +247,24 @@ namespace eval java {
         return -code error
     }
 
-    # Returns the value of the first dictionary entry whose key falls
-    # within [min_ver, max_ver] inclusive.  The dict is sorted descending,
-    # so the highest matching version wins.
+    # Returns the value of the dictionary entry whose key is numerically
+    # highest within [min_ver, max_ver] inclusive.
     #
     # @param min_ver Lower bound (inclusive)
     # @param max_ver Upper bound (inclusive)
     # @param target_dict The dictionary to search
-    # @return The value of the first matching entry, or an error if none found.
+    # @return The value of the highest matching entry, or an error if none found.
     proc match_range { min_ver max_ver target_dict } {
+        set best_ver -1
         foreach td_key [dict keys $target_dict] {
             if {$min_ver <= $td_key && $td_key <= $max_ver} {
-                return [dict get $target_dict $td_key]
+                if {$td_key > $best_ver} {
+                    set best_ver $td_key
+                }
             }
+        }
+        if {$best_ver >= 0} {
+            return [dict get $target_dict $best_ver]
         }
         return -code error
     }
