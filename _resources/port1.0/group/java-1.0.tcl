@@ -48,6 +48,11 @@ pre-fetch {
 port::register_callback java::java_set_env
 
 namespace eval java {
+    # A runtime-only Java installation is not sufficient for building ports.
+    proc is_jdk { java_home } {
+        return [file executable [file join $java_home bin javac]]
+    }
+
     # Search for a good value for JAVA_HOME
     proc find_java_home {} {
         set home_value ""
@@ -96,6 +101,9 @@ namespace eval java {
                 # even being indexed when the required Java is missing. Instead, set
                 # a flag to be checked at pre-fetch.
                 set java_version_not_found yes
+            } elseif { ![is_jdk $val] } {
+                ui_debug "Rejected non-JDK JAVA_HOME: $val"
+                set java_version_not_found yes
             } else {
                 set home_value $val
                 ui_debug "java-portgroup: Discovered matching JAVA_HOME: $home_value"
@@ -114,8 +122,12 @@ namespace eval java {
 
         # First, ask the system where java home is
         if { ![file isdirectory $home_value] && ![catch {set val [exec "/usr/libexec/java_home"]}] } {
-            set home_value $val
-            ui_debug "Discovered JAVA_HOME via /usr/libexec/java_home: $home_value"
+            if { [is_jdk $val] } {
+                set home_value $val
+                ui_debug "Discovered JAVA_HOME via /usr/libexec/java_home: $home_value"
+            } else {
+                ui_debug "Rejected non-JDK JAVA_HOME: $val"
+            }
         }
 
         # Fall back to more conventional way to find java home
@@ -188,7 +200,7 @@ namespace eval java {
     proc find_jvm_versions {} {
         if {[catch {exec /usr/libexec/java_home -V} result options]} {
             # Extract JVM versions and corresponding JAVA_HOMEs
-            set vm_versions [regexp -all -inline -- { +(\d+(?:\.\d+)+)[^/]+(\/[^\0\n]+)} $result]
+            set vm_versions [regexp -all -inline -- { +(\d+(?:\.\d+)*)[^/]+(\/[^\0\n]+)} $result]
             # %3=0 -> Regex match, ignored.
             # %3=1 -> Version
             # %3=2 -> JAVA_HOME.
@@ -200,6 +212,10 @@ namespace eval java {
                 # Extract major version
                 set vers [regsub {(\.\d+)+} $vers ""]
                 set path [lindex $vm_versions $idx+2]
+                if { ![is_jdk $path] } {
+                    ui_debug "Rejected non-JDK JAVA_HOME: $path"
+                    continue
+                }
                 # Note, using [dict set ...] here instead of [dict append ...] to handle scenario the
                 # system could have multiple installations of the JVM for exactly the same version.
                 # See e.g. https://github.com/macports/macports-ports/pull/16149
