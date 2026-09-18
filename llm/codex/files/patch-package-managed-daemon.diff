@@ -1,14 +1,15 @@
 --- app-server-daemon/src/lib.rs.orig
 +++ app-server-daemon/src/lib.rs
-@@ -34,6 +34,7 @@
- const OPERATION_LOCK_TIMEOUT: Duration = Duration::from_secs(75);
+@@ -38,6 +38,7 @@
+     Duration::from_secs(MAX_SHUTDOWN_GRACE_SECONDS as u64 + 75);
  const PID_FILE_NAME: &str = "app-server.pid";
  const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
 +const PACKAGE_MANAGER_CODEX_BIN: Option<&str> = option_env!("CODEX_PACKAGE_MANAGER_CODEX_BIN");
  const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
  const SETTINGS_FILE_NAME: &str = "settings.json";
  const STATE_DIR_NAME: &str = "app-server-daemon";
-@@ -280,5 +281,8 @@
+@@ -305,13 +306,16 @@
+             .as_path()
              .to_path_buf();
          let state_dir = codex_home.as_path().join(STATE_DIR_NAME);
 +        let managed_codex_bin = PACKAGE_MANAGER_CODEX_BIN
@@ -17,7 +18,7 @@
          Ok(Self {
              socket_path,
              pid_file: state_dir.join(PID_FILE_NAME),
-@@ -288,6 +292,6 @@
+             update_pid_file: state_dir.join(UPDATE_PID_FILE_NAME),
              operation_lock_file: state_dir.join(OPERATION_LOCK_FILE_NAME),
              settings_file: state_dir.join(SETTINGS_FILE_NAME),
 -            managed_codex_bin: managed_codex_bin(codex_home.as_path()),
@@ -25,42 +26,24 @@
          })
      }
  
-@@ -521,6 +525,13 @@
+@@ -603,7 +607,7 @@
+     async fn ensure_remote_control_started(&self) -> Result<RemoteControlStartOutput> {
          let _operation_lock = self.acquire_operation_lock().await?;
          let settings = self.load_settings().await?;
 -        if self.is_bootstrapped(&settings).await? {
-+        let package_manager_install = PACKAGE_MANAGER_CODEX_BIN.is_some();
-+        if package_manager_install || self.is_bootstrapped(&settings).await? {
-+            if package_manager_install {
-+                let updater = backend::pid_update_loop_backend(self.backend_paths(&settings));
-+                if updater.is_starting_or_running().await? {
-+                    updater.stop().await?;
-+                }
-+            }
++        if PACKAGE_MANAGER_CODEX_BIN.is_some() || self.is_bootstrapped(&settings).await? {
              let _ = self
                  .set_remote_control_locked(RemoteControlMode::Enabled)
                  .await?;
-@@ -630,18 +642,21 @@
+@@ -787,6 +791,11 @@
  
-         let backend = backend::pid_backend(self.backend_paths(&settings));
-         backend.start().await?;
-         let updater = backend::pid_update_loop_backend(self.backend_paths(&settings));
-         if updater.is_starting_or_running().await? {
-             updater.stop().await?;
-         }
--        updater.start().await?;
-+        let auto_update_enabled = PACKAGE_MANAGER_CODEX_BIN.is_none();
-+        if auto_update_enabled {
-+            updater.start().await?;
+     async fn ensure_managed_updater(&self, settings: &DaemonSettings) -> Result<bool> {
+         let updater = backend::pid_update_loop_backend(self.backend_paths(settings));
++
++        if PACKAGE_MANAGER_CODEX_BIN.is_some() {
++            updater.stop().await?;
++            return Ok(false);
 +        }
- 
-         let info = self.wait_until_ready().await?;
-         let managed_codex_version = self.managed_codex_version_best_effort().await;
-         Ok(BootstrapOutput {
-             status: BootstrapStatus::Bootstrapped,
-             backend: BackendKind::Pid,
--            auto_update_enabled: true,
-+            auto_update_enabled,
-             remote_control_enabled: settings.remote_control_enabled,
-             managed_codex_path: self.managed_codex_bin.clone(),
-             managed_codex_version,
+         if !settings.auto_update_enabled {
+             updater.stop().await?;
+             return Ok(false);
