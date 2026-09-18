@@ -20,6 +20,11 @@
 #   "1.8-24". This selects the highest installed JVM from Java 8 through
 #   Java 24, inclusive.
 #
+# The selected JDK's normalized major version is available to Portfiles as
+# [java::selected_version]. For example, Java 8 is returned as "8".
+# [java::selected_java_home_version] returns the equivalent version form for
+# /usr/libexec/java_home, such as "1.8" or "24".
+#
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
 
 options java.version java.home java.fallback java.deptypes
@@ -51,6 +56,37 @@ namespace eval java {
     # A runtime-only Java installation is not sufficient for building ports.
     proc is_jdk { java_home } {
         return [file executable [file join $java_home bin javac]]
+    }
+
+    # Return the normalized major version of the selected JDK. If JAVA_HOME
+    # has not been selected yet, select it first.
+    proc selected_version {} {
+        global java.home
+
+        if { ${java.home} eq "" } {
+            java_set_env
+        }
+
+        set java_home ${java.home}
+        if { ![is_jdk $java_home] } {
+            return -code error "selected Java home is not a JDK: $java_home"
+        }
+        # java writes its version banner to stderr, which Tcl's exec reports
+        # as an error even when the command itself exits successfully.
+        catch {exec [file join $java_home bin java] -version} output
+        if { ![regexp {(?:java|openjdk) version "(1\.\d+|\d+)} $output -> version] } {
+            return -code error "could not parse Java version for: $java_home"
+        }
+        return [regsub {^1\.} $version ""]
+    }
+
+    # Return the selected JDK version using /usr/libexec/java_home notation.
+    proc selected_java_home_version {} {
+        set version [selected_version]
+        if { $version <= 8 } {
+            return "1.$version"
+        }
+        return $version
     }
 
     # Search for a good value for JAVA_HOME
