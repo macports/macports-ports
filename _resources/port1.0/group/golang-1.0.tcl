@@ -388,8 +388,8 @@ proc go.append_env {} {
                 "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags} [get_canonical_archflags ld]" \
                 "GO_LDFLAGS=-extldflags='${configure.ldflags} [get_canonical_archflags ld]'"
         }
-        configure.env-append ${build.env}
-        test.env-append      ${build.env}
+        configure.env-append {*}${build.env}
+        test.env-append      {*}${build.env}
     }
 
     if { ! ${go.offline_build} } {
