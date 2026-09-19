@@ -10,11 +10,20 @@
 # java.version  1.8
 #
 # The java.version option allows one to optionally specify a required Java
-# version. The syntax is the same as that accepted by /usr/libexec/java_home:
+# version. The syntax follows that accepted by /usr/libexec/java_home, with
+# the additional range form below:
 #
 # - Java 8 and earlier are "1.8", etc.
 # - Java 9 and later are "9", etc.
 # - "+" and "*" wildcards are supported
+# - An inclusive major-version range can be specified with "-", for example
+#   "1.8-24". This selects the highest installed JVM from Java 8 through
+#   Java 24, inclusive.
+#
+# The selected JDK's normalized major version is available to Portfiles as
+# [java::selected_version]. For example, Java 8 is returned as "8".
+# [java::selected_java_home_version] returns the equivalent version form for
+# /usr/libexec/java_home, such as "1.8" or "24".
 #
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
 
@@ -44,6 +53,42 @@ pre-fetch {
 port::register_callback java::java_set_env
 
 namespace eval java {
+    # A runtime-only Java installation is not sufficient for building ports.
+    proc is_jdk { java_home } {
+        return [file executable [file join $java_home bin javac]]
+    }
+
+    # Return the normalized major version of the selected JDK. If JAVA_HOME
+    # has not been selected yet, select it first.
+    proc selected_version {} {
+        global java.home
+
+        if { ${java.home} eq "" } {
+            java_set_env
+        }
+
+        set java_home ${java.home}
+        if { ![is_jdk $java_home] } {
+            return -code error "selected Java home is not a JDK: $java_home"
+        }
+        # java writes its version banner to stderr, which Tcl's exec reports
+        # as an error even when the command itself exits successfully.
+        catch {exec [file join $java_home bin java] -version} output
+        if { ![regexp {(?:java|openjdk) version "(1\.\d+|\d+)} $output -> version] } {
+            return -code error "could not parse Java version for: $java_home"
+        }
+        return [regsub {^1\.} $version ""]
+    }
+
+    # Return the selected JDK version using /usr/libexec/java_home notation.
+    proc selected_java_home_version {} {
+        set version [selected_version]
+        if { $version <= 8 } {
+            return "1.$version"
+        }
+        return $version
+    }
+
     # Search for a good value for JAVA_HOME
     proc find_java_home {} {
         set home_value ""
@@ -75,6 +120,10 @@ namespace eval java {
             global os.platform os.major os.arch
 
             set big_sur_workaround [expr {${os.platform} eq "darwin" && ${os.major} >= 20}]
+            # /usr/libexec/java_home does not consistently honour an upper
+            # version bound. Select ranges from the discovered JVMs ourselves
+            # on every macOS version.
+            set version_range [regexp {^1?\.?\d+-\d+$} ${java.version}]
             if { ${os.platform} eq "darwin" && ${os.arch} eq "powerpc" && ${java.fallback} eq "openjdk8" } {
                 foreach loc { "/Library/Java/JavaVirtualMachines/openjdk8/Contents/Home" } {
                     if { [file isdirectory $loc] } {
@@ -82,11 +131,14 @@ namespace eval java {
                         ui_debug "Discovered JAVA_HOME via search path: $home_value"
                     }
                 }
-            } elseif { ${big_sur_workaround} && [catch {set val [get_jvm_bigsur ${java.version}] } ]
-            || !${big_sur_workaround} && [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}] } ] } {
+            } elseif { (${big_sur_workaround} || ${version_range}) && [catch {set val [get_jvm_bigsur ${java.version}] } ]
+            || !${big_sur_workaround} && !${version_range} && [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}] } ] } {
                 # Don't return an error because that would prevent the port from
                 # even being indexed when the required Java is missing. Instead, set
                 # a flag to be checked at pre-fetch.
+                set java_version_not_found yes
+            } elseif { ![is_jdk $val] } {
+                ui_debug "Rejected non-JDK JAVA_HOME: $val"
                 set java_version_not_found yes
             } else {
                 set home_value $val
@@ -106,8 +158,12 @@ namespace eval java {
 
         # First, ask the system where java home is
         if { ![file isdirectory $home_value] && ![catch {set val [exec "/usr/libexec/java_home"]}] } {
-            set home_value $val
-            ui_debug "Discovered JAVA_HOME via /usr/libexec/java_home: $home_value"
+            if { [is_jdk $val] } {
+                set home_value $val
+                ui_debug "Discovered JAVA_HOME via /usr/libexec/java_home: $home_value"
+            } else {
+                ui_debug "Rejected non-JDK JAVA_HOME: $val"
+            }
         }
 
         # Fall back to more conventional way to find java home
@@ -180,7 +236,7 @@ namespace eval java {
     proc find_jvm_versions {} {
         if {[catch {exec /usr/libexec/java_home -V} result options]} {
             # Extract JVM versions and corresponding JAVA_HOMEs
-            set vm_versions [regexp -all -inline -- { +(\d+(?:\.\d+)+)[^/]+(\/[^\0\n]+)} $result]
+            set vm_versions [regexp -all -inline -- { +(\d+(?:\.\d+)*)[^/]+(\/[^\0\n]+)} $result]
             # %3=0 -> Regex match, ignored.
             # %3=1 -> Version
             # %3=2 -> JAVA_HOME.
@@ -192,6 +248,10 @@ namespace eval java {
                 # Extract major version
                 set vers [regsub {(\.\d+)+} $vers ""]
                 set path [lindex $vm_versions $idx+2]
+                if { ![is_jdk $path] } {
+                    ui_debug "Rejected non-JDK JAVA_HOME: $path"
+                    continue
+                }
                 # Note, using [dict set ...] here instead of [dict append ...] to handle scenario the
                 # system could have multiple installations of the JVM for exactly the same version.
                 # See e.g. https://github.com/macports/macports-ports/pull/16149
@@ -239,19 +299,24 @@ namespace eval java {
         return -code error
     }
 
-    # Returns the value of the first dictionary entry whose key falls
-    # within [min_ver, max_ver] inclusive.  The dict is sorted descending,
-    # so the highest matching version wins.
+    # Returns the value of the dictionary entry whose key is numerically
+    # highest within [min_ver, max_ver] inclusive.
     #
     # @param min_ver Lower bound (inclusive)
     # @param max_ver Upper bound (inclusive)
     # @param target_dict The dictionary to search
-    # @return The value of the first matching entry, or an error if none found.
+    # @return The value of the highest matching entry, or an error if none found.
     proc match_range { min_ver max_ver target_dict } {
+        set best_ver -1
         foreach td_key [dict keys $target_dict] {
             if {$min_ver <= $td_key && $td_key <= $max_ver} {
-                return [dict get $target_dict $td_key]
+                if {$td_key > $best_ver} {
+                    set best_ver $td_key
+                }
             }
+        }
+        if {$best_ver >= 0} {
+            return [dict get $target_dict $best_ver]
         }
         return -code error
     }
