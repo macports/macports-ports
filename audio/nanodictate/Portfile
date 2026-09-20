@@ -1,0 +1,203 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+# NanoDictate — macOS dictation (double-Alt, bilingual EN/RU, 4 STT providers).
+# Template: 0.0.4, f8c6bb96d3025214cc80d5224f92304b63274172e7e0d4b4172f46ecd6ac4025, d074f6dc47871dd7e009cfdfa464a9ebed0dba94c1aded2db36066d511d62e30, @kodmial
+# (env MAINTAINERS), 0 (env REVISION, default 0) are filled by
+# scripts/release-prep.rb — do not hand-edit the output.
+
+PortSystem          1.0
+PortGroup           github 1.0
+
+# Binary port (symmetry with the Homebrew formula): the prebuilt tarball
+# attached to the tag is installed as-is — NO Xcode / Swift toolchain needed
+# on the user's machine. Tarball name is arch-dependent
+# (nanodictate-0.0.4-macos-<arm64|x86_64>.tar.gz, built by
+# .github/workflows/release.yml), so distfile + checksum are chosen by
+# ${os.arch}; the download URL is derived from the tag v0.0.4.
+# master_sites points at the GitHub release assets (needed to fetch the
+# arch-specific distfile itself, not just for livecheck); livecheck.type
+# github walks repo tags. The checksums are filled by scripts/release-prep.rb.
+github.setup        kodmial nanodictate 0.0.4 v
+revision            0
+
+master_sites        https://github.com/kodmial/nanodictate/releases/download/v0.0.4
+
+if {${os.arch} eq "arm64"} {
+    distfiles       nanodictate-0.0.4-macos-arm64.tar.gz
+    checksums       sha256  f8c6bb96d3025214cc80d5224f92304b63274172e7e0d4b4172f46ecd6ac4025
+} else {
+    distfiles       nanodictate-0.0.4-macos-x86_64.tar.gz
+    checksums       sha256  d074f6dc47871dd7e009cfdfa464a9ebed0dba94c1aded2db36066d511d62e30
+}
+
+platforms           {darwin >= 21}
+categories          audio
+license             MIT
+maintainers         @kodmial \
+                    openmaintainer
+
+description         macOS dictation: double-Alt, bilingual EN/RU, 4 STT providers
+long_description    NanoDictate is a macOS dictation tool: tap Alt twice, \
+                    speak, and the recognized text is inserted into the \
+                    frontmost app. Bilingual EN/RU, 4 STT providers, a \
+                    background agent (NanoDictateAgent, runs as a LaunchAgent) \
+                    and a control CLI (nanodictate).
+
+# Prebuilt tarball ships ad-hoc signed binaries (release.yml signs WITHOUT
+# entitlements on purpose: Microphone/Accessibility TCC grants are per-machine,
+# each user grants them on their own Mac). No build phase — extract + stage.
+use_configure       no
+
+# Binary port: no Makefile in the tarball — the default build phase would
+# run `make all` and fail ("No rule to make target 'all'").
+build {}
+
+destroot {
+    # The tarball is flat (no wrapper): binaries, config + Resources/ land
+    # directly in ${workpath} (release.yml: tar -C dist ...). Resources/ ships
+    # for reference only (entitlements already applied at codesign) — the port
+    # stages binaries + config like the Homebrew formula; the runtime does not
+    # need Resources.
+    xinstall -m 755 ${workpath}/nanodictate ${destroot}${prefix}/bin/
+    xinstall -m 755 ${workpath}/NanoDictateAgent ${destroot}${prefix}/bin/
+    # Binaries + config only. Service registration lives in post-activate:
+    # it writes the canonical global plist
+    # /Library/LaunchAgents/com.nanodictate.agent.plist and bootstraps the
+    # console user, so `sudo port install` leaves the daemon live with no
+    # manual `nanodictate start`. No startupitem (a separate startupitem would
+    # create a second launchd job).
+    # config.example.toml — канон дефолтов: при первом запуске приложение
+    # копирует его в юзер-конфиг ~/.config/nanodictate/config.toml (CLI никогда
+    # не читает ${prefix}/etc).
+    set share_dir ${destroot}${prefix}/share/nanodictate
+    xinstall -d -m 755 ${share_dir}
+    xinstall -m 644 ${workpath}/config.example.toml ${share_dir}/
+}
+
+# Service registration lives in post-activate, not post-destroot: post-destroot
+# runs BEFORE activation, so on a fresh install ${prefix}/bin/NanoDictateAgent
+# is not on disk yet; post-activate runs after the new files are in place.
+# Port phases run as root and are NOT sandboxed (unlike the Homebrew
+# post_install, which brew>=7 silently skips in its sandbox), so we write a
+# GLOBAL LaunchAgent and bootstrap the console user directly.
+post-activate {
+    # Register the LaunchAgent so NanoDictateAgent is alive right after
+    # `sudo port install` — no manual `nanodictate start` needed.
+    #
+    # Canonical plist: /Library/LaunchAgents/com.nanodictate.agent.plist
+    # (global LaunchAgents: loaded into every user's GUI session at login,
+    # unlike ~/Library/LaunchAgents). Same single Label com.nanodictate.agent
+    # and the same plist shape the CLI writes, so there is always exactly one
+    # daemon regardless of install method or order.
+    #
+    # Every system command is wrapped in catch so a failure (headless install,
+    # launchd refusing the bootstrap, ...) never makes `port install` fail:
+    # the plist stays on disk and RunAtLoad picks the service up at next login.
+    set launch_dir /Library/LaunchAgents
+    set logs_dir  /Library/Logs/NanoDictate
+    set plist_path ${launch_dir}/com.nanodictate.agent.plist
+    set agent_bin  ${prefix}/bin/NanoDictateAgent
+    set log_path   ${logs_dir}/agent.log
+
+    if {[catch {
+        exec /bin/mkdir -p ${launch_dir} ${logs_dir}
+        # The job runs as the console user (gui/<uid> domain), not root — the
+        # shared log directory must stay writable by whoever logs in.
+        exec /bin/chmod 0777 ${logs_dir}
+    }]} {
+        ui_warn "nanodictate: could not create ${launch_dir} — the service will register on first 'nanodictate start'"
+    } else {
+        # Single authoritative XML block (one place to edit).
+        set plist_xml {
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nanodictate.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__AGENT_BIN__</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__LOG_PATH__</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_PATH__</string>
+</dict>
+</plist>
+}
+        set content [string map [list __AGENT_BIN__ ${agent_bin} __LOG_PATH__ ${log_path}] ${plist_xml}]
+        if {[catch {
+            set fd [open ${plist_path} w 0644]
+            puts -nonewline ${fd} ${content}
+            close ${fd}
+        }]} {
+            ui_warn "nanodictate: could not write ${plist_path} — the service will register on first 'nanodictate start'"
+        } else {
+            # Bootstrap into the CURRENT console user's GUI session so the
+            # service is live immediately. uid 0 = no GUI session (SSH/
+            # headless install or login screen): nothing to bootstrap now,
+            # RunAtLoad covers the next login.
+            if {[catch {set uid [exec /usr/bin/stat -f %u /dev/console]}]} {
+                ui_msg "nanodictate: could not determine console user — the service will start at next login (plist: ${plist_path})"
+            } elseif {${uid} ne "0"} {
+                # Unload a possibly already-loaded job first (re-install over
+                # a running service / upgrade): bootout error when the service
+                # is not loaded is normal — catch, don't fail the phase.
+                catch {exec /bin/launchctl bootout gui/${uid}/com.nanodictate.agent}
+                if {[catch {exec /bin/launchctl bootstrap gui/${uid} ${plist_path}}]} {
+                    ui_msg "nanodictate: could not bootstrap the service now — it will start at next login (plist: ${plist_path})"
+                } else {
+                    ui_msg "nanodictate: service registered and running (gui/${uid}), plist ${plist_path}"
+                }
+            } else {
+                ui_msg "nanodictate: no console user (headless) — the service will start at next login (plist: ${plist_path})"
+            }
+        }
+    }
+}
+
+pre-deactivate {
+    # Teardown on uninstall/deactivate: unload the running service and remove
+    # the global plist so a single `sudo port uninstall` leaves no trace — no
+    # manual `sudo rm` step. deactivate also runs on `port upgrade`; the plist
+    # is deleted here, but post-activate recreates it and re-bootstraps the
+    # service, so the gap is a brief service break at worst. Idempotent:
+    # bootout of a service that is not loaded is normal (catch).
+    set plist_path "/Library/LaunchAgents/com.nanodictate.agent.plist"
+    set logs_dir  "/Library/Logs/NanoDictate"
+    # plist removal is not tied to the console user — do it first so it also
+    # happens when stat fails below.
+    if {[catch {file delete -force ${plist_path}}]} {
+        ui_warn "nanodictate: could not remove ${plist_path}"
+    } else {
+        ui_msg "nanodictate: plist ${plist_path} removed"
+    }
+    # Root-owned service log dir created by post-activate — remove it too, so
+    # `sudo port uninstall` leaves no trace (idempotent: a dir that was never
+    # created simply does not exist).
+    if {[catch {file delete -force ${logs_dir}}]} {
+        ui_warn "nanodictate: could not remove ${logs_dir}"
+    } else {
+        ui_msg "nanodictate: logs ${logs_dir} removed"
+    }
+    if {[catch {set uid [exec /usr/bin/stat -f %u /dev/console]}]} {
+        ui_msg "nanodictate: could not determine console user — skipping service unload"
+    } elseif {${uid} ne "0"} {
+        catch {exec /bin/launchctl bootout gui/${uid}/com.nanodictate.agent}
+        ui_msg "nanodictate: service unloaded (gui/${uid})"
+    } else {
+        ui_msg "nanodictate: no console user — nothing to unload"
+    }
+}
+
+livecheck.type      github
+
+# Optional smoke test once `nanodictate --version` lands (planned for a future 0.0.x release):
+# test.run    yes
+# test.cmd    ${prefix}/bin/nanodictate
+# test.target --version
