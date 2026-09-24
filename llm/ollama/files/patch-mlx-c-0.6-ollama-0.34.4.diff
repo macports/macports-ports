@@ -1,0 +1,113 @@
+--- a/mlx/fast.go
++++ b/mlx/fast.go
+@@ -33,33 +33,31 @@
+ // fastGatedDeltaUpdate applies MLX's gated-delta recurrence and returns its
+ // per-token outputs and final float32 state. state and mask may be nil.
+ func fastGatedDeltaUpdate(q, k, v, gates, beta, state, mask *Array) (y, nextState *Array) {
+-	outVec := mlxCheck(C.mlx_vector_array_new())
+-	defer freeVectorArray(outVec)
+-
+-	var stateCtx, maskCtx C.mlx_array
+-	if state != nil {
+-		stateCtx = state.ctx
++	if state == nil {
++		state = Zeros(DTypeFloat32, q.Dim(0), v.Dim(2), v.Dim(3), q.Dim(3))
+ 	}
+-	if mask != nil {
+-		maskCtx = mask.ctx
++	if mask == nil {
++		return gatedDeltaRecurrence(q, k, v, gates, beta, state)
+ 	}
+ 
+-	mlxCheck(C.mlx_fast_gated_delta_update(
+-		&outVec,
+-		q.ctx,
+-		k.ctx,
+-		v.ctx,
+-		gates.ctx,
+-		beta.ctx,
+-		stateCtx,
+-		maskCtx,
+-		DefaultStream().ctx))
+-
+-	y = New("FAST_GATED_DELTA_Y")
+-	nextState = New("FAST_GATED_DELTA_STATE")
+-	mlxCheck(C.mlx_vector_array_get(&y.ctx, outVec, C.size_t(0)))
+-	mlxCheck(C.mlx_vector_array_get(&nextState.ctx, outVec, C.size_t(1)))
+-	return y, nextState
++	sliceT := func(a *Array, t int) *Array {
++		dims := a.Dims()
++		start := make([]int32, len(dims))
++		stop := make([]int32, len(dims))
++		for i, d := range dims {
++			stop[i] = int32(d)
++		}
++		start[1], stop[1] = int32(t), int32(t+1)
++		return SliceStartStop(a, start, stop)
++	}
++	out := make([]*Array, 0, q.Dim(1))
++	for t := range q.Dim(1) {
++		stepY, stepState := gatedDeltaRecurrenceGraph(sliceT(q, t), sliceT(k, t), sliceT(v, t), sliceT(gates, t), sliceT(beta, t), state)
++		active := ExpandDims(ExpandDims(sliceT(mask, t), -1), -1)
++		out = append(out, Where(active, stepY, Zeros(q.DType(), stepY.Dims()...)))
++		state = Where(active, stepState, state)
++	}
++	return Concatenate(out, 1), state
+ }
+ 
+ func (r *LayerNorm) Forward(x *Array, eps float32) *Array {
+--- a/mlx/gated_delta.go
++++ b/mlx/gated_delta.go
+@@ -298,9 +298,6 @@
+ // directly.
+ func gatedDeltaRecurrence(q, k, v, g, beta, state *Array) (y, nextState *Array) {
+ 	if dims, ok := resolveGatedDeltaRecurrenceDims(q, k, v, g, beta, state); ok {
+-		if supportsFastGatedDeltaUpdate(dims) {
+-			return fastGatedDeltaUpdate(q, k, v, g, beta, state, nil)
+-		}
+ 		outs := gatedDeltaRecurrenceKernel.run(gpuLaunch{
+ 			dtypes: []gpuDTypeArg{{"InT", q.DType()}, {"StT", state.DType()}},
+ 			ints:   []gpuIntArg{{"Dk", dims.Dk}, {"Dv", dims.Dv}, {"Hk", dims.Hk}, {"Hv", dims.Hv}},
+--- a/mlx/ops_extra.go
++++ b/mlx/ops_extra.go
+@@ -124,16 +124,15 @@
+ }
+ 
+ // GatherQMM multiplies x against the quantized weight banks selected by
+-// lhsIndices and rhsIndices, with one globalScale entry per expert. Metal
+-// applies it inside the gather kernel, other backends scale the gathered
+-// output rows in the wrapper.
++// lhsIndices and rhsIndices, with one globalScale entry per expert. Apply
++// the scale in the wrapper for mlx-c versions without native support.
+ func GatherQMM(x, w, scales *Array, biases, lhsIndices, rhsIndices *Array, transpose bool, groupSize, bits int, mode string, globalScale *Array, sortedIndices bool) *Array {
+ 	cMode := C.CString(mode)
+ 	defer C.free(unsafe.Pointer(cMode))
+ 	optGroupSize := C.mlx_optional_int{value: C.int(groupSize), has_value: true}
+ 	optBits := C.mlx_optional_int{value: C.int(bits), has_value: true}
+ 
+-	var b, lhs, rhs, gs C.mlx_array
++	var b, lhs, rhs C.mlx_array
+ 	if biases != nil {
+ 		b = biases.ctx
+ 	}
+@@ -143,16 +142,13 @@
+ 	if rhsIndices != nil {
+ 		rhs = rhsIndices.ctx
+ 	}
+-	// The wrapper fallback needs rhs indices to map output rows to experts;
+-	// without them the native path reports the unsupported combination.
+-	applyWrapperScale := globalScale != nil && !MetalIsAvailable() && rhsIndices != nil
+-	if globalScale != nil && !applyWrapperScale {
+-		gs = globalScale.ctx
++	if globalScale != nil && rhsIndices == nil {
++		panic("mlx: GatherQMM globalScale requires rhsIndices with mlx-c 0.6")
+ 	}
+ 
+ 	out := New("GATHER_QMM")
+-	mlxCheck(C.mlx_gather_qmm(&out.ctx, x.ctx, w.ctx, scales.ctx, b, lhs, rhs, C.bool(transpose), optGroupSize, optBits, cMode, gs, C.bool(sortedIndices), DefaultStream().ctx))
+-	if applyWrapperScale {
++	mlxCheck(C.mlx_gather_qmm(&out.ctx, x.ctx, w.ctx, scales.ctx, b, lhs, rhs, C.bool(transpose), optGroupSize, optBits, cMode, C.bool(sortedIndices), DefaultStream().ctx))
++	if globalScale != nil {
+ 		out = mulGatherQMMGlobalScale(out, globalScale, rhsIndices)
+ 	}
+ 	return out
