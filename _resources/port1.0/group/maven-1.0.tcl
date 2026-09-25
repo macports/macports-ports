@@ -9,17 +9,18 @@
 #   PortGroup maven 1.0
 #
 # Options:
-#   java.version       - Required Java version (e.g. 1.8+, 11+, 17+)
 #   maven.skip_tests   - Skip unit tests (default: yes)
 #   maven.goal         - Maven goal to run (default: package)
-#   maven.gradle_home  - Directory (relative to worksrcpath) used as GRADLE_USER_HOME
+#   maven.gradle_home  - Directory used as GRADLE_USER_HOME
 #                        Useful for Maven projects that internally invoke Gradle
-#                        (default: .gradle)
+#                        (default: ${workpath}/.home/.gradle)
+#   maven.local_repo   - Directory used as the local Maven repository
+#                        (default: ${workpath}/.home/.m2/repository)
 #
 # Notes:
 #   - This PortGroup overrides build.target from other PortGroups (e.g. github)
 #   - All variable expansions are delayed until build time
-#   - A local Maven repository is created inside worksrcpath
+#   - The java.version option is included from the java PortGroup
 
 PortGroup java 1.0
 
@@ -28,22 +29,25 @@ depends_build-append bin:mvn3:maven3
 use_configure no
 
 # Options
-options maven.skip_tests java.version maven.goal maven.gradle_home
+options maven.skip_tests maven.goal maven.gradle_home maven.local_repo
 default maven.skip_tests yes
-default java.version {}
 default maven.goal package
-default maven.gradle_home {.gradle}
+default maven.gradle_home {${workpath}/.home/.gradle}
+default maven.local_repo {${workpath}/.home/.m2/repository}
 
 pre-build {
-    # Local Maven repository
-    file mkdir ${worksrcpath}/.m2/repository
+    # Gradle user home and local Maven repository
+    file mkdir ${maven.gradle_home} ${maven.local_repo}
+
+    # Set build target
+    build.target-append ${maven.goal}
 
     # Gradle cache (configurable per port)
-    build.env-append GRADLE_USER_HOME=${worksrcpath}/${maven.gradle_home}
+    build.env-append GRADLE_USER_HOME=${maven.gradle_home}
 
     # Always set local Maven repo
     build.pre_args-append \
-        -Dmaven.repo.local=${worksrcpath}/.m2/repository
+        -Dmaven.repo.local=${maven.local_repo}
 
     # Skip tests. Default: yes (tests are skipped unless overridden).
     if {${maven.skip_tests}} {
@@ -56,4 +60,3 @@ build.cmd mvn3
 
 # Override any inherited build.target (e.g. from github PG)
 build.target
-build.target ${maven.goal}
