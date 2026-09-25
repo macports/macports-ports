@@ -13,54 +13,40 @@
 # scoped packages are unscoped (`package-1.0.0.tgz`), so distname is derived
 # with [file tail ${bun.rootname}] and does not need to be set by the port.
 #
-# bun.version is an optional minimum bun (the runtime). MacPorts currently
-# ships a single `bun` port; this is a floor so a package's engines.bun can
-# be honored without a later PortGroup revision. It is checked at fetch time
-# when bun is already installed, and again before destroot: bun is a
-# depends_lib, which base only installs for the configure phase, so at fetch
-# time it may legitimately not be there yet.
+# bun.version is an optional minimum bun version. Checked at fetch and
+# destroot; bun may not be installed at fetch time (depends_lib is only
+# installed for configure phase).
 #
 # bun.trusted_dependencies is a list of extra package names whose lifecycle
 # scripts (postinstall, prepare, ...) bun may run. Unlike npm, bun runs no
-# lifecycle scripts unless the package is trusted, and this PortGroup always
-# writes a trustedDependencies field, which *replaces* bun's default
-# allowlist rather than extending it (src/install/lockfile.rs falls back to
-# default-trusted-dependencies.txt only when the field is absent). That is
-# deliberate -- which scripts run should be declared by the port and not
-# shift when devel/bun updates -- but it means every dependency needing a
-# lifecycle script has to be listed here, including ones a stock
-# `bun install -g` would have trusted (sharp, for instance). destroot runs
-# bun with --verbose, so blocked scripts are named in the log.
+# lifecycle scripts unless the package is trusted. This PortGroup always
+# writes a trustedDependencies field, which replaces bun's default allowlist
+# rather than extending it. Every dependency needing a lifecycle script must
+# be listed here, including ones a stock `bun install -g` would have trusted
+# (sharp, for instance). destroot runs bun with --verbose, so blocked scripts
+# are named in the log.
 #
 # The packaged module itself (${bun.rootname}) is always trusted, because
 # the install is from a local tarball and bun requires an explicit trust for
 # non-registry sources.
 #
-# Known limitation: bun links a package's bins while installing it and does
-# not link again once lifecycle scripts have run, so a bin that only exists
-# after a postinstall never reaches ${prefix}/bin -- trusting the package is
-# not enough. destroot fails on the empty bin directory rather than
-# installing a port with no binaries.
+# Known limitation: bun links bins while installing and does not re-link after
+# lifecycle scripts, so bins created only in postinstall never reach ${prefix}/bin.
+# destroot fails on empty bin directory rather than installing a port with no binaries.
 #
 # bun.add_dependencies (default yes) adds path:bin/bun:bun to depends_lib.
-# The shebang is `#!/usr/bin/env bun`, so bun is a library dependency; it
-# also covers destroot.
+# The shebang is `#!/usr/bin/env bun`, so bun is a library dependency.
 #
 # destroot needs network: bun resolves and fetches the dependency tree from
-# registry.npmjs.org. Only the top-level tarball is checksummed. This matches
-# npm-1.0.
+# registry.npmjs.org. Only the top-level tarball is checksummed.
 #
-# bun.minimum_release_age defaults to 259200 (3 days). destroot passes
-# `bun install --minimum-release-age` so registry-resolved versions newer
-# than that window are skipped (supply-chain delay; bun 1.3+). Ports may
-# raise it, or set 0 to disable. It does not checksum those deps and is
-# not a lockfile. Exact pins published inside the window fail destroot
-# rather than floating. The checksummed top-level tarball is a local file
-# and is not gated.
+# bun.minimum_release_age sets a supply-chain delay (seconds). destroot passes
+# `bun install --minimum-release-age` to skip registry-resolved versions newer
+# than this window (requires bun 1.3+). Set to 0 to disable.
 #
 # Each port destroots to ${prefix}/lib/bun/${name} with bins linked into
-# ${prefix}/bin, so two bun-PG ports can activate together. bun writes
-# relative symlinks, so destroot paths do not leak into the image.
+# ${prefix}/bin, so multiple bun-PG ports can activate together. bun writes
+# relative symlinks, so destroot paths do not leak.
 
 options bun.rootname bun.version bun.trusted_dependencies bun.add_dependencies \
         bun.minimum_release_age
@@ -68,7 +54,7 @@ default bun.rootname                {${name}}
 default bun.version                 {}
 default bun.trusted_dependencies    {}
 default bun.add_dependencies        yes
-default bun.minimum_release_age     259200
+default bun.minimum_release_age     259200 ;# 3 days
 
 default master_sites    {https://registry.npmjs.org/${bun.rootname}/-/}
 default distname        {[file tail ${bun.rootname}]-${version}}
@@ -170,7 +156,7 @@ destroot {
     set age_flag ""
     set min_age [bun_minimum_release_age_seconds]
     if {${min_age} > 0} {
-        set age_flag " --minimum-release-age=[shellescape ${min_age}]"
+        set age_flag " --minimum-release-age=${min_age}"
     }
     system -W ${workpath} "env BUN_INSTALL_GLOBAL_DIR=[shellescape ${bun_global_dir}] BUN_INSTALL_BIN=[shellescape ${bun_bin_dir}] BUN_INSTALL_CACHE_DIR=[shellescape ${workpath}/.bun-cache] bun install -g --verbose${age_flag} [shellescape ${distpath}/${distfile}]"
 
