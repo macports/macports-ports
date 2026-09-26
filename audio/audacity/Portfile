@@ -4,20 +4,22 @@ PortSystem          1.0
 PortGroup           github 1.0
 
 name                audacity
-version             3.7.9
+version             4.0.0
 categories          audio
 license             GPL-3
-maintainers         {makr @mohd-akram} openmaintainer
+maintainers         {makr @mohd-akram} {i0ntempest @i0ntempest} openmaintainer
 
 set audacity_dir    ${applications_dir}/Audacity.app/Contents
 
 subport ${name} {
     PortGroup           cmake 1.1
+    PortGroup           qt6 1.0
     PortGroup           wxWidgets 1.0
 
     github.setup        audacity audacity ${version} Audacity-
+    github.tarball_from releases
     revision            0
-    conflicts           audacity2
+    conflicts           audacity2 audacity3
     description         multi-track audio editor
 
     long_description    Audacity is an easy-to-use, multi-track audio editor and \
@@ -26,87 +28,130 @@ subport ${name} {
 
     homepage            https://www.audacityteam.org
 
-    checksums           rmd160  4026bdd9e14adb172c0d60e97101a7d1e4edef5e \
-                        sha256  9d224ebe4d5c4e38e3a2142ef6d36198d5c40db0e32329d7fbc547cce7422682 \
-                        size    67634190
+    checksums           rmd160  54cf2e741d094927ba565d6b77afffb0a3f69a62 \
+                        sha256  b29076f99fa5d2f522d001db472a896db81f9effefd15948c940571753858058 \
+                        size    190040704
 
     distname            ${name}-sources-${version}
+    worksrcdir          ${name}-${version}
+    use_xz              yes
 
+    qt6.find_method     prefix_path
+    qt6.blacklist       {< 6.8}
+    qt6.depends_lib     qtdeclarative \
+                        qt5compat \
+                        qtnetworkauth \
+                        qtshadertools \
+                        qtsvg
+    qt6.depends_build   qttools
+
+    # The Qt interface still uses wxBase in the audio backend.
     wxWidgets.use       wxWidgets-3.2
 
-    # rapidjson is header-only
     depends_build-append \
-                        port:rapidjson
+                        port:git \
+                        port:pkgconfig \
+                        port:utfcpp
 
     depends_lib-append  port:expat \
                         port:flac \
+                        port:freetype \
+                        port:harfbuzz \
                         port:lame \
-                        port:libid3tag \
                         port:libogg \
                         port:libopus \
+                        port:libpng \
                         port:libsndfile \
                         port:libvorbis \
                         port:mpg123 \
                         port:opusfile \
                         port:portaudio \
-                        port:portmidi \
-                        port:sqlite3 \
+                        port:pugixml \
                         port:wavpack \
                         port:${wxWidgets.port} \
                         port:zlib
 
     depends_run         path:lib/libavcodec.dylib:ffmpeg
 
-    patchfiles          patch-offline-manual.diff
+    # Respect the deployment target and use the installed Qt runtime.
+    patchfiles-append   patch-macports-build.diff
+    # Preserve wxWidgets' macOS framework linker arguments.
+    patchfiles-append   patch-wxwidgets-frameworks.diff
+    # Find MacPorts FFmpeg libraries and skip the Homebrew search paths.
+    patchfiles-append   patch-ffmpeg-search-path.diff
+    # Open the Audacity 4 online manual from the application's Help menu.
+    patchfiles-append   patch-online-manual.diff
+    # Require cached dependency sources instead of downloading during the build.
+    patchfiles-append   patch-offline-dependencies.diff
 
-    post-patch {
-        # truncate/disable this script which changes library paths
-        close [open ${worksrcpath}/scripts/build/macOS/fix_bundle.py w]
-    }
+    cmake.generator     Ninja
+    cmake.build_type    Release
 
-    configure.args      -Daudacity_conan_enabled=OFF \
-                        -Daudacity_has_vst3=OFF \
-                        -Daudacity_use_sqlite=system \
-                        -DwxWidgets_CONFIG_EXECUTABLE=${wxWidgets.wxconfig}
+    # Use MacPorts libraries instead of downloading upstream binaries.
+    # Source-only dependencies are supplied by the release's offline cache.
+    configure.args-append \
+                        -DAU4_BUILD_CONFIGURATION=app \
+                        -DAU4_BUILD_MODE=release \
+                        -DOPENGL_gl_LIBRARY=${configure.sdkroot}/System/Library/Frameworks/OpenGL.framework \
+                        -DOPENGL_INCLUDE_DIR=${configure.sdkroot}/System/Library/Frameworks/OpenGL.framework/Headers \
+                        -DEXTDEPS_OVERRIDE_ALL=SYSTEM \
+                        -DEXTDEPS_CACHE=${worksrcpath}/offline-deps \
+                        -DWX_CONFIG=${wxWidgets.wxconfig} \
+                        -DMUSE_ENABLE_UNIT_TESTS=OFF \
+                        -DMUSE_MODULE_DIAGNOSTICS_CRASHPAD_CLIENT=OFF \
+                        -DMUSE_MODULE_UPDATE=OFF \
+                        -DMUSE_COMPILE_USE_CCACHE=OFF
 
     compiler.cxx_standard   2017
 
-    # if not present some menu items appear in another language
-    destroot.keepdirs   ${destroot}${audacity_dir}/Resources/en.lproj
-
     post-destroot {
-        platform darwin {
-            move ${destroot}${prefix}/Audacity.app ${destroot}${applications_dir}/
-        }
+        xinstall -d ${destroot}${applications_dir}
+        move ${destroot}${prefix}/audacity.app ${destroot}${applications_dir}/Audacity.app
+
+        # Use the installed Qt plugins and QML imports, rather than bundling Qt.
+        set qt_conf [open ${destroot}${audacity_dir}/Resources/qt.conf w]
+        puts ${qt_conf} "\[Paths\]"
+        puts ${qt_conf} "Prefix=${qt6.dir}"
+        close ${qt_conf}
+
+        system -W ${destroot}${applications_dir} "/usr/bin/codesign --force --sign - Audacity.app"
     }
 
     github.livecheck.regex {([0-9.]+)}
 }
 
 subport ${name}-manual {
-    revision            0
-    description         The manual for audacity
-    long_description    {*}${description}
-    github.setup        audacity audacity-manual ${version} v
-    homepage            https://manual.audacityteam.org
-    checksums           rmd160  8bd6e60741d52f0f2e2ddcb80dea9226f3d852f3 \
-                        sha256  890a416172ddf6e34e6b2b49b062be3130202a4d5ad359c95d6d271118c5fb89 \
-                        size    26577174
-    depends_run         port:audacity
-    use_configure       no
-    build               {}
-    installs_libs       no
-    supported_archs     noarch
-    platforms           {darwin any}
-    worksrcdir          help
+    PortGroup           obsolete 1.0
 
-    set data_dir        ${prefix}/share/audacity
-    platform darwin {
-        set data_dir    ${audacity_dir}
-    }
+    revision            1
+    homepage            https://www.audacityteam.org/manual/getting-started/
+    obsolete.note       "Audacity 4's manual is available online at ${homepage}.\
+                         No offline manual is currently released. For the v3 offline\
+                         manual, install ${name}3-manual."
 
-    destroot {
-        xinstall -d ${destroot}${data_dir}
-        copy ${worksrcpath} ${destroot}${data_dir}
-    }
+    #revision            0
+    #description         The manual for audacity
+    #long_description    {*}${description}
+    #github.setup        audacity audacity-manual ${version} v
+    #homepage            https://manual.audacityteam.org
+    #checksums           rmd160  8bd6e60741d52f0f2e2ddcb80dea9226f3d852f3 \
+    #                    sha256  890a416172ddf6e34e6b2b49b062be3130202a4d5ad359c95d6d271118c5fb89 \
+    #                    size    26577174
+    #depends_run         port:audacity
+    #use_configure       no
+    #build               {}
+    #installs_libs       no
+    #supported_archs     noarch
+    #platforms           {darwin any}
+    #worksrcdir          help
+
+    #set data_dir        ${prefix}/share/audacity
+    #platform darwin {
+    #    set data_dir    ${audacity_dir}
+    #}
+
+    #destroot {
+    #    xinstall -d ${destroot}${data_dir}
+    #    copy ${worksrcpath} ${destroot}${data_dir}
+    #}
 }
