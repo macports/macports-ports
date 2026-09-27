@@ -1,0 +1,114 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           openssl 1.0
+PortGroup           python 1.0
+
+name                py-mupdf
+# Keep synchronized with port:mupdf
+version             1.28.5
+revision            0
+categories-append   graphics
+maintainers         nomaintainer
+license             AGPL-3+
+
+description         Lightweight PDF and XPS viewer and parser/rendering library
+
+long_description    MuPDF is a lightweight PDF and XPS viewer \
+                    and parser/rendering library. \
+                    \
+                    The renderer in MuPDF is tailored for high-quality \
+                    anti-aliased graphics. It renders text with metrics \
+                    and spacing accurate to within fractions of a pixel \
+                    for the highest fidelity in reproducing the look \
+                    of a printed page on screen. \
+                    \
+                    MuPDF is also small, fast, and yet complete. It supports \
+                    PDF 1.7 with transparency, encryption, hyperlinks, \
+                    annotations, search and many other bells and whistles. \
+                    MuPDF can also read XPS documents (OpenXPS ECMA-388).
+
+homepage            https://www.mupdf.com
+
+master_sites        ${homepage}/downloads/archive/
+distname            ${python.rootname}-${version}-source
+
+checksums           rmd160  3b027ead509189ceb75e575d0a0cf31834f83365 \
+                    sha256  98a5c10cda20c3992cdf76ff6b2a1149c32bd79cc796d3f703230b1185b7e934 \
+                    size    68919385
+
+# Python version support
+python.versions     312 313 314
+
+# Python bindings require the C/C++ libraries to be built first
+# Use pip to install the Python package from source
+if {${name} ne ${subport}} {
+    depends_build-append \
+                    port:python${python.version} \
+                    port:py${python.version}-clang \
+                    port:py${python.version}-pip \
+                    port:py${python.version}-pipcl \
+                    port:swig-python
+
+    depends_lib-append \
+                    port:mupdf
+
+    # The following patch addresses several issues:
+    # 1. Broken linking: build uses C compiler to link C++ code # and also hardcodes libstdc++:
+    #    Undefined symbols: "__Unwind_Resume" etc.
+    # 2. A silly parsing error for a warning which we do not need anyway:
+    #    Makethird:57: *** missing separator. Stop.
+    # 3. An upstream issue that clobbers installed dylibs on macOS/BSD
+    # 4. An upstream issue that uses the incorrect .so on BSD
+    # 5. scripts/autovenv.py not honoring the environment variable that prevents venv creation
+    # diff -Naurd ./mupdf-orig ./mupdf-new | sed -E -e 's/\.\/mupdf-(orig|new)/\./g' | sed -E -e 's|/opt/local|@@PREFIX@@|g' > ~/Downloads/patch-build.diff
+    patchfiles-append   patch-build.diff
+
+    use_configure   no
+
+    pre-build {
+        # Create build directory and symlink C/C++ libs from mupdf port
+        xinstall -d ${worksrcpath}/build/shared-release
+        system -W ${worksrcpath} "ln -sf ${prefix}/lib/libmupdf.dylib ${worksrcpath}/build/shared-release/"
+        system -W ${worksrcpath} "ln -sf ${prefix}/lib/libmupdfcpp.dylib ${worksrcpath}/build/shared-release/libmupdfcpp.so"
+    }
+
+    build.env-append      VIRTUAL_ENV=${python.prefix} \
+                          XCXXFLAGS=-std=c++17
+
+    build.cmd             ${python.bin}
+    # -b 023 in setup.py does not build C++ libraries
+    build.target          ${worksrcpath}/scripts/mupdfwrap.py -b 023
+    build.args            -d ${worksrcpath}/build/shared-release
+
+    destroot {
+        xinstall -d       ${destroot}${python.pkgd}/${python.rootname}
+        xinstall -d       ${destroot}${prefix}/share/${subport}/bin
+
+        xinstall -m 0644  ${worksrcpath}/build/shared-release/mupdf.py ${destroot}${python.pkgd}/${python.rootname}
+        xinstall -m 0755  ${worksrcpath}/build/shared-release/_mupdf.so ${destroot}${python.pkgd}/${python.rootname}
+        xinstall -m 0644  ${filespath}/__init__.py ${destroot}${python.pkgd}/${python.rootname}
+
+        # Fix rpath in _mupdf.so to find libmupdfcpp.dylib from main port
+        system -W ${worksrcpath} \
+                          "install_name_tool -add_rpath ${prefix}/lib ${destroot}${python.pkgd}/${python.rootname}/_mupdf.so"
+        system -W ${worksrcpath} \
+                          "install_name_tool -change libmupdfcpp.dylib @rpath/libmupdfcpp.dylib ${destroot}${python.pkgd}/${python.rootname}/_mupdf.so"
+        system -W ${worksrcpath} \
+                          "install_name_tool -id @rpath/_mupdf.so ${destroot}${python.pkgd}/${python.rootname}/_mupdf.so"
+
+        # example OCR script
+        xinstall -m 0755  ${filespath}/mupdf_ocr_extract.py ${destroot}${prefix}/share/${subport}/bin
+        reinplace "s|/usr/bin/env python3$|${python.bin}|" ${destroot}${prefix}/share/${subport}/bin/mupdf_ocr_extract.py
+    }
+}
+
+notes-append \
+        "An example usage script is:
+
+    ${prefix}/share/${subport}/bin/mupdf_ocr_extract.py example.pdf
+"
+
+livecheck.type      regex
+livecheck.url       https://mupdf.com/releases
+livecheck.regex     ${python.rootname}-(\\d+(?:\\.\\d+)*\[a-z\]?)-source
