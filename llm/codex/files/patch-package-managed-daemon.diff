@@ -1,45 +1,72 @@
 --- app-server-daemon/src/lib.rs.orig
 +++ app-server-daemon/src/lib.rs
-@@ -38,6 +38,7 @@
-     Duration::from_secs(MAX_SHUTDOWN_GRACE_SECONDS as u64 + 75);
- const PID_FILE_NAME: &str = "app-server.pid";
- const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
+@@ -48,6 +48,7 @@
+ const LEGACY_UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
+ const DAEMON_PID_FILE_NAME: &str = "daemon.pid";
+ const DAEMON_UPDATE_PID_FILE_NAME: &str = "daemon-updater.pid";
 +const PACKAGE_MANAGER_CODEX_BIN: Option<&str> = option_env!("CODEX_PACKAGE_MANAGER_CODEX_BIN");
  const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
  const SETTINGS_FILE_NAME: &str = "settings.json";
  const STATE_DIR_NAME: &str = "app-server-daemon";
-@@ -305,13 +306,16 @@
+@@ -283,6 +284,9 @@
+ pub async fn update(
+     http_client_factory: codex_http_client::HttpClientFactory,
+ ) -> Result<UpdateOutput> {
++    if PACKAGE_MANAGER_CODEX_BIN.is_some() {
++        return Err(anyhow!("update the daemon through the package manager"));
++    }
+     ensure_supported_platform()?;
+     #[cfg(windows)]
+     backend::windows::ensure_not_elevated()?;
+@@ -318,14 +322,17 @@
              .as_path()
              .to_path_buf();
          let state_dir = codex_home.as_path().join(STATE_DIR_NAME);
+-        let managed_codex_bin = managed_codex_bin(codex_home.as_path());
 +        let managed_codex_bin = PACKAGE_MANAGER_CODEX_BIN
 +            .map(PathBuf::from)
 +            .unwrap_or_else(|| managed_codex_bin(codex_home.as_path()));
+         // Old CLIs must not mistake a daemon-owned installation for their backend.
+-        let (pid_file, update_pid_file) =
+-            if managed_codex_bin.starts_with(codex_home.as_path().join("packages/standalone")) {
+-                (LEGACY_PID_FILE_NAME, LEGACY_UPDATE_PID_FILE_NAME)
+-            } else {
+-                (DAEMON_PID_FILE_NAME, DAEMON_UPDATE_PID_FILE_NAME)
+-            };
++        let (pid_file, update_pid_file) = if PACKAGE_MANAGER_CODEX_BIN.is_some()
++            || managed_codex_bin.starts_with(codex_home.as_path().join("packages/standalone"))
++        {
++            (LEGACY_PID_FILE_NAME, LEGACY_UPDATE_PID_FILE_NAME)
++        } else {
++            (DAEMON_PID_FILE_NAME, DAEMON_UPDATE_PID_FILE_NAME)
++        };
          Ok(Self {
              socket_path,
-             pid_file: state_dir.join(PID_FILE_NAME),
-             update_pid_file: state_dir.join(UPDATE_PID_FILE_NAME),
-             operation_lock_file: state_dir.join(OPERATION_LOCK_FILE_NAME),
-             settings_file: state_dir.join(SETTINGS_FILE_NAME),
--            managed_codex_bin: managed_codex_bin(codex_home.as_path()),
-+            managed_codex_bin,
-         })
-     }
- 
-@@ -603,7 +607,7 @@
-     async fn ensure_remote_control_started(&self) -> Result<RemoteControlStartOutput> {
+             pid_file: state_dir.join(pid_file),
+@@ -354,7 +361,9 @@
+             .parent()
+             .and_then(Path::parent)
+             .context("daemon settings path has no Codex home")?;
+-        let (pid, updater) = if managed_codex_bin.starts_with(home.join("packages/standalone")) {
++        let (pid, updater) = if PACKAGE_MANAGER_CODEX_BIN.is_some()
++            || managed_codex_bin.starts_with(home.join("packages/standalone"))
++        {
+             (LEGACY_PID_FILE_NAME, LEGACY_UPDATE_PID_FILE_NAME)
+         } else {
+             (DAEMON_PID_FILE_NAME, DAEMON_UPDATE_PID_FILE_NAME)
+@@ -657,7 +666,7 @@
          let _operation_lock = self.acquire_operation_lock().await?;
-         let settings = self.load_settings().await?;
--        if self.is_bootstrapped(&settings).await? {
-+        if PACKAGE_MANAGER_CODEX_BIN.is_some() || self.is_bootstrapped(&settings).await? {
-             let _ = self
+         let selected = self.current_installation()?;
+         let settings = selected.load_settings().await?;
+-        if selected.is_bootstrapped(&settings).await? {
++        if PACKAGE_MANAGER_CODEX_BIN.is_some() || selected.is_bootstrapped(&settings).await? {
+             let _ = selected
                  .set_remote_control_locked(RemoteControlMode::Enabled)
                  .await?;
-@@ -787,6 +791,11 @@
+@@ -845,6 +854,10 @@
  
      async fn ensure_managed_updater(&self, settings: &DaemonSettings) -> Result<bool> {
          let updater = backend::pid_update_loop_backend(self.backend_paths(settings));
-+
 +        if PACKAGE_MANAGER_CODEX_BIN.is_some() {
 +            updater.stop().await?;
 +            return Ok(false);
@@ -47,3 +74,35 @@
          if !settings.auto_update_enabled {
              updater.stop().await?;
              return Ok(false);
+@@ -895,6 +908,9 @@
+     }
+ 
+     fn current_managed_codex_bin(&self) -> Result<PathBuf> {
++        if let Some(path) = PACKAGE_MANAGER_CODEX_BIN {
++            return Ok(PathBuf::from(path));
++        }
+         // An installer can move a legacy binary into bin/ while this updater runs.
+         let home = self
+             .settings_file
+--- app-server-daemon/src/prepare_install.rs.orig
++++ app-server-daemon/src/prepare_install.rs
+@@ -26,6 +26,9 @@
+ 
+ /// Prepare a missing package while the caller holds the daemon operation lock.
+ pub(super) async fn prepare(daemon: &Daemon, settings: &DaemonSettings) -> Result<()> {
++    if crate::PACKAGE_MANAGER_CODEX_BIN.is_some() {
++        return Ok(());
++    }
+     let source = InstallContext::current().package_layout.as_ref();
+     // Keep package replacement state out of the CLI dispatcher's async stack frame.
+     Box::pin(prepare_from_package(
+@@ -45,6 +48,9 @@
+ pub async fn update_from_cli(
+     confirm: impl FnOnce(&InstallRequest) -> Result<bool>,
+ ) -> Result<Option<crate::UpdateOutput>> {
++    if crate::PACKAGE_MANAGER_CODEX_BIN.is_some() {
++        return Err(anyhow!("update the daemon through the package manager"));
++    }
+     crate::ensure_supported_platform()?;
+     #[cfg(windows)]
+     crate::backend::windows::ensure_not_elevated()?;
