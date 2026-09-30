@@ -56,9 +56,14 @@ extract.only        ${distname}${extract.suffix}
 # Disable offline mode to workaround dependencies from Git
 cargo.offline_cmd
 
-# Load the helper's GStreamer runtime directly from the MacPorts prefix.
-patchfiles-append \
-                patch-use-system-gstreamer-runtime.diff
+# Undefined symbols: "_AudioHardwareCreateProcessTap"
+# macOS 14.2 needed by CPAL for CoreAudio, 14.6 needed for loopback recording
+if {${os.major} >= 23} {
+    set enable_voice 1
+} else {
+    set enable_voice 0
+}
+
 # Support daemon mode without the standalone self-updater
 # See https://github.com/openai/codex/issues/24283
 patchfiles-append \
@@ -67,20 +72,33 @@ patchfiles-append \
 depends_build-append \
                 port:cmake
 depends_lib-append \
-                port:glib2 \
-                port:gstreamer1 \
-                port:gstreamer1-gst-plugins-base \
-                port:gettext-runtime \
                 port:libiconv \
                 port:xz
-depends_run-append \
-                port:gstreamer1-gst-plugins-good
 
 build.env-append \
                 RUSTC_BOOTSTRAP=1 \
                 RUSTFLAGS=-Zmin-recursion-limit=256 \
-                CODEX_VOICE_RUNTIME_PREFIX=${prefix} \
                 CODEX_PACKAGE_MANAGER_CODEX_BIN=${prefix}/libexec/${name}/bin/${name}
+
+if {${enable_voice}} {
+    # Load the helper's GStreamer runtime directly from the MacPorts prefix.
+    patchfiles-append \
+                patch-use-system-gstreamer-runtime.diff
+
+    depends_lib-append \
+                port:glib2 \
+                port:gstreamer1 \
+                port:gstreamer1-gst-plugins-base \
+                port:gettext-runtime
+    depends_run-append \
+                port:gstreamer1-gst-plugins-good
+
+    build.env-append \
+                CODEX_VOICE_RUNTIME_PREFIX=${prefix}
+} else {
+    build.args-append \
+                --workspace --exclude codex-voice-host
+}
 
 pre-build {
     set rusty_v8_target [cargo.rust_platform]
@@ -93,21 +111,24 @@ pre-build {
 # https://trac.macports.org/ticket/73569
 # lto=thin reduced memory usage in 0.137
 build.mem_per_job \
-                6000
+                7000
 
 destroot {
     set package_path ${destroot}${prefix}/libexec/${name}
     set bin_path ${package_path}/bin
-    set voice_path ${package_path}/codex-resources/voice
-    xinstall -d ${destroot}${prefix}/bin ${package_path}/codex-path ${bin_path} ${voice_path}/bin
+    xinstall -d ${destroot}${prefix}/bin ${package_path}/codex-path ${bin_path}
 
     foreach bin "${name} ${name}-code-mode-host" {
         xinstall -m 755 ${worksrcpath}/target/[cargo.rust_platform]/release/${bin} ${bin_path}/
         ln -s ../libexec/${name}/bin/${bin} ${destroot}${prefix}/bin/${bin}
     }
 
-    # The patched helper loads GStreamer directly from ${prefix}.
-    xinstall -m 755 ${worksrcpath}/target/[cargo.rust_platform]/release/${name}-voice-host ${voice_path}/bin/
+    if {${enable_voice}} {
+        # The patched helper loads GStreamer directly from ${prefix}.
+        set voice_path ${package_path}/codex-resources/voice
+        xinstall -d ${voice_path}/bin
+        xinstall -m 755 ${worksrcpath}/target/[cargo.rust_platform]/release/${name}-voice-host ${voice_path}/bin/
+    }
 
     set metadata [open ${package_path}/codex-package.json w]
     puts $metadata [format {{
