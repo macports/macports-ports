@@ -1,0 +1,209 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+
+name                apache-arrow-adbc
+version             24
+revision            0
+
+categories          databases devel
+# toml++ (driver manager) and fmt (drivers) are vendored, MIT, and compiled in.
+license             Apache-2 MIT
+maintainers         {@jrjsmrtn gmail.com:jrjsmrtn} openmaintainer
+
+description         Arrow Database Connectivity driver manager
+long_description    ADBC is an API standard for database access libraries \
+                    that exchange data as Apache Arrow. This port provides \
+                    its C driver manager, which loads ADBC drivers at run \
+                    time, and the ADBC C headers.
+
+homepage            https://arrow.apache.org/adbc/
+master_sites        apache:arrow/${name}-${version}
+
+checksums           rmd160  d85cfaeeb8b32a708e26242a7706a986143e7a9e \
+                    sha256  2b4b420937f62f7ae56f46dbd6951a5e4ef0da43158080a58cb44cdd09a8b2e0 \
+                    size    9916213
+
+cmake.source_dir    ${worksrcpath}/c
+
+# Upstream's default install name is @rpath, and any build type but Release
+# gets -Werror.
+configure.args-append \
+                    -DADBC_BUILD_SHARED=ON \
+                    -DADBC_BUILD_STATIC=OFF \
+                    -DADBC_INSTALL_NAME_RPATH=OFF \
+                    -DADBC_BUILD_WARNING_LEVEL=PRODUCTION
+
+# Driver manifests are looked up by name in a system directory, which upstream
+# puts in /Library on macOS; keep it inside the prefix.
+set drivers_dir     ${prefix}/etc/adbc/drivers
+patchfiles          patch-system-config-dir.diff
+
+post-patch {
+    set f ${worksrcpath}/c/driver_manager/adbc_driver_manager.cc
+    reinplace "s|@PREFIX@|${prefix}|" ${f}
+    set fd [open ${f}]
+    set src [read ${fd}]
+    close ${fd}
+    if {[string first "\"${drivers_dir}\"" ${src}] < 0} {
+        return -code error "the system driver directory was not patched"
+    }
+}
+
+set sqlite_args     [list -DSQLite3_INCLUDE_DIR=${prefix}/include \
+                        -DSQLite3_LIBRARY=${prefix}/lib/libsqlite3.dylib]
+# The driver needs one libpq, not one per server version: upstream CI tests a
+# single build against servers 14 to 18. 18 matches ladybug's pg_client.
+set pg              postgresql18
+set pg_args         [list -DPostgreSQL_INCLUDE_DIR=${prefix}/include/${pg} \
+                        -DPostgreSQL_LIBRARY=${prefix}/lib/${pg}/libpq.dylib]
+# The PostgreSQL driver's pkg-config lookup of libpq.
+configure.env-append \
+                    PKG_CONFIG_PATH=${prefix}/lib/${pg}/pkgconfig
+
+# Each driver is its own subport, built from the same source, with a manifest
+# so that it loads by name: driver='sqlite' or driver='postgresql'.
+foreach {driver dep label} {sqlite sqlite3 SQLite postgresql postgresql18 PostgreSQL} {
+    subport ${name}-${driver} {
+        description     Arrow Database Connectivity driver for ${label}
+        long_description \
+                        ADBC is an API standard for database access \
+                        libraries that exchange data as Apache Arrow. This \
+                        port provides its ${label} driver, which the ADBC \
+                        driver manager loads as `${driver}'.
+        depends_lib-append \
+                        port:${name} \
+                        port:${dep}
+    }
+}
+
+set driver ""
+if {[string match ${name}-* ${subport}]} {
+    set driver [string range ${subport} [string length ${name}-] end]
+}
+
+if {${driver} eq ""} {
+    configure.args-append \
+                    -DADBC_DRIVER_MANAGER=ON \
+                    -DADBC_DRIVER_POSTGRESQL=OFF \
+                    -DADBC_DRIVER_SQLITE=OFF
+
+    destroot.keepdirs \
+                    ${destroot}${drivers_dir}
+    post-destroot {
+        xinstall -d ${destroot}${drivers_dir}
+    }
+} else {
+    configure.args-append \
+                    -DADBC_DRIVER_MANAGER=OFF
+    if {${driver} eq "sqlite"} {
+        configure.args-append \
+                    -DADBC_DRIVER_SQLITE=ON \
+                    -DADBC_DRIVER_POSTGRESQL=OFF \
+                    {*}${sqlite_args}
+    } else {
+        # It finds libpq through pkg-config as well as through CMake.
+        depends_build-append \
+                    path:bin/pkg-config:pkgconfig
+        configure.args-append \
+                    -DADBC_DRIVER_SQLITE=OFF \
+                    -DADBC_DRIVER_POSTGRESQL=ON \
+                    {*}${pg_args}
+    }
+
+    post-destroot {
+        xinstall -d ${destroot}${drivers_dir}
+        set fd [open ${destroot}${drivers_dir}/${driver}.toml w]
+        puts ${fd} "manifest_version = 1"
+        puts ${fd} ""
+        puts ${fd} "name = '${description}'"
+        puts ${fd} "publisher = 'MacPorts ${subport} port'"
+        puts ${fd} "license = 'Apache-2.0'"
+        puts ${fd} "url = '${homepage}'"
+        puts ${fd} ""
+        puts ${fd} "\[Driver\]"
+        puts ${fd} "shared = '${prefix}/lib/libadbc_driver_${driver}.dylib'"
+        close ${fd}
+    }
+}
+
+# The tests change the build, so they get their own, seeded with the compilers
+# and flags MacPorts gave the main one.
+#   - The driver manager's tests load the SQLite driver, which is built there
+#     and never installed. Two of them expect a PostgreSQL driver, and one of
+#     those expects nothing to be listening on localhost:5432, so both are
+#     left out.
+#   - The PostgreSQL driver's tests need a server: a throwaway cluster on a
+#     Unix socket in the work directory, C locale, because some compare
+#     sorted strings.
+depends_test-append port:gtest
+if {${driver} ne "postgresql"} {
+    depends_test-append port:sqlite3
+} else {
+    depends_test-append port:${pg}-server
+}
+test.run            yes
+test {
+    set keep {CMAKE_BUILD_TYPE CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_C_FLAGS
+        CMAKE_CXX_FLAGS CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS
+        CMAKE_OSX_ARCHITECTURES CMAKE_OSX_DEPLOYMENT_TARGET CMAKE_OSX_SYSROOT
+        CMAKE_SYSTEM_PREFIX_PATH CMAKE_INSTALL_PREFIX}
+    set in [open ${build.dir}/CMakeCache.txt r]
+    set out [open ${workpath}/tests-init.cmake w]
+    foreach line [split [read ${in}] \n] {
+        if {[regexp {^([A-Za-z0-9_]+):([A-Z]+)=(.*)$} ${line} -> key type value]
+                && ${key} in ${keep}} {
+            set value [string map {\\ \\\\ \" \\\" $ \\$} ${value}]
+            puts ${out} "set(${key} \"${value}\" CACHE ${type} \"\")"
+        }
+    }
+    close ${in}
+    close ${out}
+
+    set extra {}
+    set test_env {}
+    if {${driver} eq ""} {
+        set extra [concat -DADBC_DRIVER_SQLITE=ON ${sqlite_args}]
+        set test_env "DYLD_LIBRARY_PATH=${workpath}/build-tests/driver/sqlite \
+            GTEST_FILTER=-DriverManager.MultiDriverTest:DriverManifest.ImplicitUri"
+    }
+
+    set tests ${workpath}/build-tests
+    system -W ${workpath} "PKG_CONFIG_PATH=${prefix}/lib/${pg}/pkgconfig \
+        ${configure.cmd} -C ${workpath}/tests-init.cmake \
+        [join ${configure.args}] [join ${extra}] \
+        -DADBC_BUILD_TESTS=ON -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+        -S ${cmake.source_dir} -B ${tests}"
+    system -W ${workpath} "${configure.cmd} --build ${tests} --parallel ${build.jobs}"
+
+    if {${driver} ne "postgresql"} {
+        system -W ${tests} "${test_env} ${prefix}/bin/ctest --no-tests=error --output-on-failure"
+    } else {
+        set bin ${prefix}/lib/${pg}/bin
+        set pgdir ${workpath}/pg
+        file delete -force ${pgdir}
+        file mkdir ${pgdir}
+        file attributes ${pgdir} -permissions 0700
+        system "${bin}/initdb -D ${pgdir}/data -A trust --locale=C -E UTF8 >/dev/null"
+        # The server's whole life is one system call. Started on its own, it
+        # inherits this phase's pipes (fds 3 and up, not only 0-2), holds
+        # system's output open after pg_ctl exits, and the phase hangs.
+        set uri "postgresql:///postgres?host=${pgdir}&port=54329"
+        set failed [catch {system -W ${tests} "${bin}/pg_ctl -D ${pgdir}/data -l ${pgdir}/log -w \
+            -o \"-k ${pgdir} -p 54329 -c listen_addresses=''\" start >/dev/null && \
+            { ADBC_POSTGRESQL_TEST_URI='${uri}' ${prefix}/bin/ctest --no-tests=error \
+                --output-on-failure; rc=\$?; \
+              ${bin}/pg_ctl -D ${pgdir}/data -m fast -w stop >/dev/null; exit \$rc; }"} result]
+        if {${failed}} {
+            return -code error ${result}
+        }
+    }
+}
+
+livecheck.type      regex
+livecheck.url       https://archive.apache.org/dist/arrow/
+livecheck.regex     ${name}-(\[0-9\]+)/
+if {${driver} ne ""} {
+    livecheck.type  none
+}
