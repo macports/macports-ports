@@ -6,9 +6,9 @@ PortGroup           openssl 1.0
 name                mupdf
 
 # Keep synchronized with port:py-mupdf.
-version             1.24.2
+version             1.28.5
 
-revision            1
+revision            0
 categories          graphics
 maintainers         nomaintainer
 license             AGPL-3+
@@ -34,92 +34,41 @@ homepage            https://www.mupdf.com
 master_sites        ${homepage}/downloads/archive/
 distname            ${name}-${version}-source
 
-checksums           rmd160  e19bad3ca13762fe5b238093d62e5ce292b69df4 \
-                    sha256  7fbced6d6024608661d773b93990119db7eb2483f0d3e28855eadef9ca9a8686 \
-                    size    55313640
+checksums           rmd160  3b027ead509189ceb75e575d0a0cf31834f83365 \
+                    sha256  98a5c10cda20c3992cdf76ff6b2a1149c32bd79cc796d3f703230b1185b7e934 \
+                    size    68919385
 
 depends_build-append \
                     path:bin/pkg-config:pkgconfig
 
-depends_lib-append  port:curl \
+depends_lib-append  port:brotli \
+                    port:cmark-gfm \
+                    port:curl \
                     port:freetype \
                     port:gumbo-parser \
                     path:lib/pkgconfig/harfbuzz.pc:harfbuzz \
                     port:jbig2dec \
                     port:leptonica \
                     port:libarchive \
-                    path:include/turbojpeg.h:libjpeg-turbo \
+                    port:lib/libjpeg.dylib:libjpeg-turbo \
                     port:openjpeg \
                     port:tesseract \
                     port:zlib
 
+# The following patch addresses several issues:
+# 1. Broken linking: build uses C compiler to link C++ code # and also hardcodes libstdc++:
+#    Undefined symbols: "__Unwind_Resume" etc.
+# 2. A silly parsing error for a warning which we do not need anyway:
+#    Makethird:57: *** missing separator. Stop.
+# 3. An upstream issue that clobbers installed dylibs on macOS/BSD
+# 4. An upstream issue that uses the incorrect .so on BSD
+# 5. scripts/autovenv.py not honoring the environment variable that prevents venv creation
+# diff -Naurd ./mupdf-orig ./mupdf-new | sed -E -e 's/\.\/mupdf-(orig|new)/\./g' | sed -E -e 's|/opt/local|@@PREFIX@@|g' > ~/Downloads/patch-build.diff
 patchfiles          patch-build.diff
 
-# The following patch addresses two issues:
-# 1. Broken linking: build uses C compiler to link C++ code
-# and also hardcodes libstdc++:
-# Undefined symbols: "__Unwind_Resume" etc.
-# 2. A silly parsing error for a warning which we do not need anyway:
-# Makethird:57: *** missing separator. Stop.
-patchfiles-append   patch-Makethird.diff
-
-use_configure       no
-# Unfortunately, this is still needed,
-# otherwise something goes wrong with fonts processing
-# and build may fail.
-use_parallel_build  no
-
-compiler.cxx_standard   2017
-
-# Undefined symbols:
-# "__ZN9tesseract11TessBaseAPI4InitEPKciS2_NS_13OcrEngineModeEPPciPKSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaISC_EESG_bPFbS2_PS6_IcSB_EE"
-if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
-    configure.cxxflags-append \
-                    -D_GLIBCXX_USE_CXX11_ABI=0
-}
-
-build.args          PREFIX=${prefix}
-build.args-append   CC=${configure.cc} \
-                    CXX=${configure.cxx} \
-                    CPP=${configure.cpp} \
-                    XCFLAGS="${configure.cflags} [get_canonical_archflags cc]" \
-                    XCXXFLAGS="${configure.cxxflags} [get_canonical_archflags cxx]" \
-                    XLIBS="${configure.ldflags} [get_canonical_archflags ld]" \
-                    HAVE_GLUT=yes \
-                    HAVE_X11=no \
-                    USE_SYSTEM_LIBS=yes \
-                    USE_TESSERACT=yes \
-                    build=release \
-                    shared=yes \
-                    verbose=yes \
-                    shared-release
-
-destroot.destdir    prefix=${destroot}${prefix}
-destroot.args-append \
-                    HAVE_GLUT=yes \
-                    HAVE_X11=no \
-                    USE_SYSTEM_LIBS=yes \
-                    shared=yes
-
-variant x11 {
-    depends_lib-append \
-                    port:mesa \
-                    port:xorg-libXcursor \
-                    port:xorg-libXext \
-                    port:xorg-libXinerama \
-                    port:xorg-libXrandr
-
-    build.args-replace \
-                    HAVE_X11=no HAVE_X11=yes
-    destroot.args-replace \
-                    HAVE_X11=no HAVE_X11=yes
-}
-
-variant universal   {}
-
 post-extract {
-# delete thirdparty software other than mujs and lcms2,
-# which uses lcms2mt.h that lcms2 port does not provide
+    # delete thirdparty software other than mujs, lcms2, and cmark-gfm that
+    # use headers lcms2mt.h and html.h not provided by ports lcms2 and cmark-gfm
     delete ${worksrcpath}/thirdparty/curl
     delete ${worksrcpath}/thirdparty/freeglut
     delete ${worksrcpath}/thirdparty/freetype
@@ -134,11 +83,177 @@ post-extract {
     delete ${worksrcpath}/thirdparty/zlib
 }
 
+use_configure       no
+
+# Unfortunately, this is still needed,
+# otherwise something goes wrong with fonts processing
+# and build may fail.
+use_parallel_build  no
+
+compiler.cxx_standard   2017
+
+configure.cflags-append \
+                    -I${prefix}/include \
+                    -I${worksrcpath}/include/mupdf \
+                    -fPIC \
+                    -Wno-error=implicit-function-declaration
+
+configure.cxxflags-append \
+                    -std=c++17 \
+                    -I${prefix}/include \
+                    -I${worksrcpath}/include/mupdf \
+                    -fPIC \
+                    -Wno-error=implicit-function-declaration
+
+configure.ldflags-append \
+                    [strsed ${cxx_stdlib} {s|^lib|-l|}]
+
+# cmark-gfm port doesn't include headers; these must appear *before* ${prefix}/include
+configure.cflags-prepend \
+                    -I${worksrcpath}/thirdparty/cmark-gfm/src \
+                    -I${worksrcpath}/thirdparty/cmark-gfm/extensions
+configure.cxxflags-prepend \
+                    -I${worksrcpath}/thirdparty/cmark-gfm/src \
+                    -I${worksrcpath}/thirdparty/cmark-gfm/extensions
+
+pre-build {
+    configure.cflags-append \
+                    {*}[exec pkg-config --cflags libcmark-gfm]
+    configure.cxxflags-append \
+                    {*}[exec pkg-config --cflags libcmark-gfm]
+    configure.ldflags-append \
+                    {*}[exec pkg-config --libs libcmark-gfm]
+}
+
+# Undefined symbols:
+# "__ZN9tesseract11TessBaseAPI4InitEPKciS2_NS_13OcrEngineModeEPPciPKSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaISC_EESG_bPFbS2_PS6_IcSB_EE"
+if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
+    configure.cxxflags-append \
+                    -D_GLIBCXX_USE_CXX11_ABI=0
+}
+
+build.target        {all extra-apps libs c++}
+
+set xlibs_nox11     "XLIBS=\"${configure.ldflags}\""
+
+build.args          PREFIX=${prefix}
+build.args-append   CC=${configure.cc} \
+                    CXX=${configure.cxx} \
+                    CPP=${configure.cpp} \
+                    HAVE_GLUT=yes \
+                    HAVE_X11=no \
+                    USE_SYSTEM_LIBS=yes \
+                    USE_TESSERACT=yes \
+                    "XCFLAGS=\"${configure.cflags} [get_canonical_archflags cc]\"" \
+                    "XCXXFLAGS=\"${configure.cxxflags} [get_canonical_archflags cxx]\"" \
+                    ${xlibs_nox11} \
+                    build=release \
+		    html=yes \
+		    mandir=${prefix}/share/man \
+                    shared=yes \
+                    verbose=yes \
+                    shared-release
+
+# 3d party system locations
+pre-build {
+    build.args-append   HAVE_SYS_FREETYPE=yes \
+                    "SYS_FREETYPE_CFLAGS=\"[exec pkg-config --cflags freetype2]\"" \
+                    "SYS_FREETYPE_LIBS=\"[exec pkg-config --libs freetype2]\"" \
+                    HAVE_SYS_GUMBO=yes \
+                    "SYS_GUMBO_CFLAGS=\"[exec pkg-config --cflags gumbo]\"" \
+                    "SYS_GUMBO_LIBS=\"[exec pkg-config --libs gumbo]\"" \
+                    HAVE_SYS_HARFBUZZ=yes \
+                    "SYS_HARFBUZZ_CFLAGS=\"[exec pkg-config --cflags harfbuzz]\"" \
+                    "SYS_HARFBUZZ_LIBS=\"[exec pkg-config --libs harfbuzz]\"" \
+                    HAVE_SYS_LIBJPEG=yes \
+                    "SYS_LIBJPEG_CFLAGS=\"[exec pkg-config --cflags libjpeg]\"" \
+                    "SYS_LIBJPEG_LIBS=\"[exec pkg-config --libs libjpeg]\"" \
+                    HAVE_SYS_OPENJPEG=yes \
+                    "SYS_OPENJPEG_CFLAGS=\"[exec pkg-config --cflags libopenjp2]\"" \
+                    "SYS_OPENJPEG_LIBS=\"[exec pkg-config --libs libopenjp2]\"" \
+                    HAVE_SYS_LEPTONICA=yes \
+                    "SYS_LEPTONICA_CFLAGS=\"[exec pkg-config --cflags lept]\"" \
+                    "SYS_LEPTONICA_LIBS=\"[exec pkg-config --libs lept]\"" \
+                    HAVE_SYS_TESSERACT=yes \
+                    "SYS_TESSERACT_CFLAGS=\"[exec pkg-config --cflags tesseract]\"" \
+                    "SYS_TESSERACT_LIBS=\"[exec pkg-config --libs tesseract]\"" \
+                    "SYS_CMARK_GFM_CFLAGS=\"[exec pkg-config --cflags libcmark-gfm]\"" \
+                    "SYS_CMARK_GFM_LIBS=\"[exec pkg-config --libs libcmark-gfm]\""
+}
+
+variant x11 \
+    description {Build with X11} {
+    depends_lib-append \
+                    port:mesa \
+                    port:xorg-libX11 \
+                    port:xorg-libXcursor \
+                    port:xorg-libXext \
+                    port:xorg-libXinerama \
+                    port:xorg-libXrandr
+
+    build.args-replace \
+                    HAVE_X11=no HAVE_X11=yes
+    destroot.args-replace \
+                    HAVE_X11=no HAVE_X11=yes
+
+    pre-build {
+        configure.ldflags-append \
+                    {*}[exec pkg-config --libs x11 xext]
+
+        build.args-replace \
+                    ${xlibs_nox11} \
+                    "XLIBS=\"${configure.ldflags}\""
+    }
+}
+
+# tesseract needs at least one language to run
+# port list "tesseract-*" 2>&1 | awk 'NR>1 && $1 ~ /^tesseract-/{print $1}'
+variant tesseract_eng \
+    description {Tesseract English language data} {
+    depends_run-append \
+                    port:tesseract-eng
+}
+
+variant universal   {}
+
+default_variants-append \
+                    tesseract_eng
+
+build.env-append    PATH=${workpath}/bin:$::env(PATH)
+
+destroot.env-append PATH=${workpath}/bin:$::env(PATH)
+
+destroot.destdir    prefix=${destroot}${prefix}
+destroot.target     {install install-extra-apps install-shared-c++}
+destroot.args-append \
+                    HAVE_GLUT=yes \
+                    HAVE_X11=no \
+                    USE_SYSTEM_LIBS=yes \
+                    shared=yes
+
+
 # https://trac.macports.org/ticket/33240
 # Mac OS X Tiger has an old version of `make`, needs to use GNU make
 platform darwin 8 {
     depends_build-append port:gmake
     build.cmd ${prefix}/bin/gmake
+}
+
+post-destroot {
+    foreach app {mupdf-gl muraster mutool} {
+        xinstall -m 0755 ${worksrcpath}/build/shared-release/${app} ${destroot}${prefix}/bin/
+    }
+    if {[variant_isset x11]} {
+        xinstall -m 0755 ${worksrcpath}/build/shared-release/mupdf-x11 ${destroot}${prefix}/bin/
+    }
+
+    # Fix install_name of libmupdfcpp.dylib
+    if {${os.platform} eq "darwin"} {
+        set libcpp ${destroot}${prefix}/lib/libmupdfcpp.dylib
+        if {[file exists ${libcpp}]} {
+            system "install_name_tool -id ${prefix}/lib/libmupdfcpp.dylib ${libcpp}"
+        }
+    }
 }
 
 livecheck.type      regex
