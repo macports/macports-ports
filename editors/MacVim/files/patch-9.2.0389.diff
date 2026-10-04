@@ -1,0 +1,164 @@
+From 44f707da6a06b8310bfe23f5477c7653215e1230 Mon Sep 17 00:00:00 2001
+From: Hirohito Higashi <h.east.727@gmail.com>
+Date: Wed, 22 Apr 2026 20:22:25 +0000
+Subject: [PATCH] patch 9.2.0389: DECRQM still leaves stray "pp" on Apple
+ Terminal.app
+
+Problem:  DECRQM was still sent to Apple Terminal.app before its DA2
+          reply was processed, leaving a literal "pp" on screen.
+          may_req_decrqm() was called from vim_main2()
+          right after may_req_termresponse(), at which point
+          term_props[TPR_DECRQM].tpr_status was still TPR_UNKNOWN, so
+          the `!= TPR_NO` guard let the request through (after v9.2.0387)
+Solution: Send DECRQM from handle_version_response() once
+          term_props[TPR_DECRQM].tpr_status == TPR_YES, the same
+          pattern already used for t_RS (TPR_CURSOR_STYLE) and t_RC
+          (TPR_CURSOR_BLINK), which deliberately wait for the DA2
+          reply to avoid the same echo-on-screen issue on Apple
+          Terminal.app and Gnome terminal.  Drop the now-unused
+          may_req_decrqm() helper and its call site in vim_main2()
+          (Hirohito Higashi).
+
+fixes:   #19852
+related: #19938
+closes:  #20038
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Co-Authored-By: John Marriott <basilisk@internode.on.net>
+Signed-off-by: Hirohito Higashi <h.east.727@gmail.com>
+Signed-off-by: Christian Brabandt <cb@256bit.org>
+---
+ src/main.c         |  4 ----
+ src/proto/term.pro |  1 -
+ src/term.c         | 53 ++++++++++++++++++----------------------------
+ src/version.c      |  2 ++
+ 4 files changed, 23 insertions(+), 37 deletions(-)
+
+diff --git src/main.c src/main.c
+index e0d0e7e37..cac5db145 100644
+--- src/main.c
++++ src/main.c
+@@ -892,10 +892,6 @@ vim_main2(void)
+     may_req_termresponse();
+ 
+     may_req_bg_color();
+-
+-    // Same reason as for termresponse: don't want the terminal sending out
+-    // the DECRPM response after Vim has exited.
+-    may_req_decrqm();
+ # endif
+ 
+     // start in insert mode
+diff --git src/proto/term.pro src/proto/term.pro
+index 5ec909f46..9653a35af 100644
+--- src/proto/term.pro
++++ src/proto/term.pro
+@@ -60,7 +60,6 @@ void stoptermcap(void);
+ void may_req_termresponse(void);
+ void check_terminal_behavior(void);
+ void may_req_bg_color(void);
+-void may_req_decrqm(void);
+ int swapping_screen(void);
+ void scroll_start(void);
+ void cursor_on_force(void);
+diff --git src/term.c src/term.c
+index 876e15d95..07eb5974b 100644
+--- src/term.c
++++ src/term.c
+@@ -690,15 +690,17 @@ static tcap_entry_T builtin_sync_output[] = {
+ };
+ #endif
+ 
++#ifdef FEAT_TERMRESPONSE
+ /*
+  * List of DECRQM modes that Vim supports
+  */
+ static const int dec_modes[] = {
+     2026,   // Synchronized output
+-#ifdef UNIX
++# ifdef UNIX
+     2048    // In-band terminal resize events
+-#endif
++# endif
+ };
++#endif
+ 
+ #ifdef FEAT_TERMGUICOLORS
+ /*
+@@ -4312,36 +4314,6 @@ may_req_bg_color(void)
+     }
+ }
+ 
+-/*
+- * Query the settings for the DEC modes we support via DECRQM.
+- * Only sent once, and only when the terminal is known not to dislike it
+- * (i.e. TPR_DECRQM is TPR_YES, or still TPR_UNKNOWN when the version response
+- * has not yet been received).
+- * The DECRPM responses are caught in handle_csi().
+- */
+-    void
+-may_req_decrqm(void)
+-{
+-    if (decrqm_status.tr_progress == STATUS_GET
+-	    && term_props[TPR_DECRQM].tpr_status != TPR_NO
+-	    && can_get_termresponse()
+-	    && starting == 0)
+-    {
+-	MAY_WANT_TO_LOG_THIS;
+-	LOG_TR1("Sending DECRQM requests");
+-	for (int i = 0; i < (int)ARRAY_LENGTH(dec_modes); i++)
+-	{
+-	    vim_snprintf((char *)IObuff, IOSIZE, "\033[?%d$p", dec_modes[i]);
+-	    out_str(IObuff);
+-	}
+-	termrequest_sent(&decrqm_status);
+-	// check for the characters now, otherwise they might be eaten by
+-	// get_keystroke()
+-	out_flush();
+-	(void)vpeekc_nomap();
+-    }
+-}
+-
+ #endif
+ 
+ /*
+@@ -5398,6 +5370,23 @@ handle_version_response(int first, int *arg, int argc, char_u *tp)
+ 	    need_flush = TRUE;
+ 	}
+ 
++	// Only request DEC modes via DECRQM when the terminal is known to
++	// handle it.  Not for Apple Terminal.app or GNU screen, they echo
++	// the trailing "p" to the screen.  See issue #19852.
++	if (decrqm_status.tr_progress == STATUS_GET
++		&& term_props[TPR_DECRQM].tpr_status == TPR_YES)
++	{
++	    MAY_WANT_TO_LOG_THIS;
++	    LOG_TR1("Sending DECRQM requests");
++	    for (int i = 0; i < (int)ARRAY_LENGTH(dec_modes); i++)
++	    {
++		vim_snprintf((char *)IObuff, IOSIZE, "\033[?%d$p", dec_modes[i]);
++		out_str(IObuff);
++	    }
++	    termrequest_sent(&decrqm_status);
++	    need_flush = TRUE;
++	}
++
+ 	if (need_flush)
+ 	    out_flush();
+ #endif
+diff --git src/version.c src/version.c
+index 95f20bc67..bfd90a13f 100644
+--- src/version.c
++++ src/version.c
+@@ -729,6 +729,8 @@ static char *(features[]) =
+ 
+ static int included_patches[] =
+ {   /* Add new patch number below this line */
++/**/
++    389,
+ /**/
+     388,
+ /**/
+-- 
+2.47.3
+

@@ -1,13 +1,14 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem              1.0
-PortGroup               legacysupport               1.1
+PortGroup               active_variants 1.1
+PortGroup               legacysupport   1.1
 
 # clock_gettime
 legacysupport.newest_darwin_requires_legacy 16
 
 name                    qemu
-version                 10.0.3
+version                 11.1.2
 revision                0
 categories              emulators
 license                 GPL-2+
@@ -25,11 +26,11 @@ homepage                https://www.qemu.org
 master_sites            https://download.qemu.org/
 use_xz                  yes
 
-checksums               rmd160  6255c4caa98d66ffea8a11caa707259e4664e75f \
-                        sha256  5c891267b1534a774465db8b1a0dfcb0c5e6d7ecb6f71345625adf4e0889945b \
-                        size    135736600
+checksums               rmd160  c465ddb80841956b326aa839667b02094d721e47 \
+                        sha256  731b5681e4bb18be313231579b8efd0296c5b015fa36dc533874b639ba838016 \
+                        size    141815216
 
-set py_branch           3.13
+set py_branch           3.14
 set py_version          [string replace ${py_branch} 1 1]
 
 depends_build-append    port:texinfo \
@@ -70,6 +71,57 @@ patchfiles-append       patch-qemu-include-qemu-madvise_h.diff
 # MAP_JIT workaround
 patchfiles-append       patch-qemu-tcg-region.diff
 
+# hfscompression workaround
+patchfiles-append       patch-qemu-block-file-posix.diff
+
+# SDL2 GL workaround
+patchfiles-append       patch-qemu-ui-sdl2.diff
+
+# APIs newer than the SDK or the deployment target.  Constants are guarded on
+# MAC_OS_X_VERSION_MAX_ALLOWED, functions and Objective-C methods on
+# MAC_OS_X_VERSION_MIN_REQUIRED; see each patch header.
+
+# pthread_jit_write_protect_np: macOS 11
+patchfiles-append       patch-qemu-osdep-pthread-jit.diff
+
+# IOMainPort: macOS 12 rename of IOMasterPort
+patchfiles-append       patch-qemu-block-file-posix-iomainport.diff
+
+# kAudioObjectPropertyElementMain: macOS 12 rename of ...Master
+patchfiles-append       patch-qemu-coreaudio-element-main.diff
+
+# NSScreen safeAreaInsets: macOS 12
+patchfiles-append       patch-qemu-cocoa-safeareainsets.diff
+
+# HV_DENIED: added to hv_return_t in the macOS 11 SDK
+patchfiles-append       patch-qemu-hvf-hv-denied.diff
+
+# hv_vcpu_run_until() (macOS 10.15) / HV_DEADLINE_FOREVER (macOS 11),
+# dispatched at run time where the SDK and deployment target disagree
+patchfiles-append       patch-qemu-hvf-i386-old-sdk.diff
+
+# timespec_get()/TIME_UTC: C11, reached macOS in 10.15
+patchfiles-append       patch-qemu-uftrace-timespec-get.diff
+
+# vmnet isolation / network-identifier keys and VMNET_SHARING_SERVICE_BUSY:
+# macOS 11.  Restores the guards qemu carried until commit 3bf445fbb199.
+patchfiles-append       patch-qemu-net-vmnet-common.diff
+patchfiles-append       patch-qemu-net-vmnet-host.diff
+patchfiles-append       patch-qemu-net-vmnet-shared.diff
+patchfiles-append       patch-qemu-net-vmnet-bridged.diff
+
+# 11.1.0 added HVF nested virtualization and an in-kernel vGIC, which use
+# Hypervisor.framework APIs and constants (HV_SYS_REG_*_EL2, hv_gic_*,
+# hv_vm_config_*_el2_*) that Apple introduced in the macOS 15.0 SDK. Upstream
+# gates them on __builtin_available() and silences -Wunguarded-availability,
+# which suffices only when the SDK declares the symbols and marks them as
+# newer than the deployment target. An older SDK does not declare them at
+# all, so the build fails outright, e.g. on macOS 14 with "error: use of
+# undeclared identifier 'HV_SYS_REG_CNTHCTL_EL2'". Compile those paths out
+# when building against a pre-15.0 SDK; the runtime checks guarding them
+# could never succeed on such systems anyway.
+patchfiles-append       patch-qemu-hvf-macos15-sdk.diff
+
 # ERROR: Problem encountered: You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU
 compiler.blacklist      {clang < 1500} {macports-clang-[3-9].*} {macports-gcc-[56]} {*gcc-[34].*}
 if {${os.platform} eq "darwin" && ${os.major} < 11 && [string match *clang* ${configure.compiler}]} {
@@ -101,6 +153,7 @@ configure.args-append   --disable-cocoa \
                         --disable-sdl \
                         --disable-gtk \
                         --disable-opengl \
+                        --disable-virglrenderer \
                         --enable-bzip2 \
                         --enable-hvf \
                         --disable-curl \
@@ -119,7 +172,6 @@ configure.args-append   --disable-cocoa \
                         --disable-seccomp \
                         --enable-slirp \
                         --disable-linux-aio \
-                        --disable-glusterfs \
                         --disable-rdma \
                         --disable-libssh \
                         --disable-vnc \
@@ -162,6 +214,14 @@ if {${os.platform} eq "darwin" && ${os.major} < 16} {
 
 # libtool: unknown option character `-' in: --mode=compile
 configure.env-append   LIBTOOL=${prefix}/bin/glibtool
+
+# …/hw/display/apple-gfx.m:… error: 'PGTask_t' is unavailable: obsoleted in macOS 27.0 - No longer supported
+#
+# It’s almost certain that a future version of qemu will handle this more
+# gracefully on its own. Remove this when qemu has adapted.
+if {${os.platform} eq "darwin" && ${os.major} >= 27} {
+    configure.args-append --disable-pvg
+}
 
 set target_list {}
 pre-configure {
@@ -210,18 +270,16 @@ variant cocoa description {Use the native Mac OS X graphical user interface} {
 
 variant curses description {Use the curses text-only user interface} {
     configure.args-replace  --disable-curses --enable-curses
-    configure.args-append   --extra-cflags=-DNCURSES_WIDECHAR=1
-    depends_lib-append      port:ncurses
+    depends_lib-append      port:ncurses \
+                            port:libiconv
 }
 
-# XXX: gtk/sdl need libepoxy for OpenGL
-
-variant gtk3 description {Use the GTK+3 graphical user interface} conflicts cocoa {
+variant gtk3 description {Use the GTK+3 graphical user interface} {
     configure.args-replace  --disable-gtk --enable-gtk
     depends_lib-append      path:lib/pkgconfig/gtk+-3.0.pc:gtk3 port:vte
 }
 
-variant sdl2 description {Use the SDL 2 graphical user interface} conflicts cocoa {
+variant sdl2 description {Use the SDL 2 graphical user interface} {
     configure.args-replace  --disable-sdl --enable-sdl
     depends_lib-append      port:libsdl2
 }
@@ -253,7 +311,7 @@ variant vnc description {Support VNC server} {
 
 variant spice_protocol description {Support Spice protocol} {
     configure.args-replace  --disable-spice-protocol --enable-spice-protocol
-    depends_lib-append      port:spice-protocol
+    depends_build-append    port:spice-protocol
 }
 
 variant spice requires spice_protocol description {Support Spice server} {
@@ -279,6 +337,20 @@ variant dbus description {Export the VM display through D-Bus} {
 variant fuse description {Support exporting block devices via FUSE} {
     configure.args-replace  --disable-fuse --enable-fuse
     depends_lib-append      port:macfuse
+}
+
+variant gl description {Support 3D acceleration in guests} {
+    configure.args-replace  --disable-opengl --enable-opengl \
+                            --disable-virglrenderer --enable-virglrenderer
+    depends_lib-append      port:libepoxy \
+                            port:virglrenderer
+    require_active_variants libepoxy egl
+
+    # ui/egl-helpers.c is only compiled with opengl enabled.  Mesa's
+    # surfaceless EGL, which is what is used here, typedefs
+    # EGLNativeDisplayType to int, so passing it to eglGetPlatformDisplayEXT()
+    # is an integer-to-pointer conversion -- an error from clang 15 onwards.
+    patchfiles-append       patch-qemu-egl-native-display-cast.diff
 }
 
 # Default universal variant does not work

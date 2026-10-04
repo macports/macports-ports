@@ -1,0 +1,145 @@
+diff --git a/ffi/shim.h b/ffi/shim.h
+index 15106a1..2bc0df9 100644
+--- ffi/shim.h
++++ ffi/shim.h
+@@ -2,6 +2,10 @@
+ #include <string.h>
+ #include <stdio.h>
+ #define CURL_STATICLIB
++#ifdef USE_MACPORTS_CURL
++#include "curl-impersonate/curl.h"
++#else
+ #include "curl/curl.h"
++#endif
+ 
+ int _curl_easy_setopt(void* curl, int option, void* param);
+diff --git a/scripts/build.py b/scripts/build.py
+index 3692dd8..2ad1c39 100644
+--- scripts/build.py
++++ scripts/build.py
+@@ -27,12 +27,34 @@ def is_android_env() -> bool:
+     )
+ 
+ 
++def detect_macports_curl_impersonate():
++    """Check if curl-impersonate is installed via MacPorts."""
++    macports_lib = Path("@PREFIX@/lib/libcurl-impersonate.dylib")
++    macports_include = Path("@PREFIX@/include/curl-impersonate")
++
++    # Check if USE_SYSTEM_CURL_IMPERSONATE env var is set
++    if os.environ.get("USE_SYSTEM_CURL_IMPERSONATE"):
++        return True
++
++    # Auto-detect MacPorts installation
++    if macports_lib.exists() and macports_include.exists():
++        return True
++
++    return False
++
++def normalize_machine(machine: str) -> str:
++    m = machine.lower()
++    if m in {"power", "powerpc", "ppc", "ppc64", "power macintosh"}:
++        return "powerpc"
++    return m
++
+ def detect_arch():
+     with open(Path(__file__).parent.parent / "libs.json") as f:
+         archs = json.loads(f.read())
+ 
+     uname = platform.uname()
+     uname_system = "Android" if is_android_env() else uname.system
++    uname_machine = normalize_machine(uname.machine)
+     glibc_flavor = "gnueabihf" if uname.machine in ["armv7l", "armv6l"] else "gnu"
+ 
+     libc, _ = platform.libc_ver()
+@@ -42,14 +64,21 @@ def detect_arch():
+         libc = "android"
+     pointer_size = struct.calcsize("P") * 8
+ 
++    # Check for installation via ports
++    use_macports = detect_macports_curl_impersonate()
++
+     for arch in archs:
+         if (
+             arch["system"] == uname_system
+-            and arch["machine"] == uname.machine
++            and arch["machine"] == uname_machine
+             and arch["pointer_size"] == pointer_size
+             and ("libc" not in arch or arch.get("libc") == libc)
+         ):
+-            if build_dir := os.environ.get("IMPERSONATE_BUILD_DIR"):
++            if use_macports and arch["system"] == "Darwin":
++                # Use MacPorts installation
++                arch["libdir"] = "@PREFIX@/lib"
++                arch["use_macports"] = True
++            elif build_dir := os.environ.get("IMPERSONATE_BUILD_DIR"):
+                 arch["libdir"] = os.path.expanduser(build_dir)
+             elif arch.get("libdir"):
+                 arch["libdir"] = os.path.expanduser(arch["libdir"])
+@@ -103,6 +132,11 @@ print(f"Using {libdir} to store libcurl-impersonate")
+ 
+ 
+ def download_libcurl():
++    # Skip download if using MacPorts or system installation
++    if arch.get("use_macports"):
++        print(f"Using MacPorts curl-impersonate from {libdir}")
++        return
++
+     expected = libdir / obj_name
+     if expected.exists():
+         print(f"libcurl-impersonate: {expected} already downloaded.")
+@@ -191,7 +225,7 @@ if is_static:
+     if system == "Darwin":
+         extra_link_args = [
+             f"-Wl,-force_load,{static_libs[0]}",
+-            "-lc++",
++            "-l@CXXLIB@",
+         ]
+     elif is_android:
+         extra_link_args = [
+@@ -209,6 +243,25 @@ if is_static:
+ 
+ libraries = get_curl_libraries()
+ 
++# Determine include directories and compile flags
++if arch.get("use_macports"):
++    curl_include_dirs = [
++        str(root_dir / "ffi"),
++        "@PREFIX@/include",
++    ]
++    extra_compile_flags = ["-DUSE_MACPORTS_CURL"]
++else:
++    curl_include_dirs = [
++        str(root_dir / "include"),
++        str(root_dir / "ffi"),
++        str(libdir / "include"),
++    ]
++    extra_compile_flags = []
++
++# Add platform-specific compile flags
++if system == "Darwin":
++    extra_compile_flags.append("-Wno-implicit-function-declaration")
++
+ ffibuilder.set_source(
+     "curl_cffi._wrapper",
+     """
+@@ -221,17 +274,11 @@ ffibuilder.set_source(
+     libraries=get_curl_libraries(),
+     extra_objects=[],  # linked via extra_link_args
+     source_extension=".c",
+-    include_dirs=[
+-        str(root_dir / "include"),
+-        str(root_dir / "ffi"),
+-        str(libdir / "include"),
+-    ],
++    include_dirs=curl_include_dirs,
+     sources=[
+         str(root_dir / "ffi/shim.c"),
+     ],
+-    extra_compile_args=(
+-        ["-Wno-implicit-function-declaration"] if system == "Darwin" else []
+-    ),
++    extra_compile_args=extra_compile_flags,
+     extra_link_args=extra_link_args,
+ )
+ 

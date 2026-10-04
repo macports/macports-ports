@@ -21,6 +21,10 @@ if {${os.platform} eq "darwin" && ${os.major} < 16} {
     set fuse_port "macfuse"
     set fuse_path "lib/pkgconfig/fuse.pc"
 
+    if {${os.platform} eq "darwin" && ${os.major} < 21} {
+        set fuse_port "macfuse4"
+    }
+
     configure.cflags-append -I${prefix}/include/fuse
     configure.cppflags-append -I${prefix}/include/fuse
 

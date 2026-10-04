@@ -1,0 +1,192 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+PortGroup           legacysupport 1.1
+PortGroup           go_toolchain  1.0
+
+legacysupport.newest_darwin_requires_legacy 16
+
+name                go-1.17
+version             1.17.13
+revision            1
+categories          lang
+license             BSD
+
+maintainers         {gmail.com:herby.gillot @herbygillot} \
+                    openmaintainer
+
+description         compiled, garbage-collected, concurrent programming \
+                    language developed by Google Inc.
+
+long_description    \
+    The Go programming language is an open source project to make programmers \
+    more productive. This port provides Go ${version}, the newest release that \
+    can be built for versions of macOS older than 10.13 High Sierra. It is \
+    installed alongside any other Go toolchain as go-1.17 and gofmt-1.17.
+
+homepage            https://go.dev
+
+# Upstream supports Go 1.17 on 10.13 and later, and ships no binary that runs
+# below that: the release imports clock_gettime, which arrived in 10.12, so
+# dyld cannot load it on 10.11 or older whatever the build claims to target.
+# MacPorts builds 1.17.13 from source instead, where legacysupport supplies
+# what these systems lack, and this port carries that forward.
+#
+# The range is bounded at both ends. From 10.13 onwards a newer Go is
+# available, and a modern toolchain building this release is untested. Below
+# 10.7 it cannot be built at all: on 10.6 the system dsymutil aborts on the
+# debug information Go's linker emits, failing the final link. The main `go`
+# port has never produced a 10.6 x86_64 build either.
+platforms           "darwin >= [go_toolchain.min_darwin 1.17] < 17"
+
+# Go dropped darwin/386 in 1.15, so no toolchain here is built for it and no
+# Go is available to an i386 build on any system.
+supported_archs     x86_64
+
+master_sites        ${homepage}/dl/
+distfiles           go${version}.src${extract.suffix}
+worksrcdir          go
+
+checksums           rmd160  6d8a13da5112ee67bb886eca0fec77ffaab27a5f \
+                    sha256  a1a48b23afb206f95e7bbaa9b898d965f90826f6f1d1fc0c1d784ada0cd300fd \
+                    size    22206518
+
+set GOROOT          ${worksrcpath}
+set GOROOT_FINAL    ${prefix}/lib/${name}
+set GOARCH          amd64
+
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    set legacy_build    true
+} else {
+    set legacy_build    false
+}
+
+use_configure       no
+use_parallel_build  no
+
+# build.cmd is a shell script that runs make itself, so stop the port system
+# adding a -j flag.
+build.jobs          -1
+build.dir           ${worksrcpath}/src
+build.cmd           ./make.bash
+build.target
+build.env           GOROOT=${GOROOT} \
+                    GOARCH=${GOARCH} \
+                    GOOS=darwin \
+                    GOROOT_FINAL=${GOROOT_FINAL} \
+                    CC=${configure.cc}
+
+# Bootstrap from go-1.4, the last release written in C, rather than from the
+# official prebuilt 1.17.13 toolchain. That binary imports clock_gettime and
+# so cannot start on most of the range this port covers, which is the same
+# trap that broke the main `go` port on newer systems: a bootstrap that
+# needs a newer macOS than the one building it
+# (https://trac.macports.org/ticket/73086). go-1.4 predates the problem
+# entirely and builds anywhere.
+#
+# Note that the two cases fail on different symbols. #73086 is
+# SecTrustCopyCertificateChain, which 1.25 adopted; 1.17 does not touch
+# Security.framework beyond four APIs that predate every system here.
+depends_build       port:go-1.4
+
+build.env-append    GOROOT_BOOTSTRAP=${prefix}/lib/go-1.4 \
+                    GOHOSTARCH=${GOARCH}
+
+if {${os.platform} eq "darwin" \
+    && ${os.major} <= ${legacysupport.newest_darwin_requires_legacy}} {
+    # The legacy support PG will not actually change anything in this port
+    # directly, since go doesn't use the standard CFLAGS/CXXFLAGS. We need to
+    # patch the build system and set up env variables manually.
+
+    if {!${legacy_build}} {
+        # Older compilers don't support the -Wno-nullability-completeness flag
+        # and if that's the case, they won't need it anyway, so just patch it
+        # out. Upstream no longer uses the flag as of 1.19beta1.
+        # https://github.com/golang/go/commit/bf19163a545c3117ab3c309a691f32a42cf29efd
+        patchfiles-append   patch-cgo-drop-no-nullability-completeness.diff
+    }
+
+    build.env-append    "GO_EXTLINK_ENABLED=1" \
+                        "GO_LDFLAGS=\"-extldflags=${configure.ldflags}\"" \
+                        "BOOT_GO_LDFLAGS=-extldflags=${configure.ldflags}" \
+                        "CGO_LDFLAGS=-g -O2 ${configure.ldflags}"
+
+    notes-append [subst {
+                    go-1.17 had to be specially patched and built to work on\
+                    your platform.
+
+                    It likely won't work out of the box when building other\
+                    projects, so make sure change your environment to use the\
+                    following variables:
+                      * GO_EXTLINK_ENABLED="1"
+                    to always force go to use the external gcc or clang linker\
+                    and
+                      * GO_LDFLAGS="\\\"-extldflags=\${configure.ldflags}\\\""
+                      * CGO_LDFLAGS="-g -O2 \${configure.ldflags}"
+                    to force-link any binary against the legacy support\
+                    library. Use exactly the quoting provided here, even if it\
+                    may look odd, or compilation will fail.
+
+                    Failure to do so will leave you unable to create binaries\
+                    that use features not natively available on your system,\
+                    either directly or through a go core dependency.
+    }]
+}
+
+if {${os.platform} eq "darwin" && ${os.major} == 10} {
+    # The branch https://github.com/catap/go/tree/macos-10.6
+    patchfiles-append   patch-macOS-10.6.diff
+}
+
+post-build {
+    system "find ${worksrcpath} -type d -name .hg* -print0 | xargs -0 rm -rf"
+
+    if {[file exists ${worksrcpath}/pkg/bootstrap]} {
+        delete ${worksrcpath}/pkg/bootstrap
+    }
+}
+
+destroot {
+    # A deliberately malformed Mach-O test fixture that upsets destroot.
+    set malformed ${worksrcpath}/src/cmd/vendor/github.com/google/pprof/internal/binutils/testdata/malformed_macho
+    if {[file exists ${malformed}]} {
+        delete ${malformed}
+    }
+
+    set grfdir ${destroot}${GOROOT_FINAL}
+    set docdir ${destroot}${prefix}/share/doc/${name}
+
+    xinstall -d ${grfdir}
+    xinstall -d ${docdir}
+
+    foreach f {api bin lib misc pkg src test VERSION} {
+        if {[file exists ${worksrcpath}/${f}]} {
+            copy ${worksrcpath}/${f} ${grfdir}
+        }
+    }
+
+    foreach f {go gofmt} {
+        ln -s ../lib/${name}/bin/${f} ${destroot}${prefix}/bin/${f}-1.17
+    }
+
+    foreach f {CONTRIBUTING.md LICENSE PATENTS SECURITY.md VERSION} {
+        if {[file exists ${worksrcpath}/${f}]} {
+            xinstall -m 0644 -W ${worksrcpath} ${f} ${docdir}
+        }
+    }
+
+    if {[file exists ${worksrcpath}/doc]} {
+        copy {*}[glob -directory ${worksrcpath}/doc *] ${docdir}
+    }
+}
+
+notes-append "
+    Installed as go-1.17 and gofmt-1.17, with GOROOT at ${prefix}/lib/go-1.17.
+"
+
+# Match only this branch, so this port is not reported as outdated against
+# whatever the current Go release happens to be.
+livecheck.type      regex
+livecheck.url       ${homepage}/dl/
+livecheck.regex     {go(1\.17\.[0-9.]+)\.src\.tar\.gz}

@@ -10,3 +10,12 @@
 
 ;; Info-directory-list contains ${prefix}/share/info. See #32148.
 (setq Info-default-directory-list (cons "__PREFIX__/share/info" Info-default-directory-list))
+
+;; Load per-package startup snippets that MacPorts elisp ports install into
+;; site-lisp/site-start.d/ (e.g. to register their autoloads).
+(let ((site-start-d "__PREFIX__/share/emacs/site-lisp/site-start.d"))
+  (when (file-directory-p site-start-d)
+    (dolist (f (directory-files site-start-d t "\\.el\\'"))
+      (condition-case err
+          (load f nil t)
+        (error (message "site-start.d: error loading %s: %s" f err))))))
