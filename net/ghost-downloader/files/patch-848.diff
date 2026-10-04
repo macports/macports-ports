@@ -1,0 +1,200 @@
+diff --git a/features/bili_pack/pack.py b/features/bili_pack/pack.py
+index e86baa2c..9dd622ae 100644
+--- a/features/bili_pack/pack.py
++++ b/features/bili_pack/pack.py
+@@ -5,13 +5,12 @@
+ from app.client import buildClient
+ from app.models.pack import FeaturePack, TaskParser
+ from app.models.task import TaskOptions
+-from app.platform.filesystem import toSafeFilename
+ from .account import BilibiliAccount
+ from .cards import BilibiliDraftCard, BilibiliTaskCard
+ from .config import bilibiliConfig
+ from .parse import buildPages, parseBiliUrl
+ from .stream import buildSize, fetchPlayurl, toStreamUrl
+-from .task import BilibiliTask
++from .task import BilibiliTask, toSafeName
+ 
+ 
+ class BilibiliParser(TaskParser):
+@@ -67,7 +66,7 @@ async def parse(self, options: TaskOptions) -> Task:
+                 raise ValueError("未获取到视频分P信息")
+ 
+             requestedQuality = bilibiliConfig.defaultQuality.value
+-            baseName = toSafeFilename(title, fallback="bilibili_video")
++            baseName = toSafeName(title, fallback="bilibili_video")
+             for page in parsedPages:
+                 page.headers = dict(downloadHeaders)
+                 page.subworkerCount = subworkerCount
+diff --git a/features/bili_pack/task.py b/features/bili_pack/task.py
+index 43a19e15..730fd184 100644
+--- a/features/bili_pack/task.py
++++ b/features/bili_pack/task.py
+@@ -18,6 +18,10 @@
+ AUDIO_QUALITY_LABELS = {30216: "64K", 30232: "132K", 30280: "192K", 30250: "杜比全景声", 30251: "Hi-Res"}
+ 
+ 
++def toSafeName(name: str, fallback: str = "file") -> str:
++    return toSafeFilename(name.replace("/", "_").replace("\\", "_"), fallback=fallback)
++
++
+ def buildTimeSuffix(startTime: int, endTime: int) -> str:
+     def fmt(sec: int) -> str:
+         m, s = divmod(sec, 60)
+@@ -105,10 +109,16 @@ class BilibiliTask(Task):
+     _acceptQualities: list[int] = field(default_factory=list, repr=False)
+     _qualityLabels: list[str] = field(default_factory=list, repr=False)
+ 
++    def __post_init__(self):
++        if self.files and len(self.files) > 1:
++            self._baseName = self._baseName or Path(self.name).stem
++            self.name = self._baseName
++        super().__post_init__()
++
+     @property
+     def outputPath(self) -> str:
+         if self.files and len(self.files) > 1:
+-            return str(self.outputFolder / Path(self.name).stem)
++            return str(self.outputFolder / self.name)
+         return super().outputPath
+ 
+     @property
+@@ -117,6 +127,12 @@ def filesFolder(self) -> Path:
+             return Path(self.outputPath)
+         return self.outputFolder
+ 
++    @property
++    def fileStem(self) -> str:
++        if self.files and len(self.files) > 1:
++            return self.name
++        return Path(self.name).stem
++
+     @property
+     def isSeason(self) -> bool:
+         files = self.files or []
+@@ -168,7 +184,7 @@ def updateSuffixes(self) -> None:
+ 
+     def setName(self, name: str):
+         super().setName(name)
+-        self._baseName = Path(self.name).stem
++        self._baseName = self.name if self.files and len(self.files) > 1 else Path(self.name).stem
+ 
+     def setVideoQuality(self, qn: int, codecid: int) -> None:
+         self.requestedQn = qn
+@@ -227,6 +243,9 @@ def update(self) -> None:
+             self.fileSize = 0
+             return
+ 
++        if len(files) > 1:
++            self.name = self._baseName
++
+         for file in files:
+             fullSize = (file.videoSize if self.isVideoEnabled else 0) + (file.audioSize if self.isAudioEnabled else 0)
+             if (file.startTime or file.endTime) and file._duration > 0:
+@@ -331,11 +350,11 @@ def _pageSuffix(self, page: BiliPage) -> str:
+         if len(self.files or []) <= 1:
+             return ""
+         if page.episodeTitle:
+-            title = toSafeFilename(page.episodeTitle, fallback=page.bvid or "video")
++            title = toSafeName(page.episodeTitle, fallback=page.bvid or "video")
+             same = sum(1 for f in (self.files or []) if f.bvid == page.bvid)
+             if same > 1:
+                 suffix = f" - {title} - P{page.pageNumber}"
+-                part = toSafeFilename(page.pagePart.strip(), fallback="") if page.pagePart.strip() else ""
++                part = toSafeName(page.pagePart.strip(), fallback="") if page.pagePart.strip() else ""
+                 if part and part != title:
+                     suffix += f" {part}"
+             else:
+@@ -344,15 +363,14 @@ def _pageSuffix(self, page: BiliPage) -> str:
+             suffix = f" - P{page.pageNumber}"
+             part = page.pagePart.strip()
+             if part and part != self._baseName:
+-                suffix += f" {toSafeFilename(part, fallback=part)}"
++                suffix += f" {toSafeName(part, fallback=part)}"
+         if page.startTime or page.endTime:
+             suffix += f" {buildTimeSuffix(page.startTime, page.endTime)}"
+         return suffix
+ 
+ 
+-def pageStem(taskName: str, pageSuffix: str) -> str:
+-    stem = Path(taskName).stem
+-    return f"{stem}{pageSuffix}" if pageSuffix else stem
++def pageStem(fileStem: str, pageSuffix: str) -> str:
++    return f"{fileStem}{pageSuffix}" if pageSuffix else fileStem
+ 
+ 
+ @dataclass(kw_only=True)
+@@ -366,7 +384,7 @@ def outputPath(self) -> str:
+             title = (page.episodeTitle or page.bvid or f"#{page.index}") if page else ""
+             if title:
+                 stem = f"{stem} - {title}"
+-        return str(self.task.filesFolder / toSafeFilename(f"{stem}.jpg", fallback="cover.jpg"))
++        return str(self.task.filesFolder / toSafeName(f"{stem}.jpg", fallback="cover.jpg"))
+ 
+ 
+ @dataclass(kw_only=True)
+@@ -376,7 +394,7 @@ class BilibiliVideoStep(HttpTaskStep):
+ 
+     @property
+     def outputPath(self) -> str:
+-        stem = pageStem(self.task.name, self.pageSuffix)
++        stem = pageStem(self.task.fileStem, self.pageSuffix)
+         page = pageByIndex(self.task, self.fileIndex)
+         hasTrim = page is not None and bool(page.startTime or page.endTime)
+         if (self.task.isAudioEnabled and (self.task.hasAudio or len(self.task.files or []) > 1)) or hasTrim:
+@@ -444,7 +462,7 @@ class BilibiliAudioStep(HttpTaskStep):
+ 
+     @property
+     def outputPath(self) -> str:
+-        stem = pageStem(self.task.name, self.pageSuffix)
++        stem = pageStem(self.task.fileStem, self.pageSuffix)
+         page = pageByIndex(self.task, self.fileIndex)
+         hasTrim = page is not None and bool(page.startTime or page.endTime)
+         if self.task.isVideoEnabled or hasTrim:
+@@ -516,17 +534,17 @@ class BilibiliMergeStep(FFmpegStep):
+ 
+     @property
+     def outputFile(self) -> str:
+-        stem = pageStem(self.task.name, self.pageSuffix)
++        stem = pageStem(self.task.fileStem, self.pageSuffix)
+         ext = "mp4" if self.task.isVideoEnabled else "m4a"
+         return str(self.task.filesFolder / f"{stem}.{ext}")
+ 
+     @property
+     def _videoPath(self) -> Path:
+-        return self.task.filesFolder / f"{pageStem(self.task.name, self.pageSuffix)}.video.m4s"
++        return self.task.filesFolder / f"{pageStem(self.task.fileStem, self.pageSuffix)}.video.m4s"
+ 
+     @property
+     def _audioPath(self) -> Path:
+-        return self.task.filesFolder / f"{pageStem(self.task.name, self.pageSuffix)}.audio.m4s"
++        return self.task.filesFolder / f"{pageStem(self.task.fileStem, self.pageSuffix)}.audio.m4s"
+ 
+     @property
+     def _timeRange(self) -> tuple[int, int] | None:
+@@ -649,14 +667,14 @@ def outputPath(self) -> str:
+         return ""
+ 
+     def deleteFiles(self) -> None:
+-        stem = pageStem(self.task.name, self.pageSuffix)
++        stem = pageStem(self.task.fileStem, self.pageSuffix)
+         folder = self.task.filesFolder
+         for path in folder.glob(f"{stem}.*.srt"):
+             path.unlink(missing_ok=True)
+ 
+     def moveFiles(self, oldFolder: Path, newFolder: Path) -> None:
+         from shutil import move
+-        stem = pageStem(self.task.name, self.pageSuffix)
++        stem = pageStem(self.task.fileStem, self.pageSuffix)
+         folder = self.task.filesFolder
+         for path in folder.glob(f"{stem}.*.srt"):
+             target = newFolder / path.relative_to(oldFolder)
+@@ -691,7 +709,7 @@ async def run(self, reportSpeed, waitForSpeedLimit) -> None:
+             self.setStatus(TaskStatus.COMPLETED)
+             return
+ 
+-        stem = pageStem(task.name, self.pageSuffix)
++        stem = pageStem(task.fileStem, self.pageSuffix)
+         folder = task.filesFolder
+         folder.mkdir(parents=True, exist_ok=True)
+ 

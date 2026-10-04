@@ -4,11 +4,11 @@ PortSystem              1.0
 PortGroup               github 1.0
 PortGroup               cmake 1.1
 PortGroup               legacysupport 1.1
+PortGroup               active_variants 1.1
 
-github.setup            ggerganov llama.cpp 5785 b
+# llama.cpp and ggml must be updated in sync
+github.setup            ggerganov llama.cpp 0.5.0 v
 github.tarball_from     archive
-set git-commit          5dd942d
-# This line is for displaying commit in CLI only
 revision                0
 categories              llm
 maintainers             {i0ntempest @i0ntempest} openmaintainer
@@ -19,9 +19,22 @@ long_description        The main goal of ${name} is to enable LLM inference with
                         setup and state-of-the-art performance on a wide variety of hardware\
                          - locally and in the cloud.
 
-checksums               rmd160  b94cb1f84e4c162e396e0eeaa8be8310556882fb \
-                        sha256  8802f2042d11d95691a49d23d25f830592ad50748a282e784f9961c213f23857 \
-                        size    25032633
+set source_distfile     ${distfiles}
+set nightly_tag_distfile \
+                        nightly-tag-${version}.txt
+master_sites-append     https://github.com/ggml-org/llama.cpp/releases/download/v${version}/nightly-tag.txt?dummy=:nightly_tag
+distfiles-append        ${nightly_tag_distfile}:nightly_tag
+
+checksums               ${source_distfile} \
+                        rmd160  d50a047e18709e8fbd4cacb320ed1e3c6662a5be \
+                        sha256  fef9ed754f4e031fb5c663c29260feda4ebc241abb68d64a81c0f1df5f1748e2 \
+                        size    37561391 \
+                        ${nightly_tag_distfile} \
+                        rmd160  1932836a36e690fec595471902ae1278f64d5cc8 \
+                        sha256  defb2cdfd758ca455a291fe3e37c0f9a442f5ed4fcafe4cbc179237cfb43374f \
+                        size    7
+
+extract.only            ${source_distfile}
 
 # error: 'filesystem' file not found on 10.14
 legacysupport.newest_darwin_requires_legacy \
@@ -31,117 +44,119 @@ legacysupport.use_mp_libcxx \
 
 depends_build-append    path:bin/pkg-config:pkgconfig
 
-depends_lib-append      port:curl
+depends_lib-append      port:curl \
+                        port:ggml
 
 compiler.cxx_standard   2017
 
 # cmake relies on git for version info. We need to set them manually.
-configure.args-append   -DGGML_LTO=ON \
-                        -DGGML_CCACHE=OFF \
-                        -DGGML_OPENMP=OFF \
-                        -DLLAMA_CURL=ON \
-                        -DLLAMA_BUILD_NUMBER=${version} \
-                        -DLLAMA_BUILD_COMMIT=${git-commit}
+configure.args-append   -DLLAMA_CURL=ON \
+                        -DLLAMA_BUILD_IS_DEV=OFF \
+                        -DLLAMA_BUILD_TESTS=OFF \
+                        -DLLAMA_USE_SYSTEM_GGML=ON
 
-# error: use of undeclared identifier 'MTLGPUFamilyApple7' on 10.14
-if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx" && \
-    (${os.major} >= 20 && ${configure.sdk_version} >= 11)} {
-    configure.args-append \
-                        -DGGML_METAL=ON \
-                        -DGGML_METAL_EMBED_LIBRARY=ON \
-                        -DGGML_METAL_MACOSX_VERSION_MIN=${macos_version_major}
-} else {
-    configure.args-append \
-                        -DGGML_METAL=OFF \
-                        -DGGML_METAL_EMBED_LIBRARY=OFF
-}
+pre-configure {
+    set fd [open ${distpath}/${nightly_tag_distfile} r]
+    set nightly_tag [string trim [read ${fd}]]
+    close ${fd}
 
-post-destroot {
-    delete {*}[glob -directory ${destroot}${prefix}/bin/ convert*.py]
-}
-
-variant blas description {Uses BLAS, improves performance} {
-    configure.args-append \
-                        -DGGML_BLAS=ON
-    if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx"} {
-        configure.args-append \
-                        -DGGML_ACCELLERATE=ON \
-                        -DGGML_BLAS_VENDOR=Apple
-    } else {
-        configure.args-append \
-                        -DGGML_ACCELLERATE=OFF \
-                        -DGGML_BLAS_VENDOR=OpenBLAS
-
-        depends_lib-append \
-                        path:lib/libopenblas.dylib:OpenBLAS
-    }
-}
-
-variant openmp description {enable parallelism support using OpenMP} {
-    compiler.openmp_version \
-                        4.5
-    compiler.blacklist-append \
-                        {macports-clang-[0-9].*}
-    configure.args-replace \
-                        -DGGML_OPENMP=OFF \
-                        -DGGML_OPENMP=ON
-    if {[string match *clang* ${configure.compiler}]} {
-        configure.ldflags-append \
-                        -L${prefix}/lib/libomp -lomp
-    }
-}
-
-variant model_converters description {install extra model conversion Python scripts} {
-    post-destroot {
-        xinstall -d ${destroot}${prefix}/share/${name}
-        xinstall -m 644 {*}[glob ${worksrcpath}/convert*.py] ${destroot}${prefix}/share/${name}
+    if {![regexp {^b([0-9]+)$} ${nightly_tag} -> llama_build_number]} {
+        return -code error \
+            "Invalid llama.cpp nightly tag: ${nightly_tag}"
     }
 
-    notes-append "
-        Model conversion scripts have been installed to:
+    set git-commit [exec curl -fsSL \
+                        -H "Accept: application/vnd.github.sha" \
+                        https://api.github.com/repos/ggml-org/llama.cpp/commits/${github.tag_prefix}${version} | \
+                        cut -c1-7]
 
-            ${prefix}/share/${name}/
-
-        These scripts should be executed in a Python virtual environment with at least\
-        these dependencies installed:
-            numpy
-            pytorch
-            transformers
-            gguf
-    "
+    configure.args-append \
+        -DLLAMA_BUILD_COMMIT=${git-commit} \
+        -DLLAMA_BUILD_NUMBER=${llama_build_number}
 }
 
-# This can replace the variant above once we have all the dependencies updated and fixed
-# See: https://github.com/macports/macports-ports/pull/27526
-#variant model_converters description {install extra model conversion Python scripts} {
-#    set ::python_branch   3.12
-#    set ::python_version  [string map {. ""} ${::python_branch}]
-#    depends_run-append    port:python${::python_version} \
-#                          port:py${::python_version}-numpy \
-#                          port:py${::python_version}-pytorch \
-#                          port:py${::python_version}-transformers \
-#                          port:py${::python_version}-gguf
-#
-#    post-patch {
-#        reinplace "s|#!/usr/bin/env python3|#!${prefix}/bin/python${::python_branch}|" {*}[glob ${worksrcpath}/convert*.py]
-#    }
-#
-#    post-destroot {
-#        xinstall -d ${destroot}${prefix}/libexec/${name}
-#        xinstall -m 755 {*}[glob ${worksrcpath}/convert*.py] ${destroot}${prefix}/libexec/${name}
-#        foreach file [glob -directory ${destroot}${prefix}/libexec/${name} *.py] {
-#            set filebasename [file rootname [file tail $file]]
-#            set link ${destroot}${prefix}/bin/[lindex [split ${name} .] 0]-[string map {_ -} ${filebasename}]
-#            set target [string replace ${file} 0 [string length ${destroot}]-1]
-#            ui_debug "Creating symlink: ${link} => ${target}"
-#            ln -s ${target} ${link}
-#        }
-#    }
-#}
+# Proxy dependency variants keep llama.cpp and ggml backend variants in sync.
+variant blas description {Use ggml with BLAS support} {
+    require_active_variants ggml blas
+}
 
-variant native description "Force local build and optimize for CPU" {
-    configure.args-append \
-                        -DGGML_NATIVE=ON
+variant openmp description {Use ggml with OpenMP support} {
+    require_active_variants ggml openmp
+}
+
+variant native description {Use ggml optimized for the build host CPU} {
+    require_active_variants ggml native
+}
+
+variant opencl description {Use ggml with OpenCL support} {
+    require_active_variants ggml opencl
+}
+
+variant metal conflicts vulkan description {Use ggml with Metal support} {
+    require_active_variants ggml metal
+}
+
+variant vulkan conflicts metal description {Use ggml with Vulkan support} {
+    require_active_variants ggml vulkan
 }
 
 default_variants        +blas +openmp
+
+# Newer Metal APIs used by ggml are unavailable with the 10.15 SDK.
+if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx" && \
+    (${os.major} >= 20 && ${configure.sdk_version} >= 11)} {
+    default_variants    +metal
+}
+
+set ::python_branch     3.14
+set ::python_version    [string map {. ""} ${::python_branch}]
+
+variant model_converters description {install extra model conversion Python scripts} {
+    depends_run-append  port:python${::python_version} \
+                        port:py${::python_version}-numpy \
+                        port:py${::python_version}-pytorch \
+                        port:py${::python_version}-transformers \
+                        port:py${::python_version}-mistral-common
+
+    post-patch {
+        reinplace "s|!/usr/bin/env python3|!${prefix}/bin/python${::python_branch}|" \
+            ${worksrcpath}/conversion/base.py \
+            {*}[glob ${worksrcpath}/convert*.py] \
+            {*}[glob ${worksrcpath}/gguf-py/gguf/scripts/*.py]
+    }
+
+    post-destroot {
+        xinstall -d ${destroot}${prefix}/libexec/${name}
+        xinstall -m 755 {*}[glob ${worksrcpath}/convert*.py] ${destroot}${prefix}/libexec/${name}/
+        copy ${worksrcpath}/conversion ${worksrcpath}/gguf-py ${destroot}${prefix}/libexec/${name}/
+        delete {*}[glob ${destroot}${prefix}/libexec/${name}/*_update.py]
+        foreach file {LICENSE examples tests} {
+            delete ${destroot}${prefix}/libexec/${name}/gguf-py/${file}
+        }
+        if {![variant_isset gui]} {
+            delete {*}[glob ${destroot}${prefix}/libexec/${name}/gguf-py/gguf/scripts/*gui.py]
+        }
+        foreach file [concat \
+            [glob -directory ${destroot}${prefix}/libexec/${name} *.py] \
+            [glob -directory ${destroot}${prefix}/libexec/${name}/gguf-py/gguf/scripts/ *.py] \
+        ] {
+            set filebasename [file rootname [file tail $file]]
+            set launcher ${destroot}${prefix}/bin/[lindex [split ${name} .] 0]-[string map {_ -} ${filebasename}]
+            set target [string replace ${file} 0 [string length ${destroot}]-1]
+            ui_debug "Creating launcher: ${launcher} => ${target}"
+            set fh [open ${launcher} w]
+            puts ${fh} "#!/bin/sh"
+            puts ${fh} "exec ${target} \"\$@\""
+            close ${fh}
+            file attributes ${launcher} -permissions 0755
+        }
+    }
+}
+
+variant gui requires model_converters description {install the Qt-based gguf-editor-gui script} {
+    depends_run-append  port:py${::python_version}-pyside6
+}
+
+livecheck.type          regex
+livecheck.url           https://api.github.com/repos/ggml-org/llama.cpp/releases/latest
+livecheck.regex         {"tag_name": "v([0-9.]+)"}

@@ -1,0 +1,138 @@
+--- a/src/osx/volume.mm	2025-12-08 06:59:42.000000000 +0800
++++ b/src/osx/volume.mm	2026-01-14 19:28:45.000000000 +0800
+@@ -42,6 +42,10 @@
+ #import <Foundation/NSFileManager.h>
+ #import <Foundation/NSURL.h>
+ 
++#if MAC_OS_X_VERSION_MAX_ALLOWED < 1060
++#include <sys/mount.h>
++#endif
++
+ // Fallbacks for legacy systems
+ #ifndef NSURLVolumeLocalizedNameKey
+ #define NSURLVolumeLocalizedNameKey @"NSURLVolumeLocalizedNameKey"
+@@ -62,6 +67,9 @@
+ 
+ wxArrayString wxFSVolumeBase::GetVolumes(int flagsSet, int flagsUnset)
+ {
++    wxArrayString volumePaths;
++
++#if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+ #ifdef USE_LEGACY_OBJC
+     NSArray* nativeVolumes = [[NSFileManager defaultManager]
+ #else
+@@ -70,7 +78,6 @@
+                           mountedVolumeURLsIncludingResourceValuesForKeys:nil
+                           options:NSVolumeEnumerationSkipHiddenVolumes];
+ 
+-    wxArrayString volumePaths;
+     if ( nativeVolumes == nil )
+     {
+         wxFSVolumeBase volume("/");
+@@ -96,6 +103,29 @@
+                 volumePaths.push_back(volume.GetName());
+         }
+     }
++#else
++    int count = getfsstat(NULL, 0, MNT_NOWAIT);
++    if (count > 0)
++    {
++        std::vector<struct statfs> mounts(count);
++        count = getfsstat(mounts.data(), count * sizeof(struct statfs), MNT_NOWAIT);
++
++        for (int i = 0; i < count; i++)
++        {
++            wxFSVolumeBase volume(mounts[i].f_mntonname);
++            int flags = volume.GetFlags();
++            if ((flags & flagsSet) == flagsSet && !(flags & flagsUnset))
++                volumePaths.push_back(volume.GetName());
++        }
++    }
++    else
++    {
++        wxFSVolumeBase volume("/");
++        int flags = volume.GetFlags();
++        if ((flags & flagsSet) == flagsSet && !(flags & flagsUnset))
++            volumePaths.push_back(volume.GetName());
++    }
++#endif
+     return volumePaths;
+ }
+ 
+--- a/src/osx/cocoa/stdpaths.mm	2025-12-08 06:59:42.000000000 +0800
++++ b/src/osx/cocoa/stdpaths.mm	2026-01-14 19:29:05.000000000 +0800
+@@ -113,6 +113,7 @@
+         case Dir_Downloads:
+             dirType = NSDownloadsDirectory;
+             break;
++#if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+         case Dir_Music:
+             dirType = NSMusicDirectory;
+             break;
+@@ -122,6 +123,7 @@
+         case Dir_Videos:
+             dirType = NSMoviesDirectory;
+             break;
++#endif
+         default:
+             dirType = NSDocumentDirectory;
+             break;
+
+--- a/src/osx/cocoa/utils_base.mm	2025-12-08 06:59:42.000000000 +0800
++++ b/src/osx/cocoa/utils_base.mm	2026-01-14 19:28:55.000000000 +0800
+@@ -213,6 +213,8 @@
+ 
+     // Path to bundle
+     wxString path = *argv++;
++
++#if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+     NSError *error = nil;
+     NSURL *url = [NSURL fileURLWithPath:wxCFStringRef(path).AsNSString() isDirectory:YES];
+ 
+@@ -275,7 +277,6 @@
+ 
+     NSWorkspace *ws = [NSWorkspace sharedWorkspace];
+ 
+-
+     NSRunningApplication *app = nil;
+ 
+     if ( [params count] > 0 )
+@@ -316,6 +317,10 @@
+ #endif
+         return false;
+     }
++#else
++    // Ugly hack for < 10.6
++    return false;
++#endif
+     return true;
+ }
+ 
+@@ -325,5 +330,12 @@
+ {
+     // The values of NSOrdered{Ascending,Same,Descending} are the same as
+     // expected return values of wxCmpNatural(), so we don't need to convert.
+-    return [wxCFStringRef(s1).AsNSString() localizedStandardCompare: wxCFStringRef(s2).AsNSString()];
++    NSString* ns1 = wxCFStringRef(s1).AsNSString();
++    NSString* ns2 = wxCFStringRef(s2).AsNSString();
++#if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
++    NSComparisonResult result = [ns1 localizedStandardCompare: ns2];
++#else
++    NSComparisonResult result = [ns1 localizedCompare: ns2];
++#endif
++    return static_cast<int>(result);
+ }
+
+--- a/src/osx/core/secretstore.cpp	2025-12-08 06:59:42.000000000 +0800
++++ b/src/osx/core/secretstore.cpp	2026-01-14 19:25:42.000000000 +0800
+@@ -31,6 +31,10 @@
+ 
+ #include <Security/Security.h>
+ 
++#ifndef errSecSuccess
++#define errSecSuccess 0
++#endif
++
+ namespace
+ {
+ 

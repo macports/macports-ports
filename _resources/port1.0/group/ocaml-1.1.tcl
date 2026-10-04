@@ -93,7 +93,7 @@
 #
 
 namespace eval ocaml {
-    set configs {
+    variable configs {
         build {
             oasis {
                 depends_lib     ocaml-findlib
@@ -142,7 +142,8 @@ namespace eval ocaml {
     }
 
     proc get_configs {type} {
-        return [dict get ${ocaml::configs} ${type}]
+        variable configs
+        return [dict get ${configs} ${type}]
     }
 
     proc resolve_config {type name} {
@@ -192,7 +193,8 @@ namespace eval ocaml {
     }
 
     proc has_config {type name} {
-        return [dict exists ${ocaml::configs} {*}[resolve_config $type $name]]
+        variable configs
+        return [dict exists ${configs} {*}[resolve_config $type $name]]
     }
 
     proc get_config {type name {required no}} {
@@ -205,8 +207,9 @@ namespace eval ocaml {
         }
 
         set path [resolve_config $type $name]
-        if {[dict exists ${ocaml::configs} {*}${path}]} {
-            return [dict get ${ocaml::configs} {*}${path}]
+        variable configs
+        if {[dict exists ${configs} {*}${path}]} {
+            return [dict get ${configs} {*}${path}]
         } elseif {!$required} {
             return -code error "Unknown ocaml $type type: $name"
         } else {

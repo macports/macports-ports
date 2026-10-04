@@ -1,13 +1,17 @@
 # add all working GCC compilers to the variable compilers based on ${os.major}
 
+if {![info exists use_hints]} {
+    global os.platform os.major
+}
+
 # https://trac.macports.org/ticket/57135
 # https://trac.macports.org/ticket/61636
 
-# GCC 14 on all systems
-lappend compilers macports-gcc-14
+# GCC 15 and GCC 14 on all systems
+lappend compilers macports-gcc-15 macports-gcc-14
 
 # GCC 11 to GCC 13 on OSX10.6+
-if {${os.major} >= 10 || [option os.platform] ne "darwin"} {
+if {${os.major} >= 10 || ${os.platform} ne "darwin"} {
     lappend compilers macports-gcc-13 macports-gcc-12 macports-gcc-11
 }
 

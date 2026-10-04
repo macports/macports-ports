@@ -32,7 +32,7 @@ PortGroup compiler_wrapper      1.0
 default compwrap.add_compiler_flags     no
 
 options makefile.override
-default makefile.override       {CC CXX OBJC OBJCXX FC F77 F90 JAVAC PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG}
+default makefile.override       {PREFIX CC CXX OBJC OBJCXX FC F77 F90 JAVAC PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG}
 
 options makefile.has_destdir
 default makefile.has_destdir    yes

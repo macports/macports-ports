@@ -440,7 +440,7 @@ platform macosx {
 
 
 # Trace writes to app.icon and add or remove makeicns dependency as necessary.
-trace variable app.icon w app._icon_trace
+trace add variable app.icon write app._icon_trace
 
 proc app._icon_trace {optionName unusedIndex unusedOperation} {
     global depends_build

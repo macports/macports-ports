@@ -1,0 +1,1129 @@
+diff --git a/crates/openlogi-core/src/diagnostics.rs b/crates/openlogi-core/src/diagnostics.rs
+index 74840de8d..9589c4e33 100644
+--- a/crates/openlogi-core/src/diagnostics.rs
++++ b/crates/openlogi-core/src/diagnostics.rs
+@@ -4,7 +4,10 @@ use std::fmt::Write as _;
+ 
+ use serde::{Deserialize, Serialize};
+ 
+-use crate::device::{BatteryInfo, BatteryStatus, Capabilities, DeviceKind, DeviceTransports};
++use crate::device::{
++    BatteryInfo, BatteryStatus, Capabilities, DeviceKind, DeviceModelInfo, DeviceTransports,
++};
++use crate::hid::{DeviceRoute, ReceiverBrand};
+ 
+ /// Where the resolver found the bundled device renders.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+@@ -26,6 +29,10 @@ pub enum ConnectionKind {
+     BoltReceiver,
+     /// Paired through a legacy Unifying receiver.
+     UnifyingReceiver,
++    /// Paired through a Logitech Nano receiver.
++    NanoReceiver,
++    /// Paired through a Logitech Lightspeed receiver.
++    LightspeedReceiver,
+     /// Connected directly over Bluetooth — no receiver involved.
+     BluetoothDirect,
+     /// Connected over a USB cable.
+@@ -34,6 +41,58 @@ pub enum ConnectionKind {
+     Unknown,
+ }
+ 
++impl ConnectionKind {
++    /// Classify the active connection from its route and HID++ model information.
++    #[must_use]
++    pub fn for_device(
++        route: Option<&DeviceRoute>,
++        receiver_brand: Option<ReceiverBrand>,
++        model: Option<&DeviceModelInfo>,
++    ) -> Self {
++        match route {
++            Some(DeviceRoute::Bolt { .. }) => Self::BoltReceiver,
++            Some(DeviceRoute::Unifying { .. }) => match receiver_brand {
++                Some(ReceiverBrand::Nano) => Self::NanoReceiver,
++                Some(ReceiverBrand::Lightspeed) => Self::LightspeedReceiver,
++                Some(ReceiverBrand::Bolt | ReceiverBrand::Unifying) | None => {
++                    Self::UnifyingReceiver
++                }
++            },
++            Some(DeviceRoute::Direct { product_id, .. }) => {
++                model.map_or(Self::Unknown, |model| direct_connection(*product_id, model))
++            }
++            Some(DeviceRoute::RawHid { .. }) => Self::Wired,
++            None => Self::Unknown,
++        }
++    }
++}
++
++fn direct_connection(product_id: u16, model: &DeviceModelInfo) -> ConnectionKind {
++    let candidates = [
++        (model.transports.bluetooth, ConnectionKind::BluetoothDirect),
++        (model.transports.btle, ConnectionKind::BluetoothDirect),
++        (model.transports.equad, ConnectionKind::Unknown),
++        (model.transports.usb, ConnectionKind::Wired),
++    ];
++    let mut model_ids = model.model_ids.into_iter();
++    let mut matched = None;
++    for (supported, kind) in candidates {
++        if !supported {
++            continue;
++        }
++        if model_ids
++            .next()
++            .is_some_and(|pid| pid != 0 && pid == product_id)
++        {
++            if matched.is_some() {
++                return ConnectionKind::Unknown;
++            }
++            matched = Some(kind);
++        }
++    }
++    matched.unwrap_or(ConnectionKind::Unknown)
++}
++
+ /// Whether a curated render resolved, or the device fell back to the silhouette.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "snake_case", tag = "state", content = "depot")]
+@@ -424,6 +483,8 @@ fn connection_label(connection: ConnectionKind) -> &'static str {
+     match connection {
+         ConnectionKind::BoltReceiver => "Logi Bolt receiver",
+         ConnectionKind::UnifyingReceiver => "Logi Unifying receiver",
++        ConnectionKind::NanoReceiver => "Logitech Nano receiver",
++        ConnectionKind::LightspeedReceiver => "Logitech Lightspeed receiver",
+         ConnectionKind::BluetoothDirect => "Bluetooth (direct)",
+         ConnectionKind::Wired => "Wired (USB)",
+         ConnectionKind::Unknown => "unknown",
+diff --git a/crates/openlogi-core/src/hid/route.rs b/crates/openlogi-core/src/hid/route.rs
+index 2843a0d50..fb1272733 100644
+--- a/crates/openlogi-core/src/hid/route.rs
++++ b/crates/openlogi-core/src/hid/route.rs
+@@ -103,12 +103,11 @@ pub fn is_receiver_pid(product_id: u16) -> bool {
+ /// but are surfaced under their own name.
+ #[must_use]
+ pub fn receiver_display_name(product_id: u16) -> &'static str {
+-    if find_receiver(LOGITECH_VENDOR_ID, product_id)
+-        .is_some_and(|receiver| receiver.brand == ReceiverBrand::Lightspeed)
+-    {
+-        "Lightspeed Receiver"
+-    } else {
+-        "Unifying Receiver"
++    match find_receiver(LOGITECH_VENDOR_ID, product_id).map(|receiver| receiver.brand) {
++        Some(ReceiverBrand::Bolt) => "Logi Bolt Receiver",
++        Some(ReceiverBrand::Nano) => "Nano Receiver",
++        Some(ReceiverBrand::Lightspeed) => "Lightspeed Receiver",
++        Some(ReceiverBrand::Unifying) | None => "Unifying Receiver",
+     }
+ }
+ 
+@@ -275,7 +274,7 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn lightspeed_receiver_has_its_own_display_name() {
++    fn receiver_families_have_their_own_display_names() {
+         // 0xc539 is the receiver bundled with the G502 LIGHTSPEED and the
+         // G Pro Wireless. It routes through the Unifying code path, but it is
+         // Lightspeed hardware and says so in its own USB product string, so it
+@@ -284,6 +283,8 @@ mod tests {
+         assert_eq!(receiver_display_name(0xc53f), "Lightspeed Receiver");
+         assert_eq!(receiver_display_name(0xc547), "Lightspeed Receiver");
+         assert_eq!(receiver_display_name(0xc54d), "Lightspeed Receiver");
++        assert_eq!(receiver_display_name(0xc537), "Nano Receiver");
++        assert_eq!(receiver_display_name(0xc548), "Logi Bolt Receiver");
+         assert_eq!(receiver_display_name(0xc52b), "Unifying Receiver");
+         assert_eq!(receiver_display_name(0xc532), "Unifying Receiver");
+     }
+diff --git a/crates/openlogi-desktop/src/app.rs b/crates/openlogi-desktop/src/app.rs
+index 19b76c6fc..9c2a14a35 100644
+--- a/crates/openlogi-desktop/src/app.rs
++++ b/crates/openlogi-desktop/src/app.rs
+@@ -5,7 +5,7 @@ use gpui::{
+ };
+ use gpui_base::Button as BaseButton;
+ use gpui_component::{
+-    Icon, IconName, TitleBar,
++    Icon, IconName, Root, TitleBar,
+     button::{Button, ButtonVariants as _},
+     v_flex,
+ };
+@@ -483,13 +483,15 @@ fn app_title_bar(cx: &App) -> impl IntoElement {
+ impl Render for AppView {
+     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+         let content = self.render_content(window, cx);
+-        // Root owns dialog state but the application must mount its layer.
+-        // Keep it present across connecting, permission, and error screens too.
++        // Root owns overlay state but the application must mount its layers.
++        // Keep them present across connecting, permission, and error screens too.
+         div()
+             .relative()
+             .size_full()
+             .child(content)
+-            .children(gpui_component::Root::render_dialog_layer(window, cx))
++            .children(Root::render_sheet_layer(window, cx))
++            .children(Root::render_dialog_layer(window, cx))
++            .children(Root::render_notification_layer(window, cx))
+     }
+ }
+ 
+diff --git a/crates/openlogi-desktop/src/app/detail.rs b/crates/openlogi-desktop/src/app/detail.rs
+index 008f68a41..bb8fbd619 100644
+--- a/crates/openlogi-desktop/src/app/detail.rs
++++ b/crates/openlogi-desktop/src/app/detail.rs
+@@ -882,7 +882,7 @@ fn device_description_list(record: DeviceRecord) -> impl IntoElement {
+     let connection = if is_camera {
+         tr!("device.usb").to_string()
+     } else {
+-        route_label(record.route.as_ref())
++        route_label(record.route.as_ref(), record.receiver_brand)
+     };
+     let mut items = vec![DescriptionItem::new(tr!("device.connection")).value(connection)];
+     if matches!(
+diff --git a/crates/openlogi-desktop/src/app/home.rs b/crates/openlogi-desktop/src/app/home.rs
+index 3f2f13343..27ec01065 100644
+--- a/crates/openlogi-desktop/src/app/home.rs
++++ b/crates/openlogi-desktop/src/app/home.rs
+@@ -27,8 +27,9 @@ use gpui_component::{
+     v_flex,
+ };
+ use openlogi_core::config::{DeviceViewMode, LightSettings};
+-use openlogi_core::device::{DeviceKind, DeviceTransports};
+-use openlogi_core::hid::DeviceRoute;
++use openlogi_core::device::{DeviceKind, DeviceModelInfo};
++use openlogi_core::diagnostics::ConnectionKind;
++use openlogi_core::hid::{DeviceRoute, ReceiverBrand};
+ use openlogi_ipc::PairingFailure;
+ 
+ use super::AppView;
+@@ -271,7 +272,8 @@ fn transport_glance(record: &DeviceRecord, pal: Palette) -> impl IntoElement {
+     } else {
+         connection_icon_path(
+             record.route.as_ref(),
+-            record.model_info.as_ref().map(|model| &model.transports),
++            record.receiver_brand,
++            record.model_info.as_ref(),
+         )
+     };
+     let color: Hsla = match path {
+@@ -525,7 +527,8 @@ fn connection_view(record: &DeviceRecord, pal: Palette) -> impl IntoElement {
+                 } else {
+                     connection_icon_path(
+                         record.route.as_ref(),
+-                        record.model_info.as_ref().map(|model| &model.transports),
++                        record.receiver_brand,
++                        record.model_info.as_ref(),
+                     )
+                 })
+                 .size_3()
+@@ -535,7 +538,7 @@ fn connection_view(record: &DeviceRecord, pal: Palette) -> impl IntoElement {
+ }
+ 
+ fn connection_summary(record: &DeviceRecord) -> String {
+-    let route = route_label(record.route.as_ref());
++    let route = route_label(record.route.as_ref(), record.receiver_brand);
+     if matches!(
+         record.route,
+         Some(DeviceRoute::Bolt { .. } | DeviceRoute::Unifying { .. })
+@@ -595,36 +598,21 @@ fn device_image(
+         .into_any_element()
+ }
+ 
+-/// Connection-type glyph for a gallery card: a dongle for receiver-paired
+-/// devices, a USB mark for radio-less direct ones (a wired keyboard is only
+-/// ever on the cable), a Bluetooth mark for the rest.
+-///
+-/// The route says how the device is *addressed*, not what medium carries it,
+-/// so `Direct` alone can't pick a glyph — the firmware transport table
+-/// (HID++ 0x0003) disambiguates. A radio-capable device on a direct route
+-/// keeps the Bluetooth mark: it *may* be on a cable right now, but the
+-/// current link medium isn't reported, and Bluetooth is how such devices are
+-/// normally attached.
++/// Connection-type glyph for a gallery card, classified from its active route.
+ pub(super) fn connection_icon_path(
+     route: Option<&DeviceRoute>,
+-    transports: Option<&DeviceTransports>,
++    receiver_brand: Option<ReceiverBrand>,
++    model: Option<&DeviceModelInfo>,
+ ) -> &'static str {
+-    match route {
+-        Some(DeviceRoute::Bolt { .. }) => "action-icons/bolt.svg",
+-        Some(DeviceRoute::Unifying { .. }) => "action-icons/unifying.svg",
+-        // Explicit arms (not `_`) so a new DeviceRoute variant trips the
+-        // compiler here, matching the exhaustive sibling `route_label`.
+-        Some(DeviceRoute::Direct { .. }) | None => match transports {
+-            // No Bluetooth radio at all ⇒ the direct link can only be the
+-            // cable. eQuad counts as wired-capable here: eQuad is
+-            // receiver-only by definition, so it is never the *direct* link —
+-            // an equad-only table still means this connection is a cable.
+-            Some(t) if (t.usb || t.equad) && !t.bluetooth && !t.btle => "action-icons/usb.svg",
+-            // Unknown transports (no 0x0003 snapshot, or an all-false table)
+-            // keep the old default.
+-            _ => "action-icons/bluetooth.svg",
+-        },
+-        Some(DeviceRoute::RawHid { .. }) => "action-icons/usb.svg",
++    match ConnectionKind::for_device(route, receiver_brand, model) {
++        ConnectionKind::BoltReceiver => "action-icons/bolt.svg",
++        // TODO: Replace the Nano and Lightspeed fallbacks with their appropriate logos.
++        ConnectionKind::UnifyingReceiver
++        | ConnectionKind::NanoReceiver
++        | ConnectionKind::LightspeedReceiver => "action-icons/unifying.svg",
++        ConnectionKind::BluetoothDirect => "action-icons/bluetooth.svg",
++        ConnectionKind::Wired => "action-icons/usb.svg",
++        ConnectionKind::Unknown => "action-icons/circle-dot.svg",
+     }
+ }
+ 
+diff --git a/crates/openlogi-desktop/src/app/tests.rs b/crates/openlogi-desktop/src/app/tests.rs
+index 1cec61fa7..2b8e16b4e 100644
+--- a/crates/openlogi-desktop/src/app/tests.rs
++++ b/crates/openlogi-desktop/src/app/tests.rs
+@@ -3,13 +3,16 @@ use super::{Capabilities, DetailTab, DeviceKind, DeviceRecord};
+ use crate::services::assets::ResolvedAsset;
+ use crate::ui::battery::{battery_charging_no_reading, battery_needs_attention};
+ use openlogi_core::device::{
+-    BatteryInfo, BatteryLevel, BatteryStatus, DeviceTransports, LightCapabilities, LightValueRange,
+-    LightValueUnit,
++    BatteryInfo, BatteryLevel, BatteryStatus, DeviceModelInfo, DeviceTransports, LightCapabilities,
++    LightValueRange, LightValueUnit,
+ };
+-use openlogi_core::hid::DeviceRoute;
++use openlogi_core::diagnostics::ConnectionKind;
++use openlogi_core::hid::{DeviceRoute, ReceiverBrand};
+ 
+ #[gpui::test]
+ fn main_window_renders_profile_confirmation_dialogs(cx: &mut gpui::TestAppContext) {
++    use std::{cell::Cell, rc::Rc};
++
+     use gpui::{AppContext as _, InteractiveElement as _, ParentElement as _, div};
+     use gpui_component::{Root, WindowExt as _};
+ 
+@@ -34,15 +37,20 @@ fn main_window_renders_profile_confirmation_dialogs(cx: &mut gpui::TestAppContex
+         let view = cx.new(|cx| AppView::new(window, cx));
+         Root::new(view, window, cx)
+     });
++    let dialog_renders = Rc::new(Cell::new(0));
+     cx.update(|window, cx| {
+-        window.open_alert_dialog(cx, |alert, _, _| {
++        let renders = dialog_renders.clone();
++        window.open_alert_dialog(cx, move |alert, _, _| {
++            renders.set(renders.get() + 1);
+             alert.confirm().title(
+                 div()
+                     .debug_selector(|| "profile-confirmation".into())
+                     .child("Remove Safari profile?"),
+             )
+         });
++        dialog_renders.set(0);
+         window.draw(cx).clear(cx);
++        assert_eq!(dialog_renders.get(), 1, "mount the dialog once per frame");
+     });
+     assert!(
+         cx.debug_bounds("profile-confirmation").is_some(),
+@@ -110,72 +118,76 @@ fn connection_icon_matches_route() {
+         receiver_uid: "r".into(),
+         slot: 1,
+     };
+-    let direct = DeviceRoute::Direct {
++    let wired_route = DeviceRoute::Direct {
+         vendor_id: 0x046d,
+-        product_id: 0xb019,
+-    };
+-    // Firmware transport tables (HID++ 0x0003): a wired-only device (G513),
+-    // a Bluetooth-capable one (MX Master on a cable or BT), and BLE-direct.
+-    let wired = DeviceTransports {
+-        usb: true,
+-        ..DeviceTransports::default()
++        product_id: 0xc356,
+     };
+-    let bt = DeviceTransports {
+-        usb: true,
+-        bluetooth: true,
+-        ..DeviceTransports::default()
++    let bluetooth_route = DeviceRoute::Direct {
++        vendor_id: 0x046d,
++        product_id: 0xb38a,
+     };
+-    let btle = DeviceTransports {
+-        btle: true,
+-        ..DeviceTransports::default()
++    let g915_x = DeviceModelInfo {
++        entity_count: 0,
++        serial_number: None,
++        unit_id: [0; 4],
++        transports: DeviceTransports {
++            usb: true,
++            equad: true,
++            btle: true,
++            bluetooth: false,
++        },
++        model_ids: [0xb38a, 0x40b5, 0xc356],
++        extended_model_id: 1,
+     };
++
+     assert_eq!(
+-        connection_icon_path(Some(&bolt), None),
++        connection_icon_path(Some(&bolt), None, None),
+         "action-icons/bolt.svg"
+     );
+     assert_eq!(
+-        connection_icon_path(Some(&uni), None),
++        connection_icon_path(Some(&uni), None, None),
+         "action-icons/unifying.svg"
+     );
+-    // Direct + radio-less firmware = the cable is the only possible link.
+     assert_eq!(
+-        connection_icon_path(Some(&direct), Some(&wired)),
+-        "action-icons/usb.svg"
++        ConnectionKind::for_device(Some(&uni), Some(ReceiverBrand::Nano), None),
++        ConnectionKind::NanoReceiver
+     );
+-    // eQuad is receiver-only, so an equad-only table on a *direct* route
+-    // still means a cable — not Bluetooth.
+-    let equad_only = DeviceTransports {
+-        equad: true,
+-        ..DeviceTransports::default()
+-    };
+     assert_eq!(
+-        connection_icon_path(Some(&direct), Some(&equad_only)),
+-        "action-icons/usb.svg"
++        connection_icon_path(Some(&uni), Some(ReceiverBrand::Nano), None),
++        "action-icons/unifying.svg"
+     );
+-    // An all-false table is "unknown", not "wired".
+     assert_eq!(
+-        connection_icon_path(Some(&direct), Some(&DeviceTransports::default())),
+-        "action-icons/bluetooth.svg"
++        ConnectionKind::for_device(Some(&uni), Some(ReceiverBrand::Lightspeed), None),
++        ConnectionKind::LightspeedReceiver
+     );
+-    // Direct + any radio keeps the Bluetooth mark.
+     assert_eq!(
+-        connection_icon_path(Some(&direct), Some(&bt)),
+-        "action-icons/bluetooth.svg"
++        connection_icon_path(Some(&uni), Some(ReceiverBrand::Lightspeed), None),
++        "action-icons/unifying.svg"
+     );
+     assert_eq!(
+-        connection_icon_path(Some(&direct), Some(&btle)),
+-        "action-icons/bluetooth.svg"
++        ConnectionKind::for_device(Some(&wired_route), None, Some(&g915_x)),
++        ConnectionKind::Wired
+     );
+-    // Unknown transports (no 0x0003 snapshot) keep the old default.
+     assert_eq!(
+-        connection_icon_path(Some(&direct), None),
+-        "action-icons/bluetooth.svg"
++        connection_icon_path(Some(&wired_route), None, Some(&g915_x)),
++        "action-icons/usb.svg"
+     );
+-    // No route (e.g. a synthetic/placeholder card) falls back to Bluetooth.
+     assert_eq!(
+-        connection_icon_path(None, None),
++        ConnectionKind::for_device(Some(&bluetooth_route), None, Some(&g915_x)),
++        ConnectionKind::BluetoothDirect
++    );
++    assert_eq!(
++        connection_icon_path(Some(&bluetooth_route), None, Some(&g915_x)),
+         "action-icons/bluetooth.svg"
+     );
++    assert_eq!(
++        connection_icon_path(Some(&wired_route), None, None),
++        "action-icons/circle-dot.svg"
++    );
++    assert_eq!(
++        connection_icon_path(None, None, None),
++        "action-icons/circle-dot.svg"
++    );
+ }
+ 
+ fn record(kind: DeviceKind, capabilities: Option<Capabilities>) -> DeviceRecord {
+@@ -195,6 +207,7 @@ fn record(kind: DeviceKind, capabilities: Option<Capabilities>) -> DeviceRecord
+         driver_id: None,
+         registry_model_id: None,
+         route: None,
++        receiver_brand: None,
+         capture_id: None,
+         kind,
+         capabilities,
+diff --git a/crates/openlogi-desktop/src/app/widgets.rs b/crates/openlogi-desktop/src/app/widgets.rs
+index 0cf37d1a8..1db5b049a 100644
+--- a/crates/openlogi-desktop/src/app/widgets.rs
++++ b/crates/openlogi-desktop/src/app/widgets.rs
+@@ -11,7 +11,7 @@ use gpui_component::{
+     h_flex,
+ };
+ use openlogi_core::device::DeviceKind;
+-use openlogi_core::hid::DeviceRoute;
++use openlogi_core::hid::{DeviceRoute, ReceiverBrand};
+ 
+ use super::AppView;
+ use crate::state::AppState;
+@@ -109,10 +109,19 @@ pub(super) fn sidebar_action(
+         .flex_1()
+ }
+ 
+-pub(super) fn route_label(route: Option<&DeviceRoute>) -> String {
++pub(super) fn route_label(
++    route: Option<&DeviceRoute>,
++    receiver_brand: Option<ReceiverBrand>,
++) -> String {
+     match route {
+         Some(DeviceRoute::Bolt { .. }) => tr!("device.bolt_receiver").to_string(),
+-        Some(DeviceRoute::Unifying { .. }) => tr!("device.unifying_receiver").to_string(),
++        Some(DeviceRoute::Unifying { .. }) => match receiver_brand {
++            Some(ReceiverBrand::Nano) => tr!("device.nano_receiver").to_string(),
++            Some(ReceiverBrand::Lightspeed) => tr!("device.lightspeed_receiver").to_string(),
++            Some(ReceiverBrand::Bolt | ReceiverBrand::Unifying) | None => {
++                tr!("device.unifying_receiver").to_string()
++            }
++        },
+         Some(DeviceRoute::Direct { .. } | DeviceRoute::RawHid { .. }) => {
+             tr!("device.direct_connection").to_string()
+         }
+diff --git a/crates/openlogi-desktop/src/services/diagnostics.rs b/crates/openlogi-desktop/src/services/diagnostics.rs
+index 4a9f65d1a..7d7a925c1 100644
+--- a/crates/openlogi-desktop/src/services/diagnostics.rs
++++ b/crates/openlogi-desktop/src/services/diagnostics.rs
+@@ -8,7 +8,6 @@ use openlogi_core::diagnostics::{
+     AppInfo, AssetInfo, AssetSource, ConnectionKind, DeviceDiag, DiagnosticsReport, InventoryState,
+     ReceiverDiag, RenderState,
+ };
+-use openlogi_core::hid::DeviceRoute;
+ use openlogi_ipc::{InventoryHealth, PROTOCOL_VERSION};
+ 
+ use crate::services::assets::AssetResolver;
+@@ -121,7 +120,11 @@ fn collect_devices(state: &AppState) -> Vec<DeviceDiag> {
+                 display_name: record.display_name.clone(),
+                 kind: record.kind,
+                 codename: paired.and_then(|p| p.codename.clone()),
+-                connection: connection_for(record.route.as_ref(), model.map(|m| m.transports)),
++                connection: ConnectionKind::for_device(
++                    record.route.as_ref(),
++                    record.receiver_brand,
++                    model,
++                ),
+                 online: record.online,
+                 battery: record.battery.clone(),
+                 capabilities: record.capabilities,
+@@ -154,24 +157,6 @@ fn find_paired<'a>(
+     })
+ }
+ 
+-/// Refine the HID++ route into a user-facing connection type via the device's announced transports.
+-fn connection_for(
+-    route: Option<&DeviceRoute>,
+-    transports: Option<openlogi_core::device::DeviceTransports>,
+-) -> ConnectionKind {
+-    match route {
+-        Some(DeviceRoute::Bolt { .. }) => ConnectionKind::BoltReceiver,
+-        Some(DeviceRoute::Unifying { .. }) => ConnectionKind::UnifyingReceiver,
+-        Some(DeviceRoute::Direct { .. }) => match transports {
+-            Some(t) if t.bluetooth || t.btle => ConnectionKind::BluetoothDirect,
+-            Some(t) if t.usb => ConnectionKind::Wired,
+-            _ => ConnectionKind::Unknown,
+-        },
+-        Some(DeviceRoute::RawHid { .. }) => ConnectionKind::Wired,
+-        None => ConnectionKind::Unknown,
+-    }
+-}
+-
+ fn dpi_summary(load: DpiLoad) -> Option<String> {
+     match load {
+         DpiLoad::Unknown => None,
+diff --git a/crates/openlogi-desktop/src/state/devices.rs b/crates/openlogi-desktop/src/state/devices.rs
+index 13cf3d130..9129fa3f1 100644
+--- a/crates/openlogi-desktop/src/state/devices.rs
++++ b/crates/openlogi-desktop/src/state/devices.rs
+@@ -12,7 +12,7 @@ use openlogi_core::device::{
+ use openlogi_core::device_order::{
+     DeviceIdentity as RouteIdentity, DeviceStableId, PhysicalDeviceKey,
+ };
+-use openlogi_core::hid::DeviceRoute;
++use openlogi_core::hid::{DeviceRoute, ReceiverBrand, find_receiver};
+ use tracing::debug;
+ 
+ use super::device_key::DeviceKey;
+@@ -69,6 +69,9 @@ pub struct DeviceRecord {
+     /// Model-level asset registry identity for standalone devices.
+     pub registry_model_id: Option<String>,
+     pub route: Option<DeviceRoute>,
++    /// Marketed family of the receiver behind `route`, kept separate from the
++    /// Unifying-compatible protocol used to address Nano and Lightspeed slots.
++    pub receiver_brand: Option<ReceiverBrand>,
+     /// OS capture id for cameras (AVFoundation uniqueID / DirectShow path).
+     /// Distinct from [`Self::config_key`], which prefers the port-stable USB
+     /// serial. `None` for HID++ devices (those open via [`Self::route`]).
+@@ -163,6 +166,8 @@ pub(super) fn build_device_list(
+     for inv in inventories {
+         for paired in &inv.paired {
+             let route = DeviceRoute::for_slot(inv, paired.slot);
++            let receiver_brand = find_receiver(inv.receiver.vendor_id, inv.receiver.product_id)
++                .map(|receiver| receiver.brand);
+             let (model_key, asset, model_info, codename, serial_number, unit_id) =
+                 if let Some(model) = paired.model_info.as_ref() {
+                     let asset = resolver.resolve(model, paired.codename.as_deref());
+@@ -228,6 +233,7 @@ pub(super) fn build_device_list(
+                 driver_id: None,
+                 registry_model_id: None,
+                 route,
++                receiver_brand,
+                 capture_id: None,
+                 kind,
+                 capabilities: paired.capabilities,
+@@ -317,6 +323,7 @@ fn camera_record(camera: &Camera, resolver: &AssetResolver) -> DeviceRecord {
+         driver_id: None,
+         registry_model_id: None,
+         route: None,
++        receiver_brand: None,
+         capture_id: Some(camera.unique_id.clone()),
+         kind: DeviceKind::Camera,
+         capabilities: None,
+@@ -394,6 +401,7 @@ fn append_standalone(
+             driver_id: Some(device.driver_id.clone()),
+             registry_model_id: device.registry_model_id.clone(),
+             route,
++            receiver_brand: None,
+             capture_id: None,
+             kind: device.kind,
+             capabilities: device.capabilities,
+@@ -592,6 +600,7 @@ fn offline_record(
+         driver_id: identity.driver_id.clone(),
+         registry_model_id: identity.registry_model_id.clone(),
+         route: None,
++        receiver_brand: None,
+         capture_id: None,
+         kind: identity.kind,
+         capabilities: Some(identity.capabilities),
+@@ -650,6 +659,7 @@ pub(super) fn adopt_transient_record(known: &DeviceRecord, live: DeviceRecord) -
+             .registry_model_id
+             .or_else(|| known.registry_model_id.clone()),
+         route: live.route,
++        receiver_brand: live.receiver_brand.or(known.receiver_brand),
+         capture_id: live.capture_id.or_else(|| known.capture_id.clone()),
+         kind: if known.kind == DeviceKind::Unknown {
+             live.kind
+@@ -742,6 +752,7 @@ fn demo_keyboard() -> DeviceRecord {
+         driver_id: None,
+         registry_model_id: None,
+         route: None,
++        receiver_brand: None,
+         capture_id: None,
+         kind: DeviceKind::Keyboard,
+         capabilities: Some(Capabilities {
+diff --git a/crates/openlogi-desktop/src/state/devices/tests.rs b/crates/openlogi-desktop/src/state/devices/tests.rs
+index cded2fe8a..361064e2a 100644
+--- a/crates/openlogi-desktop/src/state/devices/tests.rs
++++ b/crates/openlogi-desktop/src/state/devices/tests.rs
+@@ -13,7 +13,7 @@ use super::{
+     fold_by_inventory_key, offline_record, pick_initial_device,
+ };
+ use crate::state::inventory::adopt_routes;
+-use openlogi_core::hid::Dpi;
++use openlogi_core::hid::{Dpi, ReceiverBrand};
+ 
+ fn paired_device_no_model_info(slot: u8, wpid: Option<u16>) -> PairedDevice {
+     PairedDevice {
+@@ -148,6 +148,22 @@ fn one_mouse_on_two_routes_is_one_record() {
+     assert_eq!(records[0].config_key, "unit:6be9d300");
+ }
+ 
++#[test]
++fn records_keep_the_registered_receiver_family() {
++    for (product_id, expected) in [
++        (0xc52b, ReceiverBrand::Unifying),
++        (0xc537, ReceiverBrand::Nano),
++        (0xc547, ReceiverBrand::Lightspeed),
++        (0xc548, ReceiverBrand::Bolt),
++    ] {
++        let mut inventory = inventory_with(vec![paired_device_no_model_info(1, None)]);
++        inventory.receiver.product_id = product_id;
++        let records = records_from(&Config::default(), &[inventory]);
++
++        assert_eq!(records[0].receiver_brand, Some(expected));
++    }
++}
++
+ fn online_record(key: &str) -> DeviceRecord {
+     DeviceRecord {
+         config_key: key.to_string(),
+@@ -165,6 +181,7 @@ fn online_record(key: &str) -> DeviceRecord {
+         driver_id: None,
+         registry_model_id: None,
+         route: None,
++        receiver_brand: None,
+         capture_id: None,
+         kind: DeviceKind::Mouse,
+         capabilities: Some(Capabilities::presumed_from_kind(DeviceKind::Mouse)),
+diff --git a/crates/openlogi-desktop/src/state/scroll.rs b/crates/openlogi-desktop/src/state/scroll.rs
+index b24535a24..8feae4d07 100644
+--- a/crates/openlogi-desktop/src/state/scroll.rs
++++ b/crates/openlogi-desktop/src/state/scroll.rs
+@@ -166,6 +166,7 @@ mod tests {
+                 driver_id: None,
+                 registry_model_id: None,
+                 route: None,
++                receiver_brand: None,
+                 capture_id: None,
+                 kind: DeviceKind::Mouse,
+                 capabilities: None,
+diff --git a/crates/openlogi-desktop/src/state/tests/device_list.rs b/crates/openlogi-desktop/src/state/tests/device_list.rs
+index 0c4b0fe31..e2fbabe15 100644
+--- a/crates/openlogi-desktop/src/state/tests/device_list.rs
++++ b/crates/openlogi-desktop/src/state/tests/device_list.rs
+@@ -496,6 +496,11 @@ fn state_with_an_offline_identity(persistence: ConfigPersistence) -> AppState {
+ fn forgetting_an_offline_device_drops_its_card_and_config_entry() {
+     let mut state = state_with_an_offline_identity(ConfigPersistence::MemoryOnly);
+     assert_eq!(state.devices().len(), 1);
++    assert!(!state.devices()[0].online);
++    assert!(
++        state.devices()[0].route.is_none(),
++        "the fixture has no USB or receiver route"
++    );
+     let record_key = state.devices()[0].record_key();
+ 
+     assert_eq!(
+@@ -507,8 +512,8 @@ fn forgetting_an_offline_device_drops_its_card_and_config_entry() {
+     assert!(
+         state
+             .config
+-            .edit(|config| config.device_identity("2b034").is_none()),
+-        "the persisted entry must go with the card"
++            .edit(|config| !config.devices.contains_key("2b034")),
++        "the full persisted entry must go with the card"
+     );
+ }
+ 
+diff --git a/crates/openlogi-desktop/src/windows/settings/about.rs b/crates/openlogi-desktop/src/windows/settings/about.rs
+index 82801da14..7228c24fb 100644
+--- a/crates/openlogi-desktop/src/windows/settings/about.rs
++++ b/crates/openlogi-desktop/src/windows/settings/about.rs
+@@ -39,15 +39,19 @@ fn about_hero(view: &Entity<SettingsView>, copied: bool, cx: &mut App) -> gpui::
+     } else {
+         tr!("about.copy_diagnostics")
+     };
+-    let view = view.clone();
+-
+     h_flex()
+         .w_full()
+         .items_start()
+         .gap_3()
+-        .child(img(crate::app_assets::LOGO).w(px(56.)).h(px(56.)))
++        .child(
++            img(crate::app_assets::LOGO)
++                .size(gpui::rems(3.5))
++                .flex_none(),
++        )
+         .child(
+             v_flex()
++                .flex_1()
++                .min_w_0()
+                 .gap_2()
+                 .child(
+                     h_flex()
+@@ -63,6 +67,8 @@ fn about_hero(view: &Entity<SettingsView>, copied: bool, cx: &mut App) -> gpui::
+                 )
+                 .child(
+                     h_flex()
++                        .w_full()
++                        .flex_wrap()
+                         .items_center()
+                         .gap_1()
+                         .pt_1()
+@@ -90,43 +96,58 @@ fn about_hero(view: &Entity<SettingsView>, copied: bool, cx: &mut App) -> gpui::
+                             tr!("about.report_an_issue"),
+                             format!("{REPO_URL}/issues"),
+                         ))
+-                        .child(div().w(px(1.)).h(px(16.)).mx_1().bg(pal.border))
+-                        .child(
+-                            Button::new("about-copy-diagnostics")
+-                                .ghost()
+-                                .small()
+-                                .icon(IconName::Copy)
+-                                .label(diag_label)
+-                                .on_click(move |_, _, cx| {
+-                                    let report =
+-                                        crate::services::diagnostics::collect(cx).to_markdown();
+-                                    cx.write_to_clipboard(ClipboardItem::new_string(report));
+-                                    view.update(cx, |this, cx| {
+-                                        this.copied = true;
+-                                        this.copied_gen = this.copied_gen.wrapping_add(1);
+-                                        let generation = this.copied_gen;
+-                                        cx.notify();
+-                                        cx.spawn(async move |handle, cx| {
+-                                            cx.background_executor()
+-                                                .timer(std::time::Duration::from_secs(2))
+-                                                .await;
+-                                            handle
+-                                                .update(cx, |this, cx| {
+-                                                    if this.copied_gen == generation {
+-                                                        this.copied = false;
+-                                                        cx.notify();
+-                                                    }
+-                                                })
+-                                                .ok();
+-                                        })
+-                                        .detach();
+-                                    });
+-                                }),
+-                        ),
++                        .child(copy_diagnostics_action(view, diag_label, cx)),
+                 ),
+         )
+ }
+ 
++/// Keep the divider attached to its action when the About links wrap.
++fn copy_diagnostics_action(
++    view: &Entity<SettingsView>,
++    label: SharedString,
++    cx: &App,
++) -> gpui::Div {
++    let border = crate::ui::theme::palette(cx).border;
++    let view = view.clone();
++
++    h_flex()
++        .flex_none()
++        .child(div().w(px(1.)).h(px(16.)).mx_1().bg(border))
++        .child(
++            Button::new("about-copy-diagnostics")
++                .ghost()
++                .small()
++                .flex_none()
++                .min_w(gpui::rems(8.5))
++                .icon(IconName::Copy)
++                .label(label)
++                .on_click(move |_, _, cx| {
++                    let report = crate::services::diagnostics::collect(cx).to_markdown();
++                    cx.write_to_clipboard(ClipboardItem::new_string(report));
++                    view.update(cx, |this, cx| {
++                        this.copied = true;
++                        this.copied_gen = this.copied_gen.wrapping_add(1);
++                        let generation = this.copied_gen;
++                        cx.notify();
++                        cx.spawn(async move |handle, cx| {
++                            cx.background_executor()
++                                .timer(std::time::Duration::from_secs(2))
++                                .await;
++                            handle
++                                .update(cx, |this, cx| {
++                                    if this.copied_gen == generation {
++                                        this.copied = false;
++                                        cx.notify();
++                                    }
++                                })
++                                .ok();
++                        })
++                        .detach();
++                    });
++                }),
++        )
++}
++
+ /// The config-file location row with a reveal-in-file-manager button.
+ fn about_config(cx: &App) -> gpui::Div {
+     let pal = crate::ui::theme::palette(cx);
+@@ -188,6 +209,7 @@ fn link_button(
+     Button::new(id)
+         .ghost()
+         .small()
++        .flex_none()
+         .icon(icon)
+         .label(label)
+         .on_click(move |_, _, cx| cx.open_url(&href))
+diff --git a/crates/openlogi-ui/locales/be.toml b/crates/openlogi-ui/locales/be.toml
+index e21323960..5f7a1c1f1 100644
+--- a/crates/openlogi-ui/locales/be.toml
++++ b/crates/openlogi-ui/locales/be.toml
+@@ -121,6 +121,8 @@ full = "Поўны зарад"
+ battery_error = "Памылка батарэі"
+ bolt_receiver = "Адаптар Bolt"
+ unifying_receiver = "Адаптар Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Прамое падключэнне"
+ mouse = "Мыш"
+ keyboard = "Клавіятура"
+diff --git a/crates/openlogi-ui/locales/da.toml b/crates/openlogi-ui/locales/da.toml
+index 46d34617b..0853d197d 100644
+--- a/crates/openlogi-ui/locales/da.toml
++++ b/crates/openlogi-ui/locales/da.toml
+@@ -121,6 +121,8 @@ full = "Fuldt"
+ battery_error = "Batterifejl"
+ bolt_receiver = "Bolt-modtager"
+ unifying_receiver = "Unifying-modtager"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Direkte forbindelse"
+ mouse = "Mus"
+ keyboard = "Tastatur"
+diff --git a/crates/openlogi-ui/locales/de.toml b/crates/openlogi-ui/locales/de.toml
+index 555163950..17e397868 100644
+--- a/crates/openlogi-ui/locales/de.toml
++++ b/crates/openlogi-ui/locales/de.toml
+@@ -121,6 +121,8 @@ full = "Voll"
+ battery_error = "Akkufehler"
+ bolt_receiver = "Bolt-Empfänger"
+ unifying_receiver = "Unifying-Empfänger"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Direktverbindung"
+ mouse = "Maus"
+ keyboard = "Tastatur"
+diff --git a/crates/openlogi-ui/locales/el.toml b/crates/openlogi-ui/locales/el.toml
+index c63ff6b80..e163301b9 100644
+--- a/crates/openlogi-ui/locales/el.toml
++++ b/crates/openlogi-ui/locales/el.toml
+@@ -121,6 +121,8 @@ full = "Πλήρης"
+ battery_error = "Σφάλμα μπαταρίας"
+ bolt_receiver = "Δέκτης Bolt"
+ unifying_receiver = "Δέκτης Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Απευθείας σύνδεση"
+ mouse = "Ποντίκι"
+ keyboard = "Πληκτρολόγιο"
+diff --git a/crates/openlogi-ui/locales/en.toml b/crates/openlogi-ui/locales/en.toml
+index d1d0b8026..29da2e8cc 100644
+--- a/crates/openlogi-ui/locales/en.toml
++++ b/crates/openlogi-ui/locales/en.toml
+@@ -121,6 +121,8 @@ full = "Full"
+ battery_error = "Battery error"
+ bolt_receiver = "Bolt receiver"
+ unifying_receiver = "Unifying receiver"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Direct connection"
+ mouse = "Mouse"
+ keyboard = "Keyboard"
+diff --git a/crates/openlogi-ui/locales/es.toml b/crates/openlogi-ui/locales/es.toml
+index d7b73078b..c7dd11ce6 100644
+--- a/crates/openlogi-ui/locales/es.toml
++++ b/crates/openlogi-ui/locales/es.toml
+@@ -121,6 +121,8 @@ full = "Completa"
+ battery_error = "Error de batería"
+ bolt_receiver = "Receptor Bolt"
+ unifying_receiver = "Receptor Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Conexión directa"
+ mouse = "Ratón"
+ keyboard = "Teclado"
+diff --git a/crates/openlogi-ui/locales/fi.toml b/crates/openlogi-ui/locales/fi.toml
+index 888d3089c..e5b4925ba 100644
+--- a/crates/openlogi-ui/locales/fi.toml
++++ b/crates/openlogi-ui/locales/fi.toml
+@@ -121,6 +121,8 @@ full = "Täynnä"
+ battery_error = "Akkuvirhe"
+ bolt_receiver = "Bolt-vastaanotin"
+ unifying_receiver = "Unifying-vastaanotin"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Suora yhteys"
+ mouse = "Hiiri"
+ keyboard = "Näppäimistö"
+diff --git a/crates/openlogi-ui/locales/fr.toml b/crates/openlogi-ui/locales/fr.toml
+index 8b30e9ea0..f5032b280 100644
+--- a/crates/openlogi-ui/locales/fr.toml
++++ b/crates/openlogi-ui/locales/fr.toml
+@@ -121,6 +121,8 @@ full = "Pleine"
+ battery_error = "Erreur de batterie"
+ bolt_receiver = "Récepteur Bolt"
+ unifying_receiver = "Récepteur Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Connexion directe"
+ mouse = "Souris"
+ keyboard = "Clavier"
+diff --git a/crates/openlogi-ui/locales/it.toml b/crates/openlogi-ui/locales/it.toml
+index ea73acd27..e9c72c7b3 100644
+--- a/crates/openlogi-ui/locales/it.toml
++++ b/crates/openlogi-ui/locales/it.toml
+@@ -121,6 +121,8 @@ full = "Carica completa"
+ battery_error = "Errore batteria"
+ bolt_receiver = "Ricevitore Bolt"
+ unifying_receiver = "Ricevitore Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Connessione diretta"
+ mouse = "Mouse"
+ keyboard = "Tastiera"
+diff --git a/crates/openlogi-ui/locales/ja.toml b/crates/openlogi-ui/locales/ja.toml
+index fc0f8470f..2125ef402 100644
+--- a/crates/openlogi-ui/locales/ja.toml
++++ b/crates/openlogi-ui/locales/ja.toml
+@@ -121,6 +121,8 @@ full = "フル充電"
+ battery_error = "バッテリーエラー"
+ bolt_receiver = "Bolt レシーバー"
+ unifying_receiver = "Unifying レシーバー"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "直接接続"
+ mouse = "マウス"
+ keyboard = "キーボード"
+diff --git a/crates/openlogi-ui/locales/ko.toml b/crates/openlogi-ui/locales/ko.toml
+index a2ed81a8b..832597f8e 100644
+--- a/crates/openlogi-ui/locales/ko.toml
++++ b/crates/openlogi-ui/locales/ko.toml
+@@ -121,6 +121,8 @@ full = "완충"
+ battery_error = "배터리 오류"
+ bolt_receiver = "Bolt 수신기"
+ unifying_receiver = "Unifying 수신기"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "직접 연결"
+ mouse = "마우스"
+ keyboard = "키보드"
+diff --git a/crates/openlogi-ui/locales/nb.toml b/crates/openlogi-ui/locales/nb.toml
+index 8e38259a2..ab6f61a8b 100644
+--- a/crates/openlogi-ui/locales/nb.toml
++++ b/crates/openlogi-ui/locales/nb.toml
+@@ -121,6 +121,8 @@ full = "Fullt"
+ battery_error = "Batterifeil"
+ bolt_receiver = "Bolt-mottaker"
+ unifying_receiver = "Unifying receiver"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Direkte tilkobling"
+ mouse = "Mus"
+ keyboard = "Tastatur"
+diff --git a/crates/openlogi-ui/locales/nl.toml b/crates/openlogi-ui/locales/nl.toml
+index a7a865308..21535bb8a 100644
+--- a/crates/openlogi-ui/locales/nl.toml
++++ b/crates/openlogi-ui/locales/nl.toml
+@@ -121,6 +121,8 @@ full = "Vol"
+ battery_error = "Batterijfout"
+ bolt_receiver = "Bolt-ontvanger"
+ unifying_receiver = "Unifying-ontvanger"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Directe verbinding"
+ mouse = "Muis"
+ keyboard = "Toetsenbord"
+diff --git a/crates/openlogi-ui/locales/pl.toml b/crates/openlogi-ui/locales/pl.toml
+index 09abcc327..2f75d3fc1 100644
+--- a/crates/openlogi-ui/locales/pl.toml
++++ b/crates/openlogi-ui/locales/pl.toml
+@@ -121,6 +121,8 @@ full = "Pełna"
+ battery_error = "Błąd baterii"
+ bolt_receiver = "Odbiornik Bolt"
+ unifying_receiver = "Odbiornik Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Połączenie bezpośrednie"
+ mouse = "Mysz"
+ keyboard = "Klawiatura"
+diff --git a/crates/openlogi-ui/locales/pt-BR.toml b/crates/openlogi-ui/locales/pt-BR.toml
+index a9b5e9898..4a40e4bf2 100644
+--- a/crates/openlogi-ui/locales/pt-BR.toml
++++ b/crates/openlogi-ui/locales/pt-BR.toml
+@@ -121,6 +121,8 @@ full = "Cheia"
+ battery_error = "Erro de bateria"
+ bolt_receiver = "Receptor Bolt"
+ unifying_receiver = "Receptor Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Conexão direta"
+ mouse = "Mouse"
+ keyboard = "Teclado"
+diff --git a/crates/openlogi-ui/locales/pt-PT.toml b/crates/openlogi-ui/locales/pt-PT.toml
+index 9e0a95626..774c1ab4b 100644
+--- a/crates/openlogi-ui/locales/pt-PT.toml
++++ b/crates/openlogi-ui/locales/pt-PT.toml
+@@ -121,6 +121,8 @@ full = "Completa"
+ battery_error = "Erro de bateria"
+ bolt_receiver = "Recetor Bolt"
+ unifying_receiver = "Recetor Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Ligação direta"
+ mouse = "Rato"
+ keyboard = "Teclado"
+diff --git a/crates/openlogi-ui/locales/ru.toml b/crates/openlogi-ui/locales/ru.toml
+index b8a16ebc9..48742f1c1 100644
+--- a/crates/openlogi-ui/locales/ru.toml
++++ b/crates/openlogi-ui/locales/ru.toml
+@@ -121,6 +121,8 @@ full = "Полный заряд"
+ battery_error = "Ошибка батареи"
+ bolt_receiver = "Приёмник Bolt"
+ unifying_receiver = "Приёмник Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Прямое подключение"
+ mouse = "Мышь"
+ keyboard = "Клавиатура"
+diff --git a/crates/openlogi-ui/locales/sv.toml b/crates/openlogi-ui/locales/sv.toml
+index 040ab6f4a..461ae9c79 100644
+--- a/crates/openlogi-ui/locales/sv.toml
++++ b/crates/openlogi-ui/locales/sv.toml
+@@ -121,6 +121,8 @@ full = "Fulladdat"
+ battery_error = "Batterifel"
+ bolt_receiver = "Bolt-mottagare"
+ unifying_receiver = "Unifying receiver"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Direktanslutning"
+ mouse = "Mus"
+ keyboard = "Tangentbord"
+diff --git a/crates/openlogi-ui/locales/tr.toml b/crates/openlogi-ui/locales/tr.toml
+index 2cb881f16..683a33536 100644
+--- a/crates/openlogi-ui/locales/tr.toml
++++ b/crates/openlogi-ui/locales/tr.toml
+@@ -121,6 +121,8 @@ full = "Dolu"
+ battery_error = "Pil hatası"
+ bolt_receiver = "Bolt alıcı"
+ unifying_receiver = "Unifying alıcı"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Doğrudan bağlantı"
+ mouse = "Fare"
+ keyboard = "Klavye"
+diff --git a/crates/openlogi-ui/locales/uk.toml b/crates/openlogi-ui/locales/uk.toml
+index 4b8e2dccf..b4e5c6570 100644
+--- a/crates/openlogi-ui/locales/uk.toml
++++ b/crates/openlogi-ui/locales/uk.toml
+@@ -121,6 +121,8 @@ full = "Повний заряд"
+ battery_error = "Помилка батареї"
+ bolt_receiver = "Приймач Bolt"
+ unifying_receiver = "Приймач Unifying"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "Пряме підключення"
+ mouse = "Миша"
+ keyboard = "Клавіатура"
+diff --git a/crates/openlogi-ui/locales/zh-CN.toml b/crates/openlogi-ui/locales/zh-CN.toml
+index 0560aaf32..6d491a83f 100644
+--- a/crates/openlogi-ui/locales/zh-CN.toml
++++ b/crates/openlogi-ui/locales/zh-CN.toml
+@@ -121,6 +121,8 @@ full = "已充满"
+ battery_error = "电池错误"
+ bolt_receiver = "Bolt 接收器"
+ unifying_receiver = "Unifying 接收器"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "直接连接"
+ mouse = "鼠标"
+ keyboard = "键盘"
+diff --git a/crates/openlogi-ui/locales/zh-HK.toml b/crates/openlogi-ui/locales/zh-HK.toml
+index 9ce6d7e72..675693d13 100644
+--- a/crates/openlogi-ui/locales/zh-HK.toml
++++ b/crates/openlogi-ui/locales/zh-HK.toml
+@@ -121,6 +121,8 @@ full = "已充滿"
+ battery_error = "電池錯誤"
+ bolt_receiver = "Bolt 接收器"
+ unifying_receiver = "Unifying 接收器"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "直接連線"
+ mouse = "滑鼠"
+ keyboard = "鍵盤"
+diff --git a/crates/openlogi-ui/locales/zh-TW.toml b/crates/openlogi-ui/locales/zh-TW.toml
+index 94d1c2db1..050973d20 100644
+--- a/crates/openlogi-ui/locales/zh-TW.toml
++++ b/crates/openlogi-ui/locales/zh-TW.toml
+@@ -121,6 +121,8 @@ full = "已充滿"
+ battery_error = "電池錯誤"
+ bolt_receiver = "Bolt 接收器"
+ unifying_receiver = "Unifying 接收器"
++nano_receiver = "Nano receiver"
++lightspeed_receiver = "Lightspeed receiver"
+ direct_connection = "直接連線"
+ mouse = "滑鼠"
+ keyboard = "鍵盤"

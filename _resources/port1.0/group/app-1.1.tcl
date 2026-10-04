@@ -272,6 +272,53 @@ proc app::get_default_hide_dock_icon {} {
 options app.use_launch_script
 default app.use_launch_script  no
 
+#-------------------------------------------------------------------------------
+# app.sign: sign the app bundle
+#
+# Sign the created app bundle. Useful for avoiding repeated firewall and privacy
+# popups, and crashes on Apple Silicon.
+#-------------------------------------------------------------------------------
+
+options app.sign
+default app.sign no
+
+#-------------------------------------------------------------------------------
+# app.signing_identity: identity used to sign the app
+#
+# Defaults to the adhoc identity (sign to run locally).
+#-------------------------------------------------------------------------------
+
+options app.signing_identity
+default app.signing_identity "-"
+
+#-------------------------------------------------------------------------------
+# app.signing_entitlements: entitlements file used to sign the app
+#
+# Defaults to the empty. If non empty, --entitlements arg will be added to
+# app.signing_args.
+#-------------------------------------------------------------------------------
+
+options app.signing_entitlements
+default app.signing_entitlements ""
+
+#-------------------------------------------------------------------------------
+# app.signing_args: extra auguments passed to codesign command
+#
+# Examples: --deep, --force
+#-------------------------------------------------------------------------------
+
+options app.signing_args
+default app.signing_args ""
+
+#-------------------------------------------------------------------------------
+# app.manual_post_destroot: do not automatically run app::post_destroot and
+# app::sign if enabled
+#
+# Can be manually called to ensure execution order
+#-------------------------------------------------------------------------------
+
+options app.manual_post_destroot
+default app.manual_post_destroot no
 
 proc app::pre_destroot {} {
     global destroot applications_dir
@@ -470,6 +517,24 @@ proc app::post_destroot {} {
     }
 }
 
+proc app::sign {} {
+    global destroot applications_dir
+    set app_create               [option app.create]
+    set app_name                 [option app.name]
+    set app_sign                 [option app.sign]
+    set app_signing_identity     [option app.signing_identity]
+    set app_signing_entitlements [option app.signing_entitlements]
+    set app_signing_args         [option app.signing_args]
+
+    if {[tbool app_create] && [tbool app_sign]} {
+        # Sign the app bundle.
+        if {${app_signing_entitlements} ne ""} {
+            set app_signing_args "--entitlements ${app_signing_entitlements} ${app_signing_args}"
+        }
+        system -W ${destroot}${applications_dir} \
+            "/usr/bin/codesign --sign ${app_signing_identity} ${app_signing_args} [shellescape ${app_name}].app"
+    }
+}
 
 proc app::check_app_icon {} {
     global depends_build
@@ -515,14 +580,19 @@ exec [shellescape ${executable}]
 
 
 proc app::pg_callback {} {
+    set manual_post_destroot [option app.manual_post_destroot]
+
     app::check_app_icon
 
     pre-destroot {
         app::pre_destroot
     }
 
-    post-destroot {
-        app::post_destroot
+    if {![tbool manual_post_destroot]} {
+        post-destroot {
+            app::post_destroot
+            app::sign
+        }
     }
 }
 

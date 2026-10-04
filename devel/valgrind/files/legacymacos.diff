@@ -1,0 +1,174 @@
+# Upstream fixes from Paul Floyd for building on older macOS:
+#   9c57ad911908 (except configure.ac, for OS X < 10.10)
+#     Darwin: make sure that VKI_AT_FDCWD is defined on old systems
+#   5a5454d1cb31 (for OS X < 10.11)
+#     Darwin syswrap: make kdebug_trace_string helpers conditional
+#   739409674939 (for OS X < 10.11)
+#     Darwin persona syscall: use the SYS_persona macro to detect at build time
+#   dd0b3ac67b10 (for OS X 10.11)
+#     Darwin syswrap: move PRE(mach_voucher_extract_attr_recipe_trap)
+#   efc856293324, 57e4c8991f6e (for macOS 10.14)
+#     Darwin fixup_macho_loadcmds: make build more flexible
+#
+diff -rupN coregrind/fixup_macho_loadcmds.c coregrind/fixup_macho_loadcmds.c
+--- coregrind/fixup_macho_loadcmds.c
++++ coregrind/fixup_macho_loadcmds.c
+@@ -515,10 +515,13 @@ void modify_macho_loadcmds ( HChar* filename,
+          fail("has __UNIXSTACK, but wrong ::vmaddr");
+       if (seg->vmsize != expected_stack_size)
+          fail("has __UNIXSTACK, but wrong ::vmsize");
+-#if SDK_VERS >= SDK_10_14_6
++#if DARWIN_VERS >= DARWIN_10_15
+       if (seg->maxprot != 3)
+          fail("has __UNIXSTACK, but wrong ::maxprot (should be 3)");
+-#else
++#elif DARWIN_VERS == DARWIN_10_14
++      if (seg->maxprot != 7 && seg->maxprot != 3)
++         fail("has __UNIXSTACK, but wrong ::maxprot (should be 3 or 7)");
++#else // <= DARWIN_10_13
+       if (seg->maxprot != 7)
+          fail("has __UNIXSTACK, but wrong ::maxprot (should be 7)");
+ #endif
+diff -rupN coregrind/m_syswrap/priv_syswrap-darwin.h coregrind/m_syswrap/priv_syswrap-darwin.h
+--- coregrind/m_syswrap/priv_syswrap-darwin.h
++++ coregrind/m_syswrap/priv_syswrap-darwin.h
+@@ -31,6 +31,7 @@
+ 
+ #include "pub_core_basics.h"         // ThreadId
+ #include "priv_types_n_macros.h"     // DECL_TEMPLATE
++#include <sys/syscall.h>
+ 
+ // syswrap-darwin.c
+ Addr allocstack ( ThreadId tid );
+diff -rupN coregrind/m_syswrap/syswrap-darwin.c coregrind/m_syswrap/syswrap-darwin.c
+--- coregrind/m_syswrap/syswrap-darwin.c
++++ coregrind/m_syswrap/syswrap-darwin.c
+@@ -721,6 +721,8 @@ void VG_(show_open_ports)(void)
+    VG_(message)(Vg_UserMsg, "\n");
+ }
+ 
++/* helpers used by PRE(kdebug_trace_string) added in OSX 10.11 */
++#if DARWIN_VERS >= DARWIN_10_11
+ 
+ /* ---------------------------------------------------------------------
+    kdebug helpers
+@@ -904,6 +906,8 @@ static const HChar *kdebug_debugid(ULong did)
+   return buf;
+ }
+ 
++#endif
++
+ 
+ /* ---------------------------------------------------------------------
+    sync_mappings
+@@ -8867,6 +8871,17 @@ PRE(mach_msg_thread)
+    }
+ }
+ 
++// MACH 72
++// kern_return_t mach_voucher_extract_attr_recipe(ipc_voucher_t                           voucher,
++//                                                mach_voucher_attr_key_t                 key,
++//                                                mach_voucher_attr_raw_recipe_t          raw_recipe,
++//                                                mach_voucher_attr_raw_recipe_size_t     *in_out_size)
++PRE(mach_voucher_extract_attr_recipe_trap)
++{
++    PRINT("mach_voucher_extract_attr_recipe(voucher:%#lx, key:%lu, raw_recipe:%#lx, in_out_size:%#lx)", ARG1, ARG2, ARG3, ARG4);
++    // FIXME PJF add MEM READ/WRITE and POST as needed
++}
++
+ 
+ static int is_thread_port(mach_port_t port)
+ {
+@@ -10819,6 +10834,7 @@ PRE(pselect)
+ 
+ #endif /* DARWIN_VERS >= DARWIN_10_11 */
+ 
++#if defined(SYS_persona)
+ // SYS_persona 494
+ // __persona(uint32_t operation, uint32_t flags, struct kpersona_info *info, uid_t *id,
+ // i          size_t *idlen, char *path);
+@@ -10910,6 +10926,7 @@ POST(persona)
+       break;
+    }
+ }
++#endif /* defined(SYS_persona) */
+ 
+ 
+ /* ---------------------------------------------------------------------
+@@ -11168,17 +11185,6 @@ POST(host_create_mach_voucher_trap)
+   POST_MEM_WRITE( ARG4, sizeof(mach_port_name_t) );
+ }
+ 
+-// MACH 72
+-// kern_return_t mach_voucher_extract_attr_recipe(ipc_voucher_t                           voucher,
+-//                                                mach_voucher_attr_key_t                 key,
+-//                                                mach_voucher_attr_raw_recipe_t          raw_recipe,
+-//                                                mach_voucher_attr_raw_recipe_size_t     *in_out_size)
+-PRE(mach_voucher_extract_attr_recipe_trap)
+-{
+-    PRINT("mach_voucher_extract_attr_recipe(voucher:%#lx, key:%lu, raw_recipe:%#lx, in_out_size:%#lx)", ARG1, ARG2, ARG3, ARG4);
+-    // FIXME PJF add MEM READ/WRITE and POST as needed
+-}
+-
+ PRE(task_register_dyld_image_infos)
+ {
+ //#pragma pack(4)
+@@ -12208,7 +12214,11 @@ const SyscallTableEntry ML_(syscall_table)[] = {
+ // _____(__NR_stack_snapshot_with_config),              // 491
+ // _____(__NR_microstackshot),                          // 492
+ // _____(__NR_grab_pgo_data),                           // 493
++#endif
++#if defined(SYS_persona)
+    MACXY(__NR_persona, persona),                        // 494
++#endif
++#if DARWIN_VERS >= DARWIN_10_11
+    _____(VG_DARWIN_SYSCALL_CONSTRUCT_UNIX(495)),        // ???
+    _____(VG_DARWIN_SYSCALL_CONSTRUCT_UNIX(496)),        // ???
+    _____(VG_DARWIN_SYSCALL_CONSTRUCT_UNIX(497)),        // ???
+diff -rupN include/vki/vki-darwin.h include/vki/vki-darwin.h
+--- include/vki/vki-darwin.h
++++ include/vki/vki-darwin.h
+@@ -373,7 +373,15 @@ typedef uint32_t vki_u32;
+ #define	VKI_O_EXCL	O_EXCL
+ #define	VKI_O_EVTONLY	O_EVTONLY
+ 
++/* OSX 10.6 was the first to get any *at functions like openat
++ * but it wasn't until OSX 10.10 that a definition for AT_FDCWD
++ * was added. We dont claim to support anything older than 10.8
++ * any more, so no need to worry about versions older than that. */
++#if DARWIN_VERS >= DARWIN_10_10
+ #define VKI_AT_FDCWD AT_FDCWD
++#else
++#define VKI_AT_FDCWD -2
++#endif
+ 
+ #define	VKI_F_DUPFD	F_DUPFD
+ #define	VKI_F_GETFD	F_GETFD
+diff -rupN include/vki/vki-scnums-darwin.h include/vki/vki-scnums-darwin.h
+--- include/vki/vki-scnums-darwin.h
++++ include/vki/vki-scnums-darwin.h
+@@ -32,6 +32,7 @@
+ 
+ // need DARWIN_10_x definitions
+ #include "config.h"
++#include <sys/syscall.h>
+ 
+ // osfmk/mach/i386/syscall_sw.h
+ 
+@@ -819,11 +820,15 @@
+ #define	__NR_stack_snapshot_with_config       VG_DARWIN_SYSCALL_CONSTRUCT_UNIX(491)
+ #define	__NR_microstackshot         VG_DARWIN_SYSCALL_CONSTRUCT_UNIX(492)
+ #define	__NR_grab_pgo_data          VG_DARWIN_SYSCALL_CONSTRUCT_UNIX(493)
+-#define	__NR_persona                VG_DARWIN_SYSCALL_CONSTRUCT_UNIX(494)
++#endif /* DARWIN_VERS >= DARWIN_10_11 */
++#if defined(SYS_persona)
++#define	__NR_persona                VG_DARWIN_SYSCALL_CONSTRUCT_UNIX(SYS_persona) // 494
++#endif
+ 			/* 495  */
+ 			/* 496  */
+ 			/* 497  */
+ 			/* 498  */
++#if DARWIN_VERS >= DARWIN_10_11
+ #define	__NR_work_interval_ctl      VG_DARWIN_SYSCALL_CONSTRUCT_UNIX(499)
+ #endif /* DARWIN_VERS >= DARWIN_10_11 */
+ 

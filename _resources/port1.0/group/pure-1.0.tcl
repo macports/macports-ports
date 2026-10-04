@@ -26,6 +26,9 @@ proc pure.setup {module module_version} {
 
     depends_lib-append          port:pure
 
+    # llvm-3.4 and therefore pure doesn't support arm64
+    supported_archs             ppc ppc64 i386 x86_64
+
     use_configure               no
 
     build.args-append           PUREC_FLAGS=-mcpu=generic

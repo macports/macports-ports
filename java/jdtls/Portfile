@@ -1,0 +1,109 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           java 1.0
+
+name                jdtls
+version             1.61.0
+set version_datestamp  202609031315
+revision            0
+categories-append   devel
+license             EPL-2.0
+maintainers         nomaintainer
+
+description         Eclipse JDT Language Server
+long_description    ${description} is a Java language server implementation \
+                    that complies with the Language Server Protocol (LSP).
+
+homepage            https://github.com/eclipse-jdtls/eclipse.jdt.ls
+master_sites        https://download.eclipse.org/jdtls/milestones/${version}/
+
+distname            jdt-language-server-${version}-${version_datestamp}
+extract.suffix      .tar.gz
+
+worksrcdir          jdtls-${version}
+extract.dir         ${worksrcpath}
+pre-extract {
+    xinstall -d ${worksrcpath}
+}
+
+checksums           rmd160  c26bce337b68d091c4360a5920abd2688c0dc99f \
+                    sha256  338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64 \
+                    size    51037522
+
+set java_version_min    21
+java.version        ${java_version_min}+
+java.fallback       openjdk${java_version_min}
+
+# Python version
+# ${prefix}/var/macports/sources/rsync.macports.org/macports/release/tarballs/ports/_resources/port1.0/group/python-1.0.tcl
+set python_version  314
+set python_branch   [string index ${python_version} 0].[string range ${python_version} 1 end]
+set python_prefix   ${frameworks_dir}/Python.framework/Versions/${python_branch}
+set python_bin      ${python_prefix}/bin/python${python_branch}
+
+depends_lib-append  port:python${python_version} \
+                    port:openjdk21
+
+post-patch {
+    reinplace -W ${worksrcpath} "s|#!/usr/bin/env python3|#!${python_bin}|" bin/jdtls
+}
+
+use_configure       no
+build               {}
+
+set share_dir       ${prefix}/share/${name}
+set target_config   [expr {[string match "*arm*" ${build_arch}] ? "config_mac_arm" : "config_mac"}]
+
+set jdtls_launcher_args \
+                    "-Xms512m -Xmx4G -XX:+UseG1GC -XX:+UseStringDeduplication"
+
+destroot {
+    # Create target directory structure
+    xinstall -m 0755 -d ${destroot}${share_dir}
+
+    # Copy all language server runtime artifacts (config, plugins, bin, features)
+    foreach item [glob -nocomplain ${worksrcpath}/*] {
+        set filename [file tail ${item}]
+
+        # Skip any config_* directory that does not match the macOS architecture
+        if {[regexp {^config_} ${filename}] && ![regexp "^${target_config}\$" ${filename}]} {
+            continue
+        }
+
+        file copy ${item} ${destroot}${share_dir}/
+    }
+
+    # Wrap the bin/jdtls executable to enforce Java 21+ and MacPorts Python 3.
+    #
+    # Equinox needs its -configuration directory to be writable: it extracts
+    # native launcher libraries and writes log files there at startup. Since
+    # ${share_dir} lives under the read-only MacPorts prefix, we stage a
+    # per-user writable copy of the platform config directory under
+    # ~/Library/Caches/jdtls and point -configuration at that instead.
+    set launcher ${destroot}${prefix}/bin/jdtls
+
+    set fp [open ${launcher} w]
+    foreach shln [list \
+        "#!/bin/sh" \
+        "" \
+        "export JAVA_HOME=\"\$(PATH=\"${prefix}/bin:\$PATH\" /usr/libexec/java_home 21)\"" \
+        "" \
+        "JDTLS_CONFIG_CACHE=\"\$HOME/Library/Caches/jdtls/${target_config}\"" \
+        "if \[ ! -d \"\$JDTLS_CONFIG_CACHE\" \]; then" \
+        "    mkdir -p \"\$(dirname \"\$JDTLS_CONFIG_CACHE\")\"" \
+        "    cp -R \"${share_dir}/${target_config}\" \"\$JDTLS_CONFIG_CACHE\"" \
+        "fi" \
+        "" \
+        "cd ${share_dir}" \
+        "exec ${python_bin} ${share_dir}/bin/jdtls -configuration \"\$JDTLS_CONFIG_CACHE\" ${jdtls_launcher_args} \"\$@\"" \
+    ] {
+        puts ${fp} ${shln}
+    }
+    close ${fp}
+    file attributes ${launcher} -permissions 0755
+}
+
+livecheck.type      regex
+livecheck.url       https://download.eclipse.org/jdtls/milestones/
+livecheck.regex     {href="jdtls/milestones/(\d+(?:\.\d+)+)"}
