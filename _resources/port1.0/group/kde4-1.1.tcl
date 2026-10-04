@@ -59,9 +59,11 @@ proc kde4::configure_build {} {
         # prepend our own (new) install location for cmake modules:
         set cmake_module_path ${kde4.cmake_module_dir}\;${cmake_share_module_dir}
     }
+    set cmake_module_path   [join [list ${cmake_module_path} {*}[option cmake.module_path]] \;]
+    set cmake_prefix_path   [join [list ${cmake_module_path} {*}[option cmake.prefix_path]] \;]
     configure.args-delete -DCMAKE_MODULE_PATH=${cmake_share_module_dir}
     configure.args-append -DCMAKE_MODULE_PATH="${cmake_module_path}" \
-                          -DCMAKE_PREFIX_PATH="${cmake_module_path}"
+                          -DCMAKE_PREFIX_PATH="${cmake_prefix_path}"
 
     # standard configure args; virtually all KDE ports use CMake and Qt4.
     configure.args-append   -DBUILD_doc=OFF \
@@ -93,7 +95,7 @@ proc kde4::configure_build {} {
                             -DLIBINTL_INCLUDE_DIR=${prefix}/include \
                             -DLIBINTL_LIBRARY=${prefix}/lib/libintl.dylib \
                             -DLIBXML2_INCLUDE_DIR=${prefix}/include/libxml2 \
-                            -DLIBXML2_LIBRARIES=${prefix}/lib/libxml2.dylib \
+                            -DLIBXML2_LIBRARY=${prefix}/lib/libxml2.dylib \
                             -DLIBXML2_XMLLINT_EXECUTABLE=${prefix}/bin/xmllint \
                             -DLIBXSLT_INCLUDE_DIR=${prefix}/include \
                             -DLIBXSLT_LIBRARIES=${prefix}/lib/libxslt.dylib \

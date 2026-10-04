@@ -12,8 +12,6 @@ cmake.set_cxx_standard                no
 
 # link legacysupport statically for compilers
 legacysupport.use_static              yes
-# Sysconf wrapping causes issues so disable
-legacysupport.disable_function_wrap   yes
 
 categories              lang
 platforms               {darwin >= 11}
@@ -25,19 +23,21 @@ set clang_exe_version   ${llvm_version}
 version                 ${llvm_version}.1.8
 
 name                    llvm-${llvm_version}
-revision                0
-subport                 mlir-${llvm_version}  { revision [ expr ${revision} + 0 ] }
-subport                 clang-${llvm_version} { revision [ expr ${revision} + 0 ] }
-subport                 lldb-${llvm_version}  { revision [ expr ${revision} + 0 ] }
-subport                 flang-${llvm_version} { revision [ expr ${revision} + 0 ] }
-
-checksums               rmd160  ea28f8e5952ad3194de00fc7310f18c53aa06eea \
-                        sha256  4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142 \
-                        size    158958576
+revision                3
+subport                 mlir-${llvm_version}  { revision 0 }
+subport                 clang-${llvm_version} { revision 3 }
+subport                 lldb-${llvm_version}  { revision 1 }
+subport                 flang-${llvm_version} { revision 1 }
+subport                 libclc-${llvm_version} { revision 0 }
 
 master_sites            https://github.com/llvm/llvm-project/releases/download/llvmorg-${version}
 distname                llvm-project-${version}.src
 use_xz                  yes
+
+checksums               ${distname}${extract.suffix} \
+                        rmd160  ea28f8e5952ad3194de00fc7310f18c53aa06eea \
+                        sha256  4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142 \
+                        size    158958576
 
 dist_subdir             llvm
 set suffix              mp-${llvm_version}
@@ -46,8 +46,6 @@ worksrcdir              ${worksrcdir}/llvm
 
 # https://github.com/macports/macports-ports/commit/a83a493bc21cbe7e14b1f5884379649ec8f31bae#commitcomment-132530885
 conflicts_build-append  libunwind libunwind-headers
-# https://trac.macports.org/ticket/72695
-conflicts_build-append  ocaml-findlib
 
 # hand-tweaked, approximately c++ standard 2017
 compiler.blacklist      *gcc* {clang < 1001} macports-clang-3.*
@@ -63,9 +61,6 @@ if {${os.major} >= 17 || ${os.platform} ne "darwin"} {
 cmake.generator         Ninja
 cmake.install_prefix    ${sub_prefix}
 cmake.build_type        Release
-
-# clean up some cmake-PG added values we don't want to use, because we want @rpaths
-cmake.install_rpath
 
 configure.pre_args-delete \
     -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib"
@@ -85,7 +80,8 @@ configure.args-append \
     -DLLVM_INCLUDE_EXAMPLES=OFF \
     -DLLVM_ENABLE_FFI=ON \
     -DFFI_INCLUDE_DIR=${prefix}/include \
-    -DFFI_LIBRARY_DIR=${prefix}/lib
+    -DFFI_LIBRARY_DIR=${prefix}/lib \
+    -DLLVM_ENABLE_BINDINGS=OFF
 
 # Remove for now. See https://trac.macports.org/ticket/70333
 # Probably need to detect when Xcode is available
@@ -111,7 +107,7 @@ if {[string match macports-clang-* ${configure.compiler}]} {
     configure.args-append           -DCMAKE_LIBTOOL=${prefix}/bin/libtool
 }
 
-set py_ver              3.13
+set py_ver              3.14
 set py_ver_nodot        [string map {. {}} ${py_ver}]
 depends_build-append    port:python${py_ver_nodot} \
                         port:py${py_ver_nodot}-pygments \
@@ -124,7 +120,7 @@ platform darwin {
     depends_lib-append port:libcxx
 }
 
-patch.dir ${workpath}/${distname}
+patch.dir               ${workpath}/${distname}
 patch.pre_args-replace  -p0 -p1
 
 patchfiles-append \
@@ -139,7 +135,10 @@ patchfiles-append \
     0012-compiler-rt-add-some-defs-missing-in-older-SDKs.patch \
     0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
     0025-lldb-add-defines-needed-for-older-SDKs.patch \
-    0032-Add-Missing-Fortran-Features-includes.patch
+    0032-Add-Missing-Fortran-Features-includes.patch \
+    0140-llvm-no-cmp-spec.patch \
+    0141-infinity_nan.patch \
+    1234-stop-on-linker-error.patch
 
 if {${os.platform} eq "darwin" && ${os.major} < 14} {
     patchfiles-append  0016-10.10-and-less-compiler-rt-find-macosx-sdk.patch
@@ -202,17 +201,23 @@ if {${os.platform} eq "darwin" && ${os.major} <= 16} {
 }
 
 post-patch {
-    reinplace "s|@@PREFIX@@|${prefix}|" \
-        ${patch.dir}/clang/lib/Driver/ToolChains/Clang.cpp \
-        ${patch.dir}/clang/lib/Driver/ToolChains/CommonArgs.cpp
+    if {${subport} ne "spirv-llvm-translator-${llvm_version}"} {
+        reinplace "s|@@PREFIX@@|${prefix}|" \
+            ${patch.dir}/clang/lib/Driver/ToolChains/Clang.cpp \
+            ${patch.dir}/clang/lib/Driver/ToolChains/CommonArgs.cpp
 
-    reinplace "s|@CLANG_FORMAT_PATH@|${prefix}/bin/clang-format-${suffix}|g" \
-        ${patch.dir}/clang/tools/clang-format/clang-format-bbedit.applescript \
-        ${patch.dir}/clang/tools/clang-format/clang-format-diff.py            \
-        ${patch.dir}/clang/tools/clang-format/clang-format-sublime.py         \
-        ${patch.dir}/clang/tools/clang-format/clang-format.el                 \
-        ${patch.dir}/clang/tools/clang-format/clang-format.py
+        reinplace "s|@CLANG_FORMAT_PATH@|${prefix}/bin/clang-format-${suffix}|g" \
+            ${patch.dir}/clang/tools/clang-format/clang-format-bbedit.applescript \
+            ${patch.dir}/clang/tools/clang-format/clang-format-diff.py            \
+            ${patch.dir}/clang/tools/clang-format/clang-format-sublime.py         \
+            ${patch.dir}/clang/tools/clang-format/clang-format.el                 \
+            ${patch.dir}/clang/tools/clang-format/clang-format.py
+    }
 }
+
+livecheck.type      regex
+livecheck.url       https://github.com/llvm/llvm-project/tags
+livecheck.regex     v([quotemeta ${llvm_version}.]\[\\d.\]+)\\.tar\\.gz
 
 # libc++ link step fails on OSX10.10 and older to correctly use static legacy support lib.
 if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
@@ -222,7 +227,6 @@ if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_da
 }
 
 if {${subport} eq "llvm-${llvm_version}"} {
-
     homepage            https://llvm.org/
     description         llvm is a next generation compiler infrastructure
     long_description    The LLVM Core libraries provide a modern source- and \
@@ -232,7 +236,9 @@ if {${subport} eq "llvm-${llvm_version}"} {
                         around a well specified code representation known as \
                         the LLVM intermediate representation ("LLVM IR").
 
-    depends_lib-append  port:libedit port:libffi port:ncurses path:lib/libxar.dylib:xar port:zlib port:zstd
+    depends_lib-append  port:libedit port:libffi port:libxml2 \
+                        port:ncurses path:lib/libxar.dylib:xar \
+                        port:zlib port:zstd
     depends_run-append  port:llvm_select-${llvm_version}
 
     configure.args-append \
@@ -307,7 +313,6 @@ if { ${subport} eq "flang-${llvm_version}" } {
 }
 
 if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
-
     depends_lib-append  port:libxml2 port:libomp port:llvm-${llvm_version} port:ld64
     depends_skip_archcheck-append ld64
 
@@ -356,7 +361,6 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
 }
 
 if {${subport} eq "lldb-${llvm_version}"} {
-
     homepage            https://lldb.llvm.org/
     description         the LLVM debugger
     long_description    lldb is the "LLVM native" debugger.
@@ -382,6 +386,59 @@ if {${subport} eq "lldb-${llvm_version}"} {
     } else {
         notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign lldb_codesign ${sub_prefix}/bin/lldb-server"
     }
+}
+
+if {${subport} eq "libclc-${llvm_version}"} {
+    homepage            https://libclc.llvm.org/
+    description         OpenCL library
+    long_description    libclc is an implementation of the library requirements \
+                        of the OpenCL C programming language
+    depends_build-append \
+                        port:llvm-${llvm_version} \
+                        port:clang-${llvm_version} \
+                        port:spirv-llvm-translator-${llvm_version}
+    worksrcdir          ${distname}/libclc
+}
+
+subport spirv-llvm-translator-${llvm_version} {
+    version             ${llvm_version}.1.11
+    revision            0
+    homepage            https://github.com/KhronosGroup/SPIRV-LLVM-Translator
+    description         LLVM/SPIR-V Bi-Directional Translator
+    long_description    A library and tool for translation between LLVM IR and \
+                        SPIR-V.
+    master_sites-append https://github.com/KhronosGroup/SPIRV-LLVM-Translator/archive/v${version}
+    set dist            SPIRV-LLVM-Translator-${version}
+    distfiles-append    ${dist}.tar.gz
+    checksums-append    ${dist}.tar.gz \
+                        rmd160  c354fb4c59fe0d2bb72e67f96ece32c5147017e3 \
+                        sha256  4bf07afc97d655bd235ca4da5ef220a55350e8d4907cc54aae7e40c5dc4cdbe1 \
+                        size    1869220
+    # Bundle the SPIRV-Headers commit required by this translator version.
+    set spirv_headers_commit 575b6512579ebde466ed3dfc04e413439d14d95d
+    master_sites-append https://github.com/KhronosGroup/SPIRV-Headers/archive/:spirv_headers
+    distfiles-append    ${spirv_headers_commit}.tar.gz:spirv_headers
+    checksums-append    ${spirv_headers_commit}.tar.gz \
+                        rmd160  85f9b2a4b8fbfab77b6cd8e9c20ecb1e11601654 \
+                        sha256  775ee89eb77d067df3f5736e2b4bb2f5f3e39ead915f11f3d366139dcb42209d \
+                        size    570306
+    depends_build-append \
+                        port:spirv-tools
+    depends_lib-append \
+                        port:llvm-${llvm_version}
+    # The translator embeds ccache into Ninja rules; do not do that in a port build.
+    configure.args-append \
+                        -DCCACHE_ALLOWED=OFF
+    extract.cmd         gzip
+    extract.only        ${dist}.tar.gz ${spirv_headers_commit}.tar.gz
+    patchfiles
+    worksrcdir          ${dist}
+    configure.args-append \
+                        -DLLVM_SPIRV_INCLUDE_TESTS=OFF \
+                        -DLLVM_EXTERNAL_SPIRV_HEADERS_SOURCE_DIR=${workpath}/SPIRV-Headers-${spirv_headers_commit}
+    build.target        llvm-spirv
+    livecheck.url       ${homepage}/tags
+    livecheck.regex     v([quotemeta ${llvm_version}.]\[\\d.\]+)\\.tar\\.gz
 }
 
 variant tests description {Enable building of test code} {
@@ -418,7 +475,7 @@ post-destroot {
             file delete ${destroot}${sub_prefix}/bin/flang-new
         }
     }
-    
+
     # Move flang-N to flang
     if {[file exists ${destroot}${sub_prefix}/bin/flang-${llvm_version}]} {
         file delete ${destroot}${sub_prefix}/bin/flang
@@ -426,7 +483,7 @@ post-destroot {
     }
 
     # generate a versioned wrapper script for each file in the bin directory
-    foreach bin [glob ${destroot}${sub_prefix}/bin/*] {
+    foreach bin [glob -nocomplain ${destroot}${sub_prefix}/bin/*] {
         set bin_filename [string map "${sub_prefix} ${prefix}" ${bin}]-${suffix}
         set exec_path    [string map "${destroot}${sub_prefix} ${sub_prefix}" ${bin}]
 
@@ -487,7 +544,6 @@ post-destroot {
 }
 
 if {${subport} eq "clang-${llvm_version}"} {
-
     variant analyzer description {Install clang static analyzer} {
         # these have to be switched on or off together
         configure.args-replace -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
@@ -557,6 +613,3 @@ if {${subport} eq "clang-${llvm_version}"} {
     }
 }
 
-livecheck.type      regex
-livecheck.url       https://github.com/llvm/llvm-project/tags
-livecheck.regex     llvmorg-(${llvm_version}.\[\\d.\]+).tar.gz

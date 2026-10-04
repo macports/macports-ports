@@ -180,14 +180,23 @@ createDatabase()
     sudo -u "$GIS_USER" test -r "$PBF_FILE"
     if [ $? -eq 0 ]; then
 	>&2 echo "Importing from $PBF_FILE... (This can take a very long time, depending on import size and other factors)"
-	sudo -u nobody "$OSM2PGSQL_BIN" -d "$GIS_DB" \
-	     --create --slim  -G --hstore \
-	     --tag-transform-script \
-	     "$PREFIX/share/openstreetmap-carto/openstreetmap-carto.lua" \
-	     -C "$OSM2PGSQL_RAM" --number-processes "$OSM2PGSQL_CPUS" \
-	     -S "$PREFIX/share/openstreetmap-carto/openstreetmap-carto.style" \
-	     --input-reader='pbf' \
-	     "$PBF_FILE"
+	if [ -f "$PREFIX/share/openstreetmap-carto/openstreetmap-carto-flex.lua" ];then
+	    sudo -u nobody "$OSM2PGSQL_BIN" --database="$GIS_DB" \
+		 --create --slim \
+		 --output flex --style="$PREFIX/share/openstreetmap-carto/openstreetmap-carto-flex.lua" \
+		 --cache="$OSM2PGSQL_RAM" --number-processes "$OSM2PGSQL_CPUS" \
+		 --input-reader='pbf' \
+		 "$PBF_FILE"
+	else
+	    sudo -u nobody "$OSM2PGSQL_BIN" -d "$GIS_DB" \
+		 --create --slim  -G --hstore \
+		 --tag-transform-script \
+		 "$PREFIX/share/openstreetmap-carto/openstreetmap-carto.lua" \
+		 -C "$OSM2PGSQL_RAM" --number-processes "$OSM2PGSQL_CPUS" \
+		 -S "$PREFIX/share/openstreetmap-carto/openstreetmap-carto.style" \
+		 --input-reader='pbf' \
+		 "$PBF_FILE"
+	fi
 	if [ $? -ne 0 ]; then
 	    >&2 echo "Error importing $PBF_FILE"
 	    exit 1
@@ -205,6 +214,16 @@ createDatabase()
 		 -f "$PREFIX/share/openstreetmap-carto/functions.sql" >/dev/null
 	    if [ $? -ne 0 ]; then
 		>&2 echo "Error creating functions in PostgreSQL"
+		exit 1
+	    fi
+	fi
+	# White listed key-value tags introduced in openstreetmap-carto version 6.0.0
+	if [ -f "$PREFIX/share/openstreetmap-carto/common-values.sql" ]; then
+	    >&2 echo "Creating table for white listed key-value tags..."
+	    sudo -u "$GIS_USER" "$PGSQLBINPATH/psql" -d "$GIS_DB" -U "$GIS_DB_USER" \
+		 -f "$PREFIX/share/openstreetmap-carto/common-values.sql" >/dev/null
+	    if [ $? -ne 0 ]; then
+		>&2 echo "Error creating table for white listed key-value tags in PostgreSQL"
 		exit 1
 	    fi
 	fi

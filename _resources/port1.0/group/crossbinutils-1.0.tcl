@@ -121,6 +121,21 @@ array set crossbinutils.versions_info {
         sha256  5fe101e6fe9d18fdec95962d81ed670fdee5f37e3f48f0bef87bddf862513aa5 \
         size    27962312
     }}
+    2.46.0 {xz {
+        rmd160  cf936fe24a82aa43696ea442b6f52441af4015e2 \
+        sha256  d75a94f4d73e7a4086f7513e67e439e8fcdcbb726ffe63f4661744e6256b2cf2 \
+        size    28548776
+    }}
+    2.46.1 {xz {
+        rmd160  f617d2a1b62aff9c2d4f3f8ae6722d501563c2e0 \
+        sha256  e127a709cba24c76de8936cb7083dd768f28cd37eb010492e2f19b71eb1294e4 \
+        size    28636456
+    }}
+    2.47 {xz {
+        rmd160  525e5d29ed49a1d6ca9c54b728171d5ccac72d97 \
+        sha256  154ab23b60070e8f27013c22977f1129425d67d1e8acd6e13010e617811e4cff \
+        size    29034716
+    }}
 }
 
 proc crossbinutils.setup {target version} {

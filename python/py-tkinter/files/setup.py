@@ -8,11 +8,9 @@ try:
 except:
     raise SystemExit("Distutils problem")
 
-tkversion = "__TK-VERSION__"
-prefix = "__PREFIX__"
-inc_dirs = [prefix + "/include"]
-lib_dirs = [prefix + "/lib"]
-libs = ["tcl" + tkversion, "tk" + tkversion]
+inc_dirs = ["__TK_INCDIR__", "__TCL_INCDIR__"]
+lib_dirs = ["__TK_LIBDIR__", "__TCL_LIBDIR__"]
+libs = ["__TCL_LIBNAME__", "__TK_LIBNAME__"]
 
 setup(name = "__MODULE_NAME__",
       description = "Tk Extension to Python",

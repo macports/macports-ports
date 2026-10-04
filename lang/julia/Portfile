@@ -9,7 +9,7 @@ compilers.choose    fc f77 f90
 compilers.setup     require_fortran -g95
 compiler.blacklist-append {clang < 900}
 
-github.setup        JuliaLang julia 1.12.4 v
+github.setup        JuliaLang julia 1.13.1 v
 revision            0
 categories-append   lang math science
 maintainers         {ieee.org:s.t.smith @essandess} \
@@ -32,9 +32,9 @@ github.tarball_from releases
 distfiles           ${name}-${version}-full${extract.suffix}
 
 checksums           ${name}-${version}-full${extract.suffix} \
-                    rmd160  b78bf0ee7ae61f0a1060f836b723d6b8ef9d309f \
-                    sha256  6ea60c05395e29012b63934e686b0daa1cc155947be429ae0b247b3ea7e7be93 \
-                    size    570067718
+                    rmd160  4a68ef2d027268275abc3947a0aa2d2516bb31b9 \
+                    sha256  1c2006bced7a1f8b6c92598ef65b7b24fc74aeaadc53535a45e4c6197001057c \
+                    size    600889654
 
 extract.only        ${distfiles}
 
@@ -46,7 +46,7 @@ if {[option gpg_verify.use_gpg_verification]} {
                     ${name}-${version}-full${extract.suffix}.asc
     checksums-append \
                     ${name}-${version}-full${extract.suffix}.asc \
-                    size    866
+                    size    833
 
     post-checksum {
         gpg_verify.verify_gpg_signature \
@@ -56,23 +56,76 @@ if {[option gpg_verify.use_gpg_verification]} {
     }
 }
 
+# fix libccalllazy linking issue
+patchfiles-append   patch-libccalllazy-install-name.diff
+
 # julia build is `make && make install`
 # see https://github.com/JuliaLang/julia/blob/master/Makefile
 
 use_configure       no
 
-build.target        release
+depends_build-append \
+                    port:gmake
+
+# Note: system libunwind, libuv, and zstd aren't cleanly supported across Julia's build system
+depends_lib-append  port:pcre2
 
 pre-build {
     # create a `gfortran` symbolic link
     xinstall -m 0755 -d ${workpath}/bin
     ln -sf ${configure.fc} ${workpath}/bin/gfortran
 
+    # Julia's bundled LLVM tools look for their library deps via @rpath relative
+    # to usr/tools -> ../lib. Because USE_SYSTEM_* skips copying/building those
+    # libs into usr/lib, symlink to MacPorts. N.b. DYLD_FALLBACK_LIBRARY_PATH
+    # doesn't help here: MacPorts invokes the build via /bin/sh, a SIP-protected
+    # binary, so dyld strips all DYLD_* vars before the shell even starts.
+    xinstall -m 0755 -d ${worksrcpath}/usr/lib/julia
+    foreach lib [glob -nocomplain \
+                    ${prefix}/lib/libpcre2*.dylib] {
+        set dest    ${worksrcpath}/usr/lib/[file tail ${lib}]
+        if {![file exists ${dest}]} {
+            ln -sf  ${lib} ${dest}
+        }
+    }
+
+    # libwhich's dlopen()-based search doesn't check /opt/local/lib by
+    # default, so it can't resolve these USE_SYSTEM_* libraries into
+    # usr/lib/julia itself. Pre-create the symlinks it would have made,
+    # so make sees the (prerequisite-less) targets as already satisfied
+    # and skips the libwhich step for them entirely.
+    # variable names not ending in prepositions is the sort of nonsense up with which I will not put
+    set libpcre2_version_for_which_julia_looks 8
+    foreach {libname srcname} [list \
+        libpcre2-${libpcre2_version_for_which_julia_looks} libpcre2-${libpcre2_version_for_which_julia_looks}.dylib \
+    ] {
+        set dest ${worksrcpath}/usr/lib/julia/${libname}.dylib
+        if {![file exists ${dest}] && [file exists ${prefix}/lib/${srcname}]} {
+            ln -sf ${prefix}/lib/${srcname} ${dest}
+        }
+    }
+
     build.env-append \
-        PATH=$env(PATH):${workpath}/bin \
-        PREFIX=${prefix} \
-        FC=${configure.fc}
+                    CPPFLAGS="${configure.cppflags}" \
+                    FC=${configure.fc} \
+                    LDFLAGS="${configure.ldflags}" \
+                    PATH=$env(PATH):${workpath}/bin
+
+    set make_user_fd [open ${worksrcpath}/Make.user w+]
+    foreach line [list \
+                    "USE_SYSTEM_PCRE=1" \
+        ] {
+        puts ${make_user_fd} ${line}
+    }
+    close ${make_user_fd}
 }
+
+build.cmd           ${prefix}/bin/gmake
+build.target        release
+
+# Julia uses lowercase `prefix`; MacPorts supplies DESTDIR separately.
+destroot.args-append \
+                    prefix=${prefix}
 
 set app_name "[string totitle ${name}].app"
 
@@ -116,45 +169,25 @@ default_variants-append \
 
 pre-destroot {
     destroot.env-append \
-        PATH=$env(PATH):${workpath}/bin \
-        PREFIX=${prefix} \
-        FC=${configure.fc}
+        FC=${configure.fc} \
+        PATH=$env(PATH):${workpath}/bin
 }
 
 post-destroot {
-    # julia doesn't do destroot quite right
-    set short_version [join [lrange [split ${version} .] 0 1] .]
-    set major_version [lindex [split ${version} .] 0]
-    set dpw ${destroot}${worksrcpath}
-    delete ${destroot}${prefix}/bin
-    move ${dpw}/julia-${version}/bin ${destroot}${prefix}/bin
-    move ${dpw}/julia-${version}/etc/julia ${destroot}${prefix}/etc
-    move ${dpw}/julia-${version}/include/julia ${destroot}${prefix}/include
-    move ${dpw}/julia-${version}/lib/julia ${destroot}${prefix}/lib
-    move ${dpw}/julia-${version}/lib/libjulia.${short_version}.dylib ${destroot}${prefix}/lib
-    move ${dpw}/julia-${version}/lib/libjulia.dylib ${destroot}${prefix}/lib
-    move ${dpw}/julia-${version}/lib/libjulia.${version}.dylib ${destroot}${prefix}/lib
-    # see https://github.com/JuliaLang/julia/pull/48931
-    move ${dpw}/julia-${version}/libexec/julia ${destroot}${prefix}/libexec/julia
-    move ${dpw}/julia-${version}/share/julia ${destroot}${prefix}/share
-    delete ${destroot}${prefix}/share/man
-    move ${dpw}/julia-${version}/share/man ${destroot}${prefix}/share
-
-    delete ${destroot}${prefix}/var
-
-    system -W ${destroot}${prefix}/bin "install_name_tool -add_rpath ${prefix}/lib julia"
-    system -W ${destroot}${prefix}/lib/julia "install_name_tool -change ${worksrcpath}/usr/lib/libccalllazyfoo.dylib @rpath/libccalllazyfoo.dylib libccalllazybar.dylib"
     if {${os.arch} eq "arm"} {
         # manually fix code signature on arm
         system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force lib/libjulia.${version}.dylib"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/dsymutil"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/lld"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/zstd"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/7z"
     }
 }
 
 pre-test {
     test.env-append \
-        PATH=$env(PATH):${workpath}/bin \
-        PREFIX=${prefix} \
-        FC=${configure.fc}
+        FC=${configure.fc} \
+        PATH=$env(PATH):${workpath}/bin
 }
 
 test.run            yes

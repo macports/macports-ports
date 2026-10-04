@@ -16,6 +16,7 @@ options                             cmake.build_dir \
                                     cmake.install_prefix \
                                     cmake.install_rpath \
                                     cmake.module_path \
+                                    cmake.prefix_path \
                                     cmake_share_module_dir \
                                     cmake.out_of_source \
                                     cmake.set_osx_architectures \
@@ -47,13 +48,16 @@ default cmake.build_type            MacPorts
 default cmake.install_prefix        {${prefix}}
 
 # minimal/initial value for the install rpath:
-default cmake.install_rpath         {${prefix}/lib}
+default cmake.install_rpath         {}
 
 # standard place to install extra CMake modules
 default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
 # extra locations to search for modules can be specified with
 # cmake.module_path; they come after ${cmake_share_module_dir}
 default cmake.module_path           {}
+
+# additional prefixes to search for libraries
+default cmake.prefix_path           {}
 
 # Propagate c/c++ standards to the build
 default cmake.set_c_standard        no
@@ -96,11 +100,6 @@ depends_build-append                path:bin/cmake:cmake
 proc cmake::rpath_flags {} {
     global prefix
     if {[llength [option cmake.install_rpath]]} {
-        # make sure a single ${cmake.install_prefix} is included in the rpath
-        # careful, we are likely to be called more than once.
-        if {"[option cmake.install_prefix]/lib" ni [option cmake.install_rpath]} {
-            cmake.install_rpath-append [option cmake.install_prefix]/lib
-        }
         return [list \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
             -DCMAKE_INSTALL_RPATH="[join [option cmake.install_rpath] \;]"
@@ -125,14 +124,11 @@ proc cmake::system_prefix_path {} {
 }
 
 proc cmake::module_path {} {
-    if {[llength [option cmake.module_path]]} {
-        set modpath "[join [concat [option cmake_share_module_dir] [option cmake.module_path]] \;]"
-    } else {
-        set modpath [option cmake_share_module_dir]
-    }
+    set modpath "[join [concat [option cmake_share_module_dir] [option cmake.module_path]] \;]"
+    set prepath "[join [option cmake.prefix_path] \;]"
     return [list \
         -DCMAKE_MODULE_PATH="${modpath}" \
-        -DCMAKE_PREFIX_PATH="${modpath}"
+        -DCMAKE_PREFIX_PATH="${prepath}"
     ]
 }
 
@@ -240,6 +236,7 @@ default configure.pre_args {[list \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
                     -DCMAKE_MAKE_PROGRAM=${build.cmd} \
+                    -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON \
                     {*}[cmake::module_path] \
                     {*}[cmake::rpath_flags] \
                     -Wno-dev

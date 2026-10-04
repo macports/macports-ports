@@ -1,0 +1,518 @@
+diff --git a/app/assets/i18n/gd3.en_US.ts b/app/assets/i18n/gd3.en_US.ts
+index 67c65f0e..5d9e9efb 100644
+--- a/app/assets/i18n/gd3.en_US.ts
++++ b/app/assets/i18n/gd3.en_US.ts
+@@ -4804,6 +4804,19 @@ Data will be copied to new location and the app will then exit. Please manually
+         <translation type="vanished">I don&apos;t know shit about your OS, sorry!</translation>
+     </message>
+ </context>
++<context>
++    <name>SingleSubworkerCard</name>
++    <message>
++        <location filename="../../../features/http_pack/cards.py" line="33"/>
++        <source>单线程下载</source>
++        <translation>Single-Threaded Download</translation>
++    </message>
++    <message>
++        <location filename="../../../features/http_pack/cards.py" line="34"/>
++        <source>强制以单线程下载此任务，避免反爬及限流</source>
++        <translation>Force 1 download thread for this task to avoid triggering rate limiting</translation>
++    </message>
++</context>
+ <context>
+     <name>StreamSelectCard</name>
+     <message>
+@@ -5062,7 +5075,7 @@ Data will be copied to new location and the app will then exit. Please manually
+     </message>
+     <message>
+         <location filename="../../view/dialogs/task_draft.py" line="83"/>
+-        <location filename="../../view/dialogs/task_draft.py" line="347"/>
++        <location filename="../../view/dialogs/task_draft.py" line="352"/>
+         <source>导入文件</source>
+         <translation>Import File(s)</translation>
+     </message>
+@@ -5087,12 +5100,12 @@ Data will be copied to new location and the app will then exit. Please manually
+         <translation>Cancel</translation>
+     </message>
+     <message>
+-        <location filename="../../view/dialogs/task_draft.py" line="300"/>
++        <location filename="../../view/dialogs/task_draft.py" line="305"/>
+         <source>链接解析失败</source>
+         <translation>Link Parsing Failed</translation>
+     </message>
+     <message>
+-        <location filename="../../view/dialogs/task_draft.py" line="342"/>
++        <location filename="../../view/dialogs/task_draft.py" line="347"/>
+         <source>所有可导入文件 ({0})</source>
+         <translation>All Supported Formats ({0})</translation>
+     </message>
+diff --git a/app/services/task_draft.py b/app/services/task_draft.py
+index 3f924b63..31624dfa 100644
+--- a/app/services/task_draft.py
++++ b/app/services/task_draft.py
+@@ -52,15 +52,30 @@ def canConfirm(self) -> bool:
+         return any(item.parseId or item.task is not None for item in self._items)
+ 
+     def setBaseOptions(self, options: dict) -> None:
++        changed = {
++            name: value
++            for name, value in options.items()
++            if name not in self._baseOptions or self._baseOptions[name] != value
++        }
+         self._baseOptions = options
++        if not changed:
++            return
+         for item in self._items:
+             if item.task is not None:
+-                item.task.setOptions(self._buildOptions(item))
++                item.task.setOptions(changed)
++
++    def setBaseOption(self, name: str, value) -> None:
++        self._baseOptions[name] = value
++        for item in self._items:
++            if item.task is not None:
++                item.task.setOptions({name: value})
+ 
+     def setUrlCategory(self, url: str, categoryId: str) -> None:
+         for item in self._items:
+             if item.url == url:
+                 item.categoryOverride = categoryId
++                if item.task is not None:
++                    item.task.setOptions({"category": categoryId})
+                 break
+ 
+     def setUrls(self, urls: list[str]) -> None:
+@@ -140,7 +155,6 @@ def addParsedTasks(self, tasks: list[Task]) -> list[str]:
+     def confirm(self, autoStart=True) -> None:
+         for item in self._items:
+             if item.task is not None:
+-                item.task.setOptions(self._buildOptions(item))
+                 self.taskConfirmed.emit(item.task, autoStart)
+             elif item.parseId:
+                 item.confirmedOptions = self._buildOptions(item)
+diff --git a/app/view/dialogs/task_draft.py b/app/view/dialogs/task_draft.py
+index 3e5c3c03..0a0bd704 100644
+--- a/app/view/dialogs/task_draft.py
++++ b/app/view/dialogs/task_draft.py
+@@ -115,7 +115,8 @@ def _initWidget(self) -> None:
+         self.cancelButton.setText(self.tr("取消"))
+ 
+         self.optionGroup.addCard(OutputFolderCard(self.optionGroup))
+-        self.optionGroup.addCard(SubworkerCountCard(self.optionGroup))
++        self.subworkerCountCard = SubworkerCountCard(self.optionGroup)
++        self.optionGroup.addCard(self.subworkerCountCard)
+ 
+     def _initLayout(self) -> None:
+         self.headerLayout.addWidget(self.titleLabel)
+@@ -132,6 +133,7 @@ def _bind(self) -> None:
+         self._parseTimer.setInterval(1000)
+         self._parseTimer.timeout.connect(self._onParseNeeded)
+         self.urlEdit.textChanged.connect(self._parseTimer.start)
++        self.subworkerCountCard.slider.valueChanged.connect(self._onSubworkerCountChanged)
+ 
+         self._draft.parsingBusyChanged.connect(self.progressBar.setVisible)
+         self._draft.parseSucceeded.connect(self._onParseSucceeded)
+@@ -277,6 +279,9 @@ def _onParseNeeded(self) -> None:
+         self._draft.setBaseOptions(self.optionGroup.options())
+         self._draft.setUrls(self._urls())
+ 
++    def _onSubworkerCountChanged(self, value: int) -> None:
++        self._draft.setBaseOption("subworkerCount", value)
++
+     def _onParseSucceeded(self, url: str, task: Task) -> None:
+         card = self._featureService.draftCard(task, self.draftGroup)
+         card.categoryPicked.connect(lambda cid: self._draft.setUrlCategory(url, cid))
+diff --git a/features/bili_pack/task.py b/features/bili_pack/task.py
+index 43a19e15..bdbe0c1a 100644
+--- a/features/bili_pack/task.py
++++ b/features/bili_pack/task.py
+@@ -170,6 +170,12 @@ def setName(self, name: str):
+         super().setName(name)
+         self._baseName = Path(self.name).stem
+ 
++    def setOptions(self, options: dict) -> None:
++        if "subworkerCount" in options:
++            for page in self.files or []:
++                page.subworkerCount = options["subworkerCount"]
++        super().setOptions(options)
++
+     def setVideoQuality(self, qn: int, codecid: int) -> None:
+         self.requestedQn = qn
+         self.requestedCodecid = codecid
+diff --git a/features/ftp_pack/pack.py b/features/ftp_pack/pack.py
+index 69948107..df4f5ec6 100644
+--- a/features/ftp_pack/pack.py
++++ b/features/ftp_pack/pack.py
+@@ -111,6 +111,7 @@ async def parse(self, options: TaskOptions) -> Task:
+                 connectionInfo=connectionInfo,
+                 sourceType=sourceType,
+                 files=files,
++                subworkerCount=options.subworkerCount,
+             )
+             return task
+         finally:
+diff --git a/features/ftp_pack/task.py b/features/ftp_pack/task.py
+index 4d31d2fe..79ad4029 100644
+--- a/features/ftp_pack/task.py
++++ b/features/ftp_pack/task.py
+@@ -154,13 +154,14 @@ def setStatus(self, status: TaskStatus):
+     @classmethod
+     def fromFile(cls, file: TaskFile, task: Task) -> FtpStep:
+         ftpFile: FtpFile = file
++        ftpTask: FtpTask = task
+         return cls(
+             stepIndex=file.index + 1,
+             fileIndex=file.index,
+             remotePath=ftpFile.remotePath,
+             fileSize=file.size,
+             canUseRangeRequests=True,
+-            subworkerCount=cfg.preBlockNum.value,
++            subworkerCount=ftpTask.subworkerCount,
+         )
+ 
+     def _loadRecord(self) -> list[FtpSubworker]:
+@@ -503,6 +504,7 @@ class FtpTask(Task):
+     fileType = FtpFile
+     connectionInfo: FtpConnectionInfo
+     sourceType: str = "file"
++    subworkerCount: int = field(default_factory=lambda: cfg.preBlockNum.value)
+ 
+     def __post_init__(self):
+         if isinstance(self.connectionInfo, dict):
+@@ -515,6 +517,11 @@ def __post_init__(self):
+                 if file.index not in existing:
+                     self.addStep(FtpStep.fromFile(file, self))
+ 
++    def setOptions(self, options: dict) -> None:
++        if "subworkerCount" in options:
++            self.subworkerCount = options["subworkerCount"]
++        super().setOptions(options)
++
+     @property
+     def isFolder(self) -> bool:
+         return self.sourceType == "dir"
+@@ -531,4 +538,3 @@ def deleteFiles(self):
+             target = Path(step.outputPath)
+             deletePath(target)
+             deletePath(Path(f"{target}.ghd"))
+-
+diff --git a/features/http_pack/cards.py b/features/http_pack/cards.py
+index 7559a91b..26d9e257 100644
+--- a/features/http_pack/cards.py
++++ b/features/http_pack/cards.py
+@@ -1,14 +1,68 @@
+ from PySide6.QtCore import Qt, QRectF, QTimer
+ from PySide6.QtGui import QColor, QPainter, QPaintEvent
+-from PySide6.QtWidgets import QWidget
+-from qfluentwidgets import isDarkTheme, themeColor
++from PySide6.QtWidgets import QHBoxLayout, QWidget
++from qfluentwidgets import (
++    BodyLabel, CheckBox, FluentIcon, IconWidget, ToolTipFilter,
++    isDarkTheme, themeColor,
++)
+ 
+ from app.view.cards.task_cards import TaskCard
++from app.view.components.option_cards import OptionCard, SubworkerCountCard
+ from .task import HttpTaskStep
+ 
+ FILL_EASING = 0.25
+ 
+ 
++class SingleSubworkerCard(OptionCard):
++
++    def __init__(self, subworkerCountCard: SubworkerCountCard, parent=None, *, initial: bool = False):
++        super().__init__(parent)
++        self._subworkerCountCard = subworkerCountCard
++        self._previousCount = subworkerCountCard.slider.value()
++        self._initial = initial
++
++        self._initWidget()
++        self._initLayout()
++        self._bind()
++        self._setSingleSubworker(initial)
++
++    def _initWidget(self) -> None:
++        self.setFixedHeight(50)
++        self.iconWidget = IconWidget(FluentIcon.SPEED_OFF, self)
++        self.iconWidget.setFixedSize(16, 16)
++        self.titleLabel = BodyLabel(self.tr("单线程下载"), self)
++        self.titleLabel.setToolTip(self.tr("强制以单线程下载此任务，避免反爬及限流"))
++        self.titleLabel.installEventFilter(ToolTipFilter(self.titleLabel))
++        self.checkBox = CheckBox(self)
++        self.checkBox.setChecked(self._initial)
++
++    def _initLayout(self) -> None:
++        layout = QHBoxLayout(self)
++        layout.setContentsMargins(24, 5, 40, 5)
++        layout.setSpacing(15)
++        layout.addWidget(self.iconWidget)
++        layout.addWidget(self.titleLabel)
++        layout.addStretch(1)
++        layout.addWidget(self.checkBox)
++
++    def _bind(self) -> None:
++        self.checkBox.toggled.connect(self._setSingleSubworker)
++
++    def options(self) -> dict:
++        return {"isSingleSubworker": self.checkBox.isChecked()}
++
++    def reset(self) -> None:
++        self.checkBox.setChecked(False)
++
++    def _setSingleSubworker(self, isSingleSubworker: bool) -> None:
++        if isSingleSubworker:
++            self._previousCount = self._subworkerCountCard.slider.value()
++            self._subworkerCountCard.slider.setValue(1)
++        else:
++            self._subworkerCountCard.slider.setValue(self._previousCount)
++        self._subworkerCountCard.setEnabled(not isSingleSubworker)
++
++
+ class SegmentedProgressBar(QWidget):
+     def __init__(self, step: HttpTaskStep, parent=None):
+         super().__init__(parent)
+diff --git a/features/http_pack/pack.py b/features/http_pack/pack.py
+index 817ea911..7df62acc 100644
+--- a/features/http_pack/pack.py
++++ b/features/http_pack/pack.py
+@@ -16,7 +16,7 @@
+     Task, TaskOptions, ResourceTaskOptions, SpecialFileSize,
+ )
+ from app.platform.filesystem import toSafeFilename
+-from .cards import HttpTaskCard
++from .cards import HttpTaskCard, SingleSubworkerCard
+ from .task import HttpTask, HttpTaskStep
+ 
+ 
+@@ -220,11 +220,13 @@ def optionCards(self, task, parent=None):
+         step = task.steps[0] if task.steps else None
+         if not isinstance(step, HttpTaskStep):
+             return []
++        subworkerCountCard = SubworkerCountCard(parent, initial=step.subworkerCount)
+         return [
+             OutputFolderCard(parent, initial=task.outputFolder),
+             HeadersEditCard(parent, initial=step.headers),
+             ClientProfileCard(parent, initial=step.clientProfile, initialUserAgent=step.userAgent),
+-            SubworkerCountCard(parent, initial=step.subworkerCount),
++            subworkerCountCard,
++            SingleSubworkerCard(subworkerCountCard, parent, initial=step.isSingleSubworker),
+         ]
+ 
+     def editCards(self, task, parent=None):
+@@ -233,4 +235,3 @@ def editCards(self, task, parent=None):
+             UrlEditCard(parent, initial=task.url),
+             *self.optionCards(task, parent),
+         ]
+-
+diff --git a/features/http_pack/task.py b/features/http_pack/task.py
+index 66d4309a..e543106b 100644
+--- a/features/http_pack/task.py
++++ b/features/http_pack/task.py
+@@ -68,6 +68,7 @@ class HttpTaskStep(TaskStep):
+     httpByteOffset: int = 0
+     lastModified: str = ""
+     isAccelerated: bool = False
++    isSingleSubworker: bool = False
+     outputFile: str = ""
+     subworkers: list[HttpSubworker] = field(default_factory=list, repr=False)
+ 
+@@ -96,7 +97,11 @@ def setOptions(self, options: dict) -> None:
+             self.clientProfile = options["clientProfile"]
+         if "userAgent" in options:
+             self.userAgent = options["userAgent"]
+-        if "subworkerCount" in options:
++        if "isSingleSubworker" in options:
++            self.isSingleSubworker = bool(options["isSingleSubworker"])
++        if self.isSingleSubworker:
++            self.subworkerCount = 1
++        elif "subworkerCount" in options:
+             self.subworkerCount = options["subworkerCount"]
+ 
+     @property
+@@ -171,7 +176,7 @@ def _splitSlowest(self) -> HttpSubworker | None:
+         return newSubworker
+ 
+     def _reassignSubworker(self) -> None:
+-        if self.fileSize <= 0:
++        if self.isSingleSubworker or self.fileSize <= 0:
+             return
+         slowest = max(self.subworkers, key=lambda sw: sw.end - sw.position + 1)
+         if slowest.end - slowest.position + 1 < cfg.maxReassignSize.value * 1024:
+@@ -181,7 +186,7 @@ def _reassignSubworker(self) -> None:
+             self._taskGroup.create_task(self._runSubworker(newSw, self._fd))
+ 
+     def _autoSpeedUp(self) -> None:
+-        if self.isAccelerated or not cfg.autoSpeedUp.value:
++        if self.isSingleSubworker or self.isAccelerated or not cfg.autoSpeedUp.value:
+             return
+ 
+         self._speedHistory.append(self.speed)
+@@ -436,8 +441,12 @@ async def run(self, reportSpeed, waitForSpeedLimit) -> None:
+                 try:
+                     self._taskGroup = TaskGroup()
+                     async with self._taskGroup:
+-                        for subworker in self.subworkers:
+-                            self._taskGroup.create_task(self._runSubworker(subworker, self._fd))
++                        if self.isSingleSubworker:
++                            for subworker in self.subworkers:
++                                await self._runSubworker(subworker, self._fd)
++                        else:
++                            for subworker in self.subworkers:
++                                self._taskGroup.create_task(self._runSubworker(subworker, self._fd))
+ 
+                     self.setStatus(TaskStatus.COMPLETED)
+                     shouldDeleteRecord = True
+diff --git a/features/huggingface_pack/pack.py b/features/huggingface_pack/pack.py
+index 06ad843b..d250d60e 100644
+--- a/features/huggingface_pack/pack.py
++++ b/features/huggingface_pack/pack.py
+@@ -75,8 +75,6 @@ async def parse(self, options: TaskOptions) -> Task:
+         if token:
+             headers["authorization"] = f"Bearer {token}"
+ 
+-        from app.config.cfg import cfg
+-
+         if filePath:
+             downloadUrl = self._fileUrl(repoId, repoType, revision, filePath)
+             name = toSafeFilename(filePath.rsplit("/", 1)[-1], fallback="download")
+@@ -100,13 +98,14 @@ async def parse(self, options: TaskOptions) -> Task:
+                 repoId=repoId,
+                 repoType=repoType,
+                 revision=revision,
++                subworkerCount=options.subworkerCount,
+             )
+             task.addStep(HttpTaskStep(
+                 stepIndex=1,
+                 url=downloadUrl,
+                 fileSize=fileSize,
+                 headers=headers,
+-                subworkerCount=cfg.preBlockNum.value,
++                subworkerCount=options.subworkerCount,
+                 canUseRangeRequests=canUseRange,
+             ))
+             return task
+@@ -146,7 +145,7 @@ async def parse(self, options: TaskOptions) -> Task:
+                 url=file.downloadUrl,
+                 fileSize=file.size,
+                 headers=headers,
+-                subworkerCount=cfg.preBlockNum.value,
++                subworkerCount=options.subworkerCount,
+                 canUseRangeRequests=file.size > 0,
+                 fileIndex=file.index,
+             )
+@@ -163,6 +162,7 @@ async def parse(self, options: TaskOptions) -> Task:
+             revision=revision,
+             files=files,
+             steps=steps,
++            subworkerCount=options.subworkerCount,
+         )
+ 
+     async def _fetchTree(self, client, apiUrl: str) -> list[dict]:
+diff --git a/features/huggingface_pack/task.py b/features/huggingface_pack/task.py
+index 028bea0f..57907533 100644
+--- a/features/huggingface_pack/task.py
++++ b/features/huggingface_pack/task.py
+@@ -1,8 +1,9 @@
+ from __future__ import annotations
+ 
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ from pathlib import Path
+ 
++from app.config.cfg import cfg
+ from app.models.task import Task, TaskFile, TaskStep
+ from app.platform.filesystem import deletePath
+ 
+@@ -33,14 +34,14 @@ def deleteFiles(self) -> None:
+ 
+     @classmethod
+     def fromFile(cls, file: TaskFile, task: Task) -> TaskStep:
+-        from app.config.cfg import cfg
+         hfFile: HuggingFaceFile = file
++        hfTask: HuggingFaceTask = task
+         return cls(
+             stepIndex=file.index + 1,
+             url=hfFile.downloadUrl,
+             fileSize=file.size,
+             headers=task.steps[0].headers if task.steps else {},
+-            subworkerCount=cfg.preBlockNum.value,
++            subworkerCount=hfTask.subworkerCount,
+             canUseRangeRequests=file.size > 0,
+             fileIndex=file.index,
+         )
+@@ -54,6 +55,7 @@ class HuggingFaceTask(Task):
+     repoId: str = ""
+     repoType: str = "model"
+     revision: str = "main"
++    subworkerCount: int = field(default_factory=lambda: cfg.preBlockNum.value)
+ 
+     def __post_init__(self):
+         super().__post_init__()
+@@ -64,6 +66,11 @@ def __post_init__(self):
+                 if file.index not in existing:
+                     self.addStep(HuggingFaceStep.fromFile(file, self))
+ 
++    def setOptions(self, options: dict) -> None:
++        if "subworkerCount" in options:
++            self.subworkerCount = options["subworkerCount"]
++        super().setOptions(options)
++
+     @property
+     def countSelected(self) -> int:
+         return sum(1 for f in self.files if f.selected) if self.files else 0
+diff --git a/features/yt_dlp_pack/pack.py b/features/yt_dlp_pack/pack.py
+index c9d59969..821444bc 100644
+--- a/features/yt_dlp_pack/pack.py
++++ b/features/yt_dlp_pack/pack.py
+@@ -39,6 +39,7 @@ async def parse(self, options: TaskOptions) -> Task:
+             fileSize=SpecialFileSize.UNKNOWN,
+             outputFolder=options.outputFolder,
+             isPlaylist=isPlaylist,
++            subworkerCount=options.subworkerCount,
+         )
+         for step in buildStepGroup(0):
+             task.addStep(step)
+diff --git a/features/yt_dlp_pack/task.py b/features/yt_dlp_pack/task.py
+index 8a309889..0bcb72ca 100644
+--- a/features/yt_dlp_pack/task.py
++++ b/features/yt_dlp_pack/task.py
+@@ -15,6 +15,7 @@
+ 
+ from loguru import logger
+ 
++from app.config.cfg import cfg
+ from app.models.task import SpecialFileSize, Task, TaskError, TaskFile, TaskStep, TaskStatus
+ from ffmpeg_pack.task import FFmpegResourceStep, FFmpegStep, mediaStem
+ from http_pack.task import HttpTaskStep
+@@ -194,6 +195,12 @@ class YouTubeTask(Task):
+     coverUrl: str = ""
+     isCoverEnabled: bool = False
+     isPlaylist: bool = False
++    subworkerCount: int = field(default_factory=lambda: cfg.preBlockNum.value)
++
++    def setOptions(self, options: dict) -> None:
++        if "subworkerCount" in options:
++            self.subworkerCount = options["subworkerCount"]
++        super().setOptions(options)
+ 
+     def setCoverUrl(self, url: str) -> None:
+         if not url:
+@@ -402,8 +409,8 @@ async def _updateSegmentRanges(self, file: YouTubeFile) -> None:
+         self.task.fileSize = totalSize if totalSize > 0 else 0
+ 
+     def _updateSiblingSteps(self, videoFmt: dict | None, audioFmt: dict | None, info: dict) -> None:
+-        from app.config.cfg import cfg
+         from .config import ytDlpConfig
++        task: YouTubeTask = self.task
+ 
+         for step in self.task.steps:
+             if step.fileIndex != self.fileIndex:
+@@ -417,7 +424,7 @@ def _updateSiblingSteps(self, videoFmt: dict | None, audioFmt: dict | None, info
+                 step.fileSize = fmt.get("filesize") or fmt.get("filesize_approx") or 0
+                 step.extension = fmt.get("ext") or ("mp4" if step.role == "video" else "m4a")
+                 step.canUseRangeRequests = True
+-                step.subworkerCount = cfg.preBlockNum.value
++                step.subworkerCount = task.subworkerCount
+                 step.headers = dict(fmt.get("http_headers") or {})
+             elif isinstance(step, YouTubeMergeStep):
+                 step.videoExtension = videoFmt.get("ext", "mp4") if videoFmt else ""

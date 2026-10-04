@@ -18,7 +18,6 @@ dirs = ["pyobjc-core"] + _install_tool.sort_framework_wrappers()
 
 failed = []
 
-
 def build(dirpath):
     r = subprocess.run(
         cmd,

@@ -1,0 +1,172 @@
+#==================================================================================================
+# The latest patch release 5.0.1 introduced a regression on macOS ARM64.
+# Issue: https://github.com/pmodels/mpich/issues/7771
+#
+# Datatype: fix pack_external for MPI_LONG_DOUBLE
+# PR: https://github.com/pmodels/mpich/pull/7788
+#==================================================================================================
+--- maint/local_python/binding_c.py
++++ maint/local_python/binding_c.py
+@@ -2885,7 +2885,7 @@ def dump_validate_userbuffer_coll(func, kind, buf, ct, dt, disp):
+ 
+             G.out.append("if (%s) {" % cond)
+             G.out.append("    MPI_Aint %stype_size;" % b)
+-            G.out.append("    MPIR_Datatype_get_size_macro(%stype, %stype_size);" % (b, b))
++            G.out.append("    MPIR_Datatype_get_size_at_binding(%stype, %stype_size);" % (b, b))
+             G.out.append("    MPIR_ERRTEST_ALIAS_COLL(%s, %s, mpi_errno);" % (buf, buf2))
+             G.out.append("}")
+         else:
+--- src/include/mpir_datatype.h
++++ src/include/mpir_datatype.h
+@@ -46,6 +46,11 @@
+ #define MPIR_TYPE_ALT_COMPLEX     0x060000      /* e.g. 2-byte Bfloat, 16-byte C long double */
+ #define MPIR_TYPE_FORTRAN_LOGICAL 0x070000      /* Fortran logical may need conversions at op */
+ 
++#define MPIR_BASIC_TYPE_IS_SIGNED(datatype) (((datatype) & 0x070000) == MPIR_TYPE_SIGNED)
++#define MPIR_BASIC_TYPE_IS_UNSIGNED(datatype) (((datatype) & 0x070000) == MPIR_TYPE_UNSIGNED)
++#define MPIR_BASIC_TYPE_IS_FLOAT(datatype) (((datatype) & 0x070000) == MPIR_TYPE_FLOAT || ((datatype) & 0x070000) == MPIR_TYPE_ALT_FLOAT)
++#define MPIR_BASIC_TYPE_IS_COMPLEX(datatype) (((datatype) & 0x070000) == MPIR_TYPE_COMPLEX || ((datatype) & 0x070000) == MPIR_TYPE_ALT_COMPLEX)
++
+ #define MPIR_FIXED0             ((MPI_Datatype)0x4c800000)      /* 0-size, internally equivalent to MPI_DATATYPE_NULL */
+ #define MPIR_FIXED8             ((MPI_Datatype)0x4c800100)
+ #define MPIR_FIXED16            ((MPI_Datatype)0x4c800200)
+@@ -459,6 +464,15 @@ void MPII_Datatype_printf(MPI_Datatype type, int depth, MPI_Aint displacement, i
+     }                                                                   \
+ } while (0)
+ 
++/* Use at binding-layer validation, before MPIR_DATATYPE_REPLACE_BUILTIN */
++#define MPIR_Datatype_get_size_at_binding(a,size_) do { \
++    if (HANDLE_IS_BUILTIN(a) && ((a) & 0xff)) { \
++        size_ = MPIR_Datatype_get_basic_size(MPIR_Internal_types[(a) & 0xff].internal_type); \
++    } else { \
++        MPIR_Datatype_get_size_macro(a, size_); \
++    } \
++} while (0)
++
+ #define MPIR_Datatype_get_extent_macro(a,extent_) do {                  \
+     void *ptr;                                                          \
+     switch (HANDLE_GET_KIND(a)) {                                       \
+--- src/mpi/datatype/typerep/dataloop/looputil.c
++++ src/mpi/datatype/typerep/dataloop/looputil.c
+@@ -738,7 +738,7 @@ static int contig_unpack_external32_to_buf(MPI_Aint * blocks_p,
+     /* TODO: DEAL WITH CASE WHERE ALL DATA DOESN'T FIT! */
+     if ((src_el_size == dest_el_size) && (src_el_size == 1)) {
+         MPIR_Memcpy(((char *) bufp) + rel_off, paramp->u.unpack.unpack_buffer, *blocks_p);
+-    } else if (MPII_Typerep_basic_type_is_complex(el_type)) {
++    } else if (MPIR_BASIC_TYPE_IS_COMPLEX(el_type)) {
+         /* treat as 2x floating point */
+         external32_float_convert(((char *) bufp) + rel_off,
+                                  paramp->u.unpack.unpack_buffer,
+--- src/mpi/datatype/typerep/src/typerep_ext32.c
++++ src/mpi/datatype/typerep/src/typerep_ext32.c
+@@ -95,46 +95,3 @@ MPI_Aint MPII_Typerep_get_basic_size_external32(MPI_Datatype el_type)
+     }
+     return 0;
+ }
+-
+-bool MPII_Typerep_basic_type_is_complex(MPI_Datatype el_type)
+-{
+-    switch (MPIR_DATATYPE_GET_ORIG_BUILTIN(el_type)) {
+-        case MPI_C_COMPLEX:
+-        case MPI_C_DOUBLE_COMPLEX:
+-        case MPI_C_LONG_DOUBLE_COMPLEX:
+-#ifdef HAVE_FORTRAN_BINDING
+-        case MPI_COMPLEX8:
+-        case MPI_COMPLEX16:
+-        case MPI_COMPLEX32:
+-#endif
+-#ifdef HAVE_CXX_BINDING
+-        case MPI_CXX_FLOAT_COMPLEX:
+-        case MPI_CXX_DOUBLE_COMPLEX:
+-        case MPI_CXX_LONG_DOUBLE_COMPLEX:
+-#endif
+-            return true;
+-        default:
+-            return false;
+-    }
+-}
+-
+-bool MPII_Typerep_basic_type_is_unsigned(MPI_Datatype el_type)
+-{
+-    switch (MPIR_DATATYPE_GET_ORIG_BUILTIN(el_type)) {
+-        case MPI_PACKED:
+-        case MPI_BYTE:
+-        case MPI_WCHAR:
+-        case MPI_UNSIGNED_CHAR:
+-        case MPI_UNSIGNED_SHORT:
+-        case MPI_UNSIGNED:
+-        case MPI_UNSIGNED_LONG:
+-        case MPI_UNSIGNED_LONG_LONG:
+-        case MPI_UINT8_T:
+-        case MPI_UINT16_T:
+-        case MPI_UINT32_T:
+-        case MPI_UINT64_T:
+-            return true;
+-        default:
+-            return false;
+-    }
+-}
+--- src/mpi/datatype/typerep/src/typerep_util.h
++++ src/mpi/datatype/typerep/src/typerep_util.h
+@@ -252,7 +252,5 @@ static inline void BASIC_convert(const void *src, void *dest, int size)
+ */
+ 
+ MPI_Aint MPII_Typerep_get_basic_size_external32(MPI_Datatype el_type);
+-bool MPII_Typerep_basic_type_is_complex(MPI_Datatype el_type);
+-bool MPII_Typerep_basic_type_is_unsigned(MPI_Datatype el_type);
+ 
+ #endif /* TYPEREP_UTIL_H_INCLUDED */
+--- src/mpi/datatype/typerep/src/typerep_yaksa_pack_external.c
++++ src/mpi/datatype/typerep/src/typerep_yaksa_pack_external.c
+@@ -154,13 +154,14 @@ int MPIR_Typerep_pack_external(const void *inbuf, MPI_Aint incount, MPI_Datatype
+     MPIR_Datatype_get_size_macro(basic_type, basic_type_size);
+     ext_type_size = MPII_Typerep_get_basic_size_external32(basic_type);
+ 
+-    if (MPII_Typerep_basic_type_is_complex(basic_type)) {
++    if (MPIR_BASIC_TYPE_IS_COMPLEX(basic_type)) {
+         /* treat as float */
+         basic_type_size /= 2;
+         ext_type_size /= 2;
+     }
+ 
+-    if (basic_type == MPI_LONG_DOUBLE || basic_type == MPI_C_LONG_DOUBLE_COMPLEX) {
++    MPI_Datatype orig_basic_type = MPIR_DATATYPE_GET_ORIG_BUILTIN(basic_type);
++    if (orig_basic_type == MPI_LONG_DOUBLE || orig_basic_type == MPI_C_LONG_DOUBLE_COMPLEX) {
+         /* most c compiler's long double is different from 128-bit floating point */
+         PACK_EXTERNAL_long_double(iov, outbuf, max_iov_len);
+     } else if (basic_type_size == ext_type_size) {
+@@ -186,7 +187,7 @@ int MPIR_Typerep_pack_external(const void *inbuf, MPI_Aint incount, MPI_Datatype
+             MPIR_Assert(0);
+         } else if (basic_type_size == 8) {
+             if (ext_type_size == 4) {
+-                if (MPII_Typerep_basic_type_is_unsigned(basic_type)) {
++                if (MPIR_BASIC_TYPE_IS_UNSIGNED(basic_type)) {
+                     PACK_EXTERNAL_unequal_size(iov, outbuf, max_iov_len, uint64_t, uint32_t);
+                 } else {
+                     PACK_EXTERNAL_unequal_size(iov, outbuf, max_iov_len, int64_t, int32_t);
+@@ -252,13 +253,14 @@ int MPIR_Typerep_unpack_external(const void *inbuf, void *outbuf, MPI_Aint outco
+     MPIR_Datatype_get_size_macro(basic_type, basic_type_size);
+     ext_type_size = MPII_Typerep_get_basic_size_external32(basic_type);
+ 
+-    if (MPII_Typerep_basic_type_is_complex(basic_type)) {
++    if (MPIR_BASIC_TYPE_IS_COMPLEX(basic_type)) {
+         /* treat as float */
+         basic_type_size /= 2;
+         ext_type_size /= 2;
+     }
+ 
+-    if (basic_type == MPI_LONG_DOUBLE || basic_type == MPI_C_LONG_DOUBLE_COMPLEX) {
++    MPI_Datatype orig_basic_type = MPIR_DATATYPE_GET_ORIG_BUILTIN(basic_type);
++    if (orig_basic_type == MPI_LONG_DOUBLE || orig_basic_type == MPI_C_LONG_DOUBLE_COMPLEX) {
+         /* most c compiler's long double is different from 128-bit floating point */
+         UNPACK_EXTERNAL_long_double(inbuf, iov, max_iov_len);
+     } else if (basic_type_size == ext_type_size) {
+@@ -284,7 +286,7 @@ int MPIR_Typerep_unpack_external(const void *inbuf, void *outbuf, MPI_Aint outco
+             MPIR_Assert(0);
+         } else if (basic_type_size == 8) {
+             if (ext_type_size == 4) {
+-                if (MPII_Typerep_basic_type_is_unsigned(basic_type)) {
++                if (MPIR_BASIC_TYPE_IS_UNSIGNED(basic_type)) {
+                     UNPACK_EXTERNAL_unequal_size(inbuf, iov, max_iov_len, uint64_t, uint32_t);
+                 } else {
+                     UNPACK_EXTERNAL_unequal_size(inbuf, iov, max_iov_len, int64_t, int32_t);
