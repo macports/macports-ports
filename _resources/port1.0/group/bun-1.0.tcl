@@ -11,20 +11,17 @@
 #   bun install --lockfile-only && cp bun.lock ${filespath}/
 #
 # bun.trusted_dependencies  extra packages whose scripts may run (replaces bun's allowlist)
-# bun.minimum_release_age   seconds; default 259200; 0 disables
 # bun.version               optional minimum bun
 #
 # destroot needs network; bun.lock pins the rest.
 # ${prefix}/lib/bun/${name}, bins in ${prefix}/bin.
 
 options bun.rootname bun.version bun.trusted_dependencies bun.add_dependencies \
-        bun.minimum_release_age bun.lockfile
+        bun.lockfile
 default bun.rootname                {${name}}
 default bun.version                 {}
 default bun.trusted_dependencies    {}
 default bun.add_dependencies        yes
-# default: 3 days (259200 seconds)
-default bun.minimum_release_age     259200
 default bun.lockfile                {${filespath}/bun.lock}
 
 default master_sites    {https://registry.npmjs.org/${bun.rootname}/-/}
@@ -80,11 +77,7 @@ destroot {
     puts ${fd} "{ \"private\": true, \"trustedDependencies\": \[[join ${quoted} {, }]\], \"dependencies\": { \"${root}\": \"file:./${tar}\" } }"
     close ${fd}
 
-    set age {}
-    if {[string is entier -strict ${bun.minimum_release_age}] && ${bun.minimum_release_age} > 0} {
-        set age " --minimum-release-age=${bun.minimum_release_age}"
-    }
-    system -W ${g} "env BUN_INSTALL_CACHE_DIR=${workpath}/.bun-cache bun install --frozen-lockfile --verbose${age}"
+    system -W ${g} "env BUN_INSTALL_CACHE_DIR=${workpath}/.bun-cache bun install --frozen-lockfile --verbose"
     file delete ${g}/${tar}
 
     set pkg [file normalize ${g}/node_modules/${root}]
