@@ -26,7 +26,7 @@ name                opencv4-devel
 conflicts           opencv4
 set my_name         opencv4
 
-platforms           {darwin >= 11}
+platforms           {darwin >= 10}
 categories          graphics science
 license             BSD
 maintainers         {mascguy @mascguy}
@@ -107,6 +107,14 @@ set parent_subport_name \
 # recognize dylib as a valid library suffix
 patchfiles-append   patch-dylib_suffix.diff
 
+# use correct assembler syntax on ppc.
+# this only adds a macro, no effect on other platforms.
+patchfiles-append   patch-parallel_impl.cpp-cv_pause.diff
+
+# Fixes builds against ffmpeg 8.0. This is currently upstreamed in
+# opencv git, but not as part of the current upstream 4.12.0 release.
+patchfiles-append   patch-ffmpeg8.diff
+
 platform darwin {
     if {${opencv_latest}} {
         # Drop scrollwheel code, for 10.11 and earlier
@@ -140,7 +148,6 @@ cmake.set_cxx_standard \
                     yes
 
 compiler.blacklist-append \
-                    *gcc* \
                     {clang < 900} \
                     {macports-clang-3.[0-9]} \
                     {macports-clang-[4-6].0}
@@ -328,7 +335,7 @@ if {${universal_possible} && [variant_isset universal]} {
                     -DENABLE_PRECOMPILED_HEADERS:BOOL=OFF
 }
 
-if { ${configure.ccache} } {
+if {${configure.ccache}} {
     configure.args-replace \
                     -DENABLE_CCACHE:BOOL=OFF \
                     -DENABLE_CCACHE:BOOL=ON
@@ -346,6 +353,21 @@ platform darwin {
                     -DLAPACK_CBLAS_H=Accelerate/Accelerate.h \
                     -DLAPACK_LAPACKE_H=Accelerate/Accelerate.h
 
+    # Do not prohibit GTK:
+    patchfiles-append patch-expose-gtk-choice.diff
+
+    if { ${configure.build_arch} in [list i386 ppc] || (${universal_possible} && [variant_isset universal] &&
+        ("i386" in ${configure.universal_archs} || "ppc" in ${configure.universal_archs}))} {
+        # The Accelerate ABI requires 32-bit signed integers.
+        # In clapack.h, __CLPK_integer is a typedef for either
+        #   int (64-bit) or long int (32-bit).
+        # opencv only uses ints.
+        # Casting between pointers is never recommended, but
+        #   int and long int should have the same representations
+        #   on 32-bit systems.
+        patchfiles-append patch-32bit_accelerate.diff
+    }
+
     # the AVFoundation backend is failing to build up to 10.8
     # it might be possible to work around or repair this on 10.7 and 10.8
     # there as a qtkit video implementation prior to the AVFoundation version
@@ -356,6 +378,37 @@ platform darwin {
         configure.args-replace \
                     -DWITH_AVFOUNDATION:BOOL=ON \
                     -DWITH_AVFOUNDATION:BOOL=OFF
+    }
+
+    # Isolate PowerPC-specific fixes.
+    platform darwin powerpc {
+        # For now just disable, it is broken.
+        # window_cocoa.mm: error: expected ';' before 'in'
+        # window_cocoa.mm: error: no matching function for call to 'max(CGFloat&, double)'
+        # window_cocoa.mm: error: ivar 'image' used by '@synthesize' declaration must be an existing ivar
+        # TODO: forward-port working code from opencv3.
+        patchfiles-append \
+            patch-disable-cocoa.diff
+
+        # The code uses libdispatch unconditionally.
+        depends_lib-append \
+            port:libdispatch-legacy
+        configure.cppflags-prepend \
+            -I${prefix}/libexec/dispatch/usr/include
+        configure.ldflags-append \
+            ${prefix}/libexec/dispatch/usr/lib/libdispatch.a
+
+        # There are invalid conversion errors in non-Eigen fallbacks which require -fpermissive:
+        # essential_solver.cpp: error: invalid conversion from 'int*' to '__CLPK_integer*' {aka 'long int*'} [-fpermissive]
+        # Unfortunately, enabling Eigen variant introduces another error:
+        # /System/Library/Frameworks/vecLib.framework/Headers/vecLibTypes.h:69:26:
+        # error: two or more data types in declaration of 'vBool32'
+        configure.cxxflags-append \
+            -fpermissive
+
+        # Cocoa is broken, enable at least GTK:
+        default_variants-append \
+            +gtk3
     }
 }
 
@@ -678,6 +731,15 @@ if {${name} eq ${subport}} {
                     -DWITH_QT=5
     }
 
+    variant gtk3 description {Build with GTK-3 Backend support} {
+        depends_lib-append \
+                    path:lib/pkgconfig/gtk+-3.0.pc:gtk3
+
+        configure.args-replace \
+                    -DWITH_GTK:BOOL=OFF \
+                    -DWITH_GTK:BOOL=ON
+    }
+
     variant java description {Add Java bindings} {
         PortGroup   java 1.0
 
@@ -737,7 +799,7 @@ if {${name} eq ${subport}} {
     }
 }
 
-# NOTE: Variant 'debug' is the only one that should be shared with Python subports
+# NOTE: Variants 'debug' and 'ffmpeg{6,7,8}' are shared with Python subports
 variant debug description {Build with debugging info} {
     configure.args-replace \
                     -DBUILD_WITH_DEBUG_INFO:BOOL=OFF \
