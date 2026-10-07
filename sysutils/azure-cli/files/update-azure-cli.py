@@ -36,6 +36,7 @@ PYPI_TO_PORT_OVERRIDES = {
     "pyjwt": "jwt",
     "pyopenssl": "openssl",
     "pysocks": "socks",
+    "pymsalruntime": "msalruntime",
     "typing_extensions": "typing_extensions",
 }
 
@@ -163,6 +164,14 @@ def main():
             }
         )
     entries.sort(key=lambda e: e["tag"])
+
+    for entry in entries:
+        if entry["tag"] in ("azure_cli", "azure_cli_core"):
+            entry["file"] = re.sub(
+                rf"^{re.escape(entry['tag'])}-[^-]+-",
+                f"{entry['tag']}-${{version}}-",
+                entry["file"],
+            )
 
     print(format_aligned(
         "master_sites", [f"{e['url']}:{e['tag']}" for e in entries]))
