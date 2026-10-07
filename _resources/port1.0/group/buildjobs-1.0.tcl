@@ -156,6 +156,8 @@ proc buildjobs::pg_callback {} {
 
 #---------------------------------------------------------------------------------------------------
 
-# callback after port is parsed
-port::register_callback buildjobs::pg_callback
+# Don't run until pre-fetch, to avoid any potential port parse issues
+pre-fetch {
+    buildjobs::pg_callback
+}
 
