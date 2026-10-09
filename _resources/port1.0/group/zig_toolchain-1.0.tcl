@@ -92,37 +92,41 @@
 # Two things are deliberately absent.
 #
 # The ceiling machinery of go_toolchain, which works out the newest release a
-# given macOS can run and caps downstream ports accordingly, has nothing to
-# compute here: every series packaged so far requires darwin 22. The
-# zig_toolchain.min_darwin table below is the data it would need, so it can be
-# added if and when the series diverge.
+# given macOS can run and caps downstream ports accordingly, has nothing to cap
+# while every consumer pins an exact series and nothing depends on `zig`.
+# current_series follows upstream even when that raises the floor: at 0.17 the
+# `zig` port requires darwin 24, and on macOS 13 and 14 an older series is
+# installed directly as zig-0.NN. The min_darwin table below is the data that
+# machinery would need.
 #
-# lang/zig-bootstrap is not a point on this axis. It is a dependency-free build
-# of the current release, selected by archivers/shichizip to work around an
-# emutls bug rather than for its version, and nothing here selects it.
+# lang/zig-bootstrap is not a point on this axis. It is a separate,
+# dependency-free build of Zig with its own version, installed as
+# zig-bootstrap, and nothing here selects it.
 
 
 # The oldest darwin major version each Zig series supports.
 set zig_toolchain.min_darwin(0.15)  22  ;# 13 Ventura
 set zig_toolchain.min_darwin(0.16)  22  ;# 13 Ventura
+set zig_toolchain.min_darwin(0.17)  24  ;# 15 Sequoia
 
 # The LLVM major each Zig series builds against. Zig tracks LLVM closely and a
 # series does not build against any other.
 set zig_toolchain.llvm(0.15)        20
 set zig_toolchain.llvm(0.16)        21
+set zig_toolchain.llvm(0.17)        22
 
 # The series MacPorts packages as lang/zig-0.NN ports.
 #
 # A list of series rather than of versions, so that a patch update touches only
 # the toolchain's own Portfile.
-set zig_toolchain.packaged          {0.15 0.16}
+set zig_toolchain.packaged          {0.15 0.16 0.17}
 
 # The series the `zig` port provides.
 #
 # Named rather than derived from the newest packaged series, so that adding a
 # lang/zig-0.NN port does not move every `zig` user onto it in the same commit.
 # Bumping this is the separate, deliberate step that does.
-set zig_toolchain.current_series    0.16
+set zig_toolchain.current_series    0.17
 
 
 # The release series of a version: 0.16 from 0.16.0, and 0.16 from 0.16.
