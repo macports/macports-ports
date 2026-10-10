@@ -38,6 +38,32 @@ proc muniversal_arch_flag_supported {args} {
     return [regexp {^gcc-4|llvm|apple|clang} ${configure.compiler}]
 }
 
+# Is ${path} a Mach-O file (thin or fat) or an ar archive, judging by its
+# magic bytes? The exit status of lipo(1)/libtool(1) can't tell us: on
+# macOS 26+, libtool(1) exits 0 on non-Mach-O input and writes an empty
+# archive.
+proc muniversal_is_macho_or_archive {path} {
+    set fd [open ${path} rb]
+    set magic [read ${fd} 8]
+    close ${fd}
+    if {${magic} eq "!<arch>\n"} {
+        return 1
+    }
+    if {[binary scan ${magic} H8Iu hex nfat] != 2} {
+        return 0
+    }
+    switch -- ${hex} {
+        feedface - feedfacf - cefaedfe - cffaedfe {
+            return 1
+        }
+        cafebabe - cafebabf {
+            # Java class files share this magic, followed by their version (>= 45)
+            return [expr {${nfat} < 0x20}]
+        }
+    }
+    return 0
+}
+
 proc muniversal_get_arch_flag {arch {fortran ""}} {
     global os.arch
     # Prefer -arch to -m
@@ -684,15 +710,16 @@ variant universal {
                             ui_debug "universal: merge: ${prefixDir}/${fl} is identical in ${base1} and ${base2}"
                         } else {
                             # Actually try to merge the files
-                            # First try lipo, then libtool
-                            if { ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
+                            # First try lipo, then libtool, but only on real Mach-O/ar files
+                            set binary [expr {[muniversal_is_macho_or_archive ${dir1}/${fl}] && [muniversal_is_macho_or_archive ${dir2}/${fl}]}]
+                            if { ${binary} && ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
                                 # lipo worked
                                 ui_debug "universal: merge: lipo created ${prefixDir}/${fl}"
-                            } elseif { ! [catch {system "/usr/bin/libtool \"${dir1}/${fl}\" \"${dir2}/${fl}\" -o \"${dir}/${fl}\""}] } {
+                            } elseif { ${binary} && ! [catch {system "/usr/bin/libtool \"${dir1}/${fl}\" \"${dir2}/${fl}\" -o \"${dir}/${fl}\""}] } {
                                 # libtool worked
                                 ui_debug "universal: merge: libtool created ${prefixDir}/${fl}"
                             } else {
-                                # lipo and libtool have failed, so assume they are text files to be merged
+                                # not mergeable as binaries, so assume they are text files to be merged
                                 set dontdiff no
                                 foreach dont ${merger_dont_diff} {
                                     if {${dont} eq "${prefixDir}/${fl}"} {

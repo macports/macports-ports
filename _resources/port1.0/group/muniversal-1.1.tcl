@@ -219,6 +219,32 @@ proc muniversal::muniversal_get_diff_to_use {} {
     }
 }
 
+# Is ${path} a Mach-O file (thin or fat) or an ar archive, judging by its
+# magic bytes? The exit status of lipo(1)/libtool(1) can't tell us: on
+# macOS 26+, libtool(1) exits 0 on non-Mach-O input and writes an empty
+# archive.
+proc muniversal::is_macho_or_archive {path} {
+    set fd [open ${path} rb]
+    set magic [read ${fd} 8]
+    close ${fd}
+    if {${magic} eq "!<arch>\n"} {
+        return 1
+    }
+    if {[binary scan ${magic} H8Iu hex nfat] != 2} {
+        return 0
+    }
+    switch -- ${hex} {
+        feedface - feedfacf - cefaedfe - cffaedfe {
+            return 1
+        }
+        cafebabe - cafebabf {
+            # Java class files share this magic, followed by their version (>= 45)
+            return [expr {${nfat} < 0x20}]
+        }
+    }
+    return 0
+}
+
 # a version of `sysctl hw.cpu64bit_capable` that works on older systems
 # see https://trac.macports.org/ticket/25873
 proc muniversal::cpu64bit_capable {} {
@@ -442,15 +468,16 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                     ui_debug "universal: merge: ${prefixDir}/${fl} is identical in ${base1} and ${base2}"
                 } else {
                     # actually try to merge the files
-                    # first try lipo, then libtool
-                    if { ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
+                    # first try lipo, then libtool, but only on real Mach-O/ar files
+                    set binary [expr {[muniversal::is_macho_or_archive ${dir1}/${fl}] && [muniversal::is_macho_or_archive ${dir2}/${fl}]}]
+                    if { ${binary} && ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
                         # lipo worked
                         ui_debug "universal: merge: lipo created ${prefixDir}/${fl}"
-                    } elseif { ! [catch {system "/usr/bin/libtool \"${dir1}/${fl}\" \"${dir2}/${fl}\" -o \"${dir}/${fl}\""}] } {
+                    } elseif { ${binary} && ! [catch {system "/usr/bin/libtool \"${dir1}/${fl}\" \"${dir2}/${fl}\" -o \"${dir}/${fl}\""}] } {
                         # libtool worked
                         ui_debug "universal: merge: libtool created ${prefixDir}/${fl}"
                     } else {
-                        # lipo and libtool have failed, so assume they are text files to be merged
+                        # not mergeable as binaries, so assume they are text files to be merged
                         if {"${prefixDir}/${fl}" in ${merger_dont_diff}} {
                             # user has specified that diff does not work
                             # attempt to give each file a unique name and create a new file which includes one of the original depending on the arch
