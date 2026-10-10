@@ -30,6 +30,35 @@ proc npm_add_dependencies {} {
 }
 port::register_callback npm_add_dependencies
 
+# A path: dependency is satisfied by ANY ${prefix}/bin/node, and the ten nodejs
+# ports all provide one while conflicting with each other. So a user holding
+# nodejs8 satisfies path:bin/node:nodejs22, no newer nodejs is pulled in, and the
+# port installs against a node it was never meant to run on -- silently, because
+# path: cannot express a minimum version. Fail early and say which port to
+# install instead.
+pre-fetch {
+    global npm.nodejs_version prefix name
+    set node ${prefix}/bin/node
+    # Not installed yet: the dependency will bring in the right one.
+    if {![file executable ${node}]} {
+        return
+    }
+    if {[catch {exec ${node} --version 2>@1} v]} {
+        ui_warn "could not determine the node version: ${v}"
+        return
+    }
+    if {![regexp {^v(\d+)\.} ${v} -> major]} {
+        ui_warn "could not parse the node version: ${v}"
+        return
+    }
+    if {${major} < ${npm.nodejs_version}} {
+        return -code error \
+            "${name} needs node ${npm.nodejs_version} or newer, but\
+             ${node} is ${v}. Install nodejs${npm.nodejs_version} first;\
+             the nodejs ports conflict, so the older one has to go."
+    }
+}
+
 # Pass the tarball distfile to 'npm install' directly, since running 'npm
 # install' from the extracted directory creates a symlink to the directory
 # (which gets removed). Since there's no need to extract the tarball, disable
