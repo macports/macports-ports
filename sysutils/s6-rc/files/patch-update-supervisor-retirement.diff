@@ -1,0 +1,89 @@
+Retire obsolete supervisors after linking the replacement service directories,
+before updating fdholder storage, using the existing "an" scanner command.
+
+Sending "xd" before the rescan allows s6-svscan to reap an old supervisor
+while it is still marked active and respawn it through an unlinked scan entry.
+This produces spurious "unable to chdir" failures during live updates.
+Keep the old idle supervisors alive until the scanner identifies them as
+inactive. No sleeps, retries, signal masking, or warning suppression are added.
+Request the rescan/prune immediately after successful servicedir management:
+a later fdholder failure or timeout must not bypass supervisor retirement.
+Do not prune on a management failure: its rollback may have removed new links,
+and pruning then could stop preserved services. Interrupted updates still
+require recovery; this is not a transaction or a retirement acknowledgement.
+The ordering is in s6-rc/s6 itself, rather than a versioned Darwin API. The
+Portfile limits this downstream correction to Darwin; no OS-release-specific
+boundary is claimed.
+
+MacPorts downstream patch; not submitted to or accepted by Skarnet.
+External tests and results:
+https://github.com/bjornpagen/macports-ports/tree/c8f3c8b0da1998378636d1d363823d0cabea2b48
+Regression evidence is maintained separately from the MacPorts ports tree.
+
+--- src/s6-rc/s6-rc-update.c.orig
++++ src/s6-rc/s6-rc-update.c
+@@ -308,7 +308,7 @@
+   }
+ }
+ 
+-static inline void make_new_livedir (unsigned char const *oldstate, s6rc_db_t const *olddb, unsigned char const *newstate, s6rc_db_t const *newdb, char const *newcompiled, unsigned int *invimage, char const *prefix, stralloc *sa)
++static inline void make_new_livedir (s6rc_db_t const *olddb, unsigned char const *newstate, s6rc_db_t const *newdb, char const *newcompiled, unsigned int *invimage, char const *prefix, stralloc *sa)
+ {
+   size_t dirlen, pos, newlen, sdlen ;
+   size_t newclen = strlen(newcompiled) ;
+@@ -377,10 +377,12 @@
+   if (!atomic_symlink4(sa->s + dirlen, live, 0, 0)) goto rollback ;
+   if (verbosity >= 2) strerr_warni1x("successfully switched to new database") ;
+ 
+- /* scandir cleanup, then old livedir cleanup */
++ /* Unlink only: exiting supervisors here would let s6-svscan restart them
++    before it rescans. After linking the new servicedirs, request "an"
++    so the scanner rescans before stopping inactive supervisors. */
+   i = olddb->nlong ;
+   while (i--)
+-    s6rc_servicedir_unsupervise(sa->s, prefix, olddb->string + olddb->services[i].name, (oldstate[i] & 33) == 1) ;
++    s6rc_servicedir_unsupervise(sa->s, prefix, olddb->string + olddb->services[i].name, 1) ;
+   rm_rf_in_tmp(sa, 0) ;
+   sa->len = 0 ;
+   return ;
+@@ -786,7 +788,7 @@
+         if (verbosity >= 2)
+           strerr_warni1x("updating state and service directories") ;
+ 
+-        make_new_livedir(oldstate, &olddb, newstate, &newdb, argv[0], invimage, prefix, &sa) ;
++        make_new_livedir(&olddb, newstate, &newdb, argv[0], invimage, prefix, &sa) ;
+         stralloc_free(&sa) ;
+         if (s6rc_servicedir_manage_g(live, prefix, &deadline) < 0)
+         {
+@@ -795,14 +797,9 @@
+            strerr_diefu2sys(111, "manage new service directories in ", live) ;
+         }
+ 
+-       /* Adjust stored pipes */
+-
+-        if (verbosity >= 2)
+-          strerr_warni1x("updating s6rc-fdholder pipe storage") ;
+-
+-        update_fdholder(&olddb, oldstate, &newdb, newstate, invimage, envp, &deadline) ;
+-
+-       /* Clean up scandir */
++       /* Retire obsolete supervisors before a possible fdholder failure.
++          "a" delays "n" until a successful scan; preserved servicedirs
++          have been relinked, so their supervisors remain active. */
+ 
+         if (verbosity >= 2)
+           strerr_warni1x("cleaning up scan directory") ;
+@@ -815,6 +812,13 @@
+           if (s6_svc_writectl(scdir, S6_SVSCAN_CTLDIR, "an", 2) <= 0)
+             strerr_warnwu2sys("send command to s6-svscan on ", scdir) ;
+         }
++
++       /* Adjust stored pipes */
++
++        if (verbosity >= 2)
++          strerr_warni1x("updating s6rc-fdholder pipe storage") ;
++
++        update_fdholder(&olddb, oldstate, &newdb, newstate, invimage, envp, &deadline) ;
+       }
+ 
+ 
