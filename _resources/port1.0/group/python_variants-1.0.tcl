@@ -148,7 +148,12 @@ proc python_variants_parse_entry {entry} {
         set parts [split ${entry} ":"]
         return [list [lindex ${parts} 0] [lindex ${parts} 1]]
     }
-    return [list ${entry} "python${entry}"]
+    if {[string index ${entry} end] == "t"} {
+        set stem [string range ${entry} 0 end-1]
+        return [list ${entry} "python${stem}-freethreading"]
+    } else {
+        return [list ${entry} "python${entry}"]
+    }
 }
 
 proc python_variants_set {option action args} {

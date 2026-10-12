@@ -419,7 +419,7 @@ default python.runtime  {[python_get_runtime]}
 
 proc python_get_runtime {} {
     set v [option python.suffix]
-    set devel 315
+    set devel 316
 
     set freethreading [string equal [string index $v end] "t"]
     if {$freethreading} {
