@@ -32,17 +32,45 @@ set release_ver     ${github.version}
 # Binary compatibility version
 set compat_ver      1.0.0
 
+# Name and prefix for -devel subports
+set devel_name      ${name}-devel
+
+# Most files need to be handed off from old port to new subports.
+# This tracks when this is needed, and what the relevant versions are.
+# The release case is currently commented out to avoid a silly lint complaint.
+set need_handoff    false
+###set old_release_ver 1.5.2
+set old_devel_ver   20261009
+
 subport ${name} {
-    conflicts           ${name}-devel
+    # Conflicts until next release
+    # The -devel conflict is only for older -devel versions
+    conflicts           ${devel_name} ${devel_name}-headers ${devel_name}-libs
     set so_curversion   ${release_ver}
 }
 
-subport ${name}-devel {
-    conflicts           ${name}
+subport ${devel_name} {
+    description         Wrapper port for new ${devel_name}-headers and \
+                        ${devel_name}-libs subports.
+    long_description    {*}${description}
+    distfiles
+    build               {}
+    # We need to install something in destroot to avoid an error
+    destroot.cmd        mkdir -p
+    destroot.target     ${destroot}${prefix}/share
+    destroot.keepdirs   ${destroot}${prefix}/share
+    destroot.destdir
+    depends_build       port:${devel_name}-headers
+    depends_run         port:${devel_name}-libs
+    # Ensure install always brings in headers as a "build" dependency
+    license-append      NoMirror
+}
+
+if {${subport} ne ${name}} {
     github.setup        macports macports-legacy-support \
                         545561e5f87bca9aacf2508e5ee21a9e07ea4524
     github.tarball_from archive
-    version             20261009
+    version             20261013
     revision            0
     livecheck.type      none
     checksums           rmd160  b5101a78f3f97a92659560403069571a129bc07a \
@@ -52,11 +80,68 @@ subport ${name}-devel {
     set so_curversion   [lindex ${v_split} 0].[lindex ${v_split} 1].99
 }
 
+# Assume we'll run tests
+test.run            yes
+
+subport ${devel_name}-headers {
+    description         Wrapper headers and added headers for ${devel_name}
+    long_description    {*}${description}
+    # Conflicts until next release
+    conflicts           ${name}
+    platforms           {darwin any}
+    supported_archs     noarch
+    # Avoid compiler selection for unused compiler
+    configure.compiler  cc
+    build               {}
+    destroot.target     install-headers
+    # Nothing to test here
+    test.run            no
+    set need_handoff    true
+}
+
+subport ${devel_name}-libs {
+    description         Shared and static libraries for ${devel_name}
+    long_description    {*}${description}
+    # Conflicts until next release
+    conflicts           ${name}
+    build.target        all
+    destroot.target     install-lib
+    test.target         test_all_unv
+    set need_handoff    true
+}
+
+subport ${devel_name}-symlib {
+    description         Empty linker-symbol version of ${devel_name} \
+                        shared library
+    long_description    {*}${description}
+    license             Permissive
+    build.target        symlib
+    destroot.target     install-symlib
+    test.target         test_symlib_unv
+
+    # Avoid useless libSystem reference if allowable.
+    # This is a fatal link error on macOS 11+, even with -ffreestanding.
+    if {${os.major} < 20} {
+        build.env-append    SYMLIBNOSTDLIB="-nostdlib"
+    }
+}
+
 # This port doesn't use C++ at all, except for two very limited tests
 # that are manual-only.  Disabling cxx_stdlib avoids unnessary compiler
 # constraints on some platforms.
 #
 configure.cxx_stdlib
+
+# Simple make-based setup, with natural universal support
+use_configure       no
+universal_variant   yes
+
+# The universal variants aren't very expensive, and defaulting to
+# +universal avoids the accidental use of the -universal variants,
+# breaking universal dependents.
+if {${subport} ne ${name}} {
+    default_variants-append +universal
+}
 
 # Set up proper arch list for build, destroot, and test
 if {![variant_isset universal]} {
@@ -64,10 +149,6 @@ if {![variant_isset universal]} {
 } else {
     set archs       ${configure.universal_archs}
 }
-
-# Simple make-based setup, with natural universal support
-use_configure       no
-universal_variant   yes
 
 # Set up the needed portion of the standard environment, plus our ARCHS
 build.env-append    ARCHS=${archs} \
@@ -92,38 +173,89 @@ test.env            {*}${build.env}
 build.env-append    SOCURVERSION=${so_curversion} \
                     SOCOMPATVERSION=${compat_ver}
 
-# Set test target for optional universal handling and testing all libs
-test.target         test_all_unv
-
 # Enable parallel tests
 default test.jobs   ${build.jobs}
 test.pre_args      -j${test.jobs} ${test.target}
 
 # Include Tiger-specific additions
 platform darwin 8 {
-    build.target-append     tiger-bins
-    destroot.target-append  install-tiger
+    if {${subport} eq ${name}} {
+        build.target-append     tiger-bins
+        destroot.target-append  install-tiger
+    }
+    if {${subport} eq "${devel_name}-libs"} {
+        build.target-append     tiger-libs
+        destroot.target-append  install-tiger-libs
+    }
+    if {${subport} eq "${devel_name}-symlib"} {
+        build.target-append     tiger-libs
+        destroot.target-append  install-tiger-symlib
+    }
 
     # Work around linker/install_name_tool weirdness on ppc64
-    if {${subport} ne ${name} && ${os.arch} eq "powerpc"} {
+    if {(${subport} eq "${devel_name}-libs"
+         || ${subport} eq "${devel_name}-symlib")
+        && ${os.arch} eq "powerpc"} {
         build.env-append    TIGERLDCC="/usr/bin/cc"
     }
 
+    subport ${devel_name}-progs {
+        description         Installs updated programs for 10.4
+        long_description    {*}${description}
+        # Conflicts until next release
+        conflicts           ${name}
+        build.target        tiger-progs
+        destroot.target     install-tiger-progs
+        # No current tests for this
+        test.run            no
+        set need_handoff    true
+    }
+    if {${subport} eq ${name}} {
+        # Conflicts until next release
+        conflicts-append ${name}-progs
+    }
+    if {${subport} eq ${devel_name}} {
+        depends_run-append port:${name}-progs
+    }
+
     # Avoid troublesome Xcode 2.5 linker on 10.4
-    configure.compiler      apple-gcc-4.2
+    if {${subport} ne ${devel_name}
+        && ${subport} ne "${devel_name}-headers"} {
+        configure.compiler  apple-gcc-4.2
+    }
 }
 
 # Include Leopard-specific additions
 platform darwin 9 {
-    build.target-append     leopard-bins
-    destroot.target-append  install-leopard
+    if {${subport} eq ${name} || ${subport} eq "${devel_name}-libs"} {
+        build.target-append     leopard-bins
+        destroot.target-append  install-leopard
+    }
 }
 
-# Enable tests
-test.run            yes
-test.target         test
+# Deactivate any sufficiently old version of a specified port
+proc deactivate_old {port maxver} {
+    if {![catch {lindex [registry_active ${port}] 0} installed]} {
+        set _version [lindex $installed 1]
+        if {[vercmp $_version ${maxver}] <= 0} {
+            registry_deactivate_composite ${port} "" [list ports_nodepcheck 1]
+        }
+    }
+}
 
-if {![file exists ${prefix}/libexec/mpstats]} {
+# Here we apply any needed "deactivate hacks"
+if {${need_handoff}} {
+    pre-activate {
+        # Uncomment the release case upon the next release
+        ###deactivate_old ${name} ${old_release_ver}
+        deactivate_old ${devel_name} ${old_devel_ver}
+    }
+
+    # The following only applies until the next release
+    notes "Activating ${name} may require explicitly deactivating ${subport}."
+}
+
+if {${subport} eq ${name} && ![file exists ${prefix}/libexec/mpstats]} {
     notes "
     To help make sure your system continues to be well-represented by\
     MacPorts, especially if your system is not one of the latest macOS\
