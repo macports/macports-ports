@@ -1,0 +1,933 @@
+# Backport https://github.com/Kruszoneq/macUSB/pull/132
+# Adapted to v2.5; includes the PR runtime changes and localized strings.
+--- a/macUSB.xcodeproj/project.pbxproj
++++ b/macUSB.xcodeproj/project.pbxproj
+@@ -303,6 +303,9 @@
+ 				Features/Installation/Windows/CreatorWindowsPrerequisiteGateLogic.swift,
+ 				Features/Installation/Windows/CreatorWindowsUnmountRecoveryLogic.swift,
+ 				Features/Welcome/AppBranding.swift,
++				Features/Welcome/WelcomeAutoSkipPreferences.swift,
++				Features/Welcome/WelcomeStartupCoordinator.swift,
++				Features/Welcome/WelcomeStartupUpdateChecker.swift,
+ 				Features/Welcome/WelcomeView.swift,
+ 				macUSBIcon.icon,
+ 				Resources/Icons/OS/os_10_7_lion.icns,
+@@ -438,6 +441,9 @@
+ 				Features/Installation/Windows/CreatorWindowsPrerequisiteGateLogic.swift,
+ 				Features/Installation/Windows/CreatorWindowsUnmountRecoveryLogic.swift,
+ 				Features/Welcome/AppBranding.swift,
++				Features/Welcome/WelcomeAutoSkipPreferences.swift,
++				Features/Welcome/WelcomeStartupCoordinator.swift,
++				Features/Welcome/WelcomeStartupUpdateChecker.swift,
+ 				Features/Welcome/WelcomeView.swift,
+ 				macUSBIcon.icon,
+ 				Resources/Localizable.xcstrings,
+--- a/macUSB/App/macUSBApp.swift
++++ b/macUSB/App/macUSBApp.swift
+@@ -83,6 +83,13 @@
+             CommandGroup(replacing: .newItem) { }
+             
+             CommandMenu(String(localized: "Opcje")) {
++                Toggle(isOn: Binding(
++                    get: { menuState.skipWelcomeEnabled },
++                    set: { WelcomeAutoSkipPreferences.shared.setEnabled($0) }
++                )) {
++                    Text("app.welcome.auto_skip.menu")
++                }
++                Divider()
+                 Menu {
+                     Button(String(localized: "Mac OS X Tiger 10.4 (Multi DVD)")) {
+                         let alert = NSAlert()
+--- /dev/null
++++ b/macUSB/Features/Welcome/WelcomeAutoSkipPreferences.swift
+@@ -0,0 +1,52 @@
++import AppKit
++
++/// Keeps the persisted option disabled until the user confirms its behavior.
++final class WelcomeAutoSkipPreferences {
++    static let shared = WelcomeAutoSkipPreferences()
++
++    private var isPresentingConfirmation = false
++
++    private init() {}
++
++    func setEnabled(_ enabled: Bool) {
++        if !enabled {
++            MenuState.shared.skipWelcomeEnabled = false
++            return
++        }
++        guard !MenuState.shared.skipWelcomeEnabled, !isPresentingConfirmation else { return }
++        isPresentingConfirmation = true
++        let wasWelcomeActiveWhenRequested = WelcomeStartupCoordinator.shared.isWelcomeActive
++
++        let alert = NSAlert()
++        alert.icon = NSApp.applicationIconImage
++        alert.alertStyle = .informational
++        alert.messageText = String(localized: "app.welcome.auto_skip.confirm.title")
++        alert.informativeText = String(localized: "app.welcome.auto_skip.confirm.message")
++        alert.addButton(withTitle: String(localized: "app.welcome.auto_skip.confirm.action"))
++        alert.addButton(withTitle: String(localized: "Anuluj"))
++
++        let handleResponse: (NSApplication.ModalResponse) -> Void = { response in
++            // Wait for the sheet/modal to finish closing before publishing the option.
++            DispatchQueue.main.async {
++                self.isPresentingConfirmation = false
++                guard response == .alertFirstButtonReturn else { return }
++                let startupCoordinator = WelcomeStartupCoordinator.shared
++                let canApplyToCurrentWelcome = wasWelcomeActiveWhenRequested && startupCoordinator.isWelcomeActive
++                if !canApplyToCurrentWelcome {
++                    // Enabling from another screen applies only to a future launch.
++                    startupCoordinator.cancelAutomaticNavigation()
++                }
++                MenuState.shared.skipWelcomeEnabled = true
++                if canApplyToCurrentWelcome {
++                    startupCoordinator.refreshPrerequisitesIfNeeded()
++                }
++            }
++        }
++
++        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
++            alert.beginSheetModal(for: window, completionHandler: handleResponse)
++        } else {
++            handleResponse(alert.runModal())
++        }
++    }
++}
+--- /dev/null
++++ b/macUSB/Features/Welcome/WelcomeStartupCoordinator.swift
+@@ -0,0 +1,108 @@
++import Foundation
++import AppKit
++import Combine
++
++/// Owns startup for the app session, independently of SwiftUI view recreation.
++final class WelcomeStartupCoordinator: ObservableObject {
++    static let shared = WelcomeStartupCoordinator()
++
++    @Published private(set) var canNavigateAutomatically = false
++    private(set) var isWelcomeActive = false
++
++    private var welcomeVisibilityGeneration = 0
++
++    private var didStart = false
++    private var didFinish = false
++    private var didLeaveWelcome = false
++    private var helperStartupAllowsAutomaticNavigation = false
++    private var updateResult: WelcomeStartupUpdateResult?
++    private var isRefreshingPrerequisites = false
++    private let updateChecker = WelcomeStartupUpdateChecker()
++
++    private init() {}
++
++    func setWelcomeActive(_ active: Bool) {
++        guard isWelcomeActive != active else { return }
++        isWelcomeActive = active
++        welcomeVisibilityGeneration += 1
++        canNavigateAutomatically = false
++        if active {
++            refreshPrerequisitesIfNeeded()
++        }
++    }
++
++    func startIfNeeded() {
++        guard !didStart else { return }
++        didStart = true
++        FullDiskAccessPermissionManager.shared.handleStartupPromptIfNeeded {
++            HelperServiceManager.shared.bootstrapIfNeededAtStartup { helperResult in
++                DispatchQueue.main.async {
++                    self.helperStartupAllowsAutomaticNavigation = helperResult.isReady && !helperResult.requiredAutoRepair
++                    NotificationPermissionManager.shared.handleStartupFlowIfNeeded()
++                    self.updateChecker.check { result in
++                        self.updateResult = result
++                        self.didFinish = true
++                        if !self.helperStartupAllowsAutomaticNavigation || result != .upToDate {
++                            AppLogging.info(
++                                "Automatic welcome transition blocked: helperBootstrapSucceeded=\(helperResult.isReady), " +
++                                "helperAutoRepairRequired=\(helperResult.requiredAutoRepair), updateCheck=\(result.rawValue).",
++                                category: "App"
++                            )
++                        }
++                        self.refreshPrerequisitesIfNeeded()
++                    }
++                }
++            }
++        }
++    }
++
++    func refreshPrerequisitesIfNeeded() {
++        guard isWelcomeActive, MenuState.shared.skipWelcomeEnabled,
++              didFinish, !didLeaveWelcome, helperStartupAllowsAutomaticNavigation,
++              updateResult == .upToDate, !isRefreshingPrerequisites else { return }
++        isRefreshingPrerequisites = true
++        let visibilityGeneration = welcomeVisibilityGeneration
++        canNavigateAutomatically = false
++        // Recheck after the network request and after returning from System Settings.
++        FullDiskAccessPermissionManager.shared.refreshState(trigger: .startup) { access in
++            HelperServiceManager.shared.evaluatePassiveReadiness { snapshot in
++                DispatchQueue.main.async {
++                    self.isRefreshingPrerequisites = false
++                    guard self.isWelcomeActive, !self.didLeaveWelcome else { return }
++                    guard visibilityGeneration == self.welcomeVisibilityGeneration else {
++                        self.refreshPrerequisitesIfNeeded()
++                        return
++                    }
++                    let ready = access.hasConfirmedAccess && snapshot.state == .ready
++                    AppLogging.info(
++                        "Automatic welcome transition prerequisites checked: fullDiskAccess=\(access.rawValue), helper=\(snapshot.state.rawValue).",
++                        category: "App"
++                    )
++                    self.canNavigateAutomatically = ready
++                }
++            }
++        }
++    }
++
++    func consumeAutomaticNavigationIfReady() -> Bool {
++        guard isWelcomeActive, canNavigateAutomatically, !didLeaveWelcome,
++              helperStartupAllowsAutomaticNavigation,
++              MenuState.shared.skipWelcomeEnabled,
++              MenuState.shared.hasFullDiskAccess,
++              !MenuState.shared.helperRequiresBackgroundApproval,
++              !AppActiveOperationRegistry.shared.hasActiveOperations,
++              NSApp.isActive, NSApp.modalWindow == nil,
++              !NSApp.windows.contains(where: { $0.attachedSheet != nil }) else { return false }
++        didLeaveWelcome = true
++        AppLogging.info(
++            "Automatically moving from the welcome screen to analysis: startup checks completed successfully.",
++            category: "App"
++        )
++        return true
++    }
++
++    func cancelAutomaticNavigation() {
++        didLeaveWelcome = true
++        canNavigateAutomatically = false
++    }
++}
+--- /dev/null
++++ b/macUSB/Features/Welcome/WelcomeStartupUpdateChecker.swift
+@@ -0,0 +1,81 @@
++import Foundation
++import AppKit
++
++enum WelcomeStartupUpdateResult: String {
++    case upToDate
++    case updateAvailable
++    case failed
++}
++
++final class WelcomeStartupUpdateChecker {
++    private let versionCheckURL = URL(string: "https://raw.githubusercontent.com/Kruszoneq/macUSB/main/version.json")!
++
++    func check(completion: @escaping (WelcomeStartupUpdateResult) -> Void) {
++        guard let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
++              isValidVersion(currentVersion) else {
++            AppLogging.error("Update check failed: trigger=startup, current application version unavailable or invalid.", category: "App")
++            completion(.failed)
++            return
++        }
++        AppLogging.info("Update check started: trigger=startup, currentVersion=\(currentVersion).", category: "App")
++
++        URLSession.shared.dataTask(with: versionCheckURL) { data, response, error in
++            let finishOnMain: (WelcomeStartupUpdateResult) -> Void = { result in
++                DispatchQueue.main.async {
++                    completion(result)
++                }
++            }
++
++            guard let data = data, error == nil,
++                  let response = response as? HTTPURLResponse,
++                  (200..<300).contains(response.statusCode) else {
++                AppLogging.error("Update check failed: trigger=startup, details=\(error?.localizedDescription ?? "missing response data or unsuccessful HTTP response").", category: "App")
++                finishOnMain(.failed)
++                return
++            }
++
++            do {
++                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: String],
++                   let remoteVersion = json["version"],
++                   let downloadLink = json["url"],
++                   self.isValidVersion(remoteVersion),
++                   let downloadURL = URL(string: downloadLink),
++                   downloadURL.scheme == "https", downloadURL.host != nil {
++
++                    if remoteVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
++                        AppLogging.info("Update check completed: trigger=startup, newerVersion=\(remoteVersion), currentVersion=\(currentVersion).", category: "App")
++                        DispatchQueue.main.async {
++                            let alert = NSAlert()
++                            alert.icon = NSApplication.shared.applicationIconImage
++                            alert.alertStyle = .informational
++                            alert.messageText = String(localized: "Dostępna aktualizacja!")
++                            let remoteVersionLine = String(localized: "Dostępna jest nowa wersja: \(remoteVersion). Zalecamy aktualizację!")
++                            let currentVersionLine = String(localized: "Aktualnie uruchomiona wersja: \(currentVersion)")
++                            alert.informativeText = "\(remoteVersionLine)\n\(currentVersionLine)"
++                            alert.addButton(withTitle: String(localized: "Pobierz"))
++                            alert.addButton(withTitle: String(localized: "Ignoruj"))
++                            let response = alert.runModal()
++                            if response == .alertFirstButtonReturn {
++                                NSWorkspace.shared.open(downloadURL)
++                            }
++                            completion(.updateAvailable)
++                        }
++                    } else {
++                        AppLogging.info("Update check completed: trigger=startup, no newer version found, currentVersion=\(currentVersion), remoteVersion=\(remoteVersion).", category: "App")
++                        finishOnMain(.upToDate)
++                    }
++                } else {
++                    AppLogging.error("Update check failed: trigger=startup, invalid update metadata.", category: "App")
++                    finishOnMain(.failed)
++                }
++            } catch {
++                AppLogging.error("Update check failed: trigger=startup, details=\(error.localizedDescription).", category: "App")
++                finishOnMain(.failed)
++            }
++        }.resume()
++    }
++
++    private func isValidVersion(_ version: String) -> Bool {
++        version.range(of: #"^[0-9]+(?:\.[0-9]+)*$"#, options: .regularExpression) != nil
++    }
++}
+--- a/macUSB/Features/Welcome/WelcomeView.swift
++++ b/macUSB/Features/Welcome/WelcomeView.swift
+@@ -7,11 +7,13 @@
+     @EnvironmentObject var languageManager: LanguageManager
+     
+     @State private var dummyLock: Bool = false
+-    @State private var didRunStartupFlow: Bool = false
++    @State private var isWelcomeVisible = false
++    @ObservedObject private var startupCoordinator = WelcomeStartupCoordinator.shared
++    @ObservedObject private var menuState = MenuState.shared
++    @ObservedObject private var activeOperations = AppActiveOperationRegistry.shared
+     @State private var navigateToAnalysis: Bool = false
+     @State private var isSupportProjectHovered: Bool = false
+     
+-    let versionCheckURL = URL(string: "https://raw.githubusercontent.com/Kruszoneq/macUSB/main/version.json")!
+     let supportProjectURL = URL(string: "https://buymeacoffee.com/kruszoneq")!
+     
+     // Pusty inicjalizator (wymagany dla ContentView)
+@@ -48,6 +50,7 @@
+             
+             // --- PRZYCISK START ---
+             Button {
++                startupCoordinator.cancelAutomaticNavigation()
+                 navigateToAnalysis = true
+             } label: {
+                 HStack {
+@@ -102,77 +105,47 @@
+             .hidden()
+         )
+         .onReceive(NotificationCenter.default.publisher(for: .macUSBNavigateToAnalysis)) { _ in
++            startupCoordinator.cancelAutomaticNavigation()
+             navigateToAnalysis = true
++        }
++        .onChange(of: startupCoordinator.canNavigateAutomatically) { _ in
++            attemptAutomaticNavigation()
++        }
++        .onChange(of: menuState.skipWelcomeEnabled) { _ in
++            startupCoordinator.refreshPrerequisitesIfNeeded()
++            attemptAutomaticNavigation()
++        }
++        .onChange(of: activeOperations.activeOperationCount) { _ in
++            startupCoordinator.refreshPrerequisitesIfNeeded()
++            attemptAutomaticNavigation()
++        }
++        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
++            startupCoordinator.refreshPrerequisitesIfNeeded()
++        }
++        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
++            startupCoordinator.refreshPrerequisitesIfNeeded()
++        }
++        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndSheetNotification)) { _ in
++            DispatchQueue.main.async { attemptAutomaticNavigation() }
+         }
+         .onAppear {
+             MenuState.shared.resetLanguageChangesForWelcome()
+             MenuState.shared.rawLinuxImageSelectionEnabled = true
+-            guard !didRunStartupFlow else { return }
+-            didRunStartupFlow = true
+-            runStartupFlow()
++            isWelcomeVisible = true
++            startupCoordinator.setWelcomeActive(true)
++            startupCoordinator.startIfNeeded()
++            attemptAutomaticNavigation()
+         }
+         .onDisappear {
++            isWelcomeVisible = false
++            startupCoordinator.setWelcomeActive(false)
+             MenuState.shared.rawLinuxImageSelectionEnabled = false
+         }
+     }
+ 
+-    private func runStartupFlow() {
+-        FullDiskAccessPermissionManager.shared.handleStartupPromptIfNeeded {
+-            HelperServiceManager.shared.bootstrapIfNeededAtStartup { _ in
+-                NotificationPermissionManager.shared.handleStartupFlowIfNeeded()
+-                self.checkForUpdates { }
+-            }
+-        }
++    private func attemptAutomaticNavigation() {
++        guard isWelcomeVisible, !navigateToAnalysis else { return }
++        guard startupCoordinator.consumeAutomaticNavigationIfReady() else { return }
++        navigateToAnalysis = true
+     }
+-    
+-    func checkForUpdates(completion: @escaping () -> Void) {
+-        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+-        
+-        URLSession.shared.dataTask(with: versionCheckURL) { data, response, error in
+-            let finishOnMain: () -> Void = {
+-                DispatchQueue.main.async {
+-                    completion()
+-                }
+-            }
+-
+-            guard let data = data, error == nil else {
+-                finishOnMain()
+-                return
+-            }
+-            
+-            do {
+-                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: String],
+-                   let remoteVersion = json["version"],
+-                   let downloadLink = json["url"] {
+-                    
+-                    if remoteVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
+-                        DispatchQueue.main.async {
+-                            let alert = NSAlert()
+-                            alert.icon = NSApplication.shared.applicationIconImage
+-                            alert.alertStyle = .informational
+-                            alert.messageText = String(localized: "Dostępna aktualizacja!")
+-                            let remoteVersionLine = String(localized: "Dostępna jest nowa wersja: \(remoteVersion). Zalecamy aktualizację!")
+-                            let currentVersionLine = String(localized: "Aktualnie uruchomiona wersja: \(currentVersion)")
+-                            alert.informativeText = "\(remoteVersionLine)\n\(currentVersionLine)"
+-                            alert.addButton(withTitle: String(localized: "Pobierz"))
+-                            alert.addButton(withTitle: String(localized: "Ignoruj"))
+-                            let response = alert.runModal()
+-                            if response == .alertFirstButtonReturn, let url = URL(string: downloadLink) {
+-                                NSWorkspace.shared.open(url)
+-                            }
+-                            completion()
+-                        }
+-                    } else {
+-                        finishOnMain()
+-                    }
+-                } else {
+-                    finishOnMain()
+-                }
+-            } catch {
+-                print("Błąd sprawdzania aktualizacji: \(error)")
+-                finishOnMain()
+-            }
+-        }.resume()
+-    }
+-    
+ }
+--- a/macUSB/Shared/Services/Helper/HelperService/HelperServiceBootstrap.swift
++++ b/macUSB/Shared/Services/Helper/HelperService/HelperServiceBootstrap.swift
+@@ -1,16 +1,37 @@
+ import Foundation
+ import AppKit
+ import ServiceManagement
++
++struct HelperStartupResult {
++    let isReady: Bool
++    /// Includes version/build updates and automatic registration recovery during bootstrap.
++    let requiredAutoRepair: Bool
++}
+ 
+ extension HelperServiceManager {
+     private enum StartupAutoRepairDecision {
+         case noRepairNeeded
+         case needsRepair(previousFingerprint: String?)
++
++        var requiresRepair: Bool {
++            switch self {
++            case .noRepairNeeded: return false
++            case .needsRepair: return true
++            }
++        }
+     }
+ 
+-    func bootstrapIfNeededAtStartup(completion: @escaping (Bool) -> Void) {
++    func bootstrapIfNeededAtStartup(completion: @escaping (HelperStartupResult) -> Void) {
+         refreshBackgroundApprovalState()
+         let startupDecision = startupAutoRepairDecision()
++        let initialRecoveryRevision = currentRegistrationRecoveryRevision()
++        let finish: (Bool) -> Void = { ready in
++            completion(HelperStartupResult(
++                isReady: ready,
++                requiredAutoRepair: startupDecision.requiresRepair ||
++                    self.currentRegistrationRecoveryRevision() != initialRecoveryRevision
++            ))
++        }
+ 
+         #if DEBUG
+         if Self.isRunningFromXcodeDevelopmentBuild() {
+@@ -19,34 +40,34 @@
+             case .enabled:
+                 validateEnabledServiceHealth(interactive: false, allowRecovery: false) { ready, _ in
+                     guard ready else {
+-                        completion(false)
++                        finish(false)
+                         return
+                     }
+ 
+                     self.runStartupAutoRepairIfNeeded(decision: startupDecision) { autoRepairOK in
+-                        completion(autoRepairOK)
++                        finish(autoRepairOK)
+                     }
+                 }
+ 
+             case .requiresApproval:
+                 presentStartupApprovalAlertIfNeeded {
+-                    completion(false)
++                    finish(false)
+                 }
+ 
+             case .notRegistered, .notFound:
+                 ensureReadyForPrivilegedWork(interactive: false) { ready, _ in
+                     guard ready else {
+-                        completion(false)
++                        finish(false)
+                         return
+                     }
+ 
+                     self.runStartupAutoRepairIfNeeded(decision: startupDecision) { autoRepairOK in
+-                        completion(autoRepairOK)
++                        finish(autoRepairOK)
+                     }
+                 }
+ 
+             @unknown default:
+-                completion(false)
++                finish(false)
+             }
+             return
+         }
+@@ -55,13 +76,13 @@
+         ensureReadyForPrivilegedWork(interactive: false) { ready, _ in
+             guard ready else {
+                 self.presentStartupApprovalAlertIfNeeded {
+-                    completion(false)
++                    finish(false)
+                 }
+                 return
+             }
+ 
+             self.runStartupAutoRepairIfNeeded(decision: startupDecision) { autoRepairOK in
+-                completion(autoRepairOK)
++                finish(autoRepairOK)
+             }
+         }
+     }
+--- a/macUSB/Shared/Services/Helper/HelperService/HelperServiceEnsureReadyFlow.swift
++++ b/macUSB/Shared/Services/Helper/HelperService/HelperServiceEnsureReadyFlow.swift
+@@ -265,6 +265,7 @@
+         healthDetails: String,
+         completion: @escaping (Bool, String?) -> Void
+     ) {
++        recordAutomaticRegistrationRecovery()
+         reportHelperServiceEvent("Uruchamiam procedurę odzyskiwania rejestracji helpera.")
+         coordinationQueue.async {
+             let service = SMAppService.daemon(plistName: Self.daemonPlistName)
+--- a/macUSB/Shared/Services/Helper/HelperServiceManager.swift
++++ b/macUSB/Shared/Services/Helper/HelperServiceManager.swift
+@@ -41,6 +41,22 @@
+     var repairProgressSink: ((String) -> Void)?
+     let statusHealthTimeout: TimeInterval = 1.6
+ 
++    // Read-only startup evidence; it does not control the recovery procedure.
++    private let registrationRecoveryLock = NSLock()
++    private var registrationRecoveryRevision = 0
++
++    func currentRegistrationRecoveryRevision() -> Int {
++        registrationRecoveryLock.lock()
++        defer { registrationRecoveryLock.unlock() }
++        return registrationRecoveryRevision
++    }
++
++    func recordAutomaticRegistrationRecovery() {
++        registrationRecoveryLock.lock()
++        defer { registrationRecoveryLock.unlock() }
++        registrationRecoveryRevision += 1
++    }
++
+     struct HelperStatusSnapshot {
+         let isHealthy: Bool
+         let serviceStatus: SMAppService.Status
+--- a/macUSB/Shared/Services/MenuState.swift
++++ b/macUSB/Shared/Services/MenuState.swift
+@@ -3,6 +3,11 @@
+ 
+ final class MenuState: ObservableObject {
+     static let shared = MenuState()
++    @Published var skipWelcomeEnabled = UserDefaults.standard.bool(forKey: "SkipWelcomeScreenV1") {
++        didSet {
++            UserDefaults.standard.set(skipWelcomeEnabled, forKey: "SkipWelcomeScreenV1")
++        }
++    }
+     @Published var skipAnalysisEnabled: Bool = false
+     @Published var externalDrivesEnabled: Bool = UserDefaults.standard.bool(forKey: "AllowExternalDrives")
+     @Published var notificationsEnabled: Bool = false
+--- a/macUSB/Resources/Localizable.xcstrings
++++ b/macUSB/Resources/Localizable.xcstrings
+@@ -1,6 +1,358 @@
+ {
+   "sourceLanguage" : "pl",
+   "strings" : {
++  "app.welcome.auto_skip.confirm.action": {
++    "localizations": {
++      "de": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Automatisches Überspringen aktivieren"
++        }
++      },
++      "en": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Enable automatic skipping"
++        }
++      },
++      "es": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Activar la omisión automática"
++        }
++      },
++      "fr": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Activer le passage automatique"
++        }
++      },
++      "it": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Attiva il salto automatico"
++        }
++      },
++      "ja": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "自動スキップを有効にする"
++        }
++      },
++      "nl": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Automatisch overslaan inschakelen"
++        }
++      },
++      "pl": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Włącz automatyczne pomijanie"
++        }
++      },
++      "pt-BR": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Ativar o avanço automático"
++        }
++      },
++      "ru": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Включить автоматический пропуск"
++        }
++      },
++      "tr": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Otomatik atlamayı etkinleştir"
++        }
++      },
++      "uk": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Увімкнути автоматичний пропуск"
++        }
++      },
++      "vi": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Bật tự động bỏ qua"
++        }
++      },
++      "zh-Hans": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "启用自动跳过"
++        }
++      }
++    }
++  },
++  "app.welcome.auto_skip.confirm.message": {
++    "localizations": {
++      "de": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Nach dem Start der App und der erfolgreichen Prüfung der Berechtigungen, App-Updates und des Helper-Status wird der Startbildschirm automatisch übersprungen und die Analyse geöffnet. Falls der Helper ein Update oder eine automatische Reparatur benötigt, bleibt der Startbildschirm bei diesem App-Start sichtbar."
++        }
++      },
++      "en": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "After the app launches and successfully checks permissions, app updates, and helper readiness, it will automatically skip the welcome screen and move to analysis. If the helper needs an update or automatic repair, the welcome screen will remain visible for that launch."
++        }
++      },
++      "es": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Al iniciar la aplicación y comprobar correctamente los permisos, las actualizaciones de la aplicación y el estado del helper, se omitirá automáticamente la pantalla de bienvenida y se pasará a la etapa de análisis. Si el helper necesita una actualización o una reparación automática, la pantalla de bienvenida permanecerá visible durante ese inicio de la aplicación."
++        }
++      },
++      "fr": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Après le lancement de l’application et la vérification réussie des autorisations, des mises à jour de l’application et de l’état de l’outil auxiliaire, l’écran d’accueil sera automatiquement ignoré pour passer à l’étape d’analyse. Si l’outil auxiliaire nécessite une mise à jour ou une réparation automatique, l’écran d’accueil restera visible lors de ce lancement."
++        }
++      },
++      "it": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Dopo l’avvio dell’app e il completamento con esito positivo delle verifiche dei permessi, degli aggiornamenti dell’app e dello stato dell’helper, la schermata di benvenuto verrà saltata automaticamente e si passerà alla fase di analisi. Se l’helper richiede un aggiornamento o una riparazione automatica, la schermata di benvenuto rimarrà visibile per quell’avvio dell’app."
++        }
++      },
++      "ja": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "アプリの起動後、アクセス権、アプリのアップデート、ヘルパーの状態の確認が正常に完了すると、起動画面が自動的にスキップされ、解析に進みます。ヘルパーのアップデートまたは自動修復が必要な場合、その起動時は起動画面が表示されたままになります。"
++        }
++      },
++      "nl": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Na het starten van de app en het succesvol controleren van de toegangsrechten, app-updates en de status van de helper wordt het welkomstscherm automatisch overgeslagen en gaat de app verder naar de analyse. Als de helper een update of automatisch herstel nodig heeft, blijft het welkomstscherm tijdens die start van de app zichtbaar."
++        }
++      },
++      "pl": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Po uruchomieniu aplikacji i pomyślnym sprawdzeniu uprawnień, aktualizacji aplikacji oraz stanu helpera ekran powitalny zostanie automatycznie pominięty i nastąpi przejście do etapu analizy. Jeśli helper wymaga aktualizacji lub autonaprawy, ekran powitalny pozostanie widoczny w tym uruchomieniu aplikacji."
++        }
++      },
++      "pt-BR": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Após iniciar o app e verificar com sucesso as permissões, as atualizações do app e o estado do helper, a tela de boas-vindas será pulada automaticamente e o app passará para a etapa de análise. Se o helper precisar de uma atualização ou de um reparo automático, a tela de boas-vindas permanecerá visível nessa inicialização do app."
++        }
++      },
++      "ru": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "После запуска приложения и успешной проверки разрешений, обновлений приложения и состояния helper приветственный экран будет автоматически пропущен и откроется этап анализа. Если для helper потребуется обновление или автоматическое восстановление, приветственный экран останется видимым при этом запуске приложения."
++        }
++      },
++      "tr": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Uygulama başlatıldıktan ve izinler, uygulama güncellemeleri ve yardımcının durumu başarıyla denetlendikten sonra karşılama ekranı otomatik olarak atlanır ve analiz aşamasına geçilir. Yardımcının güncellenmesi veya otomatik olarak onarılması gerekiyorsa karşılama ekranı o başlatma sırasında görünür kalır."
++        }
++      },
++      "uk": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Після запуску застосунку й успішної перевірки дозволів, оновлень застосунку та стану помічника екран привітання буде автоматично пропущено й відкриється етап аналізу. Якщо помічник потребує оновлення або автоматичного відновлення, екран привітання залишиться видимим під час цього запуску застосунку."
++        }
++      },
++      "vi": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Sau khi ứng dụng khởi chạy và kiểm tra thành công các quyền, bản cập nhật ứng dụng và trạng thái của trình trợ giúp, màn hình chào mừng sẽ tự động được bỏ qua để chuyển sang bước phân tích. Nếu trình trợ giúp cần cập nhật hoặc tự động sửa chữa, màn hình chào mừng sẽ vẫn hiển thị trong lần khởi chạy đó."
++        }
++      },
++      "zh-Hans": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "应用启动并成功检查权限、应用更新和辅助工具状态后，将自动跳过欢迎屏幕并进入分析阶段。如果辅助工具需要更新或自动修复，则在本次启动期间会保留欢迎屏幕。"
++        }
++      }
++    }
++  },
++  "app.welcome.auto_skip.confirm.title": {
++    "localizations": {
++      "de": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Startbildschirm automatisch überspringen"
++        }
++      },
++      "en": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Skip the welcome screen automatically"
++        }
++      },
++      "es": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Omitir automáticamente la pantalla de bienvenida"
++        }
++      },
++      "fr": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Ignorer automatiquement l’écran d’accueil"
++        }
++      },
++      "it": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Saltare automaticamente la schermata di benvenuto"
++        }
++      },
++      "ja": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "起動画面を自動的にスキップ"
++        }
++      },
++      "nl": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Welkomstscherm automatisch overslaan"
++        }
++      },
++      "pl": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Automatyczne pomijanie ekranu powitalnego"
++        }
++      },
++      "pt-BR": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Pular automaticamente a tela de boas-vindas"
++        }
++      },
++      "ru": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Автоматический пропуск приветственного экрана"
++        }
++      },
++      "tr": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Karşılama ekranını otomatik olarak atlama"
++        }
++      },
++      "uk": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Автоматичний пропуск екрана привітання"
++        }
++      },
++      "vi": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Tự động bỏ qua màn hình chào mừng"
++        }
++      },
++      "zh-Hans": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "自动跳过欢迎屏幕"
++        }
++      }
++    }
++  },
++  "app.welcome.auto_skip.menu": {
++    "localizations": {
++      "de": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Startbildschirm automatisch überspringen"
++        }
++      },
++      "en": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Automatically skip the welcome screen"
++        }
++      },
++      "es": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Omitir automáticamente la pantalla de bienvenida"
++        }
++      },
++      "fr": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Ignorer automatiquement l’écran d’accueil"
++        }
++      },
++      "it": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Salta automaticamente la schermata di benvenuto"
++        }
++      },
++      "ja": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "起動画面を自動的にスキップ"
++        }
++      },
++      "nl": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Welkomstscherm automatisch overslaan"
++        }
++      },
++      "pl": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Automatycznie pomijaj ekran startowy"
++        }
++      },
++      "pt-BR": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Pular automaticamente a tela de boas-vindas"
++        }
++      },
++      "ru": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Автоматически пропускать приветственный экран"
++        }
++      },
++      "tr": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Karşılama ekranını otomatik olarak atla"
++        }
++      },
++      "uk": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Автоматично пропускати екран привітання"
++        }
++      },
++      "vi": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "Tự động bỏ qua màn hình chào mừng"
++        }
++      },
++      "zh-Hans": {
++        "stringUnit": {
++          "state": "translated",
++          "value": "自动跳过欢迎屏幕"
++        }
++      }
++    }
++  },
+     "" : {
+ 
+     },
