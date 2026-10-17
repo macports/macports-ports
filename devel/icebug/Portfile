@@ -1,0 +1,108 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           github 1.0
+
+github.setup        Ladybug-Memory icebug 13.4
+github.tarball_from archive
+revision            0
+
+categories          devel science
+license             MIT
+maintainers         {@jrjsmrtn gmail.com:jrjsmrtn} openmaintainer
+
+description         Fork of NetworKit with Apache Arrow-backed graph algorithms
+
+long_description    icebug is a fork of NetworKit, a toolbox for high-performance \
+                    network analysis, extended with Apache Arrow-backed storage. \
+                    It builds the networkit library, and supplies the graph data \
+                    science algorithms used by LadybugDB.
+
+# ttmath is a git submodule, and a GitHub release archive never carries submodule
+# contents, so it is fetched as a second distfile and moved into place below.
+set ttmath_commit   5f90e8fadc0aeca6b2fb9ae8c75614887e952b93
+
+master_sites-append https://github.com/networkit/ttmath/archive/:ttmath
+
+distfiles-append    ${ttmath_commit}${extract.suffix}:ttmath
+
+checksums           ${distname}${extract.suffix} \
+                        rmd160  630a31950ac6f0d1786efe38b9f6bfe09b4d3755 \
+                        sha256  85d281f674f85fac4524fcf9c03d98f6db8c42e46870134a2e9cf7dcd6f6b69e \
+                        size    8840695 \
+                    ${ttmath_commit}${extract.suffix} \
+                        rmd160  fd8753a8822d19ba9f7e51ef51d3c2f77a4b4efa \
+                        sha256  a8b67157eabcf68581628ded8a3d42480b845e18a0f114baf8f2e132bade3509 \
+                        size    2197208
+
+# Fixed by upstream at 20; NETWORKIT_CXX_STANDARD is not meant to be overridden.
+compiler.cxx_standard 2020
+
+# networkit links OpenMP::OpenMP_CXX unconditionally. The tree's highest construct
+# is "#pragma omp atomic capture" (centrality/CoreDecomposition.cpp), which is 3.1;
+# this also selects a compiler that accepts -fopenmp and pulls in libomp.
+compiler.openmp_version 3.1
+
+depends_lib         port:apache-arrow \
+                    port:tlx
+
+# The test suite is built with the library, so configure needs GoogleTest, not
+# just the test phase; the googletest submodule is empty in the archive, and
+# patch-system-gtest.diff makes the build use this instead.
+depends_build-append \
+                    port:gtest
+
+post-extract {
+    # The archive ships an empty extlibs/ttmath placeholder for the submodule,
+    # and move into an existing directory nests rather than replaces, so the
+    # placeholder goes first.
+    delete ${worksrcpath}/extlibs/ttmath
+    move ${workpath}/ttmath-${ttmath_commit} ${worksrcpath}/extlibs/ttmath
+}
+
+patchfiles          patch-system-gtest.diff
+
+# icebug is a NetworKit fork and keeps NetworKit's names: libnetworkit, the
+# networkit/ headers and networkit.pc. Installed into ${prefix} it would own
+# those names outright, and a NetworKit port could never be installed beside
+# it, so it gets a prefix of its own, as protobuf5-cpp and openexr2 do. Its one
+# consumer, LadybugDB's algo extension, already reads icebug from a
+# self-contained include/ and lib/ with NO_DEFAULT_PATH.
+cmake.install_prefix \
+                    ${prefix}/libexec/${name}
+
+# NETWORKIT_EXT_TLX takes a prefix, from which upstream composes
+# ${prefix}/lib/libtlx.a and ${prefix}/include/; without it the build requires the
+# tlx submodule, which the archive does not carry either.
+configure.args-append \
+                    -DNETWORKIT_EXT_TLX=${prefix} \
+                    -DNETWORKIT_BUILD_TESTS=ON
+
+# FindOpenMP leaves OpenMP_CXX_LIB_NAMES empty for clang because libomp sits
+# under ${prefix}/lib/libomp, so nothing links it and, with upstream's
+# -undefined dynamic_lookup, the library builds but cannot dlopen. GCC brings
+# its own libgomp and needs none of this.
+if {[string match *clang* ${configure.compiler}]} {
+    configure.args-append \
+                    -DOpenMP_CXX_LIB_NAMES=omp \
+                    -DOpenMP_omp_LIBRARY=${prefix}/lib/libomp/libomp.dylib
+}
+
+test.run            yes
+test.cmd            ctest
+
+# The cmake PortGroup builds with the install rpath, so the test executables
+# have none for the library they link in the build tree; build with the
+# build-tree rpath instead, as math/ginkgo does. CMake rewrites it on install.
+configure.pre_args-replace \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+# Upstream fills the .pc file's Version field by running Python over version.py
+# at configure time. NETWORKIT_PYTHON_EXECUTABLE is never set, so the command is
+# empty, CMake tolerates it, and the installed networkit.pc ships "Version:"
+# blank. The port has no other reason to depend on an interpreter.
+post-configure {
+    reinplace "s|^Version:.*|Version: ${version}|" ${build.dir}/networkit.pc
+}
