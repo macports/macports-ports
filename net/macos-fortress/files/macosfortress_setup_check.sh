@@ -223,7 +223,7 @@ EOF
 fi
 
 # Privoxy configuration http://p.p/ via proxy server
-if [[ `( export http_proxy=http://${PROXY_HOSTNAME}:8118; "${CURL}" -s --head http://p.p/ | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.\d [23]\d\d" )` ]]; then
+if [[ `( http_proxy=http://${PROXY_HOSTNAME}:8118 "${CURL}" -s --head http://p.p/ | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.\d [23]\d\d" )` ]]; then
     echo "[✅] Privoxy config http://p.p/ via http://${PROXY_HOSTNAME}:8118 is running properly"
 else
     "${CAT}" <<EOF
