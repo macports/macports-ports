@@ -120,7 +120,6 @@ PF_FILES=( \
         @PREFIX@/etc/@NAME@/compromised-ips.txt \
         @PREFIX@/etc/@NAME@/dshield_block_ip.txt \
 	@PREFIX@/etc/@NAME@/block.txt \
-	@PREFIX@/etc/@NAME@/block.txt.asc \
 ) 
 for FNAME in "${PF_FILES[@]}" \
 	; do \
@@ -187,7 +186,6 @@ Checking proxy PAC and proxy chain files…
 EOF
 
 PROXY_FILES=( \
-	"${PROXY_PAC_DIRECTORY}/proxy.pac.orig" \
 	"${PROXY_PAC_DIRECTORY}/proxy.pac" \
 	@PREFIX@/bin/adblock2privoxy \
         @PREFIX@/etc/@NAME@/proxy.pac \
@@ -225,7 +223,7 @@ EOF
 fi
 
 # Privoxy configuration http://p.p/ via proxy server
-if [[ `( http_proxy=http://${PROXY_HOSTNAME}:8118; "${CURL}" -s --head http://p.p/ | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.\d [23]\d\d" )` ]]; then
+if [[ `( export http_proxy=http://${PROXY_HOSTNAME}:8118; "${CURL}" -s --head http://p.p/ | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.\d [23]\d\d" )` ]]; then
     echo "[✅] Privoxy config http://p.p/ via http://${PROXY_HOSTNAME}:8118 is running properly"
 else
     "${CAT}" <<EOF
@@ -249,7 +247,7 @@ EOF
 fi
 
 # Javascript parsing of proxy.pac.orig and proxy.pac
-if [ -x "${JSC}" -a -f "${PROXY_PAC_DIRECTORY/proxy.pac.orig}" ]; then \
+if [ -x "${JSC}" -a -f "${PROXY_PAC_DIRECTORY}/proxy.pac.orig" ]; then \
     "${JSC}" "${PROXY_PAC_DIRECTORY}/proxy.pac.orig" >/dev/null 2>&1 \
 	&& echo "[✅] PAC ${PROXY_PAC_DIRECTORY}/proxy.pac.orig passes Javascript parsing" \
 	|| echo "[❌] PAC ${PROXY_PAC_DIRECTORY}/proxy.pac.orig fails Javascript parsing" ; \
