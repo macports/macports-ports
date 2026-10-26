@@ -1,0 +1,153 @@
+https://github.com/AndrewAnnex/SpiceyPy/commit/8209dea1fcbcaed45ce088bb182930b99f082f7c.patch
+
+From 8209dea1fcbcaed45ce088bb182930b99f082f7c Mon Sep 17 00:00:00 2001
+From: Mark Mentovai <mark@mentovai.com>
+Date: Wed, 21 Oct 2026 00:27:17 -0400
+Subject: [PATCH] Overcome 80-character string length limit in
+ exampleKernels.txt (#580)
+
+---
+ src/spiceypy/tests/gettestkernels.py      | 45 ++++++++++++++++---
+ src/spiceypy/tests/test_gettestkernels.py | 53 ++++++++++++++++++++++-
+ 2 files changed, 91 insertions(+), 7 deletions(-)
+
+diff --git src/spiceypy/tests/gettestkernels.py src/spiceypy/tests/gettestkernels.py
+index 3aef6a2f..87c8ab45 100644
+--- src/spiceypy/tests/gettestkernels.py
++++ src/spiceypy/tests/gettestkernels.py
+@@ -32,7 +32,7 @@
+ import urllib.request
+ import sys
+ import hashlib
+-from typing import Optional
++from typing import Iterable, Optional
+ 
+ _IS_PYODIDE = (
+     sys.platform == "emscripten" or "pyodide" in sys.modules or "PYODIDE" in os.environ
+@@ -321,13 +321,43 @@ def get_cassini_test_kernels() -> None:
+     get_kernel(CassiniKernels.cassIk_url, CassiniKernels.cassIk_md5)
+ 
+ 
+-def write_test_meta_kernel() -> None:
++def write_test_meta_kernel(metakernel_path: str, kernel_paths: Iterable[str]) -> None:
+     # Update the paths!
+-    with open(CoreKernels.testMetaKernel, "w") as kernelFile:
++    with open(metakernel_path, "w") as kernelFile:
+         kernelFile.write("\\begindata\n")
+         kernelFile.write("KERNELS_TO_LOAD = (\n")
+-        for kernel in CoreKernels.standardKernelList:
+-            kernelFile.write("'{0}'\n".format(os.path.join(cwd, kernel)))
++        for kernel_path in kernel_paths:
++            # Overcome the SPICE 80-character string length limitation for long
++            # paths by using string continuation with a + marker. See
++            # docs/kernel.rst at “Additional Meta-kernel Specifications”.
++            MAX_PIECE_LEN = 80
++            remain = kernel_path
++            while len(remain) > 0:
++                if len(remain) > MAX_PIECE_LEN:
++                    piece = remain[: MAX_PIECE_LEN - 1]
++                    remain = remain[MAX_PIECE_LEN - 1 :]
++                    continuation = "+"
++                else:
++                    piece = remain
++                    remain = ""
++                    continuation = ""
++                    if piece.endswith("+"):
++                        # The final piece ends with '+', which will be
++                        # interpreted as a continuation character. Double it up
++                        # if there’s room to do so. Otherwise, arrange for one
++                        # more pass through the loop.
++                        if len(piece) < MAX_PIECE_LEN:
++                            piece = piece + "+"
++                        else:
++                            remain = "+"
++                kernelFile.write("'{0}{1}'\n".format(piece, continuation))
++            if kernel_path.endswith("+"):
++                # The path ends with '+'. An extra '+' was added above to ensure
++                # that SPICE treats it as part of the path, and now this space
++                # character (which SPICE will ignore) needs to be added so that
++                # any path that follows won’t be treated as a continuation of
++                # this one.
++                kernelFile.write("' '\n")
+         kernelFile.write(")\n")
+         kernelFile.write("\\begintext")
+     print("\nDone writing test meta kernel.", flush=True)
+@@ -337,4 +367,7 @@ def download_kernels() -> None:
+     get_standard_kernels()  # Download the kernels listed in kernelList and kernelURLlist
+     get_cassini_test_kernels()  # Download Cassini kernels
+     get_extra_test_kernels()  # Download any extra test kernels we need
+-    write_test_meta_kernel()  # Create the meta kernel file for tests
++    write_test_meta_kernel(
++        CoreKernels.testMetaKernel,
++        (os.path.join(cwd, kernel) for kernel in CoreKernels.standardKernelList),
++    )  # Create the meta kernel file for tests
+diff --git src/spiceypy/tests/test_gettestkernels.py src/spiceypy/tests/test_gettestkernels.py
+index acc5921d..1c174c40 100644
+--- src/spiceypy/tests/test_gettestkernels.py
++++ src/spiceypy/tests/test_gettestkernels.py
+@@ -22,9 +22,17 @@
+ SOFTWARE.
+ """
+ 
++import os
+ import pytest
++import tempfile
+ 
+-from spiceypy.tests.gettestkernels import attempt_download, CoreKernels
++import spiceypy
++
++from spiceypy.tests.gettestkernels import (
++    attempt_download,
++    CoreKernels,
++    write_test_meta_kernel,
++)
+ 
+ 
+ def test_gettestkernels():
+@@ -52,3 +60,46 @@ def test_gettestkernels():
+             1,
+             provided_hash="11c9b4793b6676d464266e790262b986",
+         )
++
++
++def _write_empty_kernel(tpc_path: str):
++    with open(tpc_path, "w") as tpc_file:
++        tpc_file.write("KPL/PCK\n")
++
++
++def _test_metakernel_long_path(
++    metakernel_path: str, tpc_path: str, fixed_tpc_path: str
++):
++    _write_empty_kernel(tpc_path)
++    write_test_meta_kernel(metakernel_path, (tpc_path, fixed_tpc_path))
++    spiceypy.furnsh(metakernel_path)
++
++
++def test_metakernel_long_paths():
++    with tempfile.TemporaryDirectory() as temp_dir:
++        MAX_PIECE_LEN = 80
++        EMPTY_TPC_NAME = "empty.tpc"
++        FIXED_TPC_NAME = "fixed.tpc"
++
++        # This makes the test a little more interesting by having the metakernel
++        # reference a second kernel after the long-path one under test. This can
++        # expose problems with poor handling of paths that end with continuation
++        # characters.
++        fixed_tpc_path = os.path.join(temp_dir, FIXED_TPC_NAME)
++        _write_empty_kernel(fixed_tpc_path)
++
++        for path_len in range(MAX_PIECE_LEN - 2, MAX_PIECE_LEN + 3):
++            filler = "x" * max(0, path_len - len(temp_dir + os.sep + EMPTY_TPC_NAME))
++            tpc_path = os.path.join(temp_dir, filler + EMPTY_TPC_NAME)
++            assert len(tpc_path) >= path_len
++            metakernel_path = os.path.join(temp_dir, "meta.txt")
++            _test_metakernel_long_path(metakernel_path, tpc_path, fixed_tpc_path)
++
++            # Put a continuation character at the end to test an especially
++            # tricky case.
++            stressful_tpc_path = tpc_path[:-1] + "+"
++            _test_metakernel_long_path(
++                metakernel_path,
++                stressful_tpc_path,
++                fixed_tpc_path,
++            )
