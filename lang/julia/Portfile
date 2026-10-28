@@ -1,0 +1,214 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           gpg_verify 1.0
+PortGroup           compilers 1.0
+
+compilers.choose    fc f77 f90
+compilers.setup     require_fortran -g95
+compiler.blacklist-append {clang < 900}
+
+github.setup        JuliaLang julia 1.13.3 v
+revision            0
+categories-append   lang math science
+maintainers         {ieee.org:s.t.smith @essandess} \
+                    {b-data.ch:olivier.benz @benz0li} \
+                    openmaintainer
+platforms           {darwin >= 14}
+license             MIT
+homepage            http://julialang.org
+
+description         The Julia Language: A fresh approach to technical \
+                    computing.
+
+long_description    Julia is a high-level, high-performance dynamic \
+                    programming language for technical computing, with \
+                    syntax that is familiar to users of other technical \
+                    computing environments.
+
+github.tarball_from releases
+
+distfiles           ${name}-${version}-full${extract.suffix}
+
+checksums           ${name}-${version}-full${extract.suffix} \
+                    rmd160  da9216b9e728d0b48d17c5a2e053fdbf2b65846c \
+                    sha256  13c4cd067962d6c81fea60081925be9e2992a4204289cc30dee3ddd9692cf31b \
+                    size    601883519
+
+extract.only        ${distfiles}
+
+gpg_verify.use_gpg_verification \
+                    yes
+
+if {[option gpg_verify.use_gpg_verification]} {
+    distfiles-append \
+                    ${name}-${version}-full${extract.suffix}.asc
+    checksums-append \
+                    ${name}-${version}-full${extract.suffix}.asc \
+                    size    833
+
+    post-checksum {
+        gpg_verify.verify_gpg_signature \
+            ${filespath}/juliareleases.asc \
+            ${distpath}/${name}-${version}-full${extract.suffix}.asc \
+            ${distpath}/${name}-${version}-full${extract.suffix}
+    }
+}
+
+# fix libccalllazy linking issue
+patchfiles-append   patch-libccalllazy-install-name.diff
+
+# julia build is `make && make install`
+# see https://github.com/JuliaLang/julia/blob/master/Makefile
+
+use_configure       no
+
+depends_build-append \
+                    port:gmake
+
+# Note: system libunwind, libuv, and zstd aren't cleanly supported across Julia's build system
+depends_lib-append  port:pcre2
+
+pre-build {
+    # create a `gfortran` symbolic link
+    xinstall -m 0755 -d ${workpath}/bin
+    ln -sf ${configure.fc} ${workpath}/bin/gfortran
+
+    # Julia's bundled LLVM tools look for their library deps via @rpath relative
+    # to usr/tools -> ../lib. Because USE_SYSTEM_* skips copying/building those
+    # libs into usr/lib, symlink to MacPorts. N.b. DYLD_FALLBACK_LIBRARY_PATH
+    # doesn't help here: MacPorts invokes the build via /bin/sh, a SIP-protected
+    # binary, so dyld strips all DYLD_* vars before the shell even starts.
+    xinstall -m 0755 -d ${worksrcpath}/usr/lib/julia
+    foreach lib [glob -nocomplain \
+                    ${prefix}/lib/libpcre2*.dylib] {
+        set dest    ${worksrcpath}/usr/lib/[file tail ${lib}]
+        if {![file exists ${dest}]} {
+            ln -sf  ${lib} ${dest}
+        }
+    }
+
+    # libwhich's dlopen()-based search doesn't check /opt/local/lib by
+    # default, so it can't resolve these USE_SYSTEM_* libraries into
+    # usr/lib/julia itself. Pre-create the symlinks it would have made,
+    # so make sees the (prerequisite-less) targets as already satisfied
+    # and skips the libwhich step for them entirely.
+    # variable names not ending in prepositions is the sort of nonsense up with which I will not put
+    set libpcre2_version_for_which_julia_looks 8
+    foreach {libname srcname} [list \
+        libpcre2-${libpcre2_version_for_which_julia_looks} libpcre2-${libpcre2_version_for_which_julia_looks}.dylib \
+    ] {
+        set dest ${worksrcpath}/usr/lib/julia/${libname}.dylib
+        if {![file exists ${dest}] && [file exists ${prefix}/lib/${srcname}]} {
+            ln -sf ${prefix}/lib/${srcname} ${dest}
+        }
+    }
+
+    build.env-append \
+                    CPPFLAGS="${configure.cppflags}" \
+                    FC=${configure.fc} \
+                    LDFLAGS="${configure.ldflags}" \
+                    PATH=$env(PATH):${workpath}/bin
+
+    set make_user_fd [open ${worksrcpath}/Make.user w+]
+    foreach line [list \
+                    "USE_SYSTEM_PCRE=1" \
+        ] {
+        puts ${make_user_fd} ${line}
+    }
+    close ${make_user_fd}
+}
+
+build.cmd           ${prefix}/bin/gmake
+build.target        release
+
+# Julia uses lowercase `prefix`; MacPorts supplies DESTDIR separately.
+destroot.args-append \
+                    prefix=${prefix}
+
+set app_name "[string totitle ${name}].app"
+
+variant app \
+    description {Install macOS app.} {
+        post-build {
+            # create the app by hand following ${worksrcpath}/contrib/mac/app/Makefile
+            set app_copyright "© [exec date +%Y] The Julia Project"
+            system -W ${worksrcpath}/contrib/mac/app \
+                "/bin/sh -c \"
+                    osacompile -o ${app_name} startup.applescript
+                    rm ${app_name}/Contents/Resources/applet.icns
+                    cp julia.icns ${app_name}/Contents/Resources/
+                    plutil -replace CFBundleDevelopmentRegion -string \"en\" ${app_name}/Contents/Info.plist
+                    plutil -insert CFBundleDisplayName -string \"Julia\" ${app_name}/Contents/Info.plist
+                    plutil -replace CFBundleIconFile -string \"julia.icns\" ${app_name}/Contents/Info.plist
+                    plutil -replace CFBundleIconName -string \"julia\" ${app_name}/Contents/Info.plist
+                    plutil -insert CFBundleIdentifier -string \"org.julialang.launcherapp\" ${app_name}/Contents/Info.plist
+                    plutil -replace CFBundleName -string \"Julia\" ${app_name}/Contents/Info.plist
+                    plutil -insert CFBundleShortVersionString -string \'${version}\' ${app_name}/Contents/Info.plist
+                    plutil -insert CFBundleVersion -string \'${version}\' ${app_name}/Contents/Info.plist
+                    plutil -insert NSHumanReadableCopyright -string \'${app_copyright}\' ${app_name}/Contents/Info.plist
+                    mkdir -p ${app_name}/Contents/Resources/julia/bin
+                    ln -s ${prefix}/bin/julia ${app_name}/Contents/Resources/julia/bin/julia\"
+                "
+
+            if {${configure.build_arch} eq {arm64}} {
+                system -W ${worksrcpath}/contrib/mac/app \
+                    "codesign -f -s - '${app_name}/Contents/MacOS/applet'"
+            }
+        }
+
+        post-destroot {
+            copy ${worksrcpath}/contrib/mac/app/${app_name} \
+                ${destroot}${applications_dir}
+        }
+}
+
+default_variants-append \
+                    +app
+
+pre-destroot {
+    destroot.env-append \
+        FC=${configure.fc} \
+        PATH=$env(PATH):${workpath}/bin
+}
+
+post-destroot {
+    if {${os.arch} eq "arm"} {
+        # manually fix code signature on arm
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force lib/libjulia.${version}.dylib"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/dsymutil"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/lld"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/zstd"
+        system -W ${destroot}${prefix} "/usr/bin/codesign --sign - --force libexec/julia/7z"
+    }
+}
+
+pre-test {
+    test.env-append \
+        FC=${configure.fc} \
+        PATH=$env(PATH):${workpath}/bin
+}
+
+test.run            yes
+
+if {${os.arch} eq "arm"} {
+    notes-append \
+"
+On Apple Silicon machines, access the macOS Accelerate\
+and Metal frameworks using, respectively:\
+
+    using AppleAccelerate
+    using Metal
+"
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 14} {
+    known_fail      yes
+    pre-fetch {
+        ui_error "${name} @${version} requires OS X 10.10 or later"
+        return -code error "incompatible OS X version"
+    }
+}
+
+github.livecheck.regex  {([^"-]+)}

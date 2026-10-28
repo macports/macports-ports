@@ -1,0 +1,316 @@
+commit 9b0d3d17b04a59bb591c06273d2d5a975f8c5d58
+Author: Lawrence Velázquez <vq@larryv.me>
+Date:   Fri Nov 14 17:52:32 2014 -0500
+
+    Handle OS X deployment targets correctly
+
+    As described in PR target/63810, this addresses several problems with
+    the validation and encoding of deployment target version strings for the
+    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ macro.  There are
+    currently four testcases exercising inputs to -mmacosx-version-min
+    (gcc/testsuite/gcc.dg/darwin-minversion-*), but they provide minimal
+    coverage, and one is incorrect.
+
+    * The tiny number is now respected, if present.  Thus "10.9.4"
+      correctly becomes "1094" instead of "1090", and "10.10.1" becomes
+      "101001" instead of "101000".
+    * Zero padding is now ignored.  Thus "10.09" correctly becomes "1090"
+      instead of "100900", and "10.00010" becomes "101000" instead of being
+      treated as invalid.
+    * Deployment targets that are missing minor and tiny numbers are no
+      longer considered invalid.  Thus "10" is treated as "10.0.0", which
+      becomes "1000" without causing an error.
+
+    With this change, trunk matches the behavior of Apple LLVM Compiler
+    6.1.0 on 8,451 of 8,464 generated test inputs.  (The discrepancies are
+    due to a bug in Clang.)  I don't notice any testsuite regressions on
+    OS X 10.10 Yosemite x86-64.
+
+    2015-05-15  Lawrence Velázquez  <vq@larryv.me>
+
+    	PR target/63810
+    	* gcc/config/darwin-c.c (version_components): New global enum.
+    	(parse_version, version_as_legacy_macro)
+    	(version_as_modern_macro, macosx_version_as_macro): New functions.
+    	(version_as_macro): Remove.
+    	(darwin_cpp_builtins): Use new function.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-3.c: Update testcase.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-4.c: Ditto.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-5.c: New testcase.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-6.c: Ditto.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-7.c: Ditto.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-8.c: Ditto.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-9.c: Ditto.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-10.c: Ditto.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-11.c: Ditto.
+    	* gcc/testsuite/gcc.dg/darwin-minversion-12.c: Ditto.
+---
+Adapted for GCC 4.2.1 (Apple 5666.3) from my upstream trunk fix.
+Extended to fix handling of iOS deployment targets.
+
+I hereby relicense my upstream contributions under GPLv2 when used by
+the MacPorts Project, as permitted by the terms of the FSF copyright
+assignment.
+
+The text above is from my email to the gcc-patches mailing list; some
+minor details may not apply to the patch below.
+
+https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63810
+https://gcc.gnu.org/ml/gcc-patches/2015-05/msg01888.html
+https://gcc.gnu.org/viewcvs/gcc?limit_changes=0&view=rev&rev=223808
+
+Index: gcc/config/darwin-c.c
+===================================================================
+--- gcc/config/darwin-c.c.orig
++++ gcc/config/darwin-c.c
+@@ -927,35 +927,158 @@ find_subframework_header (cpp_reader *pf
+   return 0;
+ }
+ 
+-/* Return the value of darwin_macosx_version_min suitable for the
+-   __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ macro,
+-   so '10.4.2' becomes 1042.
+-   Print a warning if the version number is not known.  */
++/* Given an OS X or iOS version VERSION_STR, return it as a statically-allocated
++   array of three integers.  If VERSION_STR is invalid, return NULL.
++
++   VERSION_STR must consist of one, two, or three tokens, each separated by
++   a single period.  Each token must contain only the characters '0' through
++   '9' and is converted to an equivalent non-negative decimal integer. Omitted
++   tokens become zeros.  For example:
++
++        "10"              becomes       {10,0,0}
++        "10.10"           becomes       {10,10,0}
++        "10.10.1"         becomes       {10,10,1}
++        "10.000010.1"     becomes       {10,10,1}
++        "10.010.001"      becomes       {10,10,1}
++        "000010.10.00001" becomes       {10,10,1}
++        ".9.1"            is invalid
++        "10..9"           is invalid
++        "10.10."          is invalid  */
++
++enum version_components { MAJOR, MINOR, TINY };
++
++static const unsigned long *
++parse_version (const char *version_str)
++{
++  size_t version_len;
++  char *end;
++  static unsigned long version_array[3];
++
++  version_len = strlen (version_str);
++  if (version_len < 1)
++    return NULL;
++
++  /* Version string must consist of digits and periods only.  */
++  if (strspn (version_str, "0123456789.") != version_len)
++    return NULL;
++
++  if (!ISDIGIT (version_str[0]) || !ISDIGIT (version_str[version_len - 1]))
++    return NULL;
++
++  version_array[MAJOR] = strtoul (version_str, &end, 10);
++  version_str = end + ((*end == '.') ? 1 : 0);
++
++  /* Version string must not contain adjacent periods.  */
++  if (*version_str == '.')
++    return NULL;
++
++  version_array[MINOR] = strtoul (version_str, &end, 10);
++  version_str = end + ((*end == '.') ? 1 : 0);
++
++  version_array[TINY] = strtoul (version_str, &end, 10);
++
++  /* Version string must contain no more than three tokens.  */
++  if (*end != '\0')
++    return NULL;
++
++  return version_array;
++}
++
++/* Given VERSION -- a three-component OS X version represented as an array of
++   non-negative integers -- return a statically-allocated string suitable for
++   the legacy __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ macro.  If VERSION
++   is invalid and cannot be coerced into a valid form, return NULL.
++
++   The legacy format is a four-character string -- two chars for the major
++   number and one each for the minor and tiny numbers.  Minor and tiny numbers
++   from 10 through 99 are permitted but are clamped to 9 (for example, {10,9,10}
++   produces "1099").  If VERSION contains numbers greater than 99, it is
++   rejected.  */
++
++static const char *
++version_as_legacy_macro (const unsigned long *version)
++{
++  unsigned long major, minor, tiny;
++  static char result[5];
++
++  major = version[MAJOR];
++  minor = version[MINOR];
++  tiny = version[TINY];
++
++  if (major > 99 || minor > 99 || tiny > 99)
++    return NULL;
++
++  minor = ((minor > 9) ? 9 : minor);
++  tiny = ((tiny > 9) ? 9 : tiny);
++
++  if (sprintf (result, "%lu%lu%lu", major, minor, tiny) != 4)
++    return NULL;
++
++  return result;
++}
++
++/* Given VERSION -- a three-component OS X or iOS version represented as an
++   array of non-negative integers -- return a statically-allocated string
++   suitable for the modern __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ macro
++   or the __ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__ macro.  If VERSION is
++   invalid, return NULL.
++
++   The modern format is a five or six-character string -- one or two chars for
++   the major number and two each for the minor and tiny numbers, with
++   zero-padding if necessary (for example, {8,1,0} produces "80100", and
++   {10,10,1} produces "101001").  If VERSION contains numbers greater than 99,
++   it is rejected.  */
++
++static const char *
++version_as_modern_macro (const unsigned long *version)
++{
++  unsigned long major, minor, tiny;
++  static char result[7];
++
++  major = version[MAJOR];
++  minor = version[MINOR];
++  tiny = version[TINY];
++
++  if (major > 99 || minor > 99 || tiny > 99)
++    return NULL;
++
++  if (sprintf (result, "%lu%02lu%02lu", major, minor, tiny)
++      != ((major > 9) ? 6 : 5))
++    return NULL;
++
++  return result;
++}
++
++/* Return the value of darwin_macosx_version_min, suitably formatted for the
++   __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ macro.  Values representing
++   OS X 10.9 and earlier are encoded using the legacy four-character format,
++   while 10.10 and later use a modern six-character format.  (For example,
++   "10.9" produces "1090", and "10.10.1" produces "101001".)  If
++   darwin_macosx_version_min is invalid and cannot be coerced into a valid
++   form, print a warning and return "1000".  */
++
+ static const char *
+-/* APPLE LOCAL ARM 5683689 */
+ macosx_version_as_macro (void)
+ {
+-  static char result[] = "1000";
++  const unsigned long *version_array;
++  const char *version_macro;
+ 
+-  if (strncmp (darwin_macosx_version_min, "10.", 3) != 0)
++  version_array = parse_version (darwin_macosx_version_min);
++  if (!version_array)
+     goto fail;
+-  if (! ISDIGIT (darwin_macosx_version_min[3]))
++
++  if (version_array[MAJOR] != 10)
+     goto fail;
+-  result[2] = darwin_macosx_version_min[3];
+-  if (darwin_macosx_version_min[4] != '\0')
+-    {
+-      if (darwin_macosx_version_min[4] != '.')
+-	goto fail;
+-      if (! ISDIGIT (darwin_macosx_version_min[5]))
+-	goto fail;
+-      if (darwin_macosx_version_min[6] != '\0')
+-	goto fail;
+-      result[3] = darwin_macosx_version_min[5];
+-    }
++
++  if (version_array[MINOR] < 10)
++    version_macro = version_as_legacy_macro (version_array);
+   else
+-    result[3] = '0';
++    version_macro = version_as_modern_macro (version_array);
+ 
+-  return result;
++  if (!version_macro)
++    goto fail;
++
++  return version_macro;
+ 
+  fail:
+   error ("Unknown value %qs of -mmacosx-version-min",
+@@ -974,62 +1097,21 @@ macosx_version_as_macro (void)
+ static const char *
+ iphoneos_version_as_macro (void)
+ {
+-  static char result[sizeof ("99.99.99") + 1];
+-  const char *src_ptr = darwin_iphoneos_version_min;
+-  char *result_ptr = &result[0];
++  const unsigned long *version_array;
++  const char *version_macro;
+ 
+-  if (! darwin_iphoneos_version_min)
++  version_array = parse_version (darwin_iphoneos_version_min);
++  if (!version_array)
+     goto fail;
+ 
+-  if (! ISDIGIT (*src_ptr))
++  if (version_array[MAJOR] > 9)
+     goto fail;
+ 
+-  /* Copy over the major version number.  */
+-  *result_ptr++ = *src_ptr++;
+-
+-  if (ISDIGIT (*src_ptr))
+-    *result_ptr++ = *src_ptr++;
+-
+-  if (*src_ptr != '.')
++  version_macro = version_as_modern_macro (version_array);
++  if (!version_macro)
+     goto fail;
+ 
+-  src_ptr++;
+-
+-  /* Start parsing the minor version number.  */
+-  if (! ISDIGIT (*src_ptr))
+-    goto fail;
+-
+-  /* Zero-pad a single-digit value, or copy a two-digit value.  */
+-  *result_ptr++ = ISDIGIT (*(src_ptr + 1)) ? *src_ptr++ : '0';
+-  *result_ptr++ = *src_ptr++;
+-
+-  /* Parse the third version number (patch level?)  */
+-  if (*src_ptr == '\0')
+-    {
+-      /* Not present -- default to zeroes.  */
+-      *result_ptr++ = '0';
+-      *result_ptr++ = '0';
+-    }
+-  else if (*src_ptr == '.')
+-    {
+-      src_ptr++;
+-
+-      if (! ISDIGIT (*src_ptr))
+-	goto fail;
+-
+-      /* Zero-pad a single-digit value, or copy a two-digit value.  */
+-      *result_ptr++ = ISDIGIT (*(src_ptr + 1)) ? *src_ptr++ : '0';
+-      *result_ptr++ = *src_ptr++;
+-    }
+-  else
+-    goto fail;
+-
+-  /* Verify and copy the terminating NULL.  */
+-  if (*src_ptr != '\0')
+-    goto fail;
+- 
+-  *result_ptr++ = '\0'; 
+-  return result;
++  return version_macro;
+   
+  fail:
+   error ("Unknown value %qs of -miphoneos-version-min",

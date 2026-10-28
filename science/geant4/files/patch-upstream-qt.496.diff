@@ -1,0 +1,272 @@
+A bunch of upstream patches:
+ * fix loading icons in some examples
+ * allow pasting multiple lines
+ * remember the last dir to open/save macro files
+ * do not throw errors during menu creation when using '/control/verbose 0'
+--- source/interfaces/basic/include/G4UIQt.hh.orig
++++ source/interfaces/basic/include/G4UIQt.hh
+@@ -215,6 +215,8 @@ private:
+ 
+   QToolBar *fToolbarApp;
+   QToolBar *fToolbarUser;
++  G4String fLastErrMessage;
++  QString fLastOpenPath;
+ 
+   bool fMoveSelected;
+   bool fRotateSelected;
+@@ -226,6 +228,7 @@ private Q_SLOTS :
+   void ExitSession();
+   void ClearButtonCallback();
+   void CommandEnteredCallback();
++  void CommandEditedCallback(const QString &);
+   void ButtonCallback(const QString&);
+   void HelpTreeClicCallback();
+   void HelpTreeDoubleClicCallback();
+--- source/interfaces/basic/src/G4UIQt.cc.orig
++++ source/interfaces/basic/src/G4UIQt.cc
+@@ -131,6 +131,7 @@ G4UIQt::G4UIQt (
+ ,fPickSelected(false)
+ ,fZoomInSelected(false)
+ ,fZoomOutSelected(false)
++,fLastOpenPath("")
+ {
+ 
+   G4Qt* interactorManager = G4Qt::getInstance (argc,argv,(char*)"Qt");
+@@ -270,6 +271,7 @@ G4UIQt::G4UIQt (
+ 
+   // Connect signal
+   connect(fCommandArea, SIGNAL(returnPressed()), SLOT(CommandEnteredCallback()));
++  connect(fCommandArea, SIGNAL(textEdited(const QString &)), SLOT(CommandEditedCallback(const QString &)));
+   connect(fUITabWidget, SIGNAL(currentChanged(int)), SLOT(ToolBoxActivated(int)));
+ 
+   if(UI!=NULL) UI->SetCoutDestination(this);  // TO KEEP
+@@ -720,10 +722,10 @@ G4int G4UIQt::ReceiveG4cout (
+  
+   QStringList result = newStr.filter(fCoutFilter->text());
+ 
+-  if (result.join("\n").isEmpty()) {
++  if (result.join("").isEmpty()) {
+     return 0;
+   }
+-  fCoutTBTextArea->append(result.join("\n"));
++  fCoutTBTextArea->append(result.join(""));
+   fCoutTBTextArea->repaint();
+ 
+   fCoutTBTextArea->verticalScrollBar()->setSliderPosition(fCoutTBTextArea->verticalScrollBar()->maximum());
+@@ -753,7 +755,11 @@ G4int G4UIQt::ReceiveG4cerr (
+ 
+   // Suppress space, \n,\t,\r...
+   if (QString(aString.data()).trimmed() != "") {
+-    QMessageBox::critical(fMainWindow, "Error",aString.data());
++    if ((G4StateManager::GetStateManager()->GetCurrentState() == G4State_Abort) ||
++        (G4StateManager::GetStateManager()->GetCurrentState() == G4State_Quit )) {
++      // In case of Abort or Quit, the useful error message should be in the last error message !
++      QMessageBox::critical(fMainWindow, "Error",QString(fLastErrMessage.data())+"\n"+aString.data());
++    }
+   }
+   QColor previousColor = fCoutTBTextArea->textColor();
+   fCoutTBTextArea->setTextColor(Qt::red);
+@@ -761,6 +767,10 @@ G4int G4UIQt::ReceiveG4cerr (
+   fCoutTBTextArea->setTextColor(previousColor);
+   fCoutTBTextArea->verticalScrollBar()->setSliderPosition(fCoutTBTextArea->verticalScrollBar()->maximum());
+   fCoutTBTextArea->repaint();
++
++  if (QString(aString.data()).trimmed() != "") {
++    fLastErrMessage = aString;
++  }
+   return 0;
+ }
+ 
+@@ -805,9 +815,14 @@ void G4UIQt::AddButton (
+   QMenu *parentTmp = (QMenu*)GetInteractor(aMenu);
+ 
+   if(parentTmp==NULL) {
+-    G4cout << "Menu name " << aMenu<< " does not exist, please define it before using it."<< G4endl;
++    G4UImanager* UImanager = G4UImanager::GetUIpointer();
++    G4int verbose = UImanager->GetVerboseLevel();
++    
++    if (verbose >= 2) {
++      G4cout << "Menu name " << aMenu<< " does not exist, please define it before using it."<< G4endl;
++    }
+   }
+-  
++
+   // Find the command in the command tree
+   G4UImanager* UI = G4UImanager::GetUIpointer();
+   if(UI==NULL) return;
+@@ -820,7 +835,12 @@ void G4UIQt::AddButton (
+   }
+   
+   if(treeTop->FindPath(aCommand) == NULL) {
+-    G4cout << "Warning: command '"<< aCommand <<"' does not exist, please define it before using it."<< G4endl;
++    G4UImanager* UImanager = G4UImanager::GetUIpointer();
++    G4int verbose = UImanager->GetVerboseLevel();
++    
++    if (verbose >= 2) {
++      G4cout << "Warning: command '"<< aCommand <<"' does not exist, please define it before using it."<< G4endl;
++    }
+   }
+ 
+   QSignalMapper *signalMapper = new QSignalMapper(this);
+@@ -848,7 +868,12 @@ void G4UIQt::AddIcon(const char* aLabel, const char* aIconFile, const char* aCom
+     // try to open a file
+     pix = QPixmap(aFileName);
+     if (pix.isNull()) {
+-      G4cout << "Warning: file '"<< aFileName <<"' is incorrect or does not exist, this command will not be build"<< G4endl;
++      G4UImanager* UImanager = G4UImanager::GetUIpointer();
++      G4int verbose = UImanager->GetVerboseLevel();
++      
++      if (verbose >= 2) {
++        G4cout << "Warning: file '"<< aFileName <<"' is incorrect or does not exist, this command will not be build"<< G4endl;
++      }
+       return;
+     }
+     userToolBar = true; 
+@@ -1579,23 +1604,29 @@ void G4UIQt::AddIcon(const char* aLabel, const char* aIconFile, const char* aCom
+       ;
+     pix = QPixmap(xpm);
+   } else {
+-    G4cout << "Parameter"<< aIconFile <<" not defined"<< G4endl;
++    G4UImanager* UImanager = G4UImanager::GetUIpointer();
++    G4int verbose = UImanager->GetVerboseLevel();
++    
++    if (verbose >= 2) {
++      G4cout << "Parameter"<< aIconFile <<" not defined"<< G4endl;
++    }
+     return;
+   }
+   QToolBar *currentToolbar = NULL;
+   if (userToolBar) {
+     if (fToolbarUser == NULL) {
+-      fToolbarUser = new QToolBar(fMainWindow);
++      fToolbarUser = new QToolBar();
+       fToolbarUser->setIconSize (QSize(20,20));
+       fMainWindow->addToolBar(Qt::TopToolBarArea, fToolbarUser);
+     }
+     currentToolbar = fToolbarUser;
+   } else {
+     if (fToolbarApp == NULL) {
+-      fToolbarApp = new QToolBar(fMainWindow);
++      fToolbarApp = new QToolBar();
+       fToolbarApp->setIconSize (QSize(20,20));
+       fMainWindow->addToolBar(Qt::TopToolBarArea, fToolbarApp);
+     }
++    fMainWindow->show();
+     currentToolbar = fToolbarApp;
+   }
+ 
+@@ -1690,7 +1721,12 @@ void G4UIQt::AddIcon(const char* aLabel, const char* aIconFile, const char* aCom
+     G4UIcommandTree * treeTop = UI->GetTree();
+     
+     if(treeTop->FindPath(aCommand) == NULL) {
+-      G4cout << "Warning: command '"<< aCommand <<"' does not exist, please define it before using it."<< G4endl;
++      G4UImanager* UImanager = G4UImanager::GetUIpointer();
++      G4int verbose = UImanager->GetVerboseLevel();
++      
++      if (verbose >= 2) {
++        G4cout << "Warning: command '"<< aCommand <<"' does not exist, please define it before using it."<< G4endl;
++      }
+     }
+     
+     connect(signalMapper, SIGNAL(mapped(const QString &)),this, SLOT(ButtonCallback(const QString&)));
+@@ -2558,27 +2594,56 @@ void G4UIQt::ExitHelp(
+ void G4UIQt::CommandEnteredCallback (
+ )
+ {
+-  G4String command (fCommandArea->text().toStdString().c_str());
+-  if (fCommandArea->text().trimmed() != "") {
+-    fHistoryTBTableList->addItem(fCommandArea->text());
+-    fHistoryTBTableList->clearSelection();
+-    fHistoryTBTableList->setCurrentItem(NULL);
+-    fCommandArea->setText("");
+-
+-    G4Qt* interactorManager = G4Qt::getInstance ();
+-    if (interactorManager) { 
+-      interactorManager->FlushAndWaitExecution();
+-    }
+-    if (command(0,4) != "help") {
+-      ApplyShellCommand (command,exitSession,exitPause);
+-    } else {
+-      ActivateCommand(command);
++  // split by any new line character
++  QStringList list = fCommandArea->text().split(QRegExp("[\r\n]"),QString::SkipEmptyParts);
++
++  // Apply for all commands
++  for (unsigned int a=0; a< list.size(); a++) {
++    QString txt (list[a].trimmed());
++    if (txt != "") {
++      fHistoryTBTableList->addItem(txt);
++      fHistoryTBTableList->clearSelection();
++      fHistoryTBTableList->setCurrentItem(NULL);
++      fCommandArea->setText("");
++      G4Qt* interactorManager = G4Qt::getInstance ();
++      if (interactorManager) {
++        interactorManager->FlushAndWaitExecution();
++      }
++
++      G4String command = txt.toStdString().c_str();
++      if (command(0,4) != "help") {
++        ApplyShellCommand (command,exitSession,exitPause);
++      } else {
++        ActivateCommand(command);
++      }
+     }
+-    // Rebuild help tree
+-    FillHelpTree();
++  }
++
++  // Rebuild help tree
++  FillHelpTree();
++
++  if(exitSession==true)
++    SessionTerminate();
++}
+ 
+-    if(exitSession==true) 
+-      SessionTerminate();
++
++/** Callback when the text in the line edit is changed.
++ When a newline is inserted, trigger the Activate Command
++ on this text end set unchanged the end of the line after the newline.
++ */
++void G4UIQt::CommandEditedCallback(const QString & )
++{
++  QStringList list = fCommandArea->text().split(QRegExp("[\r\n]"),QString::SkipEmptyParts);
++
++  if (list.size() > 1) { // trigger ActivateCommand
++    for (int a=0; a<list.size()-1; a++) {
++      // set only the first part
++      fCommandArea->setText(list[a]);
++      // trigger callback
++      CommandEnteredCallback();
++    }
++    // reset unfinished command
++    fCommandArea->setText(list[list.size()-1]);
+   }
+ }
+ 
+@@ -3145,18 +3210,22 @@ void G4UIQt::ChangeSurfaceStyle(const QString& action) {
+ 
+ void G4UIQt::OpenIconCallback(const QString& aCommand) {
+ 
+-  QString nomFich = QFileDialog::getOpenFileName(fMainWindow, "Load", "vis", "Macro files (*.mac)");
++  QString nomFich = QFileDialog::getOpenFileName(fMainWindow, "Load", fLastOpenPath, "Macro files (*.mac)");
+    if (nomFich != "") {
+      G4UImanager::GetUIpointer()->ApplyCommand((QString(aCommand)+ QString(" ")+ nomFich).toStdString().c_str());
++     QDir dir;
++     fLastOpenPath = dir.absoluteFilePath(nomFich);
+    }
+ }
+ 
+ 
+ void G4UIQt::SaveIconCallback(const QString& aCommand) {
+ 
+-  QString nomFich = QFileDialog::getSaveFileName(fMainWindow, "Save", "viewerState", "Macro files (*.mac)");
++  QString nomFich = QFileDialog::getSaveFileName(fMainWindow, "Save", fLastOpenPath, "Macro files (*.mac)");
+   if (nomFich != "") {
+     G4UImanager::GetUIpointer()->ApplyCommand((QString(aCommand)+ QString(" ")+nomFich).toStdString().c_str());
++    QDir dir;
++    fLastOpenPath = dir.absoluteFilePath(nomFich);
+   }
+ }
+ 

@@ -1,0 +1,447 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           xcodeversion 1.0
+PortGroup           active_variants 1.1
+PortGroup           boost 1.0
+
+name                blender
+version             2.93.17
+revision            3
+categories          graphics multimedia
+license             GPL-2+
+maintainers         @jasonliu--
+
+homepage            https://www.blender.org
+description         3-D computer graphics creation suite
+long_description    Blender is a ${description}. It contains a set of \
+                    tools that can be used for all phases of the 3-D \
+                    computer graphics pipeline, including modeling, \
+                    sculpting, texturing, rigging, animation, \
+                    simulation, rendering, compositing, motion \
+                    tracking, and video editing. It can be used for \
+                    creating animated films, visual effects, art, 3-D \
+                    printing, motion graphics, interactive 3-D \
+                    applications, and computer games.
+
+master_sites        https://download.blender.org/source/
+use_xz              yes
+checksums           rmd160  7c7ddbe88702b3d7836e5a59374f3d7eaeeeec03 \
+                    sha256  040e1381c8a37bb22e684b15ba4fecb78817fd13f1e4709d6d8c20800ac7cbfb \
+                    size    43033860
+
+minimum_xcodeversions-append {15 8.2 16 8.2}
+if {${os.platform} eq "darwin" && ${os.major} < 15} {
+    known_fail      yes
+    pre-fetch {
+        ui_error "${name} @${version} requires macOS 10.11 or later."
+        return -code error "incompatible macOS version"
+    }
+}
+
+compiler.cxx_standard 2017
+# We need to blacklist Xcode Clang/LLVM, because Blender needs to
+# use tools such as llvm-config, which are not included in Xcode.
+# (llvm-config is needed because Blender links to libLLVM. libLLVM is
+# also not included in Xcode.)
+# (Reference: https://stackoverflow.com/questions/32959627/where-is-the-system-llvm-config-on-macos)
+compiler.blacklist-append clang {macports-clang-[5-8].0}
+
+# Blacklist macports-clang-16+ to prevent
+#  error: no template named 'unary_function' in namespace 'std'
+compiler.blacklist-append {macports-clang-1[6-9]}
+
+# Even though we need to blacklist Xcode Clang/LLVM, we still need to
+# make the rest of Xcode available to the build system. If we don't set
+# use_xcode to yes, then the build will fail, because Blender's CMake
+# scripts still need to use other parts of Xcode (e.g., the xcodebuild
+# command) besides just Xcode Clang.
+use_xcode yes
+cmake.install_prefix ${applications_dir}
+
+# error: TARGET_OS_xxx not defined, evaluates to 0
+configure.cppflags-append \
+                        -Wno-undef-prefix
+
+set py_ver          3.11
+set py_ver_nodot    [string map {. {}} ${py_ver}]
+require_active_variants [boost::depends_portname] python${py_ver_nodot}
+
+depends_lib-append  port:python${py_ver_nodot} \
+                    port:openal-soft \
+                    port:alembic \
+                    port:usd \
+                    port:opensubdiv \
+                    port:jack \
+                    port:libsndfile \
+                    port:fftw-3 \
+                    port:zlib \
+                    port:freetype \
+                    port:openexr2 \
+                    path:lib/libavcodec.dylib:ffmpeg \
+                    port:opencollada \
+                    port:pcre \
+                    port:libsdl2 \
+                    port:libpng \
+                    port:openjpeg \
+                    port:tiff \
+                    port:openimageio \
+                    port:opencolorio \
+                    port:openvdb \
+                    port:osl \
+                    port:embree \
+                    port:oidn \
+                    port:tbb \
+                    port:potrace \
+                    port:libomp \
+                    port:gmp \
+                    port:glew \
+                    path:share/pkgconfig/eigen3.pc:eigen3 \
+                    port:lzo2 \
+                    port:gflags
+
+set llvm_version ""
+# Get the version number of Clang that the MacPorts build system is
+# using. We will be telling CMake to use the same version of LLVM.
+regexp {clang-mp-([0-9]+(?:\.[0-9]+)*)} \
+    ${configure.cc} result llvm_version
+if { ${llvm_version} eq "" } {
+    ui_error "Unable to deduce MP Clang version from ${configure.cc}"
+} else {
+    # Blender links to libLLVM, so we need to add port:llvm as a dependency
+    depends_lib-append  port:llvm-$llvm_version
+}
+
+configure.env-append    OPENEXR_ROOT_DIR=${prefix}/libexec/openexr2
+
+patchfiles          patch-macports-libs-creator.diff \
+                    patch-macports-libs-platform_apple.diff \
+                    patch-unix-or-apple.diff \
+                    patch-openvdb10.diff \
+                    patch-openimageio24.diff \
+                    patch-pythin311.diff
+
+platform darwin {
+    if {${os.major} < 16} {
+        # NSWindow.allowsAutomaticWindowTabbing is introduced at macOS 10.12
+        patchfiles-append \
+                    patch-before-macOS10.12.diff
+    }
+
+    if {${os.major} < 20} {
+        # Fix of locations at 11.4 introduced a crash before, revert it
+        patchfiles-append \
+                    patch-before-macOS11.diff
+    }
+}
+
+post-patch {
+    set platform_apple.cmake \
+        ${worksrcpath}/build_files/cmake/platform/platform_apple.cmake
+    set platform_apple_xcode.cmake \
+        ${worksrcpath}/build_files/cmake/platform/platform_apple_xcode.cmake
+
+    if {${os.platform} eq "darwin" && ${os.major} <= 17} {
+        reinplace -E {s/(MACOSX_DEPLOYMENT_TARGET) 10.13/\1 10.11/} \
+            ${platform_apple.cmake}
+        reinplace {/VERSION_LESS 10.0/,/FATAL_ERROR/s/10.0/8.2/g} \
+            ${platform_apple_xcode.cmake}
+        reinplace -E {s/(OSX_MIN_DEPLOYMENT_TARGET) 10.13/\1 10.11/} \
+            ${platform_apple_xcode.cmake}
+
+        # Starting in Blender 2.90, the devs moved to using C++17 to
+        # compile Cycles. However, on older versions of macOS, this
+        # causes the build to fail with the error 'Undefined
+        # symbols for architecture x86_64: "operator delete(void*,
+        # std::align_val_t)", referenced from:
+        # ccl::OSLRenderServices::~OSLRenderServices() in
+        # libcycles_kernel_osl.a(osl_services.cpp.o)'. The first few
+        # references below seemed to point towards something related to
+        # needing to disable -falign-new by using
+        # -DCOMPILER_HAS_F_ALIGNED_NEW=OFF, but it turns out that the
+        # error is actually being caused by the fact that the devs are
+        # adding -faligned-allocation in the file
+        # 'intern/cycles/kernel/osl/CMakeLists.txt'. It seems that the
+        # real problem is that Clang on older macOSes do not have
+        # aligned allocation when compiling using C++17. Thus, we need
+        # use -fno-aligned-allocation. However, we also cannot simply
+        # remove the section of code from 'CMakeLists.txt' that adds
+        # -faligned-allocation, because if we do, the build will fail
+        # with the warning/error: "aligned deallocation function of type
+        # 'void (void *, std::align_val_t) noexcept' is only available
+        # on macOS 10.14 or newer"; "note: if you supply your own
+        # aligned allocation functions, use -faligned-allocation to
+        # silence this diagnostic". Thus, in order to build
+        # successfully, we need to explicitly use
+        # -fno-aligned-allocation on older macOSes, and explicitly use
+        # -faligned-allocation on newer macOSes.
+        #
+        # References:
+        # * https://github.com/facebook/folly/issues/864
+        # * https://www.veripool.org/issues/1231
+        # * https://trac.macports.org/ticket/47191
+        # * https://bugs.llvm.org/show_bug.cgi?id=22951
+        # * https://stackoverflow.com/questions/31686508/why-is-delete-operator-required-for-virtual-destructors
+        # * https://bugs.freedesktop.org/show_bug.cgi?id=54948
+        # * https://github.com/pybind/python_example/issues/48
+        # * https://github.com/llvm-mirror/clang/blob/master/test/SemaCXX/unavailable_aligned_allocation.cpp
+        # * See also the Portfile for port:folly.
+        reinplace -E {s/(-f)(aligned-allocation)/\1no-\2/} \
+            ${worksrcpath}/intern/cycles/kernel/osl/CMakeLists.txt
+    }
+
+    # Make it so that Blender is able to build Ceres Solver using the
+    # MacPorts eigen3 library.
+    #
+    # Note: Even though Ceres Solver is available through MacPorts, we
+    # probably can't use it when building Blender. Unlike the other
+    # third-party libraries that Blender uses, where Blender provides a
+    # relatively convenient way in its various CMake files to specify a
+    # path pointing to where those libraries live (thus making them
+    # re-targetable), one very noticeable absence is Ceres Solver.
+    # Examining the compilation options specified by the
+    # add_definitions() in the file 'extern/ceres/CMakeLists.txt', it's
+    # possible that Blender's own libmv library requires a Ceres Solver
+    # that has been compiled using a very specific set of options.
+    fs-traverse f ${worksrcpath}/extern/ceres {
+        if {[file isfile $f]} {
+            reinplace -q -E {s|(#include )"(Eigen/.*)"|\1<\2>|} $f
+        }
+    }
+
+    # Use dynamic linking instead of static linking
+    foreach f [list \
+        ${worksrcpath}/intern/cycles/CMakeLists.txt \
+        ${worksrcpath}/source/blender/compositor/CMakeLists.txt \
+    ] {
+        reinplace "/_STATIC_/s/^/#/g" $f
+    }
+
+    # Inexplicably, BOOST_LIBPATH is being set in the
+    # platform_unix.cmake script, but not in the
+    # platform_apple.cmake script. So we need to add it ourselves.
+    reinplace "/set.BOOST_DEFINITIONS/i\\
+\\  set(BOOST_LIBPATH \\$\\{Boost_LIBRARY_DIRS\\})\\
+" \
+        ${platform_apple.cmake}
+
+    # Make it so that CMake is able to find the MacPorts USD library
+    if {![catch {set result [active_variants usd monolithic]}] && \
+        !$result} \
+    {
+        # When Blender is configured to build USD as an internal
+        # dependency, Blender sets USD's compile options so that it
+        # builds as a single monolithic library. However, the default
+        # variant of the MacPorts USD port builds the USD libraries as
+        # modular individual libraries, so in that case we make it so
+        # that Blender is able to see the individual USD modules.
+        reinplace -E {s/(usd_m usd_ms)/usd \1/} \
+            ${worksrcpath}/build_files/cmake/Modules/FindUSD.cmake
+        reinplace "/blender_add_lib/i\\
+list(APPEND USD_LIBRARIES\\
+\\  gf plug sdf tf vt\\
+\\  usdGeom usdLux usdShade usdUtils\\
+)\\
+\\
+" \
+            ${worksrcpath}/source/blender/io/usd/CMakeLists.txt
+    }
+    reinplace {/add_definitions.*DPXR_STATIC/s/^/#/g} \
+        ${worksrcpath}/source/blender/io/usd/CMakeLists.txt
+    reinplace "/BOOST_INCLUDE_DIR/a\\
+\\  \\$\\{PYTHON_INCLUDE_DIRS\\}\\
+" \
+        ${worksrcpath}/source/blender/io/usd/CMakeLists.txt
+
+    if {![catch {set result [active_variants embree static]}] && \
+        !$result} \
+    {
+        # Remove these items from the list of Embree components that
+        # Blender's FindEmbree.cmake script will try to find. The
+        # default variant of the MacPorts Embree port does not generate
+        # individual libraries with these names, because Embree's
+        # default compile options build it as a dynamic library. The
+        # individual libraries only get generated when building Embree
+        # as a static library.
+        foreach re [list \
+            {/^[[:space:]]*embree_(avx|sse4)2?[[:space:]]*$/d} \
+            {/^[[:space:]]*lexers|math|simd|sys|tasking[[:space:]]*$/d} \
+        ] {
+            reinplace -E $re \
+                ${worksrcpath}/build_files/cmake/Modules/FindEmbree.cmake
+        }
+
+        reinplace {/set._embree_libraries_force_load/,/set.EMBREE_LIBRARIES .*_embree_libraries_force_load/s/^/#/} \
+            ${platform_apple.cmake}
+    }
+
+    # Fix hard-coded paths in the Find*.cmake scripts
+    foreach f [glob -directory \
+        ${worksrcpath}/build_files/cmake/Modules *.cmake \
+    ] {
+        foreach re [list \
+            "s|/usr/local|${prefix}|" \
+            "s|/usr/lib|${prefix}/lib|" \
+            "s|/usr/include|${prefix}/include|" \
+            "s|/usr/share|${prefix}/share|" \
+            "s|/opt/lib/\[0-9A-Za-z\]+|${prefix}/lib|" \
+            "s|/opt/include|${prefix}/include|" \
+            "s|/opt/share|${prefix}/share|" \
+        ] {
+            reinplace -q -E $re $f
+        }
+    }
+    reinplace -E "s|(${prefix}/lib)|\\1/opencollada|" \
+        ${worksrcpath}/build_files/cmake/Modules/FindOpenCOLLADA.cmake
+    reinplace -E "s|(${prefix}/lib)|\\1/usd|" \
+        ${worksrcpath}/build_files/cmake/Modules/FindUSD.cmake
+
+    foreach re [list \
+        "s/@@py_ver@@/$py_ver/g" \
+        "s/@@py_ver_nodot@@/$py_ver_nodot/g" \
+    ] {
+        reinplace $re ${platform_apple.cmake}
+    }
+
+    reinplace "s/@@llvm_version@@/$llvm_version/g" \
+        ${worksrcpath}/source/creator/CMakeLists.txt
+    reinplace -E {s/(llvm-config-)/\1mp-/} \
+        ${worksrcpath}/build_files/cmake/Modules/FindLLVM.cmake
+    reinplace -E {s|(llvm-config HINTS.*)bin|\1libexec/llvm-$\{LLVM_VERSION\}/bin|} \
+        ${worksrcpath}/build_files/cmake/Modules/FindLLVM.cmake
+    reinplace -E "/find_program.LLVM_CONFIG llvm-config.$/s|(llvm-config)|\\1 HINTS ${prefix}/libexec/llvm-\${LLVM_VERSION}/bin|" \
+        ${worksrcpath}/build_files/cmake/Modules/FindLLVM.cmake
+    reinplace -E "s|/opt/local/lib|${prefix}/libexec/llvm-\${LLVM_VERSION}|" \
+        ${worksrcpath}/build_files/cmake/Modules/FindClang.cmake
+
+    # Prevent Blender's CMake scripts from attempting to set the
+    # MACOSX_DEPLOYMENT_TARGET. MacPorts base already sets this.
+    reinplace {/set.CMAKE_OSX_DEPLOYMENT_TARGET/,$s/^/#/g} \
+        ${platform_apple_xcode.cmake}
+
+    if {${os.major} >= 18} {
+        # Prevent Blender's CMake scripts from setting a value for
+        # CMAKE_OSX_SYSROOT. The MacPorts build system already sets a
+        # value for CMAKE_OSX_SYSROOT based on the value of
+        # ${configure.sdkroot}. Prior to macOS 10.14, MacPorts base
+        # leaves the value of ${configure.sdkroot} empty, which results
+        # in MacPorts setting CMAKE_OSX_SYSROOT to have a value of '/'.
+        # Starting in macOS 10.14, Apple removed many headers from '/'.
+        # This meant that MacPorts base had to generate a non-empty
+        # value for ${configure.sdkroot}, because a CMAKE_OSX_SYSROOT
+        # pointing to '/' would now be an error.
+        #
+        # Because MacPorts already sets a value for CMAKE_OSX_SYSROOT
+        # based on the value of ${configure.sdkroot}, and Blender's
+        # CMake scripts are also setting a value for CMAKE_OSX_SYSROOT,
+        # this is causing the build phase to have compile commands with
+        # two '-isysroot' flags. Even worse, the paths for the SDKs will
+        # likely be different; e.g., MacPorts uses a path pointing to
+        # the Command Line Tools with an SDK version of 10.14, while
+        # Blender's CMake scripts use a path pointing to Xcode.app with
+        # an SDK version of 10.15. This will cause the build to fail,
+        # because it's quite common to have a situation where the SDK
+        # version of the Command Line Tools is different than the SDK
+        # version in Xcode.app. Using one set of tools or the other for
+        # the entirety of a build is fine, but trying to use pieces from
+        # both will virtually guarantee a build to fail.
+        reinplace {/set.CMAKE_OSX_SYSROOT /s/^/#/} \
+            ${platform_apple_xcode.cmake}
+    }
+}
+
+if {${os.major} < 16} {
+    # Add AppKit wrapper header to compiler library paths
+    configure.cflags-prepend        -isystem ${filespath}/old_appkit_compat
+    configure.cxxflags-prepend      -isystem ${filespath}/old_appkit_compat
+    configure.objcflags-prepend     -isystem ${filespath}/old_appkit_compat
+    configure.objcxxflags-prepend   -isystem ${filespath}/old_appkit_compat
+}
+
+# modern compiler and legacy CoreAudio.framework leads to
+# error: non-defining declaration of enumeration with a fixed underlying type
+configure.cxxflags-append           -Wno-elaborated-enum-base
+
+# Use of the name LIBDIR in the Blender source is not a very good one,
+# since it doesn't actually point to the lib directory.
+#                         vvvvvv
+configure.args-append   -DLIBDIR=${prefix} \
+                        -DFRAMEWORK_SEARCH_PATHS=${frameworks_dir} \
+                        -DXCODE_VERSION=${xcodeversion} \
+                        -DLLVM_VERSION=$llvm_version
+
+# Tell CMake to generate more verbose output during the build
+configure.args-append   -DCMAKE_VERBOSE_MAKEFILE=ON
+
+# Don't copy system Python into the blender install folder
+configure.args-append   -DWITH_PYTHON_INSTALL=OFF
+
+# Build Blender using the "system" (or in our case,
+# MacPorts) Python framework
+configure.args-append   -DWITH_PYTHON_FRAMEWORK=ON
+
+# Build Blender with support for runtime dynamic JACK libraries loading
+# (Note: We currently can't use this, because the port:jack port doesn't
+# generate a framework bundle, and in order to use runtime loading,
+# Blender needs to be compiled using -weak_framework or -weak_library.)
+#configure.args-append  -DWITH_JACK_DYNLOAD=ON
+
+# Build Blender with support for runtime dynamic SDL libraries loading
+# (Note: This option apparently has a different meaning than the
+# JACK_DYNLOAD option above, and has nothing to do with framework
+# bundles. Instead, it appears to enable an internal piece of Blender
+# that's referred to as the SDL extension wrangler (sdlew).)
+configure.args-append   -DWITH_SDL_DYNLOAD=ON
+
+# Tell Blender to use these "system" (in our case, MacPorts) libraries
+configure.args-append   -DWITH_SYSTEM_GLEW=ON \
+                        -DWITH_SYSTEM_EIGEN3=ON \
+                        -DWITH_SYSTEM_LZO=ON \
+                        -DWITH_SYSTEM_GFLAGS=ON
+
+# By default, Blender prefers static llvm build on Apple, but they state
+# that dynamic builds are also possible
+configure.args-append   -DLLVM_STATIC=OFF
+
+# MacPorts hasn't got NanoVDB from Nvidia, disable it
+configure.args-append   -DWITH_NANOVDB=OFF
+
+configure.args-append   -DTBB_ROOT_DIR=${prefix}/libexec/tbb
+
+post-destroot {
+    # Make sure that an addons_contrib folder makes it into the final
+    # distribution, even if it is empty.
+    set version.major [lindex [split ${version} .] 0]
+    regexp {[0-9]+} [lindex [split ${version} .] 1] version.minor
+    set addons_contrib_dir \
+        ${destroot}${applications_dir}/Blender.app/Contents/Resources/${version.major}.${version.minor}/scripts/addons_contrib
+    if {![file exists $addons_contrib_dir]} {
+        xinstall -d $addons_contrib_dir
+    }
+    destroot.keepdirs-append $addons_contrib_dir
+
+    # Create a symlink for command line use
+    set blender_cli ${destroot}${prefix}/bin/blender
+    if {![file exists $blender_cli]} {
+        ln -s ${applications_dir}/Blender.app/Contents/MacOS/Blender \
+              $blender_cli
+    }
+}
+
+livecheck.regex     ${name}-(\\d+\\.\\d+\\.\\d+)${extract.suffix}
+
+variant manpage description {Build manpage} {
+    patchfiles-append       patch-manpage-for-apple.diff
+
+    post-patch {
+        reinplace "s|@@prefix@@|${prefix}|" \
+            ${worksrcpath}/source/creator/CMakeLists.txt
+        reinplace -E "s/\(env python\)3/\\1${py_ver}/" \
+            ${worksrcpath}/doc/manpage/blender.1.py
+    }
+
+    configure.args-append   -DWITH_DOC_MANPAGE=ON
+}
+
+default_variants    +manpage

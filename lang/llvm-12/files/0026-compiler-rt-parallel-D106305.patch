@@ -1,0 +1,100 @@
+From b31080c596246bc26d2493cfd5e07f053cf9541c Mon Sep 17 00:00:00 2001
+From: Raul Tambre <raul@tambre.ee>
+Date: Wed, 21 Jul 2021 20:38:24 +0300
+Subject: [PATCH] [compiler-rt][CMake][arm64] Use a custom target for
+ symlinking LSE sources
+
+On Apple platforms the builtins may be built for both arm64 and arm64e.
+With Makefile generators separate targets are built using Make sub-invocations.
+This causes a race when creating the symlink which may sometimes fail.
+
+Work around this by using a custom target that the builtin targets depend on.
+This causes any sub-invocations to depend on the symlinks having been created before.
+
+Mailing list thread: https://lists.llvm.org/pipermail/llvm-dev/2021-July/151822.html
+
+Reviewed By: thakis, steven_wu
+
+Differential Revision: https://reviews.llvm.org/D106305
+---
+ .../cmake/Modules/CompilerRTDarwinUtils.cmake   | 14 ++++++++++++++
+ compiler-rt/lib/builtins/CMakeLists.txt         | 17 +++++++++++++----
+ 2 files changed, 27 insertions(+), 4 deletions(-)
+
+diff --git a/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake b/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
+index 380ae031a0fea..276fcbb9c0e3c 100644
+--- a/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
++++ b/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
+@@ -405,6 +405,18 @@ macro(darwin_add_builtin_libraries)
+                       ../profile/InstrProfilingVersionVar.c)
+   foreach (os ${ARGN})
+     list_intersect(DARWIN_BUILTIN_ARCHS DARWIN_${os}_BUILTIN_ARCHS BUILTIN_SUPPORTED_ARCH)
++
++    if((arm64 IN_LIST DARWIN_BUILTIN_ARCHS OR arm64e IN_LIST DARWIN_BUILTIN_ARCHS) AND NOT TARGET lse_builtin_symlinks)
++      add_custom_target(
++        lse_builtin_symlinks
++        BYPRODUCTS ${lse_builtins}
++        ${arm64_lse_commands}
++      )
++
++      set(deps_arm64 lse_builtin_symlinks)
++      set(deps_arm64e lse_builtin_symlinks)
++    endif()
++
+     foreach (arch ${DARWIN_BUILTIN_ARCHS})
+       darwin_find_excluded_builtins_list(${arch}_${os}_EXCLUDED_BUILTINS
+                               OS ${os}
+@@ -419,6 +431,7 @@ macro(darwin_add_builtin_libraries)
+       darwin_add_builtin_library(clang_rt builtins
+                               OS ${os}
+                               ARCH ${arch}
++                              DEPS ${deps_${arch}}
+                               SOURCES ${filtered_sources}
+                               CFLAGS ${CFLAGS} -arch ${arch}
+                               PARENT_TARGET builtins)
+@@ -443,6 +456,7 @@ macro(darwin_add_builtin_libraries)
+         darwin_add_builtin_library(clang_rt cc_kext
+                                 OS ${os}
+                                 ARCH ${arch}
++                                DEPS ${deps_${arch}}
+                                 SOURCES ${filtered_sources} ${PROFILE_SOURCES}
+                                 CFLAGS ${CFLAGS} -arch ${arch} -mkernel
+                                 DEFS KERNEL_USE
+diff --git a/compiler-rt/lib/builtins/CMakeLists.txt b/compiler-rt/lib/builtins/CMakeLists.txt
+index 628fe0558fdc2..59d83631a5f43 100644
+--- a/compiler-rt/lib/builtins/CMakeLists.txt
++++ b/compiler-rt/lib/builtins/CMakeLists.txt
+@@ -531,10 +531,8 @@ foreach(pat cas swp ldadd ldclr ldeor ldset)
+     foreach(model 1 2 3 4)
+       if(pat STREQUAL "cas" OR NOT size STREQUAL "16")
+         set(helper_asm "${OA_HELPERS_DIR}/outline_atomic_${pat}${size}_${model}.S")
+-        add_custom_command(
+-          OUTPUT ${helper_asm}
+-          COMMAND ${CMAKE_COMMAND} -E ${COMPILER_RT_LINK_OR_COPY} "${CMAKE_CURRENT_SOURCE_DIR}/aarch64/lse.S" "${helper_asm}"
+-        )
++        list(APPEND lse_builtins "${helper_asm}")
++        list(APPEND arm64_lse_commands COMMAND ${CMAKE_COMMAND} -E ${COMPILER_RT_LINK_OR_COPY} "${CMAKE_CURRENT_SOURCE_DIR}/aarch64/lse.S" "${helper_asm}")
+         set_source_files_properties("${helper_asm}"
+           PROPERTIES
+           COMPILE_DEFINITIONS "L_${pat};SIZE=${size};MODEL=${model}"
+@@ -741,9 +739,20 @@ else ()
+         list(APPEND BUILTIN_CFLAGS_${arch} -fforce-enable-int128)
+       endif()
+ 
++      if(arch STREQUAL "aarch64")
++        add_custom_target(
++          lse_builtin_symlinks
++          BYPRODUCTS ${lse_builtins}
++          ${arm64_lse_commands}
++        )
++
++        set(deps_aarch64 lse_builtin_symlinks)
++      endif()
++
+       add_compiler_rt_runtime(clang_rt.builtins
+                               STATIC
+                               ARCHS ${arch}
++                              DEPS ${deps_${arch}}
+                               SOURCES ${${arch}_SOURCES}
+                               DEFS ${BUILTIN_DEFS}
+                               CFLAGS ${BUILTIN_CFLAGS_${arch}}

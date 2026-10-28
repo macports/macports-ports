@@ -1,0 +1,53 @@
+From 6049dc2a510335766147aba4101ef1946f0b37dd Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Wed, 29 Jul 2026 23:42:39 +0000
+Subject: [PATCH] Don't fail telemetry when machdep.cpu.brand_string
+ doesn't exist
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+getOperatingSystemArchitecture() threw from getSysCtlByName when the
+sysctl is missing, and machdep.cpu.brand_string only exists on x86 and
+arm64 Darwin kernels — PowerPC has no machdep.cpu tree at all. In
+watchman this escaped into the InMemoryView io thread and cancelled
+freshly-created watches with "ioThread failed: failed to retrieve
+sysctl machdep.cpu.brand_string".
+
+A metadata string is not worth failing the caller over: fall back to
+hw.machine (present on every Darwin, e.g. "Power Macintosh"), then
+"unknown". Behavior on x86/arm64 is unchanged.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K6JXw8CwYRiXvqHMBGZRgP
+---
+ eden/common/telemetry/SessionInfo.cpp | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/eden/common/telemetry/SessionInfo.cpp b/eden/common/telemetry/SessionInfo.cpp
+index 95549f5..5db797d 100644
+--- eden/common/telemetry/SessionInfo.cpp
++++ eden/common/telemetry/SessionInfo.cpp
+@@ -96,8 +96,20 @@ std::string getOperatingSystemVersion() {
+ 
+ #if defined(__APPLE__)
+ std::string getOperatingSystemArchitecture() {
+-  // the c_str strips the trailing null bytes.
+-  return getSysCtlByName("machdep.cpu.brand_string", 64).c_str();
++  // machdep.cpu.brand_string exists on x86 and arm64 kernels, but
++  // the machdep.cpu tree is absent on PowerPC. Telemetry metadata
++  // is not worth failing the caller over, so fall back to hw.machine
++  // (present everywhere, e.g. "Power Macintosh") rather than letting
++  // the exception escape.
++  for (const char* name : {"machdep.cpu.brand_string", "hw.machine"}) {
++    try {
++      // the c_str strips the trailing null bytes.
++      return getSysCtlByName(name, 64).c_str();
++    } catch (const std::exception&) {
++      // try the next candidate
++    }
++  }
++  return "unknown";
+ }
+ #endif
+ 

@@ -1,0 +1,165 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           golang 1.0
+
+go.setup            github.com/prometheus/alertmanager 0.34.1 v
+go.offline_build    no
+go.toolchain_min    1.25.0
+revision            0
+
+homepage            https://prometheus.io/docs/alerting/alertmanager
+
+description         The Alertmanager handles alerts sent by client \
+                    applications such as the Prometheus server.
+
+long_description    AlertManager takes care of deduplicating, grouping, and \
+                    routing them to the correct receiver integration such as \
+                    email, PagerDuty, or OpsGenie. It also takes care of \
+                    silencing and inhibition of alerts.
+
+categories          sysutils
+installs_libs       no
+license             Apache-2
+maintainers         {gmail.com:herby.gillot @herbygillot} \
+                    openmaintainer
+
+# As of 0.34.0 the built web UI is no longer part of the source tarball, so
+# fetch upstream's prebuilt assets as a separate distfile.
+set webui_distfile  ${name}-web-ui-${version}${extract.suffix}
+
+distfiles-append    ${webui_distfile}:webui
+master_sites-append ${github.homepage}/releases/download/${git.branch}/:webui
+
+checksums           ${distname}${extract.suffix} \
+                    rmd160  e43d87be08549e767a6edf3e517ff43a214f556a \
+                    sha256  2f6bce4f4b2b28aec4e58fad1341f47cde9c30adb556399472a8831942057941 \
+                    size    819255 \
+                    ${webui_distfile} \
+                    rmd160  a1235b0f7c7ceae19ec77dba54efacc1231e26c7 \
+                    sha256  881fe0f7beb9573f35be47dd233af6220e72c8db72c03bcd1780402eb8dc1307 \
+                    size    931784
+
+depends_build-append \
+                    port:promu
+
+build.cmd           make
+# Skips the ui-elm target, which would rebuild the front end.
+build.target        common-build
+
+use_parallel_build  no
+
+set svc_name        prometheus-alertmanager
+set prom_user       prometheus
+set am_config_dir   ${prefix}/etc/${svc_name}
+set am_config_file  ${am_config_dir}/config.yml
+set am_data_dir     ${prefix}/var/db/${svc_name}
+set am_share_dir    ${prefix}/share/${svc_name}
+set am_log_dir      ${prefix}/var/log/${svc_name}
+set am_log_file     ${am_log_dir}/${name}.log
+
+add_users           ${prom_user} \
+                    group=${prom_user} \
+                    realname=Prometheus
+
+# promu will fail if it cannot capture the current user using the USER
+# environment variable.  So if USER is not currently set in the environment,
+# we'll set it here for purposes of the build.
+if {! [info exists env(USER)]} {
+    build.env-append "USER=${macportsuser}"
+}
+
+pre-build {
+    # Link promu into where the Makefile expects to find it so that it doesn't
+    # try to fetch and install promu again on its own.
+    file mkdir ${gopath}/bin
+    ln -s ${prefix}/bin/promu ${gopath}/bin/
+}
+
+post-extract {
+    # The web UI tarball unpacks as dist/; ui/web.go embeds ui/app/dist.
+    move ${workpath}/dist ${worksrcpath}/ui/app/dist
+
+    copy  ${filespath}/org.macports.${name}.plist \
+          ${workpath}/org.macports.${name}.plist
+}
+
+patch {
+    reinplace "s|@NAME@|${name}|g" \
+        ${workpath}/org.macports.${name}.plist
+
+    reinplace "s|@USER@|${prom_user}|g" \
+        ${workpath}/org.macports.${name}.plist
+
+    reinplace "s|@GROUP@|${prom_user}|g" \
+        ${workpath}/org.macports.${name}.plist
+
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${workpath}/org.macports.${name}.plist
+
+    reinplace "s|@LOGFILE@|${am_log_file}|g" \
+        ${workpath}/org.macports.${name}.plist
+
+    reinplace "s|@DATADIR@|${am_data_dir}|g" \
+        ${workpath}/org.macports.${name}.plist
+
+    reinplace "s|@CONFIGFILE@|${am_config_file}|g" \
+        ${workpath}/org.macports.${name}.plist
+}
+
+destroot.keepdirs   ${destroot}${am_config_dir} \
+                    ${destroot}${am_data_dir}
+
+destroot {
+    xinstall -m 0755 ${worksrcpath}/${name}  ${destroot}${prefix}/bin/${name}
+    xinstall -m 0755 ${worksrcpath}/amtool   ${destroot}${prefix}/bin/amtool
+
+    xinstall -d -m 0755 ${destroot}${am_config_dir}
+    xinstall -d -m 0755 ${destroot}${am_share_dir}
+    xinstall -d -m 0755 -o ${prom_user} -g ${prom_user} ${destroot}${am_log_dir}
+    xinstall -d -m 0755 -o ${prom_user} -g ${prom_user} ${destroot}${am_data_dir}
+
+    touch ${destroot}${am_log_file}
+
+    file attributes ${destroot}${am_log_file} \
+        -owner ${prom_user} -group ${prom_user}
+
+    copy ${worksrcpath}/doc ${destroot}${am_share_dir}/
+    copy ${worksrcpath}/examples ${destroot}${am_share_dir}/
+
+    xinstall -d -m 0755 \
+        ${destroot}${prefix}/etc/LaunchDaemons/org.macports.${name}
+
+    xinstall -m 0644 -o root -W ${workpath} org.macports.${name}.plist \
+        ${destroot}${prefix}/etc/LaunchDaemons/org.macports.${name}
+
+    xinstall -d -m 0755 ${destroot}/Library/LaunchDaemons
+
+    ln -s ${prefix}/etc/LaunchDaemons/org.macports.${name}/org.macports.${name}.plist \
+        ${destroot}/Library/LaunchDaemons/org.macports.${name}.plist
+}
+
+post-activate {
+    if {![file exists ${am_config_file}]} {
+        copy  ${am_share_dir}/doc/examples/simple.yml ${am_config_file}
+    }
+}
+
+github.livecheck.regex  {([0-9.]+)}
+
+notes "
+To enable the Prometheus AlertManager service, use `port load`, as follows:
+
+\$ sudo port load ${name}
+
+When enabled, the service will:
+
+  - listen by default on http://localhost:9093
+
+  - log to: ${am_log_file}
+
+Configuration for AlertManager can be found at:
+
+  ${am_config_file}
+
+"

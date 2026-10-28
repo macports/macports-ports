@@ -1,0 +1,86 @@
+From 3cc6dedb7fe4476fb28007106ad22473908230fa Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Thu, 27 Aug 2020 19:44:45 +0100
+Subject: [PATCH] Darwin, Arm64 : Avoid negative offsets in PAGE relocs.
+
+It's not clear to me whether this is a mistake in the LLVM backend
+or a genuine restriction in the relocation (the wording of the addend
+reloc says neither 'signed' nor 'unsigned'.  This works around this
+by making known negative offsets non-legitimate and composing
+the address by:
+  ardp foo@PAGE
+  add dest, temp, foo@PAGEOFF
+  add dest, dest, neg_offset
+
++ We are now handling negative addends.
+
+Part of the code attempting to deal with the "PAGE-N" issue
+was to reject negative offsets in the legitimizers - actually, this
+wasn't effective anyway.  We've now got code catching the cases
+and using a separate sum instruction, so delete these.
+
+(cherry picked from commit b3e07959c90bcc7231ecae2506555c59e570dfbd)
+Signed-off-by: Kirill A. Korinsky <kirill@korins.ky>
+---
+ gcc/config/aarch64/aarch64.c | 24 +++++++++++++++++++++---
+ 1 file changed, 21 insertions(+), 3 deletions(-)
+
+diff --git gcc/config/aarch64/aarch64.c gcc/config/aarch64/aarch64.c
+index a99cdedb513..c51aa0cd0fd 100644
+--- gcc/config/aarch64/aarch64.c
++++ gcc/config/aarch64/aarch64.c
+@@ -3220,6 +3220,21 @@ aarch64_load_symref_appropriately (rtx dest, rtx imm,
+ 	if (can_create_pseudo_p ())
+ 	  tmp_reg = gen_reg_rtx (mode);
+ 
++	if (TARGET_MACHO)
++	  {
++	    rtx sym, off;
++	    split_const (imm, &sym, &off);
++	    /* Negative offsets don't work, whether by intention is TBD.  */
++	    if (INTVAL (off) < 0)
++	      {
++		emit_move_insn (tmp_reg, gen_rtx_HIGH (mode, sym));
++		emit_insn (gen_add_losym (dest, tmp_reg, sym));
++		/* FIXME: add the SI option if/when we support ilp32.  */
++		emit_insn (gen_adddi3 (dest, dest, off));
++		return;
++	      }
++	   /* else positive offset is OK.  */
++	  }
+ 	emit_move_insn (tmp_reg, gen_rtx_HIGH (mode, copy_rtx (imm)));
+ 	emit_insn (gen_add_losym (dest, tmp_reg, imm));
+ 	return;
+@@ -9644,6 +9659,7 @@ aarch64_classify_address (struct aarch64_address_info *info,
+       /* load literal: pc-relative constant pool entry.  Only supported
+          for SI mode or larger.  */
+       info->type = ADDRESS_SYMBOLIC;
++      info->offset = NULL_RTX;
+ 
+       if (!load_store_pair_p
+ 	  && GET_MODE_SIZE (mode).is_constant (&const_size)
+@@ -9651,8 +9667,9 @@ aarch64_classify_address (struct aarch64_address_info *info,
+ 	{
+ 	  poly_int64 offset;
+ 	  rtx sym = strip_offset_and_salt (x, &offset);
+-	  return ((GET_CODE (sym) == LABEL_REF
+-		   || (GET_CODE (sym) == SYMBOL_REF
++
++	  return ((LABEL_REF_P (sym)
++		   || (SYMBOL_REF_P (sym)
+ 		       && CONSTANT_POOL_ADDRESS_P (sym)
+ 		       && aarch64_pcrelative_literal_loads)));
+ 	}
+@@ -9668,7 +9685,8 @@ aarch64_classify_address (struct aarch64_address_info *info,
+ 	  poly_int64 offset;
+ 	  HOST_WIDE_INT const_offset;
+ 	  rtx sym = strip_offset_and_salt (info->offset, &offset);
+-	  if (GET_CODE (sym) == SYMBOL_REF
++
++	  if (SYMBOL_REF_P (sym)
+ 	      && offset.is_constant (&const_offset)
+ 	      && (aarch64_classify_symbol (sym, const_offset)
+ 		  == SYMBOL_SMALL_ABSOLUTE))
+-- 
+2.42.1
+

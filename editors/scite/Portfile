@@ -1,0 +1,148 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           conflicts_build 1.0
+PortGroup           legacysupport 1.1
+
+# strnlen
+legacysupport.newest_darwin_requires_legacy 10
+
+name                scite
+version             4.4.6
+revision            1
+categories          editors
+maintainers         nomaintainer
+license             MIT
+
+description         SciTE is a SCIntilla-based text editor
+
+long_description    Originally built to demonstrate Scintilla, \
+                    it has grown to be a generally useful editor \
+                    with facilities for building and running programs. \
+                    It is best used for jobs with simple configurations.
+
+homepage            https://www.scintilla.org/SciTE.html
+master_sites        sourceforge:scintilla/SciTE/${version}
+distname            ${name}[strsed ${version} {g/\.//}]
+extract.suffix      .tgz
+
+depends_build-append \
+                    path:bin/pkg-config:pkgconfig
+
+depends_lib-append  port:atk \
+                    port:gettext-runtime \
+                    path:lib/pkgconfig/cairo.pc:cairo \
+                    path:lib/pkgconfig/harfbuzz.pc:harfbuzz \
+                    path:lib/pkgconfig/pango.pc:pango \
+                    path:lib/pkgconfig/gdk-pixbuf-2.0.pc:gdk-pixbuf2 \
+                    path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    path:lib/pkgconfig/gtk+-3.0.pc:gtk3
+
+depends_run-append  port:desktop-file-utils
+
+checksums           rmd160  18a867d72230e447a43e51fe0f2d92f42b8e3c3b \
+                    sha256  1c2e6eee6c8aa2e52983d9713a4b1c97d06c376324a3ec8932adfcb9e55d16d1 \
+                    size    2777984
+
+patchfiles          patch-scite-makefile.diff
+
+# gatomic.h: error: argument 2 of '__atomic_load' must not be a pointer to a 'volatile' type
+patchfiles-append   patch-ScintillaGTKAccessible.cxx.diff
+# SciTEBase.cxx: error: 'system_error' in namespace 'std' does not name a type
+patchfiles-append   patch-SciTEBase.cxx.diff
+
+# Setting LDFLAGS via build.args breaks linking on aarch64 and powerpc:
+# _main is not being found.
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    patchfiles-append \
+                    patch-legacy-support.diff
+
+    post-patch {
+        reinplace "s,@PREFIX@,${prefix}," ${workpath}/scintilla/lexilla/src/makefile
+    }
+}
+
+post-patch {
+    if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
+        reinplace "s,@CXX_ABI_FLAG@,-D_GLIBCXX_USE_CXX11_ABI=0,g" ${workpath}/scite/gtk/makefile \
+            ${workpath}/scintilla/gtk/makefile ${workpath}/scintilla/lexilla/src/makefile
+    } else {
+        reinplace "s,@CXX_ABI_FLAG@,,g" ${workpath}/scite/gtk/makefile \
+            ${workpath}/scintilla/gtk/makefile ${workpath}/scintilla/lexilla/src/makefile
+    }
+}
+
+compiler.cxx_standard   2017
+
+worksrcdir          ${name}
+
+patch.dir           ${workpath}
+
+# tidy's platform.h shadows scintilla's Platform.h on case-insensitive filesystems; see #28230
+if {[file exists ${prefix}/include/Platform.h]} {
+    conflicts_build tidy
+}
+
+use_configure       no
+
+variant universal   {}
+
+set sysrootflags    ""
+if {${configure.sdkroot} != ""} {
+    set sysrootflags "-isysroot ${configure.sdkroot}"
+}
+
+build.dir           ${worksrcpath}/gtk
+
+# Yes, we need to set the compiler explicitly here.
+# Otherwise g++ is picked, and this happens:
+# cc1plus: error: unrecognized command line option "-std=c++17"
+# Notice, adding LDFLAGS here breaks linking, at least on aarch64 and powerpc.
+build.args-append   CC="${configure.cc} ${sysrootflags} [get_canonical_archflags cc]" \
+                    CXX="${configure.cxx} ${sysrootflags} [get_canonical_archflags cxx]" \
+                    CPPFLAGS="${configure.cppflags}" \
+                    prefix=${prefix} \
+                    GTK3=1 \
+                    NO_LUA=1
+
+if {[string match *clang* ${configure.compiler}]} {
+    build.args-append \
+                    CLANG=1
+}
+
+pre-build {
+    ui_debug "Building scintilla"
+    system -W ${workpath}/scintilla/gtk "make [join ${build.args}] [portbuild::build_getjobsarg]"
+}
+
+destroot {
+    # Several ports use scintilla libs.
+    # Avoid dumping these into ${prefix}/lib as unsafe.
+    set scite_root ${prefix}/libexec/${name}
+    xinstall -d ${destroot}${scite_root}
+    copy ${worksrcpath}/bin/SciTE ${destroot}${scite_root}/
+    ln -sf ${scite_root}/SciTE ${destroot}${prefix}/bin/${name}
+    foreach lib {liblexilla.a liblexilla.dylib libscintilla.dylib scintilla.a} {
+        copy ${workpath}/scintilla/bin/${lib} ${destroot}${scite_root}/
+    }
+    xinstall -d ${destroot}${prefix}/share/applications
+    copy ${worksrcpath}/gtk/SciTE.desktop ${destroot}${prefix}/share/applications/
+    xinstall -m 444 ${worksrcpath}/doc/scite.1 ${destroot}${prefix}/share/man/man1
+    set docdir ${prefix}/share/doc/${name}
+    xinstall -d ${destroot}${docdir}
+    xinstall -m 644 {*}[glob ${worksrcpath}/src/*.properties] ${destroot}${docdir}
+    xinstall -m 644 -W ${workpath}/scite License.txt README ${destroot}${docdir}
+
+    system "install_name_tool -id ${scite_root}/liblexilla.dylib \
+        ${destroot}${scite_root}/liblexilla.dylib"
+    system "install_name_tool -id ${scite_root}/libscintilla.dylib \
+        ${destroot}${scite_root}/libscintilla.dylib"
+    system "install_name_tool -change ../bin/libscintilla.dylib \
+        ${scite_root}/libscintilla.dylib ${destroot}${scite_root}/SciTE"
+}
+
+post-activate {
+    system "${prefix}/bin/update-desktop-database ${prefix}/share/applications"
+}
+
+livecheck.distname  SciTE

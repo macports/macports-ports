@@ -1,0 +1,376 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem                  1.0
+PortGroup   rust            1.0
+PortGroup   rust_build      1.0
+PortGroup   conflicts_build 1.0
+
+name                        rust
+
+# Updating the version of Rust requires several steps to support all systems.
+#     update the Portfile of cargo: bump `github.setup` to the cargo release
+#         paired with this Rust release, set `rust_build.version`, and
+#         regenerate its cargo.crates
+#     modify the rust_build PortGroup
+#         update `rust_build.current_stage0_versions`
+#         add checksums for new upstream stage0 compilers
+#         remove checksums for upstream stage0 compilers that are no longer used
+#     update source checksums from the exact file fetched by
+#         ${distname}${extract.suffix}
+# This will allow Rust to build on systems supported by Rust (see https://doc.rust-lang.org/rustc/platform-support.html)
+# To support older systems, more effort is required.
+#     update the version in the rust-bootstrap Portfile using the upstream
+#         stage0 metadata for this release (currently in src/stage0)
+#     build the various rust-bootstrap ports
+#     upload the resulting stage0 compilers to a MacPorts controlled location (see `master_sites` in the rust_build PortGroup)
+#     modify the rust_build PortGroup
+#         add checksums for new MacPorts stage0 compilers
+#         remove checksums for MacPorts stage0 compilers that are no longer used
+
+# Keep macOS 10.11 and below frozen to 1.78.0
+#
+# 10.12 Sierra takes the current version: upstream supports x86_64-apple-darwin
+# back to 10.12 (https://doc.rust-lang.org/rustc/platform-support/apple-darwin.html)
+# and its stage0 binaries are built for it -- `otool -l` on the 1.98.1 stage0
+# rustc and cargo both report a 10.12 deployment target, so they run on Sierra.
+# `rust_build.stage0_info` already routes mdt >= 10.12 to the "apple" vendor, so
+# no MacPorts-built stage0 is required.  See
+# https://trac.macports.org/ticket/73775
+#
+# NOTE: this drops i386 on 10.12 (see supported_archs below) because the current
+# branch is arm64/x86_64 only.  Upstream demoted 32-bit Apple targets to tier 3
+# in 1.42 and ships no i386 artifacts, and there is no MacPorts i386 stage0 at
+# 1.98.  Sierra i386 users would need the frozen 1.78.0.
+if {${os.platform} eq "darwin" && ${os.major} > 15} {
+    # (CURRENT) macOS 10.12 and later
+    version                 1.99.1
+    revision                0
+} else {
+    # macOS 10.11 and earlier
+    version                 1.78.0
+    revision                1
+}
+
+subport rust-src            {revision  2}
+
+categories                  lang devel
+license                     {MIT Apache-2} BSD zlib NCSA Permissive
+platforms                   {darwin >= 9}
+maintainers                 {mcalhoun @MarcusCalhoun-Lopez} \
+                            openmaintainer
+
+description                 A safe, concurrent, practical language
+
+long_description            Rust is a curly-brace, block-structured expression \
+                            language. It visually resembles the C language \
+                            family, but differs significantly in syntactic and \
+                            semantic details. Its design is oriented toward \
+                            concerns of \"programming in the large\", that is, of \
+                            creating and maintaining boundaries -- both abstract \
+                            and operational -- that preserve large-system \
+                            integrity, availability and concurrency.
+
+homepage                    https://www.rust-lang.org
+
+# support for ppc and ppc64 would require
+#     bringing back PowerPC support in LLVM (https://releases.llvm.org/8.0.0/docs/ReleaseNotes.html)
+#     using GCC instead of LLVM as a backend (https://github.com/rust-lang/rustc_codegen_gcc)
+#     using an alternative Rust compiler
+#         GCC (https://rust-gcc.github.io)
+#         GCC (https://github.com/thepowersgang/mrustc)
+if {${os.platform} eq "darwin" && ${os.major} > 15} {
+    supported_archs         arm64 x86_64
+} else {
+    supported_archs         x86_64 i386
+}
+
+# see `def_v` in https://github.com/macports/macports-ports/blob/master/_resources/port1.0/group/python-1.0.tcl
+set py_ver                  3.14
+set py_ver_nodot            [string map {. {}} ${py_ver}]
+configure.python            ${prefix}/bin/python${py_ver}
+
+depends_build-append        path:bin/cmake:cmake \
+                            port:python${py_ver_nodot} \
+                            port:pkgconfig \
+                            port:ninja
+depends_lib-append          port:libiconv \
+                            port:zlib
+
+depends_skip_archcheck      cmake \
+                            python${py_ver_nodot} \
+                            pkgconfig \
+                            ninja
+
+license_noconflict          python${py_ver_nodot}
+
+conflicts_build             libuuid
+
+if {${os.platform} eq "darwin" && ${configure.sdkroot} eq "" && ${configure.sdk_version} ne ""} {
+    # cc crate works best when SDKROOT is set but not to /
+    # for versions 1.0.59...1.0.83, if SDKROOT is set but does not contain MacOSX, `xcrun --show-sdk-path` overrides SDKROOT
+    # for versions 1.0.84+, if SDKROOT is *not* set, `xcrun --show-sdk-path` sets SDKROOT
+    # for possible future directions, see https://github.com/rust-lang/cc-rs/pull/1009
+    # for details, see code in https://github.com/rust-lang/cc-rs/blob/main/src/lib.rs
+    configure.sdkroot       [rust::get_sdkroot ${configure.sdk_version}]
+}
+
+foreach arch ${muniversal.architectures} {
+    lassign [rust_build.stage0_info ${arch}]    stage0_version  stage0_arch stage0_vendor
+    if { ${prefix} ne "/opt/local" && ${stage0_vendor} eq "macports" } {
+        # MacPorts produced bootstrap binaries were built with ${prefix} as /opt/local
+        build.env.${arch}-append        DYLD_FALLBACK_LIBRARY_PATH=${prefix}/lib
+        destroot.env.${arch}-append     DYLD_FALLBACK_LIBRARY_PATH=${prefix}/lib
+    }
+}
+
+# the downloaded Rust compiler must run on the machine
+# since binaries must run anyway, simplify build by using Rosetta and not worry about cross-compiling
+muniversal.run_binaries     yes
+triplet.add_host            all
+triplet.add_build           all
+foreach arch ${muniversal.architectures} {
+    if { [option muniversal.can_run.${arch}] && [option muniversal.is_cross.${arch}] } {
+        muniversal.is_cross.${arch} no
+    }
+}
+
+distname                    rustc-${version}-src
+distfiles                   ${distname}${extract.suffix}:apple_vendor
+
+# no cargo.crates are listed (see below), so the rust PortGroup would derive a
+# dist_subdir of ${name}; keep the historical location so the source tarball
+# does not move on the mirrors
+dist_subdir                 cargo-crates
+
+# upstream source
+if {${os.platform} eq "darwin" && ${os.major} > 15} {
+    # (CURRENT) macOS 10.12 and later
+    checksums-append        rustc-${version}-src${extract.suffix} \
+                            rmd160  5b0acee42c7f62e90849a3bc62fbda6f0b9d17b2 \
+                            sha256  db56bbc64db491ceda6b78a2811a6d121c639338906fd944f720289cbd02245c \
+                            size    566528605
+
+    patchfiles-append       patch-symlink.diff
+} else {
+    checksums-append        rustc-${version}-src${extract.suffix} \
+                            rmd160  d72068a53e5ecbc188f8c77aba4bfadf8ec1c768 \
+                            sha256  ff544823a5cb27f2738128577f1e7e00ee8f4c83f2a348781ae4fc355e91d5a9 \
+                            size    284630812
+}
+
+patchfiles-append           patch-offline_bootstrap.diff
+
+if { ${os.platform} eq "darwin" && ${os.major} < 16 } {
+    # follow LLVM
+    # see https://github.com/llvm/llvm-project/blob/01f924d0e37a5deae51df0d77e10a15b63aa0c0f/clang/lib/Driver/ToolChains/Arch/X86.cpp#L79-L82
+    patchfiles-append       patch-old_procs.diff
+}
+
+if { ${os.platform} eq "darwin" && ${os.major} < 15 } {
+    # follow LLVM
+    # see https://github.com/llvm/llvm-project/blob/378778a0d10c2f8d5df8ceff81f95b6002984a4b/clang/lib/Driver/ToolChains/Darwin.cpp#L1203
+    patchfiles-append       patch-old_dwarf_version.diff
+}
+
+if { ${os.platform} eq "darwin" && ${os.major} < 14 } {
+    # revert https://github.com/llvm/llvm-project/commit/9902a0945d22cd5757b16ebe85fe07059723aa09
+    # qos.h was introduced in 10.10
+    patchfiles-append       patch-no_qos.diff
+}
+
+if { ${os.platform} eq "darwin" && ${os.major} < 12 } {
+    # ___emutls_get_address and ___muloti4
+    # see https://github.com/rust-lang/rust/commit/8a6ff90a3a41e6ace18aeb089ea0a0eb3726dd08
+    rust.add_compiler_runtime   yes
+}
+
+if { ${os.platform} eq "darwin" && ${os.major} < 11 } {
+    # thread-local storage was introduced in 10.7
+    patchfiles-append       patch-emulate_tls.diff
+}
+
+if { ${rust_build.use_cctools} } {
+    patchfiles-append       patch-llvm_libtool.diff
+    post-patch {
+        reinplace           "s|__MACPORTS_PREFIX__|${prefix}|g" \
+                            ${worksrcpath}/src/bootstrap/src/core/build_steps/llvm.rs
+    }
+}
+
+if { ${os.platform} eq "darwin" && ${os.major} < 10 } {
+    # CFURLSetResourcePropertyForKey was introduced in 10.6, so turn off the (optional) function that uses it
+    # libdispatch was introduced in 10.6, so use pthread instead
+    patchfiles-append       patch-no_CFURLSetResourcePropertyForKey.diff  \
+                            patch-no_libdispatch.diff
+}
+
+configure.cmd               ${configure.python} src/bootstrap/configure.py
+
+# build the profiler runtime so that `-C instrument-coverage` and
+# `-C profile-generate` work; upstream passes --enable-profiler in its own
+# dist-x86_64-apple and dist-aarch64-apple builds, and the runtime is only
+# linked into a binary that asks for it
+
+# we want to build the Rust compiler with `--release-channel=stable`
+# rustfmt, clippy, rustdoc, and the rust-analyzer proc-macro server seem to
+# require unstable features, so build them here
+# cargo is a separate port; the Rust source is installed by the rust-src subport
+# llvm-tools is installed as well, but upstream does so regardless of `--tools`
+# (see install.rs in the Rust source tree), so it is not listed here
+configure.args-append       --disable-codegen-tests \
+                            --disable-docs \
+                            --sysconfdir=${prefix}/etc \
+                            --set=build.verbose=0 \
+                            --release-channel=stable \
+                            --enable-extended \
+                            --enable-profiler \
+                            --tools=rustfmt,clippy,rustdoc,rust-analyzer-proc-macro-srv \
+                            --llvm-cflags="${rust_build.llvm.cflags}" \
+                            --llvm-cxxflags="${rust_build.llvm.cxxflags}" \
+                            --llvm-ldflags="${rust_build.llvm.ldflags}" \
+                            --python=${configure.python}
+
+if { ${os.platform} eq "darwin" && ${os.major} < 9 } {
+    configure.args-append   --disable-rpath
+}
+
+if { ${configure.ccache} && [file exists ${prefix}/bin/ccache] } {
+    configure.args-append   --enable-ccache
+} else {
+    configure.args-append   --disable-ccache
+}
+
+# see
+#     https://github.com/rust-lang/rust/blob/340f6491bed3525acfabbdbd1545b6aee2fca62b/src/bootstrap/lib.rs#L1033
+#     https://github.com/rust-lang/rust/blob/340f6491bed3525acfabbdbd1545b6aee2fca62b/compiler/rustc_llvm/build.rs#L329
+configure.cxx_stdlib        libc++
+configure.args-append       --enable-use-libcxx
+foreach arch ${muniversal.architectures} {
+    set platform            [option triplet.${arch}]
+    lassign                 [rust_build.stage0_info ${arch}] stage0_version stage0_arch
+    set platform_stage0     [option triplet.${stage0_arch}]
+    set rustc_prefix        ${workpath}/rustc-${stage0_version}-${platform_stage0}
+    set cargo_prefix        ${workpath}/cargo-${stage0_version}-${platform_stage0}
+    configure.args.${arch}-append \
+                            --set=build.rustc=${rustc_prefix}/rustc/bin/rustc \
+                            --set=build.cargo=${cargo_prefix}/cargo/bin/cargo
+    configure.args-append   --set=target.${platform}.cc=[compwrap::wrap_compiler cc] \
+                            --set=target.${platform}.cxx=[compwrap::wrap_compiler cxx] \
+                            --set=target.${platform}.linker=[compwrap::wrap_compiler ld] \
+                            --set=target.${platform}.ar=${rust_build.archiver} \
+                            --set=target.${platform}.ranlib=${rust_build.ranlib}
+}
+
+build.args                  BOOTSTRAP_ARGS="-j${build.jobs}"
+
+pre-build {
+    # bootstrap.py exports LIBRARY_PATH=<worksrcpath>/build/<triplet>/stage0/lib
+    # for the stage0 it would otherwise have downloaded.  This port supplies its
+    # own stage0, so that directory never exists, and linkers that report the
+    # resulting missing -L have their stderr surfaced by the `linker_messages`
+    # lint -- fatal while bootstrap is still compiling itself.  Create it empty
+    # instead of clearing rust.deny-warnings, which would hide real warnings.
+    foreach arch [option muniversal.architectures] {
+        xinstall -d ${worksrcpath}/build/[option triplet.${arch}]/stage0/lib
+    }
+}
+
+test.run                    yes
+test.target                 check
+
+rust::append_envs           RUST_BACKTRACE=full
+rust::append_envs           RUST_LOG="bootstrap::core::builder::trace"
+
+# src/bootstrap/Cargo.toml sets `[profile.dev] debug = 0`, from which cargo
+# infers `-C strip=debuginfo`.  bootstrap is compiled by the stage0 compiler,
+# so the LINKEDIT alignment fix in this tree's LLVM does not cover it, and the
+# resulting binary is rejected by dyld on macOS 27.  Override the profile
+# rather than patching it; upstream exposes no bootstrap.toml knob for this.
+# see https://github.com/rust-lang/rust/issues/157750
+rust::append_envs           CARGO_PROFILE_DEV_STRIP=none
+
+# lists of installed files, so they should include files from all architectures
+# manifest-rust-std-* is not listed: it is already per-architecture by filename
+muniversal.combine          ${prefix}/lib/rustlib/components \
+                            ${prefix}/lib/rustlib/manifest-clippy-preview \
+                            ${prefix}/lib/rustlib/manifest-llvm-tools-preview \
+                            ${prefix}/lib/rustlib/manifest-rustc \
+                            ${prefix}/lib/rustlib/manifest-rustfmt-preview
+
+post-destroot {
+    if {${subport} eq "rust-src"} return
+    delete                  ${destroot}${prefix}/lib/rustlib/install.log
+    delete                  ${destroot}${prefix}/lib/rustlib/uninstall.sh
+    xinstall -d -m 0755     ${destroot}${prefix}/share/${name}
+    xinstall    -m 0644     ${worksrcpath}/src/etc/ctags.rust \
+                            ${destroot}${prefix}/share/${name}
+    # Rewrite every component manifest rather than a hand-maintained subset.
+    # Upstream installs llvm-tools regardless of `--tools` (see install.rs), and
+    # manifest-llvm-tools-preview was missing here, so it kept the destroot path.
+    foreach manifest [glob -nocomplain ${destroot}${prefix}/lib/rustlib/manifest-*] {
+        reinplace           "s|${destroot}||g" ${manifest}
+    }
+}
+
+set rust_source_dir         ${prefix}/libexec/rust/src
+
+# do not include build information in installed libraries
+# see https://github.com/rust-lang/rust/blob/master/src/bootstrap/bin/rustc.rs
+# see also rust-src subport
+build.env-append            RUSTC_DEBUGINFO_MAP=${workpath}=${rust_source_dir}
+
+subport rust-src {
+    description             Rust source code for the Rust programming language
+    long_description        {*}${description} to trace `panic!` calls.
+
+    universal_variant       yes
+
+    depends_build
+    depends_lib
+
+    use_configure           no
+    build                   {}
+    test.run                no
+
+    # mirror https://github.com/rust-lang/rust/blob/main/src/bootstrap/src/core/build_steps/dist.rs
+    destroot {
+        set dst             "${destroot}${rust_source_dir}/rustc-${version}-src"
+        xinstall -d -m 0755 "${dst}/src/llvm-project"
+        copy "${worksrcpath}/library" "${dst}/library"
+        copy "${worksrcpath}/src/llvm-project/libunwind" "${dst}/src/llvm-project/libunwind"
+        if {${version} eq "1.78.0"} {
+            # rust-src used the root lockfile before library got its own
+            copy "${worksrcpath}/Cargo.lock" "${dst}/Cargo.lock"
+        }
+        delete "${dst}/library/backtrace/crates" \
+               "${dst}/library/stdarch/Cargo.toml" \
+               "${dst}/library/stdarch/crates/stdarch-verify" \
+               "${dst}/library/stdarch/crates/intrinsic-test"
+        xinstall -d -m 0755 "${destroot}${prefix}/lib/rustlib/src"
+        ln -s "../../../libexec/rust/src/rustc-${version}-src" "${destroot}${prefix}/lib/rustlib/src/rust"
+    }
+
+    proc rust::rust_pg_callback {} {}
+    proc rust::set_environment  {} {}
+    # keep only the source master site
+    proc rust_build::callback {} {
+        master_sites-append https://static.rust-lang.org/dist:apple_vendor
+    }
+}
+
+livecheck.type              regex
+livecheck.url               https://github.com/rust-lang/rust/tags
+livecheck.regex             refs/tags/(\[\\d\\.\]+).zip
+
+# no cargo.crates are listed for this port.
+#
+# The upstream source tarball ships a `vendor` directory holding every crate
+# named by all of its lockfiles, together with a .cargo/config.toml that
+# replaces crates-io with that directory.  An in-tree .cargo/config.toml takes
+# precedence over the one the rust PortGroup writes into ${cargo.home}, so any
+# crates listed here would be fetched, checksummed and extracted but never read
+# by the build.
+#
+# This does not apply to ports that build a normal crate: for those the
+# PortGroup's crate cache is the only source cargo sees, so they must keep
+# listing cargo.crates as usual (see the Portfile of cargo).

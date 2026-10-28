@@ -1,0 +1,323 @@
+diff -ruN tcpserver.c.orig tcpserver.c
+--- tcpserver.c.orig	2000-03-18 10:18:42.000000000 -0500
++++ tcpserver.c	2007-12-22 02:41:24.000000000 -0500
+@@ -1,6 +1,14 @@
++#ifdef __dietlibc__
++#define NO_GETLOADAVG
++#endif
++
+ #include <sys/types.h>
+ #include <sys/param.h>
+ #include <netdb.h>
++#include <stdlib.h>
++#ifdef NO_GETLOADAVG
++#include <unistd.h>
++#endif
+ #include "uint16.h"
+ #include "str.h"
+ #include "byte.h"
+@@ -28,6 +36,18 @@
+ #include "sig.h"
+ #include "dns.h"
+ 
++
++#ifdef SOLARIS
++#include <kstat.h>
++static kstat_ctl_t   *kc;
++#ifndef FSCALE
++#define FSHIFT  8               /* bits to right of fixed binary point */
++#define FSCALE  (1<<FSHIFT)
++#endif /* FSCALE */
++
++#define loaddouble(la) ((double)(la) / FSCALE)
++#endif
++
+ int verbosity = 1;
+ int flagkillopts = 1;
+ int flagdelay = 1;
+@@ -59,11 +79,22 @@
+ static stralloc tmp;
+ static stralloc fqdn;
+ static stralloc addresses;
++static stralloc diemsg_buf;
++static stralloc diemsg2_buf;
++static stralloc diemsg3_buf;
++static stralloc diemsg4_buf;
+ 
+ char bspace[16];
+ buffer b;
+ 
+ 
++typedef struct
++{
++  char ip[4];
++  pid_t pid;
++} baby;
++
++baby *child;
+ 
+ /* ---------------------------- child */
+ 
+@@ -72,6 +103,13 @@
+ int flagdeny = 0;
+ int flagallownorules = 0;
+ char *fnrules = 0;
++unsigned long maxload = 0;
++long maxconnip = -1;
++long maxconnc = -1;
++char *diemsg = "";
++char *diemsg2 = "";
++char *diemsg3 = "";
++char *diemsg4 = "";
+ 
+ void drop_nomem(void)
+ {
+@@ -110,6 +148,8 @@
+   strerr_die4sys(111,DROP,"unable to read ",fnrules,": ");
+ }
+ 
++unsigned long limit = 40;
++
+ void found(char *data,unsigned int datalen)
+ {
+   unsigned int next0;
+@@ -125,6 +165,29 @@
+ 	if (data[1 + split] == '=') {
+ 	  data[1 + split] = 0;
+ 	  env(data + 1,data + 1 + split + 1);
++	  if (str_diff(data+1, "MAXLOAD") == 0) scan_ulong(data+1+split+1,&maxload);
++	  if (str_diff(data+1, "MAXCONNIP") == 0) scan_ulong(data+1+split+1,&maxconnip);
++	  if (str_diff(data+1, "MAXCONNC") == 0) scan_ulong(data+1+split+1,&maxconnc);
++	  if (str_diff(data+1, "DIEMSG") == 0) {
++	    if (!stralloc_copys(&diemsg_buf,data+1+split+1)) drop_nomem();
++	    if (!stralloc_0(&diemsg_buf)) drop_nomem();
++	    diemsg = diemsg_buf.s;
++	  }
++	  if (str_diff(data+1, "DIEMSG_MAXLOAD") == 0) {
++	    if (!stralloc_copys(&diemsg2_buf,data+1+split+1)) drop_nomem();
++	    if (!stralloc_0(&diemsg2_buf)) drop_nomem();
++	    diemsg2 = diemsg2_buf.s;
++	  }
++	  if (str_diff(data+1, "DIEMSG_MAXCONNIP") == 0) {
++	    if (!stralloc_copys(&diemsg3_buf,data+1+split+1)) drop_nomem();
++	    if (!stralloc_0(&diemsg3_buf)) drop_nomem();
++	    diemsg3 = diemsg3_buf.s;
++	  }
++	  if (str_diff(data+1, "DIEMSG_MAXCONNC") == 0) {
++	    if (!stralloc_copys(&diemsg4_buf,data+1+split+1)) drop_nomem();
++	    if (!stralloc_0(&diemsg4_buf)) drop_nomem();
++	    diemsg4 = diemsg4_buf.s;
++	  }
+ 	}
+ 	break;
+     }
+@@ -133,9 +196,53 @@
+   }
+ }
+ 
++unsigned long getprocla(void)
++{
++#ifdef SOLARIS
++  kstat_t       *ksp;
++  kstat_named_t *knp;
++  double lavg;
++  kstat_chain_update(kc);
++  ksp = kstat_lookup(kc, "unix", 0, "system_misc");
++  kstat_read(kc,ksp,NULL);
++  knp = kstat_data_lookup(ksp,"avenrun_1min");
++  lavg = loaddouble(knp->value.ui32);
++  return (unsigned long)(lavg * 100);
++#else
++#ifdef NO_GETLOADAVG
++  int lret;
++  int i;
++  unsigned long u1, u2;
++  char *s;
++  static stralloc loadavg_data = {0};
++
++  lret = openreadclose("/proc/loadavg", &loadavg_data, 10);
++  if (lret != -1) {
++    /* /proc/loadavg format is:
++     * 13.08 3.04 1.00 34/170 14190 */
++    s = loadavg_data.s;
++    i = scan_ulong (s, &u1); s+=i;
++    if ((i>0) && (i<5) && (*s == '.')) { /* load should be < 10000 */
++      i = scan_ulong (s+1,&u2);
++      if (i==2) { /* we require two decimal places */
++        return (u1 * 100 + u2);
++      }
++      return (u1 * 100);
++    }
++  }
++#else
++  double result;
++  if (getloadavg(&result, 1) == 1) {
++    return (result * 100);
++  }
++#endif
++#endif
++}
++
+ void doit(int t)
+ {
+   int j;
++  unsigned long curload = 0;
+ 
+   remoteipstr[ip4_fmt(remoteipstr,remoteip)] = 0;
+ 
+@@ -211,6 +318,26 @@
+     }
+   }
+ 
++  if (maxload) {
++    curload = getprocla();
++    if (curload > maxload) flagdeny = 2;
++  }
++  
++  if (!flagdeny && (maxconnip != -1 || maxconnc != -1)) {
++  	unsigned long u;
++  	long c1=0, cc=0;
++  	for (u=0; u < limit; u++) if (child[u].pid != 0) { 
++  		if ((child[u].ip[0] == remoteip[0]) &&
++  		    (child[u].ip[1] == remoteip[1]) &&
++  		    (child[u].ip[2] == remoteip[2]) ) {
++  		    cc++;
++  		    if (child[u].ip[3] == remoteip[3]) c1++;
++  		}
++  	}
++	if (maxconnc != -1 && (cc >= maxconnc)) flagdeny = 4;
++	if (maxconnip != -1 && (c1 >= maxconnip)) flagdeny = 3;
++  }
++
+   if (verbosity >= 2) {
+     strnum[fmt_ulong(strnum,getpid())] = 0;
+     if (!stralloc_copys(&tmp,"tcpserver: ")) drop_nomem();
+@@ -223,11 +350,38 @@
+     cats(":"); safecats(remoteipstr);
+     cats(":"); if (flagremoteinfo) safecats(tcpremoteinfo.s);
+     cats(":"); safecats(remoteportstr);
++    if (flagdeny == 2) {
++    	char curloadstr[FMT_ULONG];
++    	curloadstr[fmt_ulong(curloadstr,curload)] = 0;
++    	cats(" "); safecats ("MAXLOAD"); cats(":"); safecats(curloadstr);
++    }
++    if (flagdeny == 3) {
++    	char maxconstr[FMT_ULONG];
++    	maxconstr[fmt_ulong(maxconstr,maxconnip)] = 0;
++    	cats(" "); safecats ("MAXCONNIP"); cats(":"); safecats(maxconstr);
++    }
++    if (flagdeny == 4) {
++    	char maxconstr[FMT_ULONG];
++    	maxconstr[fmt_ulong(maxconstr,maxconnc)] = 0;
++    	cats(" "); safecats ("MAXCONNC"); cats(":"); safecats(maxconstr);
++    }
+     cats("\n");
+     buffer_putflush(buffer_2,tmp.s,tmp.len);
+   }
+ 
+-  if (flagdeny) _exit(100);
++  if (flagdeny) {
++    if ((flagdeny==2) && *diemsg2) diemsg = diemsg2;
++    if ((flagdeny==3) && *diemsg3) diemsg = diemsg3;
++    if ((flagdeny==4) && *diemsg4) diemsg = diemsg4;
++    if (*diemsg) {
++      buffer_init(&b,write,t,bspace,sizeof bspace);
++      buffer_puts(&b,diemsg);
++      if (buffer_putsflush(&b,"\r\n") == -1)
++        strerr_die2sys(111,DROP,"unable to print diemsg: ");
++    }
++    sleep(1);
++    _exit(100);
++  }
+ }
+ 
+ 
+@@ -253,7 +407,6 @@
+   _exit(100);
+ }
+ 
+-unsigned long limit = 40;
+ unsigned long numchildren = 0;
+ 
+ int flag1 = 0;
+@@ -278,6 +431,7 @@
+ {
+   int wstat;
+   int pid;
++  unsigned long u;
+  
+   while ((pid = wait_nohang(&wstat)) > 0) {
+     if (verbosity >= 2) {
+@@ -286,6 +440,8 @@
+       strerr_warn4("tcpserver: end ",strnum," status ",strnum2,0);
+     }
+     if (numchildren) --numchildren; printstatus();
++    for (u=0; u < limit; u++) if (child[u].pid == pid) { child[u].pid = 0; break; }
++    if (u == limit) strerr_die1x(111,"tcpserver: ERROR: dead child not found?!"); /* never happens */
+   }
+ }
+ 
+@@ -299,6 +455,7 @@
+   unsigned long u;
+   int s;
+   int t;
++  pid_t pid;
+  
+   while ((opt = getopt(argc,argv,"dDvqQhHrR1UXx:t:u:g:l:b:B:c:pPoO")) != opteof)
+     switch(opt) {
+@@ -332,6 +489,14 @@
+   argc -= optind;
+   argv += optind;
+ 
++  x = env_get("MAXLOAD"); if (x) scan_ulong(x,&maxload);
++  x = env_get("MAXCONNIP"); if (x) scan_ulong(x,&maxconnip);
++  x = env_get("MAXCONNC"); if (x) scan_ulong(x,&maxconnc);
++  x = env_get("DIEMSG"); if (x) diemsg = x;
++  x = env_get("DIEMSG_MAXLOAD"); if (x) diemsg2 = x;
++  x = env_get("DIEMSG_MAXCONNIP"); if (x) diemsg3 = x;
++  x = env_get("DIEMSG_MAXCONNC"); if (x) diemsg4 = x;
++  
+   if (!verbosity)
+     buffer_2->fd = -1;
+  
+@@ -352,6 +517,10 @@
+   }
+ 
+   if (!*argv) usage();
++  
++  child = calloc(sizeof(baby),limit);
++  if (!child)
++    strerr_die2x(111,FATAL,"out of memory for MAXCONNIP tracking");
+  
+   sig_block(sig_child);
+   sig_catch(sig_child,sigchld);
+@@ -393,6 +562,9 @@
+  
+   close(0);
+   close(1);
++  #ifdef SOLARIS
++  kc = kstat_open();
++  #endif  
+   printstatus();
+  
+   for (;;) {
+@@ -405,7 +577,7 @@
+     if (t == -1) continue;
+     ++numchildren; printstatus();
+  
+-    switch(fork()) {
++    switch(pid=fork()) {
+       case 0:
+         close(s);
+         doit(t);
+@@ -420,6 +592,10 @@
+       case -1:
+         strerr_warn2(DROP,"unable to fork: ",&strerr_sys);
+         --numchildren; printstatus();
++        break;
++      default:
++        for (u=0; u < limit; u++) if (child[u].pid == 0) { byte_copy(child[u].ip,4,remoteip); child[u].pid = pid; break; }
++	if (u == limit) strerr_die1x(111,"tcpserver: ERROR: no empty space for new child?!"); /* never happens */
+     }
+     close(t);
+   }

@@ -1,0 +1,191 @@
+From d91b7075292573710b3371ee5fd4ab2793d28144 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Wed, 29 Jul 2026 07:46:26 +0000
+Subject: [PATCH 09/13] folly: support legacy macOS (10.5/10.6) in system
+ portability code
+
+- File::dupCloseOnExec: F_DUPFD_CLOEXEC appeared in Mac OS X 10.7;
+  fall back to dup + FD_CLOEXEC so close-on-exec is preserved.
+- portability/Time: use TASK_BASIC_INFO when MACH_TASK_BASIC_INFO
+  (10.8 SDK) is unavailable; skip folly's weak clock_gettime when
+  targeting < 10.12 and an external implementation (MacPorts
+  legacy-support) provides the function, since folly's definition
+  conflicts with it.
+- NativeSemaphore: libdispatch appeared in 10.6; fall back to the
+  POSIX semaphore implementation when targeting 10.5 (only tests
+  exercise this class on Darwin).
+- ThreadId: pthread_threadid_np appeared in 10.6 but is declared only
+  for i386/x86_64 there, so ppc slices can never use it; use the mach
+  thread port as the unique id on ppc and pre-10.6 targets rather than
+  returning a constant.
+
+pthread_setname_np needs no change: MacPorts legacy-support supplies
+it on legacy systems.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013G8CDpEyDCCgV4jaMM9WME
+---
+ folly/File.cpp                          |  8 +++++++-
+ folly/portability/Time.cpp              | 25 +++++++++++++++++++++++++
+ folly/synchronization/NativeSemaphore.h | 17 +++++++++++++++--
+ folly/system/ThreadId.cpp               | 12 ++++++++++++
+ 4 files changed, 59 insertions(+), 3 deletions(-)
+
+diff --git a/folly/File.cpp b/folly/File.cpp
+index 3ed853a4b..d3f8c638e 100644
+--- a/folly/File.cpp
++++ b/folly/File.cpp
+@@ -145,8 +145,14 @@ File File::dupCloseOnExec() const {
+     int fd;
+ #ifdef _WIN32
+     fd = ::dup(fd_);
+-#else
++#elif defined(F_DUPFD_CLOEXEC)
+     fd = ::fcntl(fd_, F_DUPFD_CLOEXEC, 0);
++#else
++    // Pre-10.7 macOS: no atomic dup-with-cloexec; set the flag separately.
++    fd = ::dup(fd_);
++    if (fd != -1) {
++      ::fcntl(fd, F_SETFD, FD_CLOEXEC);
++    }
+ #endif
+     checkUnixError(fd, "dup() failed");
+ 
+diff --git a/folly/portability/Time.cpp b/folly/portability/Time.cpp
+index 8ecfb79cf..2a6aca322 100644
+--- a/folly/portability/Time.cpp
++++ b/folly/portability/Time.cpp
+@@ -38,14 +38,27 @@ static void duration_to_ts(
+ #if !FOLLY_HAVE_CLOCK_GETTIME || FOLLY_FORCE_CLOCK_GETTIME_DEFINITION
+ #if defined(__MACH__) && __MACH__
+ #include <errno.h>
++#include <sys/types.h>
++#include <AvailabilityMacros.h> // @manual
+ #include <mach/mach_init.h> // @manual
+ #include <mach/mach_port.h> // @manual
+ #include <mach/mach_time.h> // @manual
+ #include <mach/mach_types.h> // @manual
+ #include <mach/task.h> // @manual
++#include <mach/task_info.h> // @manual
+ #include <mach/thread_act.h> // @manual
+ #include <mach/vm_map.h> // @manual
+ 
++// When targeting macOS < 10.12 the OS has no clock_gettime, but an external
++// library (e.g. MacPorts legacy-support) may supply it, in which case
++// FOLLY_HAVE_CLOCK_GETTIME is set and defining folly's own copy here would
++// conflict with it.  Otherwise the definitions below exist both as the
++// fallback of last resort and for 10.12+ targets, where SDK headers declare
++// clock_gettime even when the deployment target predates the SDK (see
++// portability/Time.h).
++#if !defined(__APPLE__) || MAC_OS_X_VERSION_MIN_REQUIRED >= 101200 || \
++    !FOLLY_HAVE_CLOCK_GETTIME
++
+ static std::chrono::nanoseconds time_value_to_ns(time_value_t t) {
+   return std::chrono::seconds(t.seconds) +
+       std::chrono::microseconds(t.microseconds);
+@@ -65,6 +78,7 @@ static int clock_process_cputime(struct timespec* ts) {
+   }
+ 
+   // Get CPU usage for terminated threads.
++#ifdef MACH_TASK_BASIC_INFO
+   mach_task_basic_info task_basic_info;
+   mach_msg_type_number_t task_basic_info_count = MACH_TASK_BASIC_INFO_COUNT;
+   kern_result = task_info(
+@@ -72,6 +86,16 @@ static int clock_process_cputime(struct timespec* ts) {
+       MACH_TASK_BASIC_INFO,
+       (thread_info_t)&task_basic_info,
+       &task_basic_info_count);
++#else
++  // MACH_TASK_BASIC_INFO appeared in the macOS 10.8 SDK.
++  task_basic_info_data_t task_basic_info;
++  mach_msg_type_number_t task_basic_info_count = TASK_BASIC_INFO_COUNT;
++  kern_result = task_info(
++      mach_task_self(),
++      TASK_BASIC_INFO,
++      (thread_info_t)&task_basic_info,
++      &task_basic_info_count);
++#endif
+   if (FOLLY_UNLIKELY(kern_result != KERN_SUCCESS)) {
+     return -1;
+   }
+@@ -121,6 +145,7 @@ FOLLY_ATTR_WEAK int clock_gettime(clockid_t clk_id, struct timespec* ts) {
+       return -1;
+   }
+ }
++#endif
+ 
+ int clock_getres(clockid_t clk_id, struct timespec* ts) {
+   if (clk_id != CLOCK_MONOTONIC) {
+diff --git a/folly/synchronization/NativeSemaphore.h b/folly/synchronization/NativeSemaphore.h
+index f894eed63..c571f64ce 100644
+--- a/folly/synchronization/NativeSemaphore.h
++++ b/folly/synchronization/NativeSemaphore.h
+@@ -24,9 +24,22 @@
+ #include <folly/lang/Exception.h>
+ #include <folly/portability/Windows.h>
+ 
++#if defined(__APPLE__)
++#include <AvailabilityMacros.h>
++// libdispatch appeared in Mac OS X 10.6; fall back to POSIX semaphores when
++// targeting 10.5.
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
++#define FOLLY_DETAIL_HAS_DISPATCH_SEMAPHORE 1
++#else
++#define FOLLY_DETAIL_HAS_DISPATCH_SEMAPHORE 0
++#endif
++#else
++#define FOLLY_DETAIL_HAS_DISPATCH_SEMAPHORE 0
++#endif
++
+ #if defined(_WIN32)
+ 
+-#elif defined(__APPLE__)
++#elif FOLLY_DETAIL_HAS_DISPATCH_SEMAPHORE
+ 
+ #include <dispatch/dispatch.h> // @manual
+ 
+@@ -94,7 +107,7 @@ class NativeSemaphore {
+   HANDLE sem_{INVALID_HANDLE_VALUE};
+ };
+ 
+-#elif defined(__APPLE__)
++#elif FOLLY_DETAIL_HAS_DISPATCH_SEMAPHORE
+ 
+ class NativeSemaphore {
+  public:
+diff --git a/folly/system/ThreadId.cpp b/folly/system/ThreadId.cpp
+index 2531c38de..ef6011cb6 100644
+--- a/folly/system/ThreadId.cpp
++++ b/folly/system/ThreadId.cpp
+@@ -16,6 +16,10 @@
+ 
+ #include <folly/system/ThreadId.h>
+ 
++#if defined(__APPLE__)
++#include <AvailabilityMacros.h>
++#endif
++
+ #include <folly/Likely.h>
+ #include <folly/portability/PThread.h>
+ #include <folly/portability/SysSyscall.h>
+@@ -40,9 +44,17 @@ namespace detail {
+ 
+ uint64_t getOSThreadIDSlow() {
+ #if defined(__APPLE__)
++#if defined(__POWERPC__) || MAC_OS_X_VERSION_MIN_REQUIRED < 1060
++  // pthread_threadid_np appeared in Mac OS X 10.6, but its declaration is
++  // restricted to i386/x86_64 there (Libc-594 pthread.h), so ppc slices
++  // cannot use it even when targeting 10.6.  The mach thread port is still
++  // a usable unique id for threads within the process.
++  return uint64_t(pthread_mach_thread_np(pthread_self()));
++#else
+   uint64_t tid;
+   pthread_threadid_np(nullptr, &tid);
+   return tid;
++#endif
+ #elif defined(_WIN32)
+   return uint64_t(GetCurrentThreadId());
+ #elif defined(__FreeBSD__)
+-- 
+2.43.0
+

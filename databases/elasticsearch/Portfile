@@ -1,0 +1,159 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           java 1.0
+
+version             7.16.1
+revision            0
+name                elasticsearch
+categories          databases java
+supported_archs     x86_64
+platforms           {darwin any}
+license             Apache-2
+maintainers         @gerardsoleca openmaintainer
+
+description         Distributed RESTful search engine built for the cloud
+long_description    Elasticsearch is a highly scalable open-source \
+                    full-text search and analytics engine. It allows \
+                    you to store search, and analyze big volumes of \
+                    data quickly and in near real time. It is \
+                    generally used as the underlying engine/technology \
+                    that powers applications that have complex search \
+                    features and requirements.  Elasticsearch requires \
+                    Java/OpenJDK 11+, which comes installed.  Other \
+                    Java versions are not supported.
+
+homepage            https://www.elastic.co/
+
+master_sites        https://artifacts.elastic.co/downloads/${name}/
+worksrcdir          ${distname}
+distname            ${name}-${version}-darwin-x86_64
+
+checksums           rmd160  e7de56cb0129aa88f12b7f9ab92964540946daec \
+                    sha256  da5d346d4b4114ee6c141b8d603a295b1b3e2e9dce56cf1e3701ad4bf0be0716 \
+                    size    340743823
+
+use_configure       no
+build {}
+
+# Required java version
+# see https://www.elastic.co/support/matrix#matrix_jvm
+java.version        11+
+# LTS JDK port to install if required java not found
+java.fallback       openjdk11
+
+# diff -NaurdwB -I '^ *#' ./elasticsearch-orig/config/elasticsearch.yml ./elasticsearch-new/config/elasticsearch.yml | sed -E -e 's/\.\/elasticsearch-(orig|new)\//\.\//' > patch-elasticsearch-yml.diff
+# diff -NaurdwB -I '^ *#' ./elasticsearch-orig/config/jvm.options ./elasticsearch-new/config/jvm.options | sed -E -e 's/\.\/elasticsearch-(orig|new)\//\.\//' > patch-jvm-options.diff
+# diff -Naur -I '^ *#' bin/elasticsearch-env bin/elasticsearch-env-patch | sed -E 's|(elasticsearch-env)-patch|\1|' > patch-elasticsearch-env.diff
+patchfiles          patch-elasticsearch-yml.diff \
+                    patch-elasticsearch-env.diff \
+                    patch-jvm-options.diff
+
+set elasticdir      ${prefix}/share/${name}
+set confdir         ${prefix}/etc/${name}
+set logdir          ${prefix}/var/log/${name}
+set dbdir           ${prefix}/var/${name}
+set user            ${name}
+set group           ${user}
+
+# Elasticsearch cannot run as root, so a dedicated user is required
+add_users           ${user} group=${group} realname=Elasticsearch\ Server
+
+pre-build {
+    # Change the PREFIX in the config files. They are already patched.
+    reinplace s|@PREFIX@|${prefix}|g ${worksrcpath}/config/elasticsearch.yml
+    reinplace s|@PREFIX@|${prefix}|g ${worksrcpath}/bin/elasticsearch-env
+    reinplace s|@PREFIX_LOGDIR@|${logdir}|g ${worksrcpath}/config/jvm.options
+}
+
+destroot {
+    # Setup the directories used by elasticsearch
+    xinstall -m 755 -o ${user} -g ${group} -d \
+        ${destroot}${elasticdir} \
+        ${destroot}${confdir} \
+        ${destroot}${logdir} \
+        ${destroot}${dbdir}
+
+    # These two directories are empty, so we need to preserve them
+    destroot.keepdirs-append \
+        ${destroot}${logdir} \
+        ${destroot}${dbdir}
+
+    # Copy elasticsearch to destroot
+    copy \
+        ${worksrcpath}/bin \
+        ${worksrcpath}/lib \
+        ${worksrcpath}/modules \
+        ${destroot}${elasticdir}
+
+    # Copy config files to etc
+    copy \
+        ${worksrcpath}/config/elasticsearch.yml \
+        ${worksrcpath}/config/jvm.options \
+        ${worksrcpath}/config/log4j2.properties \
+        ${destroot}${confdir}
+
+    # Symlink the two required binaries to be used
+    ln -s ../share/${name}/bin/${name} ${destroot}${prefix}/bin/${name}
+    ln -s ../share/${name}/bin/${name}-env ${destroot}${prefix}/bin/${name}-env
+}
+
+post-activate {
+    # Plugins needs to be an empty folder or elastic crashes,
+    # so it is created here to avoid .turd_elasticsearch file
+    xinstall -d ${elasticdir}/plugins
+
+    # Give the appropriate permissions on the file system
+    system "chown -R root:${group} ${elasticdir}"
+    system "chown -R ${user}:${group} ${logdir}"
+    system "chown -R ${user}:${group} ${dbdir}"
+}
+
+notes "\
+Elasticsearch requires Java/OpenJDK ${java.version}, which comes installed.\
+Other Java versions are not supported.
+
+To interact with Elasticsearch, start with commands like:
+
+# default Elasticsearch response
+curl -XGET \"http://localhost:9200\"
+
+# create and configure a new index
+curl -XPUT \"http://localhost:9200/my_first_index\" \\
+  -H 'Content-Type: application/json' -d'
+{
+    \"settings\" : {
+        \"index\" : {
+            \"number_of_shards\" : 5,
+            \"number_of_replicas\" : 2
+        }
+    }
+}
+'
+
+# examine cluster health, shard disk usage and status
+curl -XGET \"http://localhost:9200/_cluster/health?pretty\"
+curl -XGET \"http://localhost:9200/_cat/shards?v\"
+
+# irreversibly delete all data in /my_first_index
+curl -XDELETE \"http://localhost:9200/my_first_index\"
+
+Each Elasticsearch shard is a Lucene index; aim for 10-50 GB per shard.
+
+${name} is tested with the JDK provided in port ${java.fallback}. Add these\
+lines to your ~/.profile to set up your java environment and test with\
+'java -version':
+
+# Java environment
+if \[ -x /usr/libexec/java_home \]; then
+        export JAVA_HOME=\$(/usr/libexec/java_home)
+        export KEYTOOL=\"\$JAVA_HOME\"/jre/bin
+fi
+"
+
+startupitem.create  yes
+startupitem.logfile ${logdir}/daemon.log
+startupitem.executable \
+    sudo -u elasticsearch ${prefix}/bin/${name}
+
+livecheck.url       https://www.elastic.co/downloads/elasticsearch

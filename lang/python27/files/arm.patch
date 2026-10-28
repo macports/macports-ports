@@ -1,0 +1,273 @@
+https://bugs.python.org/issue41100
+https://github.com/python/cpython/pull/21249
+https://github.com/python/cpython/pull/21268
+https://github.com/python/cpython/pull/21564
+
+--- configure.orig	2020-04-20 07:13:39.000000000 +1000
++++ configure	2020-09-10 19:51:43.000000000 +1000
+@@ -8474,6 +8474,9 @@
+     	ppc)
+     		MACOSX_DEFAULT_ARCH="ppc64"
+     		;;
++    	arm64)
++    		MACOSX_DEFAULT_ARCH="arm64"
++    		;;
+     	*)
+     		as_fn_error $? "Unexpected output of 'arch' on OSX" "$LINENO" 5
+     		;;
+--- Mac/Tools/pythonw.c.orig	2020-04-20 07:13:39.000000000 +1000
++++ Mac/Tools/pythonw.c	2020-09-10 20:22:45.000000000 +1000
+@@ -114,6 +114,9 @@
+ #elif defined(__x86_64__)
+     cpu_types[0] = CPU_TYPE_X86_64;
+ 
++#elif defined(__arm64__)
++    cpu_types[0] = CPU_TYPE_ARM64;
++
+ #elif defined(__ppc__)
+     cpu_types[0] = CPU_TYPE_POWERPC;
+ #elif defined(__i386__)
+--- Lib/test/test_platform.py.orig	2020-04-20 07:13:39.000000000 +1000
++++ Lib/test/test_platform.py	2020-09-10 20:26:40.000000000 +1000
+@@ -220,7 +220,7 @@
+             self.assertEqual(res[1], ('', '', ''))
+ 
+             if sys.byteorder == 'little':
+-                self.assertIn(res[2], ('i386', 'x86_64'))
++                self.assertIn(res[2], ('i386', 'x86_64', 'arm64'))
+             else:
+                 self.assertEqual(res[2], 'PowerPC')
+ 
+--- Lib/_osx_support.py.orig	2020-04-20 07:13:39.000000000 +1000
++++ Lib/_osx_support.py	2020-09-10 20:38:30.000000000 +1000
+@@ -470,6 +470,8 @@
+ 
+             if len(archs) == 1:
+                 machine = archs[0]
++            elif archs == ('arm64', 'x86_64'):
++                machine = 'universal2'
+             elif archs == ('i386', 'ppc'):
+                 machine = 'fat'
+             elif archs == ('i386', 'x86_64'):
+@@ -484,6 +486,10 @@
+                 raise ValueError(
+                    "Don't know machine value for archs=%r" % (archs,))
+ 
++        elif machine == 'arm':
++            # No 32-bit arm support on macOS
++            machine = 'arm64'
++
+         elif machine == 'i386':
+             # On OSX the machine type returned by uname is always the
+             # 32-bit variant, even if the executable architecture is
+--- Lib/test/test_unicode.py.orig	2020-04-20 07:13:39.000000000 +1000
++++ Lib/test/test_unicode.py	2020-09-18 01:42:41.000000000 +1000
+@@ -1676,6 +1676,7 @@
+     def test_from_format(self):
+         test_support.import_module('ctypes')
+         from ctypes import (
++            c_char_p,
+             pythonapi, py_object, sizeof,
+             c_int, c_long, c_longlong, c_ssize_t,
+             c_uint, c_ulong, c_ulonglong, c_size_t, c_void_p)
+@@ -1684,6 +1685,7 @@
+         else:
+             name = "PyUnicodeUCS4_FromFormat"
+         _PyUnicode_FromFormat = getattr(pythonapi, name)
++        _PyUnicode_FromFormat.argtypes = (c_char_p,)
+         _PyUnicode_FromFormat.restype = py_object
+ 
+         def PyUnicode_FromFormat(format, *args):
+--- Modules/_ctypes/callbacks.c.orig	2020-04-20 07:13:39.000000000 +1000
++++ Modules/_ctypes/callbacks.c	2020-09-18 02:26:42.000000000 +1000
+@@ -24,7 +24,7 @@ CThunkObject_dealloc(PyObject *_self)
+     Py_XDECREF(self->callable);
+     Py_XDECREF(self->restype);
+     if (self->pcl_write)
+-        ffi_closure_free(self->pcl_write);
++        Py_ffi_closure_free(self->pcl_write);
+     PyObject_GC_Del(self);
+ }
+ 
+@@ -426,7 +426,7 @@ CThunkObject *_ctypes_alloc_callback(PyO
+ 
+     assert(CThunk_CheckExact(p));
+ 
+-    p->pcl_write = ffi_closure_alloc(sizeof(ffi_closure),
++    p->pcl_write = Py_ffi_closure_alloc(sizeof(ffi_closure),
+ 				     &p->pcl_exec);
+     if (p->pcl_write == NULL) {
+         PyErr_NoMemory();
+@@ -473,12 +473,15 @@ CThunkObject *_ctypes_alloc_callback(PyO
+                      "ffi_prep_cif failed with %d", result);
+         goto error;
+     }
+-#if defined(X86_DARWIN) || defined(POWERPC_DARWIN)
+-    result = ffi_prep_closure(p->pcl_write, &p->cif, closure_fcn, p);
+-#else
++#if HAVE_FFI_PREP_CLOSURE_LOC
+     result = ffi_prep_closure_loc(p->pcl_write, &p->cif, closure_fcn,
+ 				  p,
+ 				  p->pcl_exec);
++#elif defined(__APPLE__) && defined(__arm64__)
++    PyErr_Format(PyExc_NotImplementedError, "ffi_prep_closure_loc() is missing");
++    goto error;
++#else
++    result = ffi_prep_closure(p->pcl_write, &p->cif, closure_fcn, p);
+ #endif
+     if (result != FFI_OK) {
+         PyErr_Format(PyExc_RuntimeError,
+--- Modules/_ctypes/callproc.c.orig	2020-04-20 07:13:39.000000000 +1000
++++ Modules/_ctypes/callproc.c	2020-09-21 06:08:56.000000000 +1000
+@@ -773,7 +773,8 @@ static int _call_function_pointer(int fl
+                                   ffi_type **atypes,
+                                   ffi_type *restype,
+                                   void *resmem,
+-                                  int argcount)
++                                  int argcount,
++                                  int argtypecount)
+ {
+ #ifdef WITH_THREAD
+     PyThreadState *_save = NULL; /* For Py_BLOCK_THREADS and Py_UNBLOCK_THREADS */
+@@ -801,6 +802,37 @@ static int _call_function_pointer(int fl
+     if ((flags & FUNCFLAG_CDECL) == 0)
+         cc = FFI_STDCALL;
+ #endif
++
++    /* Even on Apple-arm64 the calling convention for variadic functions conincides
++    * with the standard calling convention in the case that the function called
++    * only with its fixed arguments.   Thus, we do not need a special flag to be
++    * set on variadic functions.   We treat a function as variadic if it is called
++    * with a nonzero number of variadic arguments */
++    int is_variadic = (argtypecount != 0 && argcount > argtypecount);
++    (void) is_variadic;
++
++#if defined(__APPLE__) && defined(__arm64__) && !defined(HAVE_FFI_PREP_CIF_VAR)
++    if (is_variadic) {
++        PyErr_SetString(PyExc_NotImplementedError, "ffi_prep_cif_var() is missing");
++        return -1;
++    }
++#endif
++
++#if HAVE_FFI_PREP_CIF_VAR
++    if (is_variadic) {
++        if (FFI_OK != ffi_prep_cif_var(&cif,
++                                        cc,
++                                        argtypecount,
++                                        argcount,
++                                        restype,
++                                        atypes)) {
++            PyErr_SetString(PyExc_RuntimeError,
++                            "ffi_prep_cif_var failed");
++            return -1;
++        }
++    } else
++ #endif
++    {
+     if (FFI_OK != ffi_prep_cif(&cif,
+                                cc,
+                                argcount,
+@@ -810,6 +842,7 @@ static int _call_function_pointer(int fl
+                         "ffi_prep_cif failed");
+         return -1;
+     }
++    }
+ 
+     if (flags & (FUNCFLAG_USE_ERRNO | FUNCFLAG_USE_LASTERROR)) {
+         error_object = _ctypes_get_errobj(&space);
+@@ -1183,6 +1216,9 @@ PyObject *_ctypes_callproc(PPROC pProc,
+                                      rtype, resbuf,
+                                      Py_SAFE_DOWNCAST(argcount,
+                                                       Py_ssize_t,
++                                                      int),
++                                     Py_SAFE_DOWNCAST(argtype_count,
++                                                      Py_ssize_t,
+                                                       int)))
+         goto cleanup;
+ 
+--- Modules/_ctypes/ctypes.h.orig	2020-04-20 07:13:39.000000000 +1000
++++ Modules/_ctypes/ctypes.h	2020-09-21 06:14:07.000000000 +1000
+@@ -481,6 +481,13 @@ static void capsule_destructor_ ## name(
+ 
+ #endif /* PY_VERSION_HEX >= 0x020700A4 */
+ 
++#if USING_MALLOC_CLOSURE_DOT_C
++void Py_ffi_closure_free(void *p);
++void *Py_ffi_closure_alloc(size_t size, void** codeloc);
++#else
++#define Py_ffi_closure_free ffi_closure_free
++#define Py_ffi_closure_alloc ffi_closure_alloc
++#endif
+ 
+ /*
+  Local Variables:
+--- Modules/_ctypes/malloc_closure.c.orig	2020-04-20 07:13:39.000000000 +1000
++++ Modules/_ctypes/malloc_closure.c	2020-09-21 06:22:52.000000000 +1000
+@@ -89,16 +89,24 @@ static void more_core(void)
+ /******************************************************************/
+ 
+ /* put the item back into the free list */
+-void ffi_closure_free(void *p)
++void Py_ffi_closure_free(void *p)
+ {
++#if HAVE_FFI_CLOSURE_ALLOC
++    ffi_closure_free(p);
++    return;
++#else
+     ITEM *item = (ITEM *)p;
+     item->next = free_list;
+     free_list = item;
++#endif
+ }
+ 
+ /* return one item from the free list, allocating more if needed */
+-void *ffi_closure_alloc(size_t ignored, void** codeloc)
++void *Py_ffi_closure_alloc(size_t size, void** codeloc)
+ {
++#if HAVE_FFI_CLOSURE_ALLOC
++    return ffi_closure_alloc(size, codeloc);
++#else
+     ITEM *item;
+     if (!free_list)
+         more_core();
+@@ -108,4 +116,5 @@ void *ffi_closure_alloc(size_t ignored, 
+     free_list = item->next;
+     *codeloc = (void *)item;
+     return (void *)item;
++#endif
+ }
+--- setup.py.orig	2020-04-20 07:13:39.000000000 +1000
++++ setup.py	2020-09-21 07:32:43.000000000 +1000
+@@ -16,6 +16,7 @@
+ from distutils.command.install import install
+ from distutils.command.install_lib import install_lib
+ from distutils.spawn import find_executable
++import distutils.command.config
+ 
+ cross_compiling = "_PYTHON_HOST_PLATFORM" in os.environ
+ 
+@@ -2129,6 +2130,7 @@
+ 
+         if host_platform == 'darwin':
+             sources.append('_ctypes/malloc_closure.c')
++            extra_compile_args.append('-DUSING_MALLOC_CLOSURE_DOT_C=1')
+             sources.append('_ctypes/darwin/dlfcn_simple.c')
+             extra_compile_args.append('-DMACOSX')
+             include_dirs.append('_ctypes/darwin')
+@@ -2191,6 +2193,16 @@
+                     break
+ 
+         if ffi_inc and ffi_lib:
++            config = distutils.command.config.config(self.distribution)
++            config._check_compiler()
++            if any(cc in config.compiler.compiler_so for cc in ('gcc', 'clang')):
++                config.compiler.compiler_so += ["-Wno-unguarded-availability-new", "-Wno-unused-value"]
++            if config.check_func("ffi_prep_closure_loc", headers=['ffi.h'], include_dirs=[ffi_inc]):
++                ext.extra_compile_args.append("-DHAVE_FFI_PREP_CLOSURE_LOC=1")
++            if config.check_func("ffi_prep_cif_var", headers=['ffi.h'], include_dirs=[ffi_inc]):
++                ext.extra_compile_args.append("-DHAVE_FFI_PREP_CIF_VAR=1")
++            if host_platform == 'darwin' and config.check_func("ffi_closure_alloc", headers=['ffi.h'], include_dirs=[ffi_inc]):
++                ext.extra_compile_args.append("-DHAVE_FFI_CLOSURE_ALLOC=1")
+             ext.include_dirs.extend(ffi_inc)
+             ext.libraries.append(ffi_lib)
+             self.use_system_libffi = True

@@ -1,0 +1,161 @@
+From b2303debfa63b60c21c93c318bed63341564a549 Mon Sep 17 00:00:00 2001
+From: Steven Wu <stevenwu@apple.com>
+Date: Thu, 25 Jun 2020 16:44:13 -0700
+Subject: [PATCH] [compiler-rt] Add support for arm64 macOS
+
+Summary: Allow compiler-rt to build for arm64 support on macOS.
+
+Reviewers: arphaman, doug.gregor, dexonsmith
+
+Reviewed By: arphaman, dexonsmith
+
+Subscribers: dberris, mgorny, kristof.beyls, jkorous, ributzka, danielkiss, #sanitizers, llvm-commits
+
+Tags: #sanitizers
+
+Differential Revision: https://reviews.llvm.org/D82610
+---
+ .../cmake/Modules/CompilerRTDarwinUtils.cmake | 47 ++++++++++++++-----
+ compiler-rt/cmake/builtin-config-ix.cmake     | 23 +++++++++
+ .../sanitizer_platform_interceptors.h         |  2 +-
+ .../sanitizer_platform_limits_posix.cpp       |  4 +-
+ 4 files changed, 60 insertions(+), 16 deletions(-)
+
+diff --git a/projects/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake b/projects/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
+index 657d2c97eac8..425de8bffdf7 100644
+--- a/projects/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
++++ b/projects/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
+@@ -169,25 +169,46 @@ function(darwin_test_archs os valid_archs)
+     CACHE STRING "List of valid architectures for platform ${os}." FORCE)
+ endfunction()
+ 
+-# This function checks the host cpusubtype to see if it is post-haswell. Haswell
+-# and later machines can run x86_64h binaries. Haswell is cpusubtype 8.
++# This function checks the host cputype/cpusubtype to filter supported
++# architecture for the host OS. This is used to determine which tests are
++# available for the host.
+ function(darwin_filter_host_archs input output)
+   list_intersect(tmp_var DARWIN_osx_ARCHS ${input})
+   execute_process(
+-    COMMAND sysctl hw.cpusubtype
+-    OUTPUT_VARIABLE SUBTYPE)
+-
+-  string(REGEX MATCH "hw.cpusubtype: ([0-9]*)"
+-         SUBTYPE_MATCHED "${SUBTYPE}")
+-  set(HASWELL_SUPPORTED Off)
+-  if(SUBTYPE_MATCHED)
+-    if(${CMAKE_MATCH_1} GREATER 7)
+-      set(HASWELL_SUPPORTED On)
++    COMMAND sysctl hw.cputype
++    OUTPUT_VARIABLE CPUTYPE)
++  string(REGEX MATCH "hw.cputype: ([0-9]*)"
++         CPUTYPE_MATCHED "${CPUTYPE}")
++  set(ARM_HOST Off)
++  if(CPUTYPE_MATCHED)
++    # ARM cputype is (0x01000000 | 12) and X86(_64) is always 7.
++    if(${CMAKE_MATCH_1} GREATER 11)
++      set(ARM_HOST On)
+     endif()
+   endif()
+-  if(NOT HASWELL_SUPPORTED)
+-    list(REMOVE_ITEM tmp_var x86_64h)
++
++  if(ARM_HOST)
++    list(REMOVE_ITEM tmp_var i386)
++  else()
++    list(REMOVE_ITEM tmp_var arm64)
++    list(REMOVE_ITEM tmp_var arm64e)
++    execute_process(
++      COMMAND sysctl hw.cpusubtype
++      OUTPUT_VARIABLE SUBTYPE)
++    string(REGEX MATCH "hw.cpusubtype: ([0-9]*)"
++           SUBTYPE_MATCHED "${SUBTYPE}")
++
++    set(HASWELL_SUPPORTED Off)
++    if(SUBTYPE_MATCHED)
++      if(${CMAKE_MATCH_1} GREATER 7)
++        set(HASWELL_SUPPORTED On)
++      endif()
++    endif()
++    if(NOT HASWELL_SUPPORTED)
++      list(REMOVE_ITEM tmp_var x86_64h)
++    endif()
+   endif()
++
+   set(${output} ${tmp_var} PARENT_SCOPE)
+ endfunction()
+ 
+diff --git a/projects/compiler-rt/cmake/builtin-config-ix.cmake b/projects/compiler-rt/cmake/builtin-config-ix.cmake
+index 5f4275ae54d4..8de901513beb 100644
+--- a/projects/compiler-rt/cmake/builtin-config-ix.cmake
++++ b/projects/compiler-rt/cmake/builtin-config-ix.cmake
+@@ -64,11 +64,34 @@ if(APPLE)
+   find_darwin_sdk_dir(DARWIN_tvossim_SYSROOT appletvsimulator)
+   find_darwin_sdk_dir(DARWIN_tvos_SYSROOT appletvos)
+ 
++  # Get supported architecture from SDKSettings.
++  function(sdk_has_arch_support sdk_path os arch has_support)
++    execute_process(COMMAND
++        /usr/libexec/PlistBuddy -c "Print :SupportedTargets:${os}:Archs" ${sdk_path}/SDKSettings.plist
++      OUTPUT_VARIABLE SDK_SUPPORTED_ARCHS
++      RESULT_VARIABLE PLIST_ERROR)
++    if (PLIST_ERROR EQUAL 0 AND
++        SDK_SUPPORTED_ARCHS MATCHES " ${arch}\n")
++      message(STATUS "Found ${arch} support in ${sdk_path}/SDKSettings.plist")
++      set("${has_support}" On PARENT_SCOPE)
++    else()
++      message(STATUS "No ${arch} support in ${sdk_path}/SDKSettings.plist")
++      set("${has_support}" Off PARENT_SCOPE)
++    endif()
++  endfunction()
++
+   set(DARWIN_EMBEDDED_PLATFORMS)
+   set(DARWIN_osx_BUILTIN_MIN_VER 10.5)
+   set(DARWIN_osx_BUILTIN_MIN_VER_FLAG
+       -mmacosx-version-min=${DARWIN_osx_BUILTIN_MIN_VER})
+   set(DARWIN_osx_BUILTIN_ALL_POSSIBLE_ARCHS ${X86} ${X86_64})
++  # Add support for arm64 macOS if available in SDK.
++  foreach(arch ${ARM64})
++    sdk_has_arch_support(${DARWIN_osx_SYSROOT} macosx ${arch} MACOS_ARM_SUPPORT)
++    if (MACOS_ARM_SUPPORT)
++     list(APPEND DARWIN_osx_BUILTIN_ALL_POSSIBLE_ARCHS ${arch})
++    endif()
++  endforeach(arch)
+ 
+   if(COMPILER_RT_ENABLE_IOS)
+     list(APPEND DARWIN_EMBEDDED_PLATFORMS ios)
+diff --git a/projects/compiler-rt/lib/sanitizer_common/sanitizer_platform_interceptors.h b/projects/compiler-rt/lib/sanitizer_common/sanitizer_platform_interceptors.h
+index 9dd6d285f594..561ce2ac176d 100644
+--- a/projects/compiler-rt/lib/sanitizer_common/sanitizer_platform_interceptors.h
++++ b/projects/compiler-rt/lib/sanitizer_common/sanitizer_platform_interceptors.h
+@@ -341,7 +341,7 @@
+ #define SANITIZER_INTERCEPT_STATFS \
+   (SI_FREEBSD || SI_MAC || SI_LINUX_NOT_ANDROID || SI_SOLARIS)
+ #define SANITIZER_INTERCEPT_STATFS64 \
+-  ((SI_MAC && !SI_IOS) || SI_LINUX_NOT_ANDROID)
++  (((SI_MAC && !TARGET_CPU_ARM64) && !SI_IOS) || SI_LINUX_NOT_ANDROID)
+ #define SANITIZER_INTERCEPT_STATVFS \
+   (SI_FREEBSD || SI_NETBSD || SI_OPENBSD || SI_LINUX_NOT_ANDROID)
+ #define SANITIZER_INTERCEPT_STATVFS64 SI_LINUX_NOT_ANDROID
+diff --git a/projects/compiler-rt/lib/sanitizer_common/sanitizer_platform_limits_posix.cpp b/projects/compiler-rt/lib/sanitizer_common/sanitizer_platform_limits_posix.cpp
+index e71515f12e94..664d1c516f63 100644
+--- a/projects/compiler-rt/lib/sanitizer_common/sanitizer_platform_limits_posix.cpp
++++ b/projects/compiler-rt/lib/sanitizer_common/sanitizer_platform_limits_posix.cpp
+@@ -170,7 +170,7 @@ typedef struct user_fpregs elf_fpregset_t;
+ namespace __sanitizer {
+   unsigned struct_utsname_sz = sizeof(struct utsname);
+   unsigned struct_stat_sz = sizeof(struct stat);
+-#if !SANITIZER_IOS
++#if !SANITIZER_IOS && !(SANITIZER_MAC && TARGET_CPU_ARM64)
+   unsigned struct_stat64_sz = sizeof(struct stat64);
+ #endif // !SANITIZER_IOS
+   unsigned struct_rusage_sz = sizeof(struct rusage);
+@@ -197,7 +197,7 @@ namespace __sanitizer {
+   unsigned struct_regex_sz = sizeof(regex_t);
+   unsigned struct_regmatch_sz = sizeof(regmatch_t);
+ 
+-#if SANITIZER_MAC && !SANITIZER_IOS
++#if (SANITIZER_MAC && !TARGET_CPU_ARM64) && !SANITIZER_IOS
+   unsigned struct_statfs64_sz = sizeof(struct statfs64);
+ #endif // SANITIZER_MAC && !SANITIZER_IOS
+ 

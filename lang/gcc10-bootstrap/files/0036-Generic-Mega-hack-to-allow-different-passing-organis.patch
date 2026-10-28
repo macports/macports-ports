@@ -1,0 +1,152 @@
+From 32c7f2f14d7d9d27575e279559a054d5c28bfb9a Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Fri, 21 Aug 2020 19:55:26 +0100
+Subject: [PATCH] Generic : Mega-hack to allow different passing organisation
+ for variadic funcs.
+
+Right now, the generic code assumes that it can determine the stack layout from
+target callbacks that don't have complete information about the argument they
+are processing (they only know the mode and the type - not it the argument is
+named or not, for example).  This hack is not complete - but makes some
+progress.
+
+It looks like we really need the option for a target to override the layout
+process - if it requires distinct stack layouts for different calling convs.
+
+(cherry picked from commit 1090760b67eae80e5829f2dc4f7256ddd368ad22)
+Signed-off-by: Kirill A. Korinsky <kirill@korins.ky>
+---
+ gcc/calls.c                  |  9 ++++++---
+ gcc/config/aarch64/aarch64.c | 12 +++++++-----
+ gcc/function.c               | 14 ++++++++++----
+ gcc/function.h               |  3 ++-
+ 4 files changed, 25 insertions(+), 13 deletions(-)
+
+diff --git gcc/calls.c gcc/calls.c
+index 45c137cee1e..3c0dff06bc5 100644
+--- gcc/calls.c
++++ gcc/calls.c
+@@ -2485,7 +2485,8 @@ initialize_argument_information (int num_actuals ATTRIBUTE_UNUSED,
+ #endif
+ 			     reg_parm_stack_space,
+ 			     args[i].pass_on_stack ? 0 : args[i].partial,
+-			     fndecl, args_size, &args[i].locate);
++			     fndecl, args_size, &args[i].locate,
++			     argpos < n_named_args);
+ #ifdef BLOCK_REG_PADDING
+       else
+ 	/* The argument is passed entirely in registers.  See at which
+@@ -5215,7 +5216,8 @@ emit_library_call_value_1 (int retval, rtx orgfun, rtx value,
+ 			   argvec[count].reg != 0,
+ #endif
+ 			   reg_parm_stack_space, 0,
+-			   NULL_TREE, &args_size, &argvec[count].locate);
++			   NULL_TREE, &args_size, &argvec[count].locate,
++			   /*named_p=*/ true);
+ 
+       if (argvec[count].reg == 0 || argvec[count].partial != 0
+ 	  || reg_parm_stack_space > 0)
+@@ -5306,7 +5308,8 @@ emit_library_call_value_1 (int retval, rtx orgfun, rtx value,
+ 			       argvec[count].reg != 0,
+ #endif
+ 			       reg_parm_stack_space, argvec[count].partial,
+-			       NULL_TREE, &args_size, &argvec[count].locate);
++			       NULL_TREE, &args_size, &argvec[count].locate,
++			       /*named_p=*/true);
+ 	  args_size.constant += argvec[count].locate.size.constant;
+ 	  gcc_assert (!argvec[count].locate.size.var);
+ 	}
+diff --git gcc/config/aarch64/aarch64.c gcc/config/aarch64/aarch64.c
+index 99cf8652c70..65dadebfa53 100644
+--- gcc/config/aarch64/aarch64.c
++++ gcc/config/aarch64/aarch64.c
+@@ -6329,13 +6329,15 @@ on_stack:
+ 	 at the end.  When the current position is 0 - any allocation needs
+ 	 a stack slot.  CHECKME: do we need to align 16byte entities?
+ 
+-	 but we don't do this for unnamed parms in variadic functinos, they
++	 but we don't do this for unnamed parms in variadic functions, they
+ 	 each get their own slot.  */
+       if (!arg.named)
+ 	{
+ 	  pcum->aapcs_stack_words = size / UNITS_PER_WORD;
++	  pcum->darwinpcs_sub_word_offset = 0;
++	  pcum->darwinpcs_sub_word_pos = 0;
+ 	  /* We skip the re-alignment for 16byte things, since we currently
+-	     assume that the don't force such alignment.  */
++	     assume that the darwinpcs doesn't force such alignment.  */
+ 	  return;
+ 	}
+ 
+@@ -6498,12 +6500,12 @@ aarch64_function_arg_boundary (machine_mode mode, const_tree type)
+   bool abi_break;
+   unsigned int alignment = aarch64_function_arg_alignment (mode, type,
+ 							   &abi_break);
+-  if (abi_break && warn_psabi)
+-    inform (input_location, "parameter passing for argument of type "
+-	    "%qT changed in GCC 9.1", type);
+ #if TARGET_MACHO
+   return MIN (alignment, STACK_BOUNDARY);
+ #else
++  if (abi_break & warn_psabi)
++    inform (input_location, "parameter passing for argument of type "
++	    "%qT changed in GCC 9.1", type);
+   return MIN (MAX (alignment, PARM_BOUNDARY), STACK_BOUNDARY);
+ #endif
+ }
+diff --git gcc/function.c gcc/function.c
+index d937873a149..1e4035074dc 100644
+--- gcc/function.c
++++ gcc/function.c
+@@ -2596,7 +2596,8 @@ assign_parm_find_entry_rtl (struct assign_parm_data_all *all,
+   locate_and_pad_parm (data->arg.mode, data->arg.type, in_regs,
+ 		       all->reg_parm_stack_space,
+ 		       entry_parm ? data->partial : 0, current_function_decl,
+-		       &all->stack_args_size, &data->locate);
++		       &all->stack_args_size, &data->locate,
++		       data->arg.named);
+ 
+   /* Update parm_stack_boundary if this parameter is passed in the
+      stack.  */
+@@ -3999,7 +4000,8 @@ locate_and_pad_parm (machine_mode passed_mode, tree type, int in_regs,
+ 		     int reg_parm_stack_space, int partial,
+ 		     tree fndecl ATTRIBUTE_UNUSED,
+ 		     struct args_size *initial_offset_ptr,
+-		     struct locate_and_pad_arg_data *locate)
++		     struct locate_and_pad_arg_data *locate,
++		     bool named_p)
+ {
+   tree sizetree;
+   pad_direction where_pad;
+@@ -4035,8 +4037,12 @@ locate_and_pad_parm (machine_mode passed_mode, tree type, int in_regs,
+ 	      : size_int (GET_MODE_SIZE (passed_mode)));
+   where_pad = targetm.calls.function_arg_padding (passed_mode, type);
+   boundary = targetm.calls.function_arg_boundary (passed_mode, type);
+-  round_boundary = targetm.calls.function_arg_round_boundary (passed_mode,
+-							      type);
++  if (named_p)
++    round_boundary = targetm.calls.function_arg_round_boundary (passed_mode,
++							        type);
++  else
++    round_boundary = PARM_BOUNDARY;
++
+   locate->where_pad = where_pad;
+ 
+   /* Alignment can't exceed MAX_SUPPORTED_STACK_ALIGNMENT.  */
+diff --git gcc/function.h gcc/function.h
+index 58816d2d927..412509af923 100644
+--- gcc/function.h
++++ gcc/function.h
+@@ -645,7 +645,8 @@ extern bool use_register_for_decl (const_tree);
+ extern gimple_seq gimplify_parameters (gimple_seq *);
+ extern void locate_and_pad_parm (machine_mode, tree, int, int, int,
+ 				 tree, struct args_size *,
+-				 struct locate_and_pad_arg_data *);
++				 struct locate_and_pad_arg_data *,
++				 bool named_p = true);
+ extern void generate_setjmp_warnings (void);
+ 
+ /* Identify BLOCKs referenced by more than one NOTE_INSN_BLOCK_{BEG,END},
+-- 
+2.42.1
+

@@ -1,0 +1,150 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                lirc
+version             0.10.2
+revision            0
+categories          sysutils net
+license             {GPL-2+ OpenSSLException}
+maintainers         nomaintainer
+description         Linux Infrared Remote Control
+long_description \
+    LIRC enables receiving and/or sending infra-red remote controls signals.\
+    The only hardware is known to work (on the Mac operating system) includes the\
+    IR receiver in older HDHomerun tuner boxes and the Sony Vaio PCVA-IR5U receiver.\
+    Other hardware _could_ work but is untested.  Lirc does not currently work with\
+    the IR receiver built into various Mac models.\
+    Lirc on OSX can also receive signals relayed from another Lirc server.
+
+homepage            http://www.lirc.org
+master_sites        sourceforge
+#use_bzip2           yes
+checksums           rmd160  9c2d7ded3e88ac69f5e591100dbfefb69f947710 \
+                    sha256  a44a26caf9ba55c2343e065f0a9451425c136572b279ea1e011ad012b36b607e
+
+livecheck.distname  LIRC
+
+set lircuser        _lirc
+set pythonbranch    3.12
+set pythonver       python${pythonbranch}
+configure.python    ${prefix}/bin/${pythonver}
+set pymodver        py[join [split ${pythonbranch} .] ""]
+
+compiler.cxx_standard 2011
+
+use_autoreconf      yes
+autoreconf.cmd      ./autogen.sh
+# setting autoreconf.cmd means that autotools build dependencies are not added
+
+# avoid confusion with the C++20 <version> header
+pre-build {
+    # the build copies the file there, so we do it ahead of time
+    move ${worksrcpath}/VERSION ${worksrcpath}/python-pkg
+}
+post-build {
+    delete ${worksrcpath}/VERSION
+}
+build.args      -o VERSION
+destroot.args   -o VERSION
+
+depends_build-append \
+                    port:autoconf \
+                    port:automake \
+                    port:gsed \
+                    port:libtool \
+                    port:pkgconfig \
+                    path:bin/doxygen:doxygen \
+                    port:${pymodver}-setuptools \
+                    port:${pymodver}-yaml
+
+depends_lib         path:lib/pkgconfig/libusb-1.0.pc:libusb \
+                    port:libusb-compat \
+                    port:libftdi1 \
+                    port:portaudio
+
+patchfiles          patch-commandir_support.diff \
+                    patch-lirc-options.diff \
+                    patch-include-media-lirc.diff \
+                    patch-makefile.diff
+
+if {${os.platform} eq "darwin" && ${os.major} < 12} {
+    # https://trac.macports.org/ticket/53314
+    patchfiles-append   old-scandir.diff
+}
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    # https://trac.macports.org/ticket/58950
+    patchfiles-append   patch-nodocs-snowleopard.diff
+}
+
+if {[string match *gcc* ${configure.compiler}]} {
+    # USB.h: error: too many '#pragma options align=reset'
+    PortGroup       legacysupport 1.1
+
+    # ircd.cpp: error: invalid conversion from 'gid_t*' {aka 'unsigned int*'} to 'int*' [-fpermissive]
+    configure.cxxflags-append \
+                    -fpermissive
+}
+
+post-patch {
+    reinplace -locale C "s|@PREFIX@|${prefix}|g" ${worksrcpath}/lirc_options.conf
+    reinplace -locale C "s|#!/usr/bin/env python3\$|#!${configure.python}|" \
+        ${worksrcpath}/python-pkg/lirc/lirctool \
+        ${worksrcpath}/tools/check_configs.py \
+        ${worksrcpath}/tools/irdb-get \
+        ${worksrcpath}/tools/irtext2udp \
+        ${worksrcpath}/tools/lirc-init-db \
+        ${worksrcpath}/tools/lirc-setup/lirc-setup \
+        ${worksrcpath}/tools/lircd-setup \
+        ${worksrcpath}/tools/pronto2lirc
+}
+
+# consider variant for X programs (irxevent xmode2)
+configure.args      --without-x --disable-silent-rules
+
+post-destroot {
+    xinstall -m 777 -d ${destroot}${prefix}/var/log/${name}
+    xinstall -m 777 -d ${destroot}${prefix}/var/run/${name}
+    destroot.keepdirs ${destroot}${prefix}/var/log/${name} \
+        ${destroot}${prefix}/var/run/${name}
+    move ${destroot}${prefix}/etc/lirc/lirc_options.conf \
+        ${destroot}${prefix}/etc/lirc/lirc_options.conf.template
+    if {![variant_isset gui]} {
+        delete ${destroot}${prefix}/bin/lirc-setup
+        delete ${destroot}${prefix}/lib/python3.4
+    }
+}
+
+post-activate {
+    if {![file exists ${prefix}/etc/lirc/lirc_options.conf]} {
+        copy ${prefix}/etc/lirc/lirc_options.conf.template \
+            ${prefix}/etc/lirc/lirc_options.conf
+    }
+}
+
+variant gui description { include experimental gui tools } {
+    depends_run-append  path:lib/pkgconfig/gtk+-3.0.pc:gtk3 \
+                        port:${pymodver}-gobject3 \
+                        port:${pymodver}-yaml \
+                        port:vte
+    configure.args-replace --without-x --with-x
+}
+
+add_users ${lircuser} group=${lircuser} realname=LIRC\ user
+
+startupitem.create        yes
+startupitem.executable    ${prefix}/sbin/lircd \
+                          --nodaemon --logfile=${prefix}/var/log/${name}/lircd.log \
+                          --effective-user=${lircuser}
+
+notes "
+Before starting the lircd background process, two configuration steps need to be\
+completed.  First, edit ${prefix}/etc/lirc/lirc_options.conf to specify the driver\
+and device being used.  Second, add at least one remote configuration file to\
+${prefix}/etc/lirc/lircd.conf.d so lirc can interpret the infrared pulses that your remote\
+sends.  The script irdb-get can help find existing remote configuration files or the\
+program irrecord can help create a configuration file for a particular remote.
+
+Any clients of lirc must be able to read and write the pipe at\
+${prefix}/var/run/lircd
+"

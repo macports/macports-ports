@@ -1,0 +1,192 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem 1.0
+
+name            g95
+version         0.93
+revision        5
+categories      lang
+license         GPL-2
+maintainers     nomaintainer
+description     Another GNU Fortran 95 compiler
+long_description \
+                G95 is a stable, production Fortran 95 compiler \
+                available for multiple cpu architectures and operating systems. \
+                Parts of the F2003 standard have been implemented in g95.
+homepage        http://g95.org/
+dist_subdir     ${name}/${version}
+
+if {${os.major} < 10 || ${build_arch} eq "ppc" || ${build_arch} eq "i386"} {
+    default_variants +gcc40
+}
+
+if {${os.platform} eq "darwin" && ([vercmp $xcodeversion 9.0] > 0)} {
+    known_fail  yes
+    depends_lib
+    depends_run
+    archive_sites
+    pre-fetch {
+        ui_error "building ${name} is not supported with Xcode 9 or greater"
+        return -code error {unsupported platform}
+    }
+}
+
+set triple ""
+if {[variant_isset gcc40]} {
+    set version_gcc 4.0.4
+    set triple  ${os.arch}-apple-darwin${os.major}
+    set dcore   gcc-core-${version_gcc}.tar.bz2
+    checksums   ${dcore} md5    193e0a7a471cca70e374974bc5a60137         \
+                ${dcore} sha1   55c664b33a4dc6b2130c47da28a1d6daab732ce9 \
+                ${dcore} rmd160 af67dc8385942450f6b27ad83a6b9e3d22f779a1
+} else {
+    license         GPL-3
+    set version_gcc 4.2.4
+    array set barch {ppc powerpc ppc64 powerpc64 i386 i386 x86_64 x86_64}
+    if {[info exists barch(${build_arch})]} {
+        set triple  $barch(${build_arch})-apple-darwin${os.major}
+    }
+    set dcore   gcc-core-${version_gcc}.tar.bz2
+    checksums   ${dcore} md5     b7a4c167f6a05301591b139b356e36d0 \
+                ${dcore} sha1    540fa6949415ded321a7cbe80bbf8befe85e3566 \
+                ${dcore} rmd160  d54581d0a2ecc22718e6be101c6dc524a4a88463
+}
+master_sites    ftp://gcc.gnu.org/pub/gcc/releases/gcc-${version_gcc}/:gcc \
+                http://ftp.g95.org/v${version}/:g95
+set buildhost   "--build=${triple} --host=${triple}"
+
+set dg95        ${name}_source.tgz
+set gcclib      lib/${name}/${triple}/${version_gcc}
+distfiles       ${dcore}:gcc ${dg95}:g95
+
+checksums-append    ${dg95}  md5     f9552aef0975c1dcf70950b6e6b18ff1 \
+                    ${dg95}  sha1    b5e503fd6459b65cbda73190685f9490230d9cff \
+                    ${dg95}  rmd160  98d03e9a1835f4b3553a72a798bdf1d90a757176
+
+depends_build   port:ld64 port:cctools port:libtool
+depends_lib     port:libiconv path:share/doc/libgcc/README:libgcc
+
+patchfiles      patch-Makefile.in.diff \
+                patch-darwin.h.diff \
+                patch-lang.opt.diff \
+                patch-libf95-intrinsics-dot_product10.c.diff \
+                patch-libf95-intrinsics-matmul10.c.diff \
+                patch-libf95-intrinsics-random.c.diff \
+                patch-libf95-io-read.c.diff \
+                patch-libf95-math-ff.c.diff \
+                patch-libf95-math-x87.S.diff \
+                patch-libf95-quad-power16.c.diff
+
+universal_variant no
+use_parallel_build  no
+
+extract.only    ${dg95}
+
+post-extract {
+    system -W ${workpath} "tar jxvf ${distpath}/${dcore}"
+    system -W ${worksrcpath} "tar zxvf libf95.a-${version}.tar.gz"
+}
+
+pre-patch {
+    ln -s ${workpath}/gcc-${version_gcc} ${worksrcpath}
+}
+
+post-patch {
+    reinplace "s|gcc-lib|$name|" ${worksrcpath}/configure
+    reinplace "s|gcc-lib|$name|" ${worksrcpath}/libf95.a-${version}/configure
+    reinplace "s|CFLAGS_FOR_TARGET = -O2 \$(CFLAGS)|CFLAGS_FOR_TARGET = ${configure.cflags}|" ${workpath}/gcc-${version_gcc}/Makefile.in
+    reinplace "s|^stage1_cflags=\"|stage1_cflags=\"${configure.cflags} ${configure.cc_archflags} |" ${workpath}/gcc-${version_gcc}/configure
+    if {![variant_isset gcc40]} {
+        reinplace "s|named_section|get_named_section|" ${worksrcpath}/trans-decl.c
+    }
+}
+
+compiler.blacklist-append   {clang < 500}
+
+configure.cflags-append -std=gnu89
+pre-configure {
+    file mkdir ${workpath}/gcc-${version_gcc}/${name}
+    if {${build_arch} eq "i386"} {
+        reinplace "s|i686|i386|" ${workpath}/gcc-${version_gcc}/gcc/config/i386/darwin.h
+    }
+#    set gcc_configargs "--with-as=/usr/bin/as --with-ld=/usr/bin/ld --with-nm=/usr/bin/nm"
+#    set gcc_configargs "--with-as=${prefix}/bin/as --with-ld=${prefix}/bin/ld --with-nm=${prefix}/bin/nm"
+    system -W ${workpath}/gcc-${version_gcc}/${name} \
+           "export CC=\"${configure.cc}\"; \
+            export CPPFLAGS=\"${configure.cppflags}\"; \
+            export CFLAGS=\"${configure.cflags} ${configure.cc_archflags}\"; \
+            export CFLAGS_FOR_BUILD=\"${configure.cflags} ${configure.cc_archflags}\"; \
+            export CFLAGS_FOR_TARGET=\"${configure.cflags}\"; \
+            export LDFLAGS=\"${configure.ldflags} ${configure.cc_archflags}\"; \
+            export MACOSX_DEPLOYMENT_TARGET=\"${macosx_deployment_target}\"; \
+            export MAKEINFO=missing;\
+            ../configure --prefix=${prefix}/${gcclib} \
+                         --enable-languages=c \
+                         --disable-multilib \
+                         --with-included-gettext \
+                         --with-libiconv=${prefix} \
+                         --libdir=${prefix}/${gcclib} \
+                         --with-as=${prefix}/bin/as \
+                         --with-ld=${prefix}/bin/ld \
+                         --with-nm=${prefix}/bin/nm \
+                         ${buildhost}; \
+            make"
+    if {![variant_isset gcc40]} {
+        system -W ${workpath}/gcc-${version_gcc}/${name}/gcc \
+               "ar d libbackend.a options.o"
+        system -W ${workpath}/gcc-${version_gcc}/gcc \
+               "patch -p0 < ${filespath}/patch-gcc.c.diff"
+    }
+}
+
+configure.args  --with-gcc-dir=${workpath}/gcc-${version_gcc} ${buildhost}
+
+post-configure {
+    if {![variant_isset gcc40]} {
+        reinplace "s|\(f951_LDADD\)|(f951_LDADD) ${workpath}/gcc-${version_gcc}/g95/libdecnumber/*.o|" ${worksrcpath}/Makefile
+    }
+}
+
+pre-build {
+    if {![variant_isset gcc40] && ${os.arch} eq "i386"} {
+        reinplace "s|\(g95_LDADD\)|(g95_LDADD) ${workpath}/gcc-${version_gcc}/g95/gcc/driver-i386.o|" ${worksrcpath}/Makefile
+    }
+}
+
+post-build {
+    system -W ${worksrcpath}/libf95.a-${version} \
+          "export CC=\"${configure.cc}\"; \
+           export CFLAGS=\"${configure.cflags} ${configure.cc_archflags}\"; \
+           export MACOSX_DEPLOYMENT_TARGET=\"${macosx_deployment_target}\"; \
+           ./configure --prefix=${prefix} ${buildhost}; \
+           make"
+}
+
+post-destroot {
+    system -W ${worksrcpath}/libf95.a-${version} \
+           "make install DESTDIR=${destroot}; \
+            ranlib ${destroot}${prefix}/${gcclib}/libf95.a; \
+            ranlib ${destroot}${prefix}/${gcclib}/libgcc.a; \
+            ranlib ${destroot}${prefix}/${gcclib}/libgcc_eh.a"
+    xinstall -d ${destroot}${prefix}/share/doc/${name}
+    xinstall -m 644 ${worksrcpath}/G95Manual.pdf ${destroot}${prefix}/share/doc/${name}
+
+    ln -s ${prefix}/${gcclib}/libf95.a ${destroot}${prefix}/lib/libf95.a
+
+    if {[variant_isset gcc40]} {
+        delete ${destroot}${prefix}/${gcclib}/libgcc_s.1.0.dylib
+        ln -s ${prefix}/lib/libgcc/libgcc_s.1.dylib ${destroot}${prefix}/${gcclib}/libgcc_s.1.0.dylib
+    } else {
+        delete ${destroot}${prefix}/${gcclib}/libgcc_s.1.dylib
+        ln -s ${prefix}/lib/libgcc/libgcc_s.1.dylib ${destroot}${prefix}/${gcclib}/libgcc_s.1.dylib
+    }
+}
+
+variant gcc40 description {build against gcc-4.0.x} {
+    patchfiles-delete   patch-lang.opt.diff patch-darwin.h.diff
+    patchfiles-append   patch-host-darwin.c.diff patch-darwin-fallback.c.diff
+}
+
+livecheck.type      regex
+livecheck.url       http://g95.org/downloads.shtml
+livecheck.regex     Stable version (\[0-9.\]+)

@@ -1,0 +1,257 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           active_variants 1.1
+PortGroup           github 1.0
+PortGroup           gobject_introspection 1.0
+
+github.setup        avahi avahi 0.8 v
+revision            10
+categories          net devel
+maintainers         {i0ntempest @i0ntempest} openmaintainer
+license             LGPL-2.1+
+description         Avahi is an Implementation of the DNS Service Discovery and Multicast DNS \
+                    specifications for Zeroconf Networking.
+
+long_description    {*}${description} It uses D-Bus for communication between user applications and a \
+                    system daemon. The daemon is used to coordinate application efforts in caching \
+                    replies, necessary to minimize the traffic imposed on networks.
+
+homepage            https://avahi.org
+github.tarball_from releases
+
+checksums           rmd160  f060e7afbc20accc6befbbe6776d3ca7956b4962 \
+                    sha256  060309d7a333d38d951bc27598c677af1796934dbd98e1024e7ad8de798fedda \
+                    size    1591458
+
+patchfiles          patch-avahi-daemon-Makefile.in.diff \
+                    patch-avahi-dnsconfd-Makefile.in.diff \
+                    patch-avahi-utils-Makefile.in.diff \
+                    patch-initscript-darwin-org.freedesktop.avahi-daemon.plist.in.diff \
+                    patch-initscript-darwin-org.freedesktop.avahi-dnsconfd.plist.in.diff \
+                    patch-configure-var-run.diff
+
+# ensure MacPorts machine-id from dbus is found
+# see https://trac.macports.org/ticket/53894 for O_CLOEXEC
+patchfiles-append   patch-avahi_daemon.diff
+
+post-patch {
+    # this preprocessor macro causes a lot of things to be undefined inside netinet/in.h system header.
+    reinplace "s/-D_XOPEN_SOURCE=500//" ${worksrcpath}/configure
+
+    # use correct location of dbus from patch-avahi_daemon.diff
+    reinplace "s|__MACPORTS_PREFIX__|${prefix}|g" ${worksrcpath}/avahi-daemon/main.c
+}
+
+depends_build       port:pkgconfig \
+                    port:intltool \
+                    port:libxml2 \
+                    port:xmltoman \
+                    port:gettext
+
+depends_lib         port:expat \
+                    port:gdbm \
+                    port:gettext-runtime \
+                    port:libdaemon \
+                    port:libevent \
+                    port:dbus
+
+gobject_introspection yes
+
+if {${os.platform} eq "darwin" && ${os.major} >= 9} {
+    set avahi_user  _avahi
+    set avahi_group _avahi
+} else {
+    set avahi_user  avahi
+    set avahi_group avahi
+}
+add_users ${avahi_user} group=${avahi_group} realname=Avahi\ Service
+
+# "Priviliged [sic] access group for Avahi clients"
+# defaults to netdev
+# macOS has no equivalent group
+#     see https://wiki.ubuntu.com/Security/Privileges#Connect_to_wireless_and_ethernet_networks
+#     see https://wiki.debian.org/SystemGroups
+set avahi_priv_group admin
+
+configure.args      --disable-autoipd \
+                    --disable-silent-rules \
+                    --disable-qt3 \
+                    --disable-qt4 \
+                    --disable-qt5 \
+                    --disable-mono \
+                    --disable-monodoc \
+                    --with-distro=darwin \
+                    --enable-compat-libdns_sd \
+                    --disable-gtk3 \
+                    --disable-gtk \
+                    --disable-tests \
+                    --with-avahi-priv-access-group=${avahi_priv_group} \
+                    --with-avahi-user=${avahi_user} \
+                    --with-avahi-group=${avahi_group}
+
+# __APPLE_USE_RFC_2292 should be removed once avahi is updated to support RFC 3542
+configure.cppflags-append   -L${prefix}/lib -D__APPLE_USE_RFC_2292
+
+# libevent-watch.c:285: error: 'for' loop initial declaration used outside C99 mode
+configure.cflags-append     -std=c99
+
+set daemon_uniquename   org.freedesktop.avahi-daemon
+set dnsconfd_uniquename org.freedesktop.avahi-dnsconfd
+
+startupitem.type    launchd
+startupitem.create  no
+startupitems        name        avahi-daemon \
+                    location    LaunchDaemons \
+                    uniquename  ${daemon_uniquename} \
+                    plist       ${daemon_uniquename}.plist \
+                    name        avahi-dnsconfd \
+                    location    LaunchDaemons \
+                    uniquename  ${dnsconfd_uniquename} \
+                    plist       ${dnsconfd_uniquename}.plist
+
+# Temporary fix for 0.8 which is missing this file causing build to fail
+pre-build {
+    copy ${filespath}/build-db ${worksrcpath}/service-type-database/
+}
+
+post-destroot {
+    foreach uniquename "${daemon_uniquename} ${dnsconfd_uniquename}" {
+        xinstall -d -m 0755 ${destroot}${prefix}/etc/LaunchDaemons/${uniquename}
+        move ${destroot}/Library/LaunchDaemons/${uniquename}.plist ${destroot}${prefix}/etc/LaunchDaemons/${uniquename}/
+        if {${startupitem.install} && [geteuid] == 0} {
+            ln -s ${prefix}/etc/LaunchDaemons/${uniquename}/${uniquename}.plist ${destroot}/Library/LaunchDaemons/
+        } else {
+            ln -s ${prefix}/etc/LaunchDaemons/${uniquename}/${uniquename}.plist ${destroot}${prefix}/etc/LaunchDaemons
+        }
+    }
+}
+
+variant mono description {Enable Mono support} {
+    depends_lib-append      port:mono \
+                            port:gtk-sharp2
+
+    configure.args-delete   --disable-mono
+
+    post-patch {
+        reinplace {s/\.so\.0/.0.dylib/} ${worksrcpath}/avahi-ui-sharp/avahi-ui-sharp.dll.config.in
+    }
+
+    post-build {
+        # TODO This shouldn't be needed, we need to fix Mono dllmap library path.
+        reinplace -E "s|(target=\")|\\1${prefix}/lib/|" \
+            ${worksrcpath}/avahi-sharp/avahi-sharp.dll.config \
+            ${worksrcpath}/avahi-ui-sharp/avahi-ui-sharp.dll.config
+    }
+}
+
+variant test description {Build tests} {
+    configure.args-delete   --disable-tests
+    configure.args-append   --enable-tests
+    test.run                yes
+    test.target             check
+}
+
+variant gtk description {Build with GTK2} {
+    depends_lib-append      path:lib/pkgconfig/gtk+-2.0.pc:gtk2 \
+                            port:libglade2
+    configure.args-replace  --disable-gtk --enable-gtk
+}
+
+variant gtk3 description {Build with GTK3} {
+    depends_lib-append      path:lib/pkgconfig/gtk+-3.0.pc:gtk3
+    configure.args-delete   --disable-gtk3
+    # Enable manpages that are built with gtk variant but not with gtk3
+    pre-configure {
+        reinplace "s|HAVE_GTK_TRUE|HAVE_GTK2OR3_TRUE|g" ${worksrcpath}/man/Makefile.in
+    }
+}
+
+variant qt4 description {Build with Qt4} {
+    PortGroup   qt4 1.0
+
+    configure.args-delete   --disable-qt4
+}
+
+variant qt5 description {Build with Qt5} {
+    PortGroup   qt5 1.0
+
+    # This configure script does not use CXXFLAGS variable for Qt5 compile test so I have to do this
+    configure.env-append    QT5_CFLAGS=-std=c++11\ -DQT_CORE_LIB\ -F${qt_dir}/lib\ -I${qt_dir}/lib/QtCore.framework/Headers\ -I${qt_dir}/include
+    compiler.cxx_standard   2011
+    configure.args-delete   --disable-qt5
+}
+
+set py_versions [list \
+    2.7 \
+    3.10 \
+    3.11 \
+    3.12 \
+    3.13 \
+    3.14
+]
+
+foreach py_ver ${py_versions} {
+    set py_ver_nodot($py_ver) [string map {. ""} ${py_ver}]
+    lappend py_variants python$py_ver_nodot($py_ver)
+
+}
+foreach py_ver ${py_versions} {
+    set py_variant python$py_ver_nodot($py_ver)
+    variant $py_variant conflicts {*}[ldelete $py_variants $py_variant] description "Build with Python $py_ver" "
+        global python_framework
+        set python_framework    ${frameworks_dir}/Python.framework/Versions/${py_ver}
+
+        configure.python        ${prefix}/bin/python${py_ver}
+        depends_lib-append      port:dbus-python$py_ver_nodot($py_ver) \
+                                port:py$py_ver_nodot($py_ver)-gdbm \
+                                port:py$py_ver_nodot($py_ver)-gobject3
+        configure.pkg_config_path-append \
+                                \${python_framework}/lib/pkgconfig
+    "
+    if {[variant_isset $py_variant]} {
+        set py_variant_set 1
+    }
+}
+pre-fetch {
+    if {![info exists python_framework]} {
+        error "This port requires that one python variant be enabled"
+    }
+}
+post-patch {
+    reinplace "s|PYTHON_PREFIX=\'\${prefix}\'|PYTHON_PREFIX=\'${python_framework}\'|" \
+                        ${worksrcpath}/configure
+}
+
+if {![info exists py_variant_set]} {
+    default_variants +python314
+}
+
+variant x11 conflicts quartz {
+    require_active_variants gtk3 x11
+    require_active_variants gtk2 x11
+}
+
+variant quartz conflicts x11 {
+    require_active_variants gtk3 quartz
+    require_active_variants gtk2 quartz
+}
+
+if {![variant_isset quartz]} {
+    default_variants-append +x11
+}
+if {![variant_isset gtk]} {
+    default_variants-append +gtk3
+}
+
+if {[variant_isset python312] || [variant_isset python313] || [variant_isset python314]} {
+    # Project is using an old py-compile script incompatible with Python 3.12+
+    depends_build-append        port:automake
+    pre-configure {
+        set automake_dirs [glob -directory ${prefix}/share automake-*]
+        set automake_dir [lindex [lsort -command vercmp $automake_dirs] end]
+        ln -sf ${automake_dir}/py-compile ${worksrcpath}
+    }
+}
+
+github.livecheck.regex  {([0-9.]+)}

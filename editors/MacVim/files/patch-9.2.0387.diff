@@ -1,0 +1,422 @@
+From cee8fd73eb54a3196ac3cc2292a0e6910aeaff75 Mon Sep 17 00:00:00 2001
+From: Hirohito Higashi <h.east.727@gmail.com>
+Date: Tue, 21 Apr 2026 20:46:12 +0000
+Subject: [PATCH] patch 9.2.0387: DECRQM request may leave stray chars in
+ terminal
+
+Problem:  Sending DECRQM from handle_version_response() caused DECRPM
+          responses to arrive during user input processing, leaving
+          bytes in typebuf when clear_showcmd() ran.  This made
+          visual-mode showcmd (e.g. "7" line count after V<C-D><C-D>)
+          intermittently disappear, failing many screendump tests on CI.
+Solution: Move DECRQM request out of handle_version_response() and send
+          it at startup via may_req_decrqm(), following the existing
+          may_req_termresponse() and may_req_bg_color() pattern.
+          Add TPR_DECRQM property set per terminal from the DA2 reply,
+          and route DECRQM sends through a may_req_decrqm() helper using
+          the termrequest_T pattern, skipping terminals known to
+          mishandle it (Foxe Chen, Hirohito Higashi).
+
+fixes:  #19852
+closes: #19938
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Hirohito Higashi <h.east.727@gmail.com>
+Co-Authored-By: Foxe Chen <chen.foxe@gmail.com>
+Signed-off-by: Hirohito Higashi <h.east.727@gmail.com>
+Signed-off-by: Foxe Chen <chen.foxe@gmail.com>
+Signed-off-by: Christian Brabandt <cb@256bit.org>
+---
+ runtime/doc/builtin.txt        |  6 ++-
+ src/main.c                     |  7 +--
+ src/proto/term.pro             |  2 +-
+ src/term.c                     | 80 ++++++++++++++++++++++++++--------
+ src/testdir/test_termcodes.vim | 18 +++++++-
+ src/version.c                  |  2 +
+ 6 files changed, 90 insertions(+), 25 deletions(-)
+
+diff --git runtime/doc/builtin.txt runtime/doc/builtin.txt
+index 0fe02ac94..9ea0ae82c 100644
+--- runtime/doc/builtin.txt
++++ runtime/doc/builtin.txt
+@@ -1,4 +1,4 @@
+-*builtin.txt*	For Vim version 9.2.  Last change: 2026 Apr 06
++*builtin.txt*	For Vim version 9.2.  Last change: 2026 Apr 21
+ 
+ 
+ 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
+@@ -11990,6 +11990,7 @@ terminalprops()						*terminalprops()*
+ 		   underline_rgb	whether |t_8u| works **
+ 		   mouse		mouse type supported
+ 		   kitty		whether Kitty terminal was detected
++		   decrqm		whether sending DECRQM sequences work
+ 
+ 		** value 'u' for unknown, 'y' for yes, 'n' for no
+ 
+@@ -12009,6 +12010,9 @@ terminalprops()						*terminalprops()*
+ 
+ 		For "mouse" the value 'u' is unknown
+ 
++		If "decrqm" is 'y', then Vim will query support for the
++		'termsync' and 'termresize' ("inband") options.
++
+ 		Also see:
+ 		- 'ambiwidth' - detected by using |t_u7|.
+ 		- |v:termstyleresp| and |v:termblinkresp| for the response to
+diff --git src/main.c src/main.c
+index bfabcbbed..e0d0e7e37 100644
+--- src/main.c
++++ src/main.c
+@@ -892,10 +892,11 @@ vim_main2(void)
+     may_req_termresponse();
+ 
+     may_req_bg_color();
++
++    // Same reason as for termresponse: don't want the terminal sending out
++    // the DECRPM response after Vim has exited.
++    may_req_decrqm();
+ # endif
+-    // Same reason for termresponse, don't want the terminal sending out the
+-    // DECRPM response after Vim has exited.
+-    send_decrqm_modes();
+ 
+     // start in insert mode
+     if (p_im)
+diff --git src/proto/term.pro src/proto/term.pro
+index 82c794f4f..5ec909f46 100644
+--- src/proto/term.pro
++++ src/proto/term.pro
+@@ -60,6 +60,7 @@ void stoptermcap(void);
+ void may_req_termresponse(void);
+ void check_terminal_behavior(void);
+ void may_req_bg_color(void);
++void may_req_decrqm(void);
+ int swapping_screen(void);
+ void scroll_start(void);
+ void cursor_on_force(void);
+@@ -96,7 +97,6 @@ void swap_tcap(void);
+ void ansi_color2rgb(int nr, char_u *r, char_u *g, char_u *b, char_u *ansi_idx);
+ void cterm_color2rgb(int nr, char_u *r, char_u *g, char_u *b, char_u *ansi_idx);
+ int term_replace_keycodes(char_u *ta_buf, int ta_len, int len_arg);
+-void send_decrqm_modes(void);
+ void term_disable_dec(void);
+ void term_set_win_resize(bool state);
+ void term_set_sync_output(int flags);
+diff --git src/term.c src/term.c
+index 882df6655..876e15d95 100644
+--- src/term.c
++++ src/term.c
+@@ -154,6 +154,9 @@ static termrequest_T rcs_status = TERMREQUEST_INIT;
+ // Request window's position report:
+ static termrequest_T winpos_status = TERMREQUEST_INIT;
+ 
++// Request DECRQM (DEC mode) report:
++static termrequest_T decrqm_status = TERMREQUEST_INIT;
++
+ static termrequest_T *all_termrequests[] = {
+     &crv_status,
+     &u7_status,
+@@ -165,6 +168,7 @@ static termrequest_T *all_termrequests[] = {
+     &rbm_status,
+     &rcs_status,
+     &winpos_status,
++    &decrqm_status,
+     NULL
+ };
+ 
+@@ -1539,8 +1543,10 @@ typedef struct {
+ #define TPR_MOUSE		    3
+ // term response indicates kitty
+ #define TPR_KITTY		    4
++// can send DECRQM requests to terminal
++#define TPR_DECRQM		    5
+ // table size
+-#define TPR_COUNT		    5
++#define TPR_COUNT		    6
+ 
+ static termprop_T term_props[TPR_COUNT];
+ 
+@@ -1564,6 +1570,8 @@ init_term_props(int all)
+     term_props[TPR_MOUSE].tpr_set_by_termresponse = TRUE;
+     term_props[TPR_KITTY].tpr_name = "kitty";
+     term_props[TPR_KITTY].tpr_set_by_termresponse = FALSE;
++    term_props[TPR_DECRQM].tpr_name = "decrqm";
++    term_props[TPR_DECRQM].tpr_set_by_termresponse = TRUE;
+ 
+     for (i = 0; i < TPR_COUNT; ++i)
+ 	if (all || term_props[i].tpr_set_by_termresponse)
+@@ -4304,6 +4312,36 @@ may_req_bg_color(void)
+     }
+ }
+ 
++/*
++ * Query the settings for the DEC modes we support via DECRQM.
++ * Only sent once, and only when the terminal is known not to dislike it
++ * (i.e. TPR_DECRQM is TPR_YES, or still TPR_UNKNOWN when the version response
++ * has not yet been received).
++ * The DECRPM responses are caught in handle_csi().
++ */
++    void
++may_req_decrqm(void)
++{
++    if (decrqm_status.tr_progress == STATUS_GET
++	    && term_props[TPR_DECRQM].tpr_status != TPR_NO
++	    && can_get_termresponse()
++	    && starting == 0)
++    {
++	MAY_WANT_TO_LOG_THIS;
++	LOG_TR1("Sending DECRQM requests");
++	for (int i = 0; i < (int)ARRAY_LENGTH(dec_modes); i++)
++	{
++	    vim_snprintf((char *)IObuff, IOSIZE, "\033[?%d$p", dec_modes[i]);
++	    out_str(IObuff);
++	}
++	termrequest_sent(&decrqm_status);
++	// check for the characters now, otherwise they might be eaten by
++	// get_keystroke()
++	out_flush();
++	(void)vpeekc_nomap();
++    }
++}
++
+ #endif
+ 
+ /*
+@@ -5172,21 +5210,27 @@ handle_version_response(int first, int *arg, int argc, char_u *tp)
+ 		may_adjust_color_count(256);
+ 	    // Libvterm can handle SGR mouse reporting.
+ 	    term_props[TPR_MOUSE].tpr_status = TPR_MOUSE_SGR;
++	    term_props[TPR_DECRQM].tpr_status = TPR_YES;
+ 	}
+ 
+ 	if (version == 95)
+ 	{
+ 	    // Mac Terminal.app sends 1;95;0
++	    //
++	    // Terminal.app doesn't seem to handle DECRQM sequences
++	    // properly, see issue #19852.
+ 	    if (arg[0] == 1 && arg[2] == 0)
+ 	    {
+ 		term_props[TPR_UNDERLINE_RGB].tpr_status = TPR_YES;
+ 		term_props[TPR_MOUSE].tpr_status = TPR_MOUSE_SGR;
++		term_props[TPR_DECRQM].tpr_status = TPR_NO;
+ 	    }
+ 	    // iTerm2 sends 0;95;0
+ 	    else if (arg[0] == 0 && arg[2] == 0)
+ 	    {
+ 		// iTerm2 can do SGR mouse reporting
+ 		term_props[TPR_MOUSE].tpr_status = TPR_MOUSE_SGR;
++		term_props[TPR_DECRQM].tpr_status = TPR_YES;
+ 	    }
+ 	    // old iTerm2 sends 0;95;
+ 	    else if (arg[0] == 0 && arg[2] == -1)
+@@ -5212,6 +5256,7 @@ handle_version_response(int first, int *arg, int argc, char_u *tp)
+ 		term_props[TPR_MOUSE].tpr_status = TPR_MOUSE_SGR;
+ 	    else if (version >= 95)
+ 		term_props[TPR_MOUSE].tpr_status = TPR_MOUSE_XTERM2;
++	    term_props[TPR_DECRQM].tpr_status = TPR_YES;
+ 	}
+ 
+ 	// Detect terminals that set $TERM to something like
+@@ -5224,11 +5269,15 @@ handle_version_response(int first, int *arg, int argc, char_u *tp)
+ 	// Assuming any version number over 2500 is not an
+ 	// xterm (without the limit for rxvt and screen).
+ 	if (arg[1] >= 2500)
++	{
+ 	    term_props[TPR_UNDERLINE_RGB].tpr_status = TPR_YES;
++	    term_props[TPR_DECRQM].tpr_status = TPR_YES;
++	}
+ 
+ 	else if (version == 136 && arg[2] == 0)
+ 	{
+ 	    term_props[TPR_UNDERLINE_RGB].tpr_status = TPR_YES;
++	    term_props[TPR_DECRQM].tpr_status = TPR_YES;
+ 
+ 	    // PuTTY sends 0;136;0
+ 	    if (arg[0] == 0)
+@@ -5252,6 +5301,7 @@ handle_version_response(int first, int *arg, int argc, char_u *tp)
+ 
+ 	    // Kitty can handle SGR mouse reporting.
+ 	    term_props[TPR_MOUSE].tpr_status = TPR_MOUSE_SGR;
++	    term_props[TPR_DECRQM].tpr_status = TPR_YES;
+ 	}
+ 
+ 	// GNU screen sends 83;30600;0, 83;40500;0, etc.
+@@ -5262,6 +5312,9 @@ handle_version_response(int first, int *arg, int argc, char_u *tp)
+ 	{
+ 	    term_props[TPR_CURSOR_STYLE].tpr_status = TPR_NO;
+ 	    term_props[TPR_CURSOR_BLINK].tpr_status = TPR_NO;
++	    term_props[TPR_DECRQM].tpr_status = TPR_NO; // screen doesn't seem
++							// to handle DECRQM
++							// sequences
+ 	}
+ 
+ 	// Xterm first responded to this request at patch level
+@@ -5753,6 +5806,13 @@ handle_csi(
+ 	key_name[0] = (int)KS_EXTRA;
+ 	key_name[1] = (int)KE_IGNORE;
+ 
++#ifdef FEAT_TERMRESPONSE
++	// Mark the DECRQM request as answered so it is not sent again and
++	// stoptermcap() does not wait for it.
++	if (decrqm_status.tr_progress == STATUS_SENT)
++	    decrqm_status.tr_progress = STATUS_GOT;
++#endif
++
+ 	if (setting >= 0 && setting <= 4)
+ 	{
+ 	    LOG_TRN("Received DECRPM mode %d: %s", arg[0], tp);
+@@ -7987,24 +8047,6 @@ term_replace_keycodes(char_u *ta_buf, int ta_len, int len_arg)
+     return len;
+ }
+ 
+-/*
+- * Query the settings for the DEC modes we support
+- */
+-    void
+-send_decrqm_modes(void)
+-{
+-    if (termcap_active && cur_tmode == TMODE_RAW)
+-    {
+-	// Request setting of relevant DEC modes via DECRQM
+-	for (int i = 0; i < (int)ARRAY_LENGTH(dec_modes); i++)
+-	{
+-	    vim_snprintf((char *)IObuff, IOSIZE, "\033[?%d$p", dec_modes[i]);
+-	    out_str(IObuff);
+-	}
+-	out_flush();
+-    }
+-}
+-
+ /*
+  * Should be called when cleaning up terminal state.
+  */
+diff --git src/testdir/test_termcodes.vim src/testdir/test_termcodes.vim
+index edf64d283..eaf60f53b 100644
+--- src/testdir/test_termcodes.vim
++++ src/testdir/test_termcodes.vim
+@@ -359,7 +359,7 @@ func Test_term_mouse_middle_click_insert_mode()
+   let &term = save_term
+   let &ttymouse = save_ttymouse
+   call test_override('no_query_mouse', 0)
+-  close!
++  bw!
+ endfunc
+ 
+ " Test for switching window using mouse in insert mode
+@@ -1720,6 +1720,7 @@ func Test_xx01_term_style_response()
+         \ underline_rgb: 'u',
+         \ mouse: 's',
+         \ kitty: 'u',
++        \ decrqm: 'y'
+         \ }, terminalprops())
+ 
+   set t_RV=
+@@ -1755,6 +1756,7 @@ func Test_xx02_iTerm2_response()
+         \ underline_rgb: 'u',
+         \ mouse: 's',
+         \ kitty: 'u',
++        \ decrqm: 'y'
+         \ }, terminalprops())
+ 
+   set t_RV=
+@@ -1775,6 +1777,7 @@ func Run_libvterm_konsole_response(code)
+         \ underline_rgb: 'u',
+         \ mouse: 's',
+         \ kitty: 'u',
++        \ decrqm: 'y'
+         \ }, terminalprops())
+ endfunc
+ 
+@@ -1818,6 +1821,7 @@ func Test_xx04_Mac_Terminal_response()
+         \ underline_rgb: 'y',
+         \ mouse: 's',
+         \ kitty: 'u',
++        \ decrqm: 'n'
+         \ }, terminalprops())
+   call assert_equal("\<Esc>[58;2;%lu;%lu;%lum", &t_8u)
+ 
+@@ -1849,6 +1853,7 @@ func Test_xx05_mintty_response()
+         \ underline_rgb: 'y',
+         \ mouse: 's',
+         \ kitty: 'u',
++        \ decrqm: 'y'
+         \ }, terminalprops())
+ 
+   set t_RV=
+@@ -1885,6 +1890,7 @@ func Test_xx06_screen_response()
+         \ underline_rgb: 'y',
+         \ mouse: 's',
+         \ kitty: 'u',
++        \ decrqm: 'n'
+         \ }, terminalprops())
+ 
+   set t_RV=
+@@ -1910,6 +1916,7 @@ func Do_check_t_8u_set_reset(set_by_user)
+         \ underline_rgb: 'u',
+         \ mouse: 's',
+         \ kitty: 'u',
++        \ decrqm: 'y'
+         \ }, terminalprops())
+   call assert_equal(a:set_by_user ? default_value : '', &t_8u)
+ endfunc
+@@ -1949,6 +1956,7 @@ func Test_xx07_xterm_response()
+         \ underline_rgb: 'y',
+         \ mouse: 'u',
+         \ kitty: 'u',
++        \ decrqm: 'y'
+         \ }, terminalprops())
+ 
+   " xterm >= 95 < 277 "xterm2"
+@@ -1965,6 +1973,7 @@ func Test_xx07_xterm_response()
+         \ underline_rgb: 'u',
+         \ mouse: '2',
+         \ kitty: 'u',
++        \ decrqm: 'y'
+         \ }, terminalprops())
+ 
+   " xterm >= 277: "sgr"
+@@ -1981,6 +1990,7 @@ func Test_xx07_xterm_response()
+         \ underline_rgb: 'u',
+         \ mouse: 's',
+         \ kitty: 'u',
++        \ decrqm: 'y'
+         \ }, terminalprops())
+ 
+   " xterm >= 279: "sgr" and cursor_style not reset; also check t_8u reset,
+@@ -2010,6 +2020,7 @@ func Test_xx08_kitty_response()
+         \ underline_rgb: 'y',
+         \ mouse: 's',
+         \ kitty: 'y',
++        \ decrqm: 'y'
+         \ }, terminalprops())
+ 
+   call feedkeys("\<Esc>[?1u") " simulate the kitty keyboard protocol is enabled
+@@ -3055,6 +3066,11 @@ func Test_term_win_resize()
+ 
+   let buf = RunVimInTerminal('-S XTestWinResize', #{rows: 15, cols: 20})
+ 
++  " Must add a delay, since status report is sent internally by vim only when
++  " version response is received, which may come after we send the status report
++  " here.
++  sleep 100m
++
+   " Send status report
+   call term_sendkeys(buf, "\<Esc>[?2048;1$y")
+   call TermWait(buf)
+diff --git src/version.c src/version.c
+index 36a8da078..b2be3d98b 100644
+--- src/version.c
++++ src/version.c
+@@ -729,6 +729,8 @@ static char *(features[]) =
+ 
+ static int included_patches[] =
+ {   /* Add new patch number below this line */
++/**/
++    387,
+ /**/
+     386,
+ /**/
+-- 
+2.47.3
+

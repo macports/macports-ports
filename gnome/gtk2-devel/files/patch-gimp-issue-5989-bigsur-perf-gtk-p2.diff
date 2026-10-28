@@ -1,0 +1,114 @@
+diff -Naur a/gdk/quartz/gdkglobals-quartz.c b/gdk/quartz/gdkglobals-quartz.c
+--- gdk/quartz/gdkglobals-quartz.c	2021-01-24 15:47:27.000000000 +0000
++++ gdk/quartz/gdkglobals-quartz.c	2021-01-24 15:40:36.000000000 +0000
+@@ -34,9 +34,18 @@
+
+   if (minor == GDK_OSX_UNSUPPORTED)
+     {
+-      OSErr err = Gestalt (gestaltSystemVersionMinor, (SInt32*)&minor);
++      gint32 major = GDK_OSX_UNSUPPORTED;
++      OSErr err = Gestalt (gestaltSystemVersionMajor, (SInt32*)&major);
++      g_return_val_if_fail (err == noErr, GDK_OSX_UNSUPPORTED);
+
++      err = Gestalt (gestaltSystemVersionMinor, (SInt32*)&minor);
+       g_return_val_if_fail (err == noErr, GDK_OSX_UNSUPPORTED);
++
++      /* we should really move to NSProcessInfo instead of Gestalt, but its
++       * OS-version API exists in 10.10 and above, so we break 10.9 compat.
++       * So let's just fudge this for now, representing 11.x as 10.(15+x)
++       */
++      if(major > 10) minor += 15;
+     }
+
+   if (minor < GDK_OSX_MIN)
+diff -Naur a/gdk/quartz/gdkwindow-quartz.c b/gdk/quartz/gdkwindow-quartz.c
+--- gdk/quartz/gdkwindow-quartz.c	2021-01-24 15:47:27.000000000 +0000
++++ gdk/quartz/gdkwindow-quartz.c	2021-01-24 15:40:36.000000000 +0000
+@@ -475,8 +475,10 @@
+ _gdk_windowing_before_process_all_updates (void)
+ {
+   in_process_all_updates = TRUE;
+-
+-  NSDisableScreenUpdates ();
++
++  /* This API was deprecated in MacOS 10.14 */
++  if (gdk_quartz_osx_version() < GDK_OSX_MOJAVE)
++    NSDisableScreenUpdates ();
+ }
+
+ void
+@@ -491,14 +493,11 @@
+     {
+       NSWindow *nswindow = tmp_list->data;
+
++      /* Revert to pre-2.24.33 behaviour.  The extra redraw introduced here really killed performance */
+       [[nswindow contentView] displayIfNeeded];
+
+       _gdk_quartz_drawable_flush (NULL);
+
+-      /* 10.14 needs to be told that the view needs to be redrawn, see
+-       * https://gitlab.gnome.org/GNOME/gtk/issues/1479 */
+-      if (gdk_quartz_osx_version() >= GDK_OSX_MOJAVE)
+-           [[nswindow contentView] setNeedsDisplay:YES];
+       [nswindow enableFlushWindow];
+       [nswindow flushWindow];
+       [nswindow release];
+@@ -510,7 +509,9 @@
+
+   in_process_all_updates = FALSE;
+
+-  NSEnableScreenUpdates ();
++  /* This API was deprecated in MacOS 10.14 */
++  if (gdk_quartz_osx_version() < GDK_OSX_MOJAVE)
++    NSEnableScreenUpdates ();
+ }
+
+ static void
+diff -Naur a/gtk/gtkcontainer.c b/gtk/gtkcontainer.c
+--- gtk/gtkcontainer.c	2021-01-24 15:47:28.000000000 +0000
++++ gtk/gtkcontainer.c	2021-01-24 15:40:36.000000000 +0000
+@@ -42,6 +42,9 @@
+ #include <gobject/gvaluecollector.h>
+ #include "gtkalias.h"
+
++#ifdef GDK_WINDOWING_QUARTZ
++  #include "gdk/quartz/gdkquartz.h"
++#endif
+
+ enum {
+   ADD,
+@@ -1357,7 +1360,17 @@
+       gtk_container_check_resize (GTK_CONTAINER (widget));
+     }
+
+-  gdk_window_process_all_updates ();
++  #ifdef GDK_WINDOWING_QUARTZ
++    /* It seems that we process_all_updates (and redraw) here *and* in
++     * gdk_window_update_idle.  And that means full-window redraws in
++     * MacOS 11.  Disabling this does not seem to have any detrimental
++     * effects in my tests, but does cut down on processor use, so...
++     */
++    if(gdk_quartz_osx_version() < GDK_OSX_MOJAVE)
++      gdk_window_process_all_updates ();
++  #elif
++    gdk_window_process_all_updates ();
++  #endif
+
+   return FALSE;
+ }
+diff -Naur a/gtk/gtkquartz.c b/gtk/gtkquartz.c
+--- gtk/gtkquartz.c	2021-01-24 15:47:28.000000000 +0000
++++ gtk/gtkquartz.c	2021-01-24 15:40:36.000000000 +0000
+@@ -67,7 +67,11 @@
+     }
+   [nsimage lockFocus];
+
+-  context = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
++  if (gdk_quartz_osx_version () < GDK_OSX_YOSEMITE)
++       context = [[NSGraphicsContext currentContext] graphicsPort];
++  else
++       context = [[NSGraphicsContext currentContext] CGContext];
++
+   CGContextDrawImage (context, CGRectMake (0, 0, pixbuf_width, pixbuf_height), image);
+
+   [nsimage unlockFocus];

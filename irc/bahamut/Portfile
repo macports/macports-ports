@@ -1,0 +1,113 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               github 1.0
+
+github.setup            DALnet bahamut 2.2.4 v
+revision                0
+checksums               rmd160  ab83555cd635d425dfe21948cddcdcdae4ad6a90 \
+                        sha256  fbfaa367378c799cafd3ef8a744e6339101f8572dc2ee2f4bcd7d7caa3b3e6a2 \
+                        size    898945
+
+conflicts               expect whois
+maintainers             {ryandesign @ryandesign} openmaintainer
+categories              irc
+license                 GPL
+
+description             Bahamut is an Internet Relay Chat Daemon (IRCd) designed for DALnet.
+
+long_description        ${description}
+
+github.tarball_from     releases
+
+depends_lib             path:lib/libssl.dylib:openssl \
+                        port:zlib
+
+patchfiles              zlib.patch \
+                        externs.patch \
+                        make-cert.patch
+
+post-patch {
+    # Use real system headers not bundled macOS-incompatible copies.
+    # https://github.com/DALnet/bahamut/issues/230
+    set regexps [list]
+    set headers [list arpa/inet.h arpa/nameser.h resolv.h sys/cdefs.h sys/queue.h]
+    foreach header ${headers} {
+        set headertail [file tail ${header}]
+        delete ${worksrcpath}/include/${headertail}
+        reinplace -q "s| \.\./include/${headertail}||" ${worksrcpath}/src/Makefile.in
+        lappend regexps "s|^\[\[:space:\]\]*#include\[\[:space:\]\]*\"${headertail}\"|#include <${header}>|"
+    }
+    set sources [glob ${worksrcpath}/include/*.h ${worksrcpath}/src/*.c]
+    reinplace -E -q -locale C [join ${regexps} {;}] {*}${sources}
+    reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/configure
+}
+
+# The code uses the HEADER struct and maybe other old stuff.
+# https://github.com/DALnet/bahamut/issues/230
+configure.cppflags-append \
+                        -DBIND_8_COMPAT
+
+configure.args          --enable-openssl=${prefix}
+
+configure.universal_args-delete --disable-dependency-tracking
+
+set bins                [list tools/mkpasswd]
+set sbins               [list src/ircd]
+set confs               [list ircd.motd ircd.smotd make-cert.cnf opers.txt reference.conf template.conf]
+
+set bindir              ${prefix}/bin
+set sbindir             ${prefix}/sbin
+set confdir             ${prefix}/etc/${name}
+
+post-build {
+    # make exits with 0 status even if build failed.
+    # https://github.com/DALnet/bahamut/issues/221
+    foreach f [list {*}${bins} {*}${sbins}] {
+        if {![file exists ${worksrcpath}/${f}]} {
+            return -code error "${f} did not get built"
+        }
+    }
+}
+
+# Doesn't support DESTDIR.
+# https://github.com/DALnet/bahamut/issues/231
+destroot.destdir        INSTALL_DIR=${destroot}${prefix}
+
+post-destroot {
+    # Everything gets installed into the same directory.
+    # https://github.com/DALnet/bahamut/issues/234
+    foreach f [list {*}${bins} make-cert.sh] {
+        move ${destroot}${prefix}/[file tail ${f}] ${destroot}${bindir}
+    }
+    foreach f ${sbins} {
+        move ${destroot}${prefix}/[file tail ${f}] ${destroot}${sbindir}
+    }
+    xinstall -d ${destroot}${confdir}
+    foreach f ${confs} {
+        move ${destroot}${prefix}/${f} ${destroot}${confdir}
+    }
+    reinplace "s|${destroot}${prefix}|${confdir}|g" ${destroot}${prefix}/bin/make-cert.sh
+}
+
+platform darwin {
+    # Fix detection of res_mkquery: it *is* in libresolv on macOS.
+    # https://github.com/DALnet/bahamut/issues/229
+    configure.args-append \
+                        ac_cv_func___res_mkquery=no \
+                        ac_cv_func_res_mkquery=yes \
+                        ac_cv_search___res_mkquery=no \
+                        ac_cv_search_res_mkquery=-lresolv
+}
+
+startupitem.create      yes
+startupitem.executable  ${sbindir}/ircd -t -f ${confdir}/ircd.conf
+startupitem.pidfile     clean ${confdir}/ircd.pid
+
+notes "
+To configure ${name}, copy ${confdir}/template.conf to ${confdir}/ircd.conf and make changes.
+
+To create the certificate, run:
+
+    sudo ${bindir}/make-cert.sh
+"

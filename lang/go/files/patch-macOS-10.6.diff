@@ -1,0 +1,120 @@
+diff --git src/crypto/x509/internal/macos/security.go src/crypto/x509/internal/macos/security.go
+index 0f6fa42b7b..90719b4cfe 100644
+--- src/crypto/x509/internal/macos/security.go
++++ src/crypto/x509/internal/macos/security.go
+@@ -81,18 +81,6 @@ func x509_SecTrustSettingsCopyCertificates_trampoline()
+ 
+ const kSecFormatX509Cert int32 = 9
+ 
+-//go:cgo_import_dynamic x509_SecItemExport SecItemExport "/System/Library/Frameworks/Security.framework/Versions/A/Security"
+-
+-func SecItemExport(cert CFRef) (data CFRef, err error) {
+-	ret := syscall(abi.FuncPCABI0(x509_SecItemExport_trampoline), uintptr(cert), uintptr(kSecFormatX509Cert),
+-		0 /* flags */, 0 /* keyParams */, uintptr(unsafe.Pointer(&data)), 0)
+-	if ret != 0 {
+-		return 0, OSStatus{"SecItemExport", int32(ret)}
+-	}
+-	return data, nil
+-}
+-func x509_SecItemExport_trampoline()
+-
+ const errSecItemNotFound = -25300
+ 
+ //go:cgo_import_dynamic x509_SecTrustSettingsCopyTrustSettings SecTrustSettingsCopyTrustSettings "/System/Library/Frameworks/Security.framework/Versions/A/Security"
+@@ -109,10 +97,15 @@ func SecTrustSettingsCopyTrustSettings(cert CFRef, domain SecTrustSettingsDomain
+ }
+ func x509_SecTrustSettingsCopyTrustSettings_trampoline()
+ 
+-//go:cgo_import_dynamic x509_SecPolicyCopyProperties SecPolicyCopyProperties "/System/Library/Frameworks/Security.framework/Versions/A/Security"
++//go:cgo_import_dynamic x509_SecCertificateCopyData SecCertificateCopyData "/System/Library/Frameworks/Security.framework/Versions/A/Security"
+ 
+-func SecPolicyCopyProperties(policy CFRef) CFRef {
+-	ret := syscall(abi.FuncPCABI0(x509_SecPolicyCopyProperties_trampoline), uintptr(policy), 0, 0, 0, 0, 0)
+-	return CFRef(ret)
++func SecCertificateCopyData(cert CFRef) ([]byte, error) {
++	ret := syscall(abi.FuncPCABI0(x509_SecCertificateCopyData_trampoline), uintptr(cert), 0, 0, 0, 0, 0)
++	if ret == 0 {
++		return nil, errors.New("x509: invalid certificate object")
++	}
++	b := CFDataToSlice(CFRef(ret))
++	CFRelease(CFRef(ret))
++	return b, nil
+ }
+-func x509_SecPolicyCopyProperties_trampoline()
++func x509_SecCertificateCopyData_trampoline()
+diff --git src/crypto/x509/internal/macos/security.s src/crypto/x509/internal/macos/security.s
+index 0038f25b27..03a389b9cf 100644
+--- src/crypto/x509/internal/macos/security.s
++++ src/crypto/x509/internal/macos/security.s
+@@ -12,9 +12,7 @@
+ 
+ TEXT ·x509_SecTrustSettingsCopyCertificates_trampoline(SB),NOSPLIT,$0-0
+ 	JMP	x509_SecTrustSettingsCopyCertificates(SB)
+-TEXT ·x509_SecItemExport_trampoline(SB),NOSPLIT,$0-0
+-	JMP	x509_SecItemExport(SB)
+ TEXT ·x509_SecTrustSettingsCopyTrustSettings_trampoline(SB),NOSPLIT,$0-0
+ 	JMP	x509_SecTrustSettingsCopyTrustSettings(SB)
+-TEXT ·x509_SecPolicyCopyProperties_trampoline(SB),NOSPLIT,$0-0
+-	JMP	x509_SecPolicyCopyProperties(SB)
++TEXT ·x509_SecCertificateCopyData_trampoline(SB),NOSPLIT,$0-0
++ 	JMP x509_SecCertificateCopyData(SB)
+diff --git src/crypto/x509/root_darwin.go src/crypto/x509/root_darwin.go
+index 05593bb105..c4cfc3358a 100644
+--- src/crypto/x509/root_darwin.go
++++ src/crypto/x509/root_darwin.go
+@@ -115,14 +115,11 @@ func loadSystemRoots() (*CertPool, error) {
+ 
+ // exportCertificate returns a *Certificate for a SecCertificateRef.
+ func exportCertificate(cert macOS.CFRef) (*Certificate, error) {
+-	data, err := macOS.SecItemExport(cert)
++	data, err := macOS.SecCertificateCopyData(cert)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	defer macOS.CFRelease(data)
+-	der := macOS.CFDataToSlice(data)
+-
+-	return ParseCertificate(der)
++    return ParseCertificate(data)
+ }
+ 
+ // isRootCertificate reports whether Subject and Issuer match.
+@@ -181,23 +178,12 @@ func sslTrustSettingsResult(cert macOS.CFRef) (macOS.SecTrustSettingsResult, err
+ 		return macOS.SecTrustSettingsResultTrustRoot, nil
+ 	}
+ 
+-	isSSLPolicy := func(policyRef macOS.CFRef) bool {
+-		properties := macOS.SecPolicyCopyProperties(policyRef)
+-		defer macOS.CFRelease(properties)
+-		if v, ok := macOS.CFDictionaryGetValueIfPresent(properties, macOS.SecPolicyOid); ok {
+-			return macOS.CFEqual(v, macOS.CFRef(macOS.SecPolicyAppleSSL))
+-		}
+-		return false
+-	}
+-
+ 	for i := 0; i < macOS.CFArrayGetCount(trustSettings); i++ {
+ 		tSetting := macOS.CFArrayGetValueAtIndex(trustSettings, i)
+ 
+ 		// First, check if this trust setting is constrained to a non-SSL policy.
+-		if policyRef, ok := macOS.CFDictionaryGetValueIfPresent(tSetting, macOS.SecTrustSettingsPolicy); ok {
+-			if !isSSLPolicy(policyRef) {
+-				continue
+-			}
++		if _, ok := macOS.CFDictionaryGetValueIfPresent(tSetting, macOS.SecTrustSettingsPolicy); ok {
++			continue
+ 		}
+ 
+ 		// Then check if it is restricted to a hostname, so not a root.
+diff --git src/syscall/zerrors_darwin_amd64.go src/syscall/zerrors_darwin_amd64.go
+index 0b9897284c..c35e07622d 100644
+--- src/syscall/zerrors_darwin_amd64.go
++++ src/syscall/zerrors_darwin_amd64.go
+@@ -233,7 +233,7 @@ const (
+ 	F_ALLOCATECONTIG                  = 0x2
+ 	F_CHKCLEAN                        = 0x29
+ 	F_DUPFD                           = 0x0
+-	F_DUPFD_CLOEXEC                   = 0x43
++	F_DUPFD_CLOEXEC                   = 0x0
+ 	F_FLUSH_DATA                      = 0x28
+ 	F_FREEZE_FS                       = 0x35
+ 	F_FULLFSYNC                       = 0x33

@@ -1,0 +1,53 @@
+HV_DEADLINE_FOREVER is macOS 11 and hv_vcpu_run_until() is macOS 10.15
+(__HV_10_15), so neither is usable on every system this port supports.
+
+Route the call through a small dispatcher.  Where the SDK predates 11 the
+older hv_vcpu_run() is used outright; where the SDK has both but the
+deployment target predates 11, __builtin_available() picks at run time, so a
+binary built for an older target still uses the newer call when it actually
+runs on 11 or later.  This replaces an earlier compile-time-only shim, which
+also relied on passing a hand-defined HV_DEADLINE_FOREVER to a 10.15 SDK
+where that sentinel did not yet exist.
+
+The dispatcher's shape is taken from
+https://github.com/koucyuu/qemu_catalina_patches
+
+--- target/i386/hvf/hvf.c.orig
++++ target/i386/hvf/hvf.c
+@@ -1001,6 +1001,27 @@
+     return ret;
+ }
+ 
++static hv_return_t hvf_vcpu_run_dispatch(hv_vcpuid_t vcpu_id)
++{
++    /*
++     * hv_vcpu_run_until() is available from macOS 10.15 (__HV_10_15) and
++     * HV_DEADLINE_FOREVER from 11.0.  Where the SDK has both but the
++     * deployment target predates 11, decide at run time so a binary built
++     * for an older system still uses the newer call when it can.
++     */
++#ifndef MAC_OS_VERSION_11_0
++    return hv_vcpu_run(vcpu_id);
++#elif MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_VERSION_11_0
++    return hv_vcpu_run_until(vcpu_id, HV_DEADLINE_FOREVER);
++#else
++    if (__builtin_available(macOS 11.0, *)) {
++        return hv_vcpu_run_until(vcpu_id, HV_DEADLINE_FOREVER);
++    } else {
++        return hv_vcpu_run(vcpu_id);
++    }
++#endif
++}
++
+ int hvf_arch_vcpu_exec(CPUState *cpu)
+ {
+     int ret = 0;
+@@ -1028,7 +1049,7 @@
+ 
+         cpu_exec_start(cpu);
+ 
+-        hv_return_t r = hv_vcpu_run_until(cpu->accel->fd, HV_DEADLINE_FOREVER);
++        hv_return_t r = hvf_vcpu_run_dispatch(cpu->accel->fd);
+         assert_hvf_ok(r);
+ 
+         cpu_exec_end(cpu);

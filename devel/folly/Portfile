@@ -1,0 +1,211 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim: fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           boost 1.0
+PortGroup           cmake 1.1
+PortGroup           github 1.0
+PortGroup           legacysupport 1.1
+PortGroup           openssl 1.0
+
+boost.version       1.81
+legacysupport.newest_darwin_requires_legacy 19
+
+if {[string match *clang* ${configure.compiler}]} {
+    # Don't use libcxx with gcc.
+    legacysupport.use_mp_libcxx yes
+}
+
+# NB: Facebook does not do API stability, apparently, so please don't
+# upgrade without also upgrading its dependents, as listed by:
+# port list rdepends:folly
+github.setup        facebook folly 2026.07.27.00 v
+revision            0
+categories          devel
+license             Apache-2
+maintainers         {@barracuda156 macos-powerpc.org:barracuda} openmaintainer
+
+description         Open-source C++ library developed and used at Facebook
+long_description    Folly (acronymed loosely after Facebook Open Source Library) is a library of \
+                    C++14 components designed with practicality and efficiency in mind. Folly contains \
+                    a variety of core library components used extensively at Facebook. In particular, \
+                    it's often a dependency of Facebook's other open source C++ efforts and place where \
+                    those projects can share code. \
+                    It complements (as opposed to competing against) offerings such as Boost and of course \
+                    std. In fact, we embark on defining our own component only when something we need is \
+                    either not available, or does not meet the needed performance profile. We endeavor to \
+                    remove things from folly if or when std or Boost obsoletes them. \
+                    Performance concerns permeate much of Folly, sometimes leading to designs that are \
+                    more idiosyncratic than they would otherwise be (see e.g. PackedSyncPtr.h, SmallLocks.h). \
+                    Good performance at large scale is a unifying theme in all of Folly.
+
+checksums           rmd160  b925bd1dc4a98afd48636a7f83a029801b800eb9 \
+                    sha256  b3bc3805d75d4c1c725d2acd6baa1e2f069098b6fa7eae9ff2553c2ca80cbe79 \
+                    size    5180593
+github.tarball_from releases
+distname            ${name}-v${version}
+extract.mkdir       yes
+
+cmake.generator     Ninja
+
+set libfmt_v        12
+cmake.prefix_path-append \
+                    ${prefix}/lib/libfmt${libfmt_v}/cmake
+
+depends_lib-append  port:bzip2 \
+                    port:double-conversion \
+                    port:fast-float \
+                    port:gflags \
+                    port:google-glog \
+                    port:libevent \
+                    port:libfmt${libfmt_v} \
+                    port:libsodium \
+                    port:lz4 \
+                    port:lzma \
+                    port:snappy \
+                    port:xz \
+                    port:zlib \
+                    port:zstd
+
+patch.pre_args-replace  -p0 -p1
+
+patchfiles-append   0001-cmake-only-link-c-abi-on-Apple-when-the-C-stdlib-is-.patch
+
+# powerpc & 32-bit:
+if {${configure.build_arch} in [list i386 ppc ppc64]} {
+    patchfiles-append \
+                    0002-folly-Portability-define-FOLLY_PPC-kIsArchPPC-for-32.patch \
+                    0003-folly-DiscriminatedPtr-support-32-bit-architectures-.patch \
+                    0004-folly-io-IOBuf-keep-HeapPrefix-at-8-bytes-on-ABIs-wi.patch \
+                    0005-folly-relax-layout-assertions-that-cannot-hold-on-Da.patch \
+                    0006-folly-ConstexprMath-avoid-long-double-literals-for-e.patch \
+                    0007-folly-portability-Asm-pause-on-32-bit-PPC-too-with-A.patch
+}
+
+# Older SDKs:
+if {${os.platform} eq "darwin" && ${os.major} <= 20} {
+    patchfiles-append \
+                    0008-folly-support-building-networking-code-against-legac.patch \
+                    0009-folly-support-legacy-macOS-10.5-10.6-in-system-porta.patch
+}
+
+if {[string match *gcc* ${configure.compiler}]} {
+    patchfiles-append \
+                    0010-folly-Subprocess-avoid-constructor-priority-with-GCC.patch \
+                    0011-folly-container-fix-F14-fallback-ambiguity-with-C-20.patch
+}
+
+# https://github.com/facebook/folly/issues/2681
+if {${configure.cxx_stdlib} eq "libc++"} {
+    patchfiles-append \
+                    0012-executors-avoid-glog-CHECK_EQ-nullptr_t-link-failur.patch
+}
+
+configure.args-append   -DBUILD_SHARED_LIBS=ON \
+                        -DFOLLY_USE_JEMALLOC=0
+
+compiler.thread_local_storage \
+                        yes
+# Requires C++20 now:
+compiler.cxx_standard   2020
+
+# error: typedef redefinition with different types ('uint8_t' (aka 'unsigned char') vs 'enum clockid_t')
+# error: no matching constructor for initialization of 'std::function<LocalRefCount ()>'
+compiler.blacklist-append {clang < 1400}
+
+platform darwin {
+    # https://github.com/facebook/folly/issues/864
+    if {${os.major} <= 16} {
+        configure.args-append   -DCOMPILER_HAS_F_ALIGNED_NEW=OFF
+        # gcc does not recognize -fno-aligned-allocation
+        if {[string match *clang* ${configure.compiler}]} {
+            configure.cxxflags-append \
+                                -fno-aligned-allocation
+        }
+    }
+    # Support for TCP fast-open was only added to macOS 10.11+
+    if {${os.major} < 15} {
+        configure.cxxflags-append \
+                                -DFOLLY_ALLOW_TFO=0
+    }
+    if {[string match *gcc* ${configure.compiler}]} {
+        # ThreadName.cpp: error: invalid conversion from 'std::array<char, 16>::size_type' {aka 'long unsigned int'} to 'size_t*' {aka 'long unsigned int*'}
+        configure.cxxflags-append \
+                                -fpermissive
+        # https://github.com/macports/macports-ports/pull/15689#issuecomment-1212969969
+        configure.ldflags-append \
+                                -L${prefix}/lib -lgflags
+        # This is just easier than keep rebasing a patch to fix a broken libatomic test which upstream has:
+        if {${configure.build_arch} in [list arm i386 ppc]} {
+            configure.ldflags-append \
+                                -latomic
+        }
+    } elseif {[string match *clang* ${configure.compiler}]} {
+        # error: TARGET_OS_xxx not defined, evaluates to 0
+        configure.cppflags-append \
+                                -Wno-undef-prefix
+    }
+    # Fix for building in Rosetta, so that x86 SSE is not invoked:
+    if {${os.major} == 10 && ${configure.build_arch} eq "ppc"} {
+        configure.args-append   -DCMAKE_LIBRARY_ARCHITECTURE="ppc" \
+                                -DIS_X86_64_ARCH=OFF
+    }
+}
+
+variant jemalloc description "Use je_malloc" {
+    depends_lib-append          port:jemalloc
+    configure.args-append       -DFOLLY_HAVE_WEAK_SYMBOLS=ON
+    configure.args-replace      -DFOLLY_USE_JEMALLOC=0 -DFOLLY_USE_JEMALLOC=1
+    configure.ldflags-append    -ljemalloc
+}
+
+variant native description "Build with best native support for local CPU capabilities" {
+    if {${build_arch} in [list ppc ppc64]} {
+        # -march= flag is unsupported for PPC:
+        configure.cxxflags-append \
+                                -mtune=native
+    } else {
+        configure.cxxflags-append \
+                                -march=native
+    }
+}
+
+# FIXME: at the moment about 90% of tests pass on PowerPC.
+# This is somewhat worse than Sonoma arm64, where 91% of tests pass.
+# https://github.com/facebook/folly/issues/2128
+variant tests description "Enable testing" {
+    depends_build-append        port:gtest
+
+    if {${os.platform} eq "darwin" && ${os.major} < 19} {
+        patchfiles-append       0013-folly-test-adjust-tests-for-Darwin-ppc32-and-legacy-.patch
+    }
+
+    configure.pre_args-replace  -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+                                -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+    configure.args-append       -DBUILD_TESTS=ON
+
+    pre-test {
+        if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
+            foreach testexec    [glob ${cmake.build_dir}/*test] {
+                move            ${testexec} \
+                                ${testexec}-orig
+
+                set  wrapper    [open "${testexec}" w 0755]
+                puts ${wrapper} "#!/bin/bash"
+                puts ${wrapper} ""
+                puts ${wrapper} {if [ -n "$DYLD_LIBRARY_PATH" ]; then}
+                puts ${wrapper} "   DYLD_LIBRARY_PATH=${prefix}/lib/libgcc:\./:\${DYLD_LIBRARY_PATH}"
+                puts ${wrapper} {else}
+                puts ${wrapper} "   DYLD_LIBRARY_PATH=${prefix}/lib/libgcc:\./"
+                puts ${wrapper} {fi}
+                puts ${wrapper} {export DYLD_LIBRARY_PATH}
+                puts ${wrapper} ""
+                puts ${wrapper} {exec "${0}-orig" "$@"}
+                close $wrapper
+            }
+        }
+        # test infrastructure uses /bin/ps, which is forbidden by sandboxing
+        append portsandbox_profile " (allow process-exec (literal \"/bin/ps\") (with no-profile))"
+    }
+    test.run                    yes
+}

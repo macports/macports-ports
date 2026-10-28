@@ -1,0 +1,269 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+
+name                legacy-support
+categories          devel
+
+maintainers         {mascguy @mascguy} \
+                    {fwright.net:fw @fhgwright} \
+                    openmaintainer
+license             MIT BSD APSL-2
+
+description         Installs wrapper headers and a runtime library to add \
+                    missing functionality to legacy OSX versions.
+long_description    {*}${description}
+
+# Introduced to roll back to 1.0.13 release due to issues with 1.1.0.
+# Must now stay.
+epoch               1
+
+github.setup        macports macports-legacy-support 1.5.2 v
+revision            0
+github.tarball_from archive
+checksums           rmd160  58a9837f78a72cb2204d674cc41e028b10bff71b \
+                    sha256  16da882281d26d8ddfb434acfde0828fc3e4119aab332445f65688ae879e9962 \
+                    size    228427
+
+# Primary release version
+set release_ver     ${github.version}
+
+# Binary compatibility version
+set compat_ver      1.0.0
+
+# Name and prefix for -devel subports
+set devel_name      ${name}-devel
+
+# Most files need to be handed off from old port to new subports.
+# This tracks when this is needed, and what the relevant versions are.
+# The release case is currently commented out to avoid a silly lint complaint.
+set need_handoff    false
+###set old_release_ver 1.5.2
+set old_devel_ver   20261009
+
+subport ${name} {
+    # Conflicts until next release
+    # The -devel conflict is only for older -devel versions
+    conflicts           ${devel_name} ${devel_name}-headers ${devel_name}-libs
+    set so_curversion   ${release_ver}
+}
+
+subport ${devel_name} {
+    description         Wrapper port for new ${devel_name}-headers and \
+                        ${devel_name}-libs subports.
+    long_description    {*}${description}
+    distfiles
+    build               {}
+    # We need to install something in destroot to avoid an error
+    destroot.cmd        mkdir -p
+    destroot.target     ${destroot}${prefix}/share
+    destroot.keepdirs   ${destroot}${prefix}/share
+    destroot.destdir
+    depends_build       port:${devel_name}-headers
+    depends_run         port:${devel_name}-libs
+    # Ensure install always brings in headers as a "build" dependency
+    license-append      NoMirror
+}
+
+if {${subport} ne ${name}} {
+    github.setup        macports macports-legacy-support \
+                        545561e5f87bca9aacf2508e5ee21a9e07ea4524
+    github.tarball_from archive
+    version             20261013
+    revision            0
+    livecheck.type      none
+    checksums           rmd160  b5101a78f3f97a92659560403069571a129bc07a \
+                        sha256  548981c4a1ed41a26c591022434d6684bbf753b61279edde0f2088145e079f36 \
+                        size    334772
+    set v_split         [split ${release_ver} .]
+    set so_curversion   [lindex ${v_split} 0].[lindex ${v_split} 1].99
+}
+
+# Assume we'll run tests
+test.run            yes
+
+subport ${devel_name}-headers {
+    description         Wrapper headers and added headers for ${devel_name}
+    long_description    {*}${description}
+    # Conflicts until next release
+    conflicts           ${name}
+    platforms           {darwin any}
+    supported_archs     noarch
+    # Avoid compiler selection for unused compiler
+    configure.compiler  cc
+    build               {}
+    destroot.target     install-headers
+    # Nothing to test here
+    test.run            no
+    set need_handoff    true
+}
+
+subport ${devel_name}-libs {
+    description         Shared and static libraries for ${devel_name}
+    long_description    {*}${description}
+    # Conflicts until next release
+    conflicts           ${name}
+    build.target        all
+    destroot.target     install-lib
+    test.target         test_all_unv
+    set need_handoff    true
+}
+
+subport ${devel_name}-symlib {
+    description         Empty linker-symbol version of ${devel_name} \
+                        shared library
+    long_description    {*}${description}
+    license             Permissive
+    build.target        symlib
+    destroot.target     install-symlib
+    test.target         test_symlib_unv
+
+    # Avoid useless libSystem reference if allowable.
+    # This is a fatal link error on macOS 11+, even with -ffreestanding.
+    if {${os.major} < 20} {
+        build.env-append    SYMLIBNOSTDLIB="-nostdlib"
+    }
+}
+
+# This port doesn't use C++ at all, except for two very limited tests
+# that are manual-only.  Disabling cxx_stdlib avoids unnessary compiler
+# constraints on some platforms.
+#
+configure.cxx_stdlib
+
+# Simple make-based setup, with natural universal support
+use_configure       no
+universal_variant   yes
+
+# The universal variants aren't very expensive, and defaulting to
+# +universal avoids the accidental use of the -universal variants,
+# breaking universal dependents.
+if {${subport} ne ${name}} {
+    default_variants-append +universal
+}
+
+# Set up proper arch list for build, destroot, and test
+if {![variant_isset universal]} {
+    set archs       ${configure.build_arch}
+} else {
+    set archs       ${configure.universal_archs}
+}
+
+# Set up the needed portion of the standard environment, plus our ARCHS
+build.env-append    ARCHS=${archs} \
+                    CC=${configure.cc} \
+                    CXX=${configure.cxx} \
+                    PREFIX=${prefix}
+
+# For some reason, omitting the unnecessary LDFLAGS definition causes
+# a benign discrepancy in some otherwise reproducible builds on 11.x.
+# For maximum consistency of installed content, we keep this for the
+# release version for now.  This can be removed as of the next release.
+#
+if {${subport} eq ${name}} {
+    build.env-append    LDFLAGS=${configure.ldflags}
+}
+
+# Use same env for destroot and test (before adding version defs)
+destroot.env        {*}${build.env}
+test.env            {*}${build.env}
+
+# Define the version
+build.env-append    SOCURVERSION=${so_curversion} \
+                    SOCOMPATVERSION=${compat_ver}
+
+# Enable parallel tests
+default test.jobs   ${build.jobs}
+test.pre_args      -j${test.jobs} ${test.target}
+
+# Include Tiger-specific additions
+platform darwin 8 {
+    if {${subport} eq ${name}} {
+        build.target-append     tiger-bins
+        destroot.target-append  install-tiger
+    }
+    if {${subport} eq "${devel_name}-libs"} {
+        build.target-append     tiger-libs
+        destroot.target-append  install-tiger-libs
+    }
+    if {${subport} eq "${devel_name}-symlib"} {
+        build.target-append     tiger-libs
+        destroot.target-append  install-tiger-symlib
+    }
+
+    # Work around linker/install_name_tool weirdness on ppc64
+    if {(${subport} eq "${devel_name}-libs"
+         || ${subport} eq "${devel_name}-symlib")
+        && ${os.arch} eq "powerpc"} {
+        build.env-append    TIGERLDCC="/usr/bin/cc"
+    }
+
+    subport ${devel_name}-progs {
+        description         Installs updated programs for 10.4
+        long_description    {*}${description}
+        # Conflicts until next release
+        conflicts           ${name}
+        build.target        tiger-progs
+        destroot.target     install-tiger-progs
+        # No current tests for this
+        test.run            no
+        set need_handoff    true
+    }
+    if {${subport} eq ${name}} {
+        # Conflicts until next release
+        conflicts-append ${name}-progs
+    }
+    if {${subport} eq ${devel_name}} {
+        depends_run-append port:${name}-progs
+    }
+
+    # Avoid troublesome Xcode 2.5 linker on 10.4
+    if {${subport} ne ${devel_name}
+        && ${subport} ne "${devel_name}-headers"} {
+        configure.compiler  apple-gcc-4.2
+    }
+}
+
+# Include Leopard-specific additions
+platform darwin 9 {
+    if {${subport} eq ${name} || ${subport} eq "${devel_name}-libs"} {
+        build.target-append     leopard-bins
+        destroot.target-append  install-leopard
+    }
+}
+
+# Deactivate any sufficiently old version of a specified port
+proc deactivate_old {port maxver} {
+    if {![catch {lindex [registry_active ${port}] 0} installed]} {
+        set _version [lindex $installed 1]
+        if {[vercmp $_version ${maxver}] <= 0} {
+            registry_deactivate_composite ${port} "" [list ports_nodepcheck 1]
+        }
+    }
+}
+
+# Here we apply any needed "deactivate hacks"
+if {${need_handoff}} {
+    pre-activate {
+        # Uncomment the release case upon the next release
+        ###deactivate_old ${name} ${old_release_ver}
+        deactivate_old ${devel_name} ${old_devel_ver}
+    }
+
+    # The following only applies until the next release
+    notes "Activating ${name} may require explicitly deactivating ${subport}."
+}
+
+if {${subport} eq ${name} && ![file exists ${prefix}/libexec/mpstats]} {
+    notes "
+    To help make sure your system continues to be well-represented by\
+    MacPorts, especially if your system is not one of the latest macOS\
+    releases, please consider installing mpstats.  It will periodically\
+    send an anonymous synopsis of your OS settings and installed ports.\
+    The information provided by this is useful to help determine how\
+    resources are allocated.
+
+    You can install mpstats like this:    sudo port install mpstats
+    "
+}

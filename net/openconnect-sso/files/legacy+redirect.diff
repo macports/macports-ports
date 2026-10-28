@@ -1,0 +1,104 @@
+From b53695bbe1c2f5f87ea43455f826d82e14e9b6b1 Mon Sep 17 00:00:00 2001
+From: Dan Villiom Podlaski Christiansen <danchr@gmail.com>
+Date: Tue, 28 Feb 2023 16:22:00 +0100
+Subject: [PATCH 1/2] Use an insecure request when detecting redirects, and
+ allow legacy connect
+
+---
+ openconnect_sso/authenticator.py | 30 +++++++++++++++++++++++++++++-
+ 1 file changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/openconnect_sso/authenticator.py b/openconnect_sso/authenticator.py
+index 2cd0456..54ee683 100644
+--- a/openconnect_sso/authenticator.py
++++ b/openconnect_sso/authenticator.py
+@@ -2,6 +2,9 @@
+ import requests
+ import structlog
+ from lxml import etree, objectify
++import ssl
++from requests import adapters
++import urllib3
+ 
+ from openconnect_sso.saml_authenticator import authenticate_in_browser
+ 
+@@ -54,7 +57,7 @@ async def authenticate(self, display_mode):
+     def _detect_authentication_target_url(self):
+         # Follow possible redirects in a GET request
+         # Authentication will occcur using a POST request on the final URL
+-        response = requests.get(self.host.vpn_url)
++        response = self.session.get(self.host.vpn_url, verify=False)
+         response.raise_for_status()
+         self.host.address = response.url
+         logger.debug("Auth target url", url=self.host.vpn_url)
+@@ -89,8 +92,33 @@ class AuthResponseError(AuthenticationError):
+     pass
+ 
+ 
++class LegacyHTTPAdapter(adapters.HTTPAdapter):
++    """“Transport adapter” that allows us to use legacy renogation.
++
++    Such renegotiation is disabled by default in OpenSSL 3.0. This
++    suppresses errors such as:
++
++      SSLError(1, '[SSL: UNSAFE_LEGACY_RENEGOTIATION_DISABLED] unsafe
++      legacy renegotiation disabled (_ssl.c:992)')
++
++    """
++
++    def init_poolmanager(self, connections, maxsize, block=False):
++        ctx = urllib3.util.ssl_.create_urllib3_context()
++        ctx.load_default_certs()
++        ctx.options |= 0x4  # ssl.OP_LEGACY_SERVER_CONNECT
++
++        self.poolmanager = urllib3.PoolManager(
++            ssl_context=ctx,
++            num_pools=connections,
++            maxsize=maxsize,
++            block=block,
++        )
++
++
+ def create_http_session(proxy):
+     session = requests.Session()
++    session.mount("https://", LegacyHTTPAdapter())
+     session.proxies = {"http": proxy, "https": proxy}
+     session.headers.update(
+         {
+
+From e5d7e7db696fff90ceb81750e08726304b7fff0a Mon Sep 17 00:00:00 2001
+From: Dan Villiom Podlaski Christiansen <danchr@gmail.com>
+Date: Tue, 28 Feb 2023 16:22:46 +0100
+Subject: [PATCH 2/2] Don't fail, but issue a warning when detecting redirect
+ fails
+
+---
+ openconnect_sso/authenticator.py | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/openconnect_sso/authenticator.py b/openconnect_sso/authenticator.py
+index 54ee683..ac3c14a 100644
+--- a/openconnect_sso/authenticator.py
++++ b/openconnect_sso/authenticator.py
+@@ -57,10 +57,18 @@ async def authenticate(self, display_mode):
+     def _detect_authentication_target_url(self):
+         # Follow possible redirects in a GET request
+         # Authentication will occcur using a POST request on the final URL
+-        response = self.session.get(self.host.vpn_url, verify=False)
+-        response.raise_for_status()
+-        self.host.address = response.url
+         logger.debug("Auth target url", url=self.host.vpn_url)
++        response = self.session.get(self.host.vpn_url, verify=False)
++        if response.ok:
++            self.host.address = response.url
++        else:
++            logger.warn(
++                "Failed to check for redirect",
++                reason=response.reason,
++                error=response.status_code,
++                response=response,
++            )
++            self.host.address = self.host.vpn_url
+ 
+     def _start_authentication(self):
+         request = _create_auth_init_request(self.host, self.host.vpn_url)

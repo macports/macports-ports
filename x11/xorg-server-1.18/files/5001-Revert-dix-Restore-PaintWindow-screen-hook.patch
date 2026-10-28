@@ -1,0 +1,348 @@
+From 1d3dba846a7e51608b71797e7510d114555bfcd3 Mon Sep 17 00:00:00 2001
+From: Jeremy Huddleston Sequoia <jeremyhu@apple.com>
+Date: Sat, 26 Dec 2015 10:56:52 -0800
+Subject: [PATCH 5001/5005] Revert "dix: Restore PaintWindow screen hook"
+
+This reverts commit cbd3cfbad3f07b20e90ea9498110f255813eb441.
+---
+ composite/compwindow.c          |  2 +-
+ dix/window.c                    |  4 ++--
+ hw/xquartz/quartz.c             |  4 ++--
+ hw/xwin/winrandr.c              |  2 +-
+ include/scrnintstr.h            |  5 -----
+ mi/miexpose.c                   | 32 +++++++++++++++++++++++++++-----
+ mi/mioverlay.c                  | 11 +++++------
+ mi/miscrinit.c                  |  1 -
+ mi/miwindow.c                   |  6 ++----
+ miext/rootless/rootlessCommon.h |  1 -
+ miext/rootless/rootlessScreen.c |  3 +--
+ miext/rootless/rootlessWindow.c | 23 +----------------------
+ miext/rootless/rootlessWindow.h |  1 -
+ 13 files changed, 42 insertions(+), 53 deletions(-)
+
+diff --git a/composite/compwindow.c b/composite/compwindow.c
+index 344138a..77bdfa2 100644
+--- a/composite/compwindow.c
++++ b/composite/compwindow.c
+@@ -104,7 +104,7 @@ compRepaintBorder(ClientPtr pClient, void *closure)
+ 
+         RegionNull(&exposed);
+         RegionSubtract(&exposed, &pWindow->borderClip, &pWindow->winSize);
+-        pWindow->drawable.pScreen->PaintWindow(pWindow, &exposed, PW_BORDER);
++        miPaintWindow(pWindow, &exposed, PW_BORDER);
+         RegionUninit(&exposed);
+     }
+     return TRUE;
+diff --git a/dix/window.c b/dix/window.c
+index ead4dc2..6f31396 100644
+--- a/dix/window.c
++++ b/dix/window.c
+@@ -1592,7 +1592,7 @@ ChangeWindowAttributes(WindowPtr pWin, Mask vmask, XID *vlist, ClientPtr client)
+ 
+         RegionNull(&exposed);
+         RegionSubtract(&exposed, &pWin->borderClip, &pWin->winSize);
+-        pWin->drawable.pScreen->PaintWindow(pWin, &exposed, PW_BORDER);
++        miPaintWindow(pWin, &exposed, PW_BORDER);
+         RegionUninit(&exposed);
+     }
+     return error;
+@@ -3159,7 +3159,7 @@ dixSaveScreens(ClientPtr client, int on, int mode)
+ 
+                 /* make it look like screen saver is off, so that
+                  * NotClippedByChildren will compute a clip list
+-                 * for the root window, so PaintWindow works
++                 * for the root window, so miPaintWindow works
+                  */
+                 screenIsSaved = SCREEN_SAVER_OFF;
+                 (*pWin->drawable.pScreen->MoveWindow) (pWin,
+diff --git a/hw/xquartz/quartz.c b/hw/xquartz/quartz.c
+index c8b6f96..2def8e3 100644
+--- a/hw/xquartz/quartz.c
++++ b/hw/xquartz/quartz.c
+@@ -300,8 +300,8 @@ QuartzUpdateScreens(void)
+ 
+     quartzProcs->UpdateScreen(pScreen);
+ 
+-    /* PaintWindow needs to be called after RootlessUpdateScreenPixmap (from xprUpdateScreen) */
+-    pScreen->PaintWindow(pRoot, &pRoot->borderClip, PW_BACKGROUND);
++    /* miPaintWindow needs to be called after RootlessUpdateScreenPixmap (from xprUpdateScreen) */
++    miPaintWindow(pRoot, &pRoot->borderClip, PW_BACKGROUND);
+ 
+     /* Tell RandR about the new size, so new connections get the correct info */
+     RRScreenSizeNotify(pScreen);
+diff --git a/hw/xwin/winrandr.c b/hw/xwin/winrandr.c
+index 1560199..73bbc9d 100644
+--- a/hw/xwin/winrandr.c
++++ b/hw/xwin/winrandr.c
+@@ -134,7 +134,7 @@ winDoRandRScreenSetSize(ScreenPtr pScreen,
+     SetRootClip(pScreen, ROOT_CLIP_FULL);
+ 
+     // and arrange for it to be repainted
+-    pScreen->PaintWindow(pRoot, &pRoot->borderClip, PW_BACKGROUND);
++    miPaintWindow(pRoot, &pRoot->borderClip, PW_BACKGROUND);
+ 
+     /* Indicate that a screen size change took place */
+     RRScreenSizeNotify(pScreen);
+diff --git a/include/scrnintstr.h b/include/scrnintstr.h
+index 2e617c4..a627fe7 100644
+--- a/include/scrnintstr.h
++++ b/include/scrnintstr.h
+@@ -158,10 +158,6 @@ typedef void (*PostValidateTreeProcPtr) (WindowPtr /*pParent */ ,
+ typedef void (*WindowExposuresProcPtr) (WindowPtr /*pWindow */ ,
+                                         RegionPtr /*prgn */);
+ 
+-typedef void (*PaintWindowProcPtr) (WindowPtr /*pWindow*/,
+-                                    RegionPtr /*pRegion*/,
+-                                    int /*what*/);
+-
+ typedef void (*CopyWindowProcPtr) (WindowPtr /*pWindow */ ,
+                                    DDXPointRec /*ptOldOrg */ ,
+                                    RegionPtr /*prgnSrc */ );
+@@ -502,7 +498,6 @@ typedef struct _Screen {
+     ClearToBackgroundProcPtr ClearToBackground;
+     ClipNotifyProcPtr ClipNotify;
+     RestackWindowProcPtr RestackWindow;
+-    PaintWindowProcPtr PaintWindow;
+ 
+     /* Pixmap procedures */
+ 
+diff --git a/mi/miexpose.c b/mi/miexpose.c
+index 148d1a6..f4c6e89 100644
+--- a/mi/miexpose.c
++++ b/mi/miexpose.c
+@@ -268,11 +268,10 @@ miHandleExposures(DrawablePtr pSrcDrawable, DrawablePtr pDstDrawable,
+         RegionTranslate(&rgnExposed, pDstDrawable->x, pDstDrawable->y);
+ 
+         if (extents) {
+-            /* PaintWindow doesn't clip, so we have to */
++            /* miPaintWindow doesn't clip, so we have to */
+             RegionIntersect(&rgnExposed, &rgnExposed, &pWin->clipList);
+         }
+-        pDstDrawable->pScreen->PaintWindow((WindowPtr) pDstDrawable,
+-                                           &rgnExposed, PW_BACKGROUND);
++        miPaintWindow((WindowPtr) pDstDrawable, &rgnExposed, PW_BACKGROUND);
+ 
+         if (extents) {
+             RegionReset(&rgnExposed, &expBox);
+@@ -384,14 +383,16 @@ miWindowExposures(WindowPtr pWin, RegionPtr prgn)
+              * work overall, on both client and server.  This is cheating, but
+              * isn't prohibited by the protocol ("spontaneous combustion" :-).
+              */
+-            BoxRec box = *RegionExtents(prgn);
++            BoxRec box;
++
++            box = *RegionExtents(prgn);
+             exposures = &expRec;
+             RegionInit(exposures, &box, 1);
+             RegionReset(prgn, &box);
+             /* miPaintWindow doesn't clip, so we have to */
+             RegionIntersect(prgn, prgn, &pWin->clipList);
+         }
+-        pWin->drawable.pScreen->PaintWindow(pWin, prgn, PW_BACKGROUND);
++        miPaintWindow(pWin, prgn, PW_BACKGROUND);
+         if (clientInterested)
+             miSendExposures(pWin, exposures,
+                             pWin->drawable.x, pWin->drawable.y);
+@@ -401,6 +402,14 @@ miWindowExposures(WindowPtr pWin, RegionPtr prgn)
+     }
+ }
+ 
++#ifdef ROOTLESS
++/* Ugly, ugly, but we lost our hooks into miPaintWindow... =/ */
++void RootlessSetPixmapOfAncestors(WindowPtr pWin);
++void RootlessStartDrawing(WindowPtr pWin);
++void RootlessDamageRegion(WindowPtr pWin, RegionPtr prgn);
++Bool IsFramedWindow(WindowPtr pWin);
++#endif
++
+ void
+ miPaintWindow(WindowPtr pWin, RegionPtr prgn, int what)
+ {
+@@ -428,6 +437,19 @@ miPaintWindow(WindowPtr pWin, RegionPtr prgn, int what)
+     Bool solid = TRUE;
+     DrawablePtr drawable = &pWin->drawable;
+ 
++#ifdef ROOTLESS
++    if (IsFramedWindow(pWin)) {
++        RootlessStartDrawing(pWin);
++        RootlessDamageRegion(pWin, prgn);
++
++        if (pWin->backgroundState == ParentRelative) {
++            if ((what == PW_BACKGROUND) ||
++                (what == PW_BORDER && !pWin->borderIsPixel))
++                RootlessSetPixmapOfAncestors(pWin);
++        }
++    }
++#endif
++
+     if (what == PW_BACKGROUND) {
+         while (pWin->backgroundState == ParentRelative)
+             pWin = pWin->parent;
+diff --git a/mi/mioverlay.c b/mi/mioverlay.c
+index b8b7a5b..a2715e9 100644
+--- a/mi/mioverlay.c
++++ b/mi/mioverlay.c
+@@ -844,8 +844,8 @@ miOverlayHandleExposures(WindowPtr pWin)
+             if ((mival = pTree->valdata)) {
+                 if (!((*pPriv->InOverlay) (pTree->pWin))) {
+                     if (RegionNotEmpty(&mival->borderExposed)) {
+-                        pScreen->PaintWindow(pTree->pWin, &mival->borderExposed,
+-                                             PW_BORDER);
++                        miPaintWindow(pTree->pWin, &mival->borderExposed,
++                                      PW_BORDER);
+                     }
+                     RegionUninit(&mival->borderExposed);
+ 
+@@ -883,8 +883,7 @@ miOverlayHandleExposures(WindowPtr pWin)
+             }
+             else {
+                 if (RegionNotEmpty(&val->after.borderExposed)) {
+-                    pScreen->PaintWindow(pChild, &val->after.borderExposed,
+-                                         PW_BORDER);
++                    miPaintWindow(pChild, &val->after.borderExposed, PW_BORDER);
+                 }
+                 (*WindowExposures) (pChild, &val->after.exposed);
+             }
+@@ -1008,7 +1007,7 @@ miOverlayWindowExposures(WindowPtr pWin, RegionPtr prgn)
+             else
+                 RegionIntersect(prgn, prgn, &pWin->clipList);
+         }
+-        pScreen->PaintWindow(pWin, prgn, PW_BACKGROUND);
++        miPaintWindow(pWin, prgn, PW_BACKGROUND);
+         if (clientInterested)
+             miSendExposures(pWin, exposures,
+                             pWin->drawable.x, pWin->drawable.y);
+@@ -1607,7 +1606,7 @@ miOverlayClearToBackground(WindowPtr pWin,
+     if (generateExposures)
+         (*pScreen->WindowExposures) (pWin, &reg);
+     else if (pWin->backgroundState != None)
+-        pScreen->PaintWindow(pWin, &reg, PW_BACKGROUND);
++        miPaintWindow(pWin, &reg, PW_BACKGROUND);
+     RegionUninit(&reg);
+ }
+ 
+diff --git a/mi/miscrinit.c b/mi/miscrinit.c
+index 9c6af0d..b53c7e4 100644
+--- a/mi/miscrinit.c
++++ b/mi/miscrinit.c
+@@ -253,7 +253,6 @@ miScreenInit(ScreenPtr pScreen, void *pbits,  /* pointer to screen bits */
+     pScreen->ClearToBackground = miClearToBackground;
+     pScreen->ClipNotify = (ClipNotifyProcPtr) 0;
+     pScreen->RestackWindow = (RestackWindowProcPtr) 0;
+-    pScreen->PaintWindow = miPaintWindow;
+     /* CreatePixmap, DestroyPixmap */
+     /* RealizeFont, UnrealizeFont */
+     /* CreateGC */
+diff --git a/mi/miwindow.c b/mi/miwindow.c
+index 39c279e..2fc7cfb 100644
+--- a/mi/miwindow.c
++++ b/mi/miwindow.c
+@@ -113,7 +113,7 @@ miClearToBackground(WindowPtr pWin,
+     if (generateExposures)
+         (*pWin->drawable.pScreen->WindowExposures) (pWin, &reg);
+     else if (pWin->backgroundState != None)
+-        pWin->drawable.pScreen->PaintWindow(pWin, &reg, PW_BACKGROUND);
++        miPaintWindow(pWin, &reg, PW_BACKGROUND);
+     RegionUninit(&reg);
+ }
+ 
+@@ -219,9 +219,7 @@ miHandleValidateExposures(WindowPtr pWin)
+     while (1) {
+         if ((val = pChild->valdata)) {
+             if (RegionNotEmpty(&val->after.borderExposed))
+-                pWin->drawable.pScreen->PaintWindow(pChild,
+-                                                    &val->after.borderExposed,
+-                                                    PW_BORDER);
++                miPaintWindow(pChild, &val->after.borderExposed, PW_BORDER);
+             RegionUninit(&val->after.borderExposed);
+             (*WindowExposures) (pChild, &val->after.exposed);
+             RegionUninit(&val->after.exposed);
+diff --git a/miext/rootless/rootlessCommon.h b/miext/rootless/rootlessCommon.h
+index c3fa2a2..7fdea22 100644
+--- a/miext/rootless/rootlessCommon.h
++++ b/miext/rootless/rootlessCommon.h
+@@ -94,7 +94,6 @@ typedef struct _RootlessScreenRec {
+     ChangeBorderWidthProcPtr ChangeBorderWidth;
+     PositionWindowProcPtr PositionWindow;
+     ChangeWindowAttributesProcPtr ChangeWindowAttributes;
+-    PaintWindowProcPtr PaintWindow;
+ 
+     CreateGCProcPtr CreateGC;
+     CopyWindowProcPtr CopyWindow;
+diff --git a/miext/rootless/rootlessScreen.c b/miext/rootless/rootlessScreen.c
+index 4716564..6226ee8 100644
+--- a/miext/rootless/rootlessScreen.c
++++ b/miext/rootless/rootlessScreen.c
+@@ -473,7 +473,7 @@ expose_1(WindowPtr pWin)
+     if (!pWin->realized)
+         return;
+ 
+-    pWin->drawable.pScreen->PaintWindow(pWin, &pWin->borderClip, PW_BACKGROUND);
++    miPaintWindow(pWin, &pWin->borderClip, PW_BACKGROUND);
+ 
+     /* FIXME: comments in windowstr.h indicate that borderClip doesn't
+        include subwindow visibility. But I'm not so sure.. so we may
+@@ -669,7 +669,6 @@ RootlessWrap(ScreenPtr pScreen)
+     WRAP(CloseScreen);
+     WRAP(CreateGC);
+     WRAP(CopyWindow);
+-    WRAP(PaintWindow);
+     WRAP(GetImage);
+     WRAP(SourceValidate);
+     WRAP(CreateWindow);
+diff --git a/miext/rootless/rootlessWindow.c b/miext/rootless/rootlessWindow.c
+index e304299..3240acc 100644
+--- a/miext/rootless/rootlessWindow.c
++++ b/miext/rootless/rootlessWindow.c
+@@ -720,7 +720,7 @@ RootlessResizeCopyWindow(WindowPtr pWin, DDXPointRec ptOldOrg,
+ /*
+  * RootlessCopyWindow
+  *  Update *new* location of window. Old location is redrawn with
+- *  PaintWindow. Cloned from fbCopyWindow.
++ *  miPaintWindow. Cloned from fbCopyWindow.
+  *  The original always draws on the root pixmap, which we don't have.
+  *  Instead, draw on the parent window's pixmap.
+  */
+@@ -794,27 +794,6 @@ RootlessCopyWindow(WindowPtr pWin, DDXPointRec ptOldOrg, RegionPtr prgnSrc)
+     RL_DEBUG_MSG("copywindowFB end\n");
+ }
+ 
+-void
+-RootlessPaintWindow(WindowPtr pWin, RegionPtr prgn, int what)
+-{
+-    ScreenPtr pScreen = pWin->drawable.pScreen;
+-
+-    if (IsFramedWindow(pWin)) {
+-        RootlessStartDrawing(pWin);
+-        RootlessDamageRegion(pWin, prgn);
+-
+-        if (pWin->backgroundState == ParentRelative) {
+-            if ((what == PW_BACKGROUND) ||
+-                (what == PW_BORDER && !pWin->borderIsPixel))
+-                RootlessSetPixmapOfAncestors(pWin);
+-        }
+-    }
+-
+-    SCREEN_UNWRAP(pScreen, PaintWindow);
+-    pScreen->PaintWindow(pWin, prgn, what);
+-    SCREEN_WRAP(pScreen, PaintWindow);
+-}
+-
+ /*
+  * Window resize procedures
+  */
+diff --git a/miext/rootless/rootlessWindow.h b/miext/rootless/rootlessWindow.h
+index 4fd34d5..d3955fc 100644
+--- a/miext/rootless/rootlessWindow.h
++++ b/miext/rootless/rootlessWindow.h
+@@ -48,7 +48,6 @@ Bool RootlessUnrealizeWindow(WindowPtr pWin);
+ void RootlessRestackWindow(WindowPtr pWin, WindowPtr pOldNextSib);
+ void RootlessCopyWindow(WindowPtr pWin, DDXPointRec ptOldOrg,
+                         RegionPtr prgnSrc);
+-void RootlessPaintWindow(WindowPtr pWin, RegionPtr prgn, int what);
+ void RootlessMoveWindow(WindowPtr pWin, int x, int y, WindowPtr pSib,
+                         VTKind kind);
+ void RootlessResizeWindow(WindowPtr pWin, int x, int y, unsigned int w,
+-- 
+2.8.1
+

@@ -1,0 +1,236 @@
+diff -ur ../kdepim-4.13.3-orig/CMakeLists.txt ./CMakeLists.txt
+--- ../kdepim-4.13.3-orig/CMakeLists.txt	2014-07-09 21:18:50.000000000 +0900
++++ ./CMakeLists.txt	2014-09-21 00:07:54.000000000 +0900
+@@ -310,9 +310,7 @@
+         macro_optional_add_subdirectory(knode)
+       endif()
+ 
+-      if(Q_WS_X11)
+-        macro_optional_add_subdirectory(ktimetracker)
+-      endif()
++      macro_optional_add_subdirectory(ktimetracker)
+ 
+     endif()
+     macro_optional_add_subdirectory(kontact) # must be the last one.
+Only in .: CMakeLists.txt.orig
+diff -ur ../kdepim-4.13.3-orig/ktimetracker/CMakeLists.txt ./ktimetracker/CMakeLists.txt
+--- ../kdepim-4.13.3-orig/ktimetracker/CMakeLists.txt	2014-07-09 21:18:50.000000000 +0900
++++ ./ktimetracker/CMakeLists.txt	2014-09-21 00:07:54.000000000 +0900
+@@ -1,15 +1,18 @@
+ project(ktimetracker)
+ 
++if(NOT Q_WS_MAC)
+ #We check if X11_Xscreensaver was found
+-if(X11_Xscreensaver_FOUND)
+-  message(STATUS "Found the X11 screensaver extension")
+-  macro_bool_to_01(X11_Xscreensaver_LIB HAVE_LIBXSS)
++  if(X11_Xscreensaver_FOUND)
++    message(STATUS "Found the X11 screensaver extension")
++    macro_bool_to_01(X11_Xscreensaver_LIB HAVE_LIBXSS)
++  else()
++    message(STATUS "The X11 screensaver extension was NOT found.")
++  endif()
++  add_feature_info("KtimeTracker idle detection" X11_Xscreensaver_FOUND "Measure the screen idle time in KTimeTracker")
+ else()
+-  message(STATUS "The X11 screensaver extension was NOT found.")
++  add_feature_info("KtimeTracker idle detection" Q_WS_MAC "Measure the screen idle time in KTimeTracker")
+ endif()
+ 
+-add_feature_info("KtimeTracker idle detection" X11_Xscreensaver_FOUND "Measure the screen idle time in KTimeTracker")
+-
+ configure_file(config-ktimetracker.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-ktimetracker.h )
+ 
+ add_subdirectory( support )
+@@ -69,6 +72,9 @@
+ if(X11_Xscreensaver_LIB)
+ 	target_link_libraries(ktimetracker  ${X11_Xscreensaver_LIB} )
+ endif()
++if(Q_WS_MAC)
++     target_link_libraries(ktimetracker  "-framework ApplicationServices" )
++endif()
+ 
+ install( TARGETS karm  ${INSTALL_TARGETS_DEFAULT_ARGS} )
+ install( TARGETS ktimetracker  ${INSTALL_TARGETS_DEFAULT_ARGS} )
+@@ -84,6 +90,9 @@
+ if(X11_Xscreensaver_LIB)
+     target_link_libraries(kcm_ktimetracker  ${X11_Xscreensaver_LIB} )
+ endif()
++if(Q_WS_MAC)
++     target_link_libraries(kcm_ktimetracker  "-framework ApplicationServices" )
++endif()
+ 
+ install(TARGETS kcm_ktimetracker DESTINATION ${PLUGIN_INSTALL_DIR})
+ 
+@@ -99,6 +108,9 @@
+ if(X11_Xscreensaver_LIB)
+ 	target_link_libraries(ktimetrackerpart  ${X11_Xscreensaver_LIB})
+ endif()
++if(Q_WS_MAC)
++     target_link_libraries(ktimetrackerpart  "-framework ApplicationServices" )
++endif()
+ 
+ 
+ install(TARGETS ktimetrackerpart  DESTINATION ${PLUGIN_INSTALL_DIR})
+diff -ur ../kdepim-4.13.3-orig/ktimetracker/idletimedetector.cpp ./ktimetracker/idletimedetector.cpp
+--- ../kdepim-4.13.3-orig/ktimetracker/idletimedetector.cpp	2014-07-09 21:18:50.000000000 +0900
++++ ./ktimetracker/idletimedetector.cpp	2014-09-21 00:07:54.000000000 +0900
+@@ -39,6 +39,10 @@
+ #include <QX11Info>
+ #endif
+ 
++#ifdef Q_OS_MAC
++#    include <ApplicationServices/ApplicationServices.h>
++#endif
++
+ IdleTimeDetector::IdleTimeDetector(int maxIdle)
+ {
+     _maxIdle = maxIdle;
+@@ -47,11 +51,16 @@
+     int event_base, error_base;
+     if(XScreenSaverQueryExtension(QX11Info::display(), &event_base, &error_base)) _idleDetectionPossible = true;
+     else _idleDetectionPossible = false;
+-    _timer = new QTimer(this);
+-    connect(_timer, SIGNAL(timeout()), this, SLOT(check()));
++#elif defined(Q_OS_MAC)
++    _idleDetectionPossible = true;
+ #else
+     _idleDetectionPossible = false;
+ #endif // HAVE_LIBXSS
++    if( _idleDetectionPossible ){
++        _timer = new QTimer(this);
++        // the slot was renamed to runOnce() to avoid a macro defined through ApplicationServices.h on OS X
++        connect(_timer, SIGNAL(timeout()), this, SLOT(runOnce()));
++    }
+ }
+ 
+ bool IdleTimeDetector::isIdleDetectionPossible()
+@@ -59,11 +68,11 @@
+     return _idleDetectionPossible;
+ }
+ 
+-void IdleTimeDetector::check()
++void IdleTimeDetector::runOnce()
+ {
+     kDebug(5970) << "Entering function";
+ #if defined(HAVE_LIBXSS) && defined(Q_WS_X11)
+-    kDebug(5970) << "kompiled for libxss and x11, idledetectionpossible is " << _idleDetectionPossible;
++    kDebug(5970) << "compiled for libxss and x11, idledetectionpossible is " << _idleDetectionPossible;
+     if (_idleDetectionPossible)
+     {
+         _mit_info = XScreenSaverAllocInfo();
+@@ -74,6 +83,12 @@
+         if (idleminutes >= _maxIdle)
+         informOverrun();
+     }
++#elif defined(Q_OS_MAC)
++    // see http://stackoverflow.com/a/22307622/1460868
++    idleminutes = (int) CGEventSourceSecondsSinceLastEventType( kCGEventSourceStateHIDSystemState, kCGAnyInputEventType ) / secsPerMinute;
++    if( idleminutes >= _maxIdle ){
++        informOverrun();
++    }
+ #endif // HAVE_LIBXSS
+ }
+ 
+@@ -92,7 +107,7 @@
+     emit(stopAllTimers(idlestart));
+ }
+ 
+-#if defined(HAVE_LIBXSS) && defined(Q_WS_X11)
++#if (defined(HAVE_LIBXSS) && defined(Q_WS_X11)) || defined(Q_OS_MAC)
+ void IdleTimeDetector::informOverrun()
+ {
+     if (!_overAllIdleDetect)
+@@ -126,20 +141,20 @@
+         kDebug(5970) << "Setting WinId " << dialog->winId() << " to deskTop " << KWindowSystem::self()->currentDesktop();
+         dialog->show();
+ }
+-#endif // HAVE_LIBXSS
++#endif // HAVE_LIBXSS || Q_OS_MAC
+ 
+ void IdleTimeDetector::startIdleDetection()
+ {
+-#if defined(HAVE_LIBXSS) && defined(Q_WS_X11)
+-    if (!_timer->isActive())
++#if (defined(HAVE_LIBXSS) && defined(Q_WS_X11)) || defined(Q_OS_MAC)
++  if (!_timer->isActive())
+         _timer->start(testInterval);
+ #endif //HAVE_LIBXSS
+ }
+ 
+ void IdleTimeDetector::stopIdleDetection()
+ {
+-#if defined(HAVE_LIBXSS) && defined(Q_WS_X11)
+-    if (_timer->isActive())
++#if (defined(HAVE_LIBXSS) && defined(Q_WS_X11)) || defined(Q_OS_MAC)
++  if (_timer->isActive())
+         _timer->stop();
+ #endif // HAVE_LIBXSS
+ }
+diff -ur ../kdepim-4.13.3-orig/ktimetracker/idletimedetector.h ./ktimetracker/idletimedetector.h
+--- ../kdepim-4.13.3-orig/ktimetracker/idletimedetector.h	2014-07-09 21:18:50.000000000 +0900
++++ ./ktimetracker/idletimedetector.h	2014-09-21 00:07:54.000000000 +0900
+@@ -59,13 +59,14 @@
+      Returns true if it is possible to do idle detection.
+      Idle detection relys on a feature in the X server, which might not
+      always be present.
++     On OS X, it uses CGEventSourceSecondsSinceLastEventType() from ApplicationServices.framework
+   **/
+   bool isIdleDetectionPossible();
+ 
+ Q_SIGNALS:
+   /**
+      Tells the listener to subtract time from current timing.
+-     The time to subtract is due to the idle time since the dialog wass
++     The time to subtract is due to the idle time since the dialog was
+      shown, and until the user answers the dialog.
+      @param minutes Minutes to subtract.
+   **/
+@@ -104,12 +105,12 @@
+ 
+ 
+ protected:
+-#if defined(HAVE_LIBXSS) && defined(Q_WS_X11)
++#if (defined(HAVE_LIBXSS) && defined(Q_WS_X11)) || defined(Q_OS_MAC)
+   void informOverrun();
+-#endif // HAVE_LIBXSS
++#endif // HAVE_LIBXSS || Q_OS_MAC
+ 
+ protected Q_SLOTS:
+-  void check();
++  void runOnce();
+ 
+ private:
+ #if defined(HAVE_LIBXSS) && defined(Q_WS_X11)
+diff -ur ../kdepim-4.13.3-orig/ktimetracker/ktimetrackerutility.cpp ./ktimetracker/ktimetrackerutility.cpp
+--- ../kdepim-4.13.3-orig/ktimetracker/ktimetrackerutility.cpp	2014-07-09 21:18:50.000000000 +0900
++++ ./ktimetracker/ktimetrackerutility.cpp	2014-09-21 00:07:54.000000000 +0900
+@@ -26,8 +26,10 @@
+ 
+ #include <math.h>
+ #include <stdlib.h>
++#ifdef Q_WS_X11
+ #include <X11/Xlib.h>
+ #include <fixx11h.h>
++#endif
+ 
+ QString getFocusWindow()
+ {
+diff -ur ../kdepim-4.13.3-orig/ktimetracker/mainwindow.cpp ./ktimetracker/mainwindow.cpp
+--- ../kdepim-4.13.3-orig/ktimetracker/mainwindow.cpp	2014-07-09 21:18:50.000000000 +0900
++++ ./ktimetracker/mainwindow.cpp	2014-09-21 00:07:54.000000000 +0900
+@@ -71,7 +71,15 @@
+         // and another one in the plugin. The build system should be fixed.
+         //m_part = factory->create<ktimetrackerpart>( this );
+ 
++#ifdef Q_OS_MAC
++	   // not sure if this is really required but this is the code that works for me with g++-mp-4.8
++	   static KParts::ReadWritePart *rwp = factory->create<KParts::ReadWritePart>( this );
++        static ktimetrackerpart *mp = dynamic_cast<ktimetrackerpart*>( rwp );
++        m_part = dynamic_cast<ktimetrackerpart*>( rwp );
++	   kError() << "this=" << this << "; rwp=" << rwp << "; mp=" << mp << "; m_part=" << m_part;
++#else
+         m_part = dynamic_cast<ktimetrackerpart*>( factory->create<KParts::ReadWritePart>( this ) );
++#endif // Q_OS_MAC
+ 
+         if (m_part)
+         {

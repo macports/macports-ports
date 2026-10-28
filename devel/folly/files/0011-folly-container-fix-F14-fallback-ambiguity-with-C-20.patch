@@ -1,0 +1,100 @@
+From 2d653b749225e49eff1dd141b4468cb2e3694f2b Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Wed, 29 Jul 2026 10:30:31 +0000
+Subject: [PATCH 13/13] folly/container: fix F14 fallback ambiguity with C++20
+ heterogeneous lookup
+
+The F14 fallback containers (used where SIMD intrinsics are unavailable,
+e.g. PowerPC) derive from std::unordered_set/map and add heterogeneous
+find/count/equal_range overloads next to using-declarations that pull in
+the base-class versions. Since C++20 (P0919) the standard containers
+provide transparent lookup overloads themselves, and with GCC 16's
+libstdc++ these are no longer hidden by the derived-class templates, so
+every heterogeneous lookup call becomes ambiguous:
+
+  F14SetFallback.h:262:16: error: call of overloaded
+  'find(const std::basic_string_view<char>&)' is ambiguous
+
+Replace the using-declarations with exact non-template forwarders to
+Super, the same shadowing style F14MapFallback.h already uses for its
+find/count/at members, so the base-class transparent overloads stay
+hidden regardless of how the standard library declares them.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01UyF7VxTcCgsCkxpVJd7ynt
+---
+ folly/container/detail/F14MapFallback.h | 12 +++++++++++-
+ folly/container/detail/F14SetFallback.h | 21 ++++++++++++++++++---
+ 2 files changed, 29 insertions(+), 4 deletions(-)
+
+diff --git a/folly/container/detail/F14MapFallback.h b/folly/container/detail/F14MapFallback.h
+index c399d0206..72cdd843e 100644
+--- a/folly/container/detail/F14MapFallback.h
++++ b/folly/container/detail/F14MapFallback.h
+@@ -418,7 +418,17 @@ class F14BasicMap : public std::unordered_map<K, M, H, E, A> {
+   }
+ 
+  public:
+-  using Super::equal_range;
++  // Shadows (rather than using) Super::equal_range: since C++20 (P0919)
++  // std::unordered_map has a transparent equal_range overload that would
++  // be ambiguous with the heterogeneous overloads defined here.
++  std::pair<iterator, iterator> equal_range(key_type const& key) {
++    return Super::equal_range(key);
++  }
++
++  std::pair<const_iterator, const_iterator> equal_range(
++      key_type const& key) const {
++    return Super::equal_range(key);
++  }
+ 
+   template <typename K2>
+   EnableHeterogeneousFind<K2, std::pair<iterator, iterator>> equal_range(
+diff --git a/folly/container/detail/F14SetFallback.h b/folly/container/detail/F14SetFallback.h
+index e5261982d..eca105611 100644
+--- a/folly/container/detail/F14SetFallback.h
++++ b/folly/container/detail/F14SetFallback.h
+@@ -236,14 +236,22 @@ class F14BasicSet
+   }
+ 
+  public:
+-  using Super::count;
++  // Lookup functions from Super are shadowed by exact-match forwarders
++  // rather than pulled in with using-declarations: since C++20 (P0919)
++  // std::unordered_set has transparent overloads of find, count, and
++  // equal_range that would be ambiguous with the heterogeneous overloads
++  // defined here.
++
++  size_type count(key_type const& key) const { return Super::count(key); }
+ 
+   template <typename K>
+   EnableHeterogeneousFind<K, size_type> count(K const& key) const {
+     return contains(key) ? 1 : 0;
+   }
+ 
+-  using Super::find;
++  iterator find(key_type const& key) { return Super::find(key); }
++
++  const_iterator find(key_type const& key) const { return Super::find(key); }
+ 
+   template <typename K>
+   EnableHeterogeneousFind<K, iterator> find(K const& key) {
+@@ -274,7 +282,14 @@ class F14BasicSet
+   }
+ 
+  public:
+-  using Super::equal_range;
++  std::pair<iterator, iterator> equal_range(key_type const& key) {
++    return Super::equal_range(key);
++  }
++
++  std::pair<const_iterator, const_iterator> equal_range(
++      key_type const& key) const {
++    return Super::equal_range(key);
++  }
+ 
+   template <typename K>
+   EnableHeterogeneousFind<K, std::pair<iterator, iterator>> equal_range(
+-- 
+2.43.0
+

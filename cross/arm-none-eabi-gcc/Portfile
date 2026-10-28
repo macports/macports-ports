@@ -1,0 +1,110 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           crossgcc 1.0
+
+set gccversion      16.1.0
+set newlibversion   4.6.0.20260123
+crossgcc.setup      arm-none-eabi ${gccversion}
+crossgcc.setup_libc newlib ${newlibversion}
+revision            0
+
+maintainers         {judaew @judaew} openmaintainer
+
+depends_build-append \
+                    bin:makeinfo:texinfo
+
+# specific to ARM
+configure.args-append \
+                    --enable-interwork \
+                    --disable-newlib-supplied-syscalls \
+                    --with-multilib-list=rmprofile \
+                    --enable-newlib-io-long-long \
+                    --enable-newlib-io-c99-formats
+
+# GCC's arm target code contains bracket nesting exceeding clangs's default
+# bracket limit.  (https://llvm.org/bugs/show_bug.cgi?id=19650)
+if {[string match "*clang*" ${configure.compiler}]} {
+    configure.cflags-append -fbracket-depth=512
+    configure.cxxflags-append -fbracket-depth=512
+}
+
+# Build newlib-nano variant for reduced flash footprint.
+# nano.specs is already shipped by GCC but is useless without the nano
+# libraries (libc_nano.a, libg_nano.a) and nano newlib.h header.
+# This does a second build of newlib with nano-specific flags, then
+# copies the outputs with _nano.a suffixes, matching what the ARM GNU
+# Toolchain ships.
+post-build {
+    # Create a wrapper for the cross compiler from the build tree.
+    # The just-built xgcc needs -B to find its support files.
+    set wrapperdir "${workpath}/nano-tools"
+    file mkdir ${wrapperdir}
+    set fd [open "${wrapperdir}/arm-none-eabi-gcc" w]
+    puts $fd "#!/bin/sh"
+    puts $fd "exec \"${workpath}/build/gcc/xgcc\" \"-B${workpath}/build/gcc/\" \"\$@\""
+    close $fd
+    file attributes "${wrapperdir}/arm-none-eabi-gcc" -permissions 0755
+
+    set nano_builddir "${workpath}/build-nano-newlib"
+    set nano_installdir "${workpath}/install-nano"
+    file mkdir ${nano_builddir}
+
+    system -W ${nano_builddir} "\
+        PATH=${wrapperdir}:${prefix}/bin:\$PATH \
+        CFLAGS_FOR_TARGET='-g -Os -ffunction-sections -fdata-sections' \
+        ${workpath}/newlib-${crossgcc.libc_version}/configure \
+        --target=arm-none-eabi \
+        --prefix=${nano_installdir} \
+        --enable-interwork \
+        --disable-newlib-supplied-syscalls \
+        --enable-newlib-reent-small \
+        --disable-newlib-fvwrite-in-streamio \
+        --disable-newlib-fseek-optimization \
+        --disable-newlib-wide-orient \
+        --disable-newlib-unbuf-stream-opt \
+        --enable-newlib-global-atexit \
+        --enable-newlib-retargetable-locking \
+        --enable-newlib-global-stdio-streams \
+        --enable-newlib-nano-malloc \
+        --enable-newlib-nano-formatted-io \
+        --enable-lite-exit \
+        --disable-nls"
+
+    system -W ${nano_builddir} "\
+        PATH=${wrapperdir}:${prefix}/bin:\$PATH \
+        make"
+
+    system -W ${nano_builddir} "\
+        PATH=${wrapperdir}:${prefix}/bin:\$PATH \
+        make install"
+}
+
+post-destroot {
+    # Install newlib-nano: the nano newlib.h header and renamed libraries.
+
+    set nano_installdir "${workpath}/install-nano"
+    set nano_libbase "${nano_installdir}/arm-none-eabi/lib"
+    set dest_libbase "${destroot}${prefix}/arm-none-eabi/lib"
+
+    # Copy nano newlib.h header (used by nano.specs via -isystem)
+    file mkdir "${destroot}${prefix}/arm-none-eabi/include/newlib-nano"
+    file copy "${nano_installdir}/arm-none-eabi/include/newlib.h" \
+              "${destroot}${prefix}/arm-none-eabi/include/newlib-nano/newlib.h"
+
+    # Copy nano libraries to each multilib directory, renaming to *_nano.a
+    foreach nano_libc [split [exec find ${nano_libbase} -name libc.a] \n] {
+        set nano_dir [file dirname ${nano_libc}]
+        set relpath [string range ${nano_dir} [string length ${nano_libbase}] end]
+        set dest_dir "${dest_libbase}${relpath}"
+
+        if {[file isdirectory ${dest_dir}]} {
+            foreach {src dst} {libc.a libc_nano.a libg.a libg_nano.a} {
+                set srcfile "${nano_dir}/${src}"
+                if {[file exists ${srcfile}]} {
+                    file copy -force ${srcfile} "${dest_dir}/${dst}"
+                }
+            }
+        }
+    }
+}
