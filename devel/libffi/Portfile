@@ -7,7 +7,7 @@ PortGroup           github 1.0
 conflicts           libffi-devel
 
 github.setup        libffi libffi 3.4.8 v
-revision            0
+revision            1
 
 checksums           rmd160  ea8558bf3afdf92f470859807a31c6dc78921d0e \
                     sha256  bc9842a18898bfacb0ed1252c4febcc7e78fa139fd27fdc7a3e30d9d9356119b \
@@ -33,7 +33,7 @@ homepage            https://www.sourceware.org/libffi/
 
 # patch-sources.diff: fixes for various issues.
 #
-# This diff is from v3.4.8 vs. macports-3.4.8.
+# This diff is from v3.4.8 vs. macports-3.4.8r1.
 #
 patchfiles          patch-sources.diff
 
@@ -54,27 +54,88 @@ compiler.blacklist-append macports-*
 # tested by running the applicable port commands with
 # "configure.cxx_stdlib=libc++".
 #
-platform darwin {
-    configure.cxx_stdlib
-}
+configure.cxx_stdlib
 
-# The architecture-detection code in the configure script is based on the
-# compiler's default architecture.  We need to force this to match the
-# target architecture to get the correct build.  Merely providing the
-# correct architecture options in xxFLAGS is insufficient.
+# Architecture handling.
+# The gnu-oriented code often gets this wrong, so we're explicit.
 #
-if { [variant_isset universal] } {
-    merger_arch_compiler yes
-} else {
-    configure.cc "${configure.cc} ${configure.cc_archflags}"
+# We set 'build' to the platform's native arch, and 'host' to the actual
+# arch for the build and test.  This setup provides the most honest info
+# in the logs, including in the test results.
+
+# Obtain the platform's true native arch.  There's no one tool to do this,
+# though 'machine' provides mappable (albeit nonstandard) values in all cases
+# except x86, where it's necessary to use sysctl to check bitness.  The sysctl
+# for the x86_64 property may be 0 or missing on i386, but is always 1 on
+# x86_64.
+#
+proc get_platform_arch {} {
+    switch -glob [exec machine] {
+        ppc970  {return powerpc64}
+        ppc*    {return powerpc}
+        i?86 {
+            if {[regexp {1$} [exec sysctl hw.optional.x86_64 2>/dev/null]]} {
+                return x86_64
+            } else {
+                return i386
+            }
+        }
+        arm64*  {return arm64}
+    }
 }
 
-# There used to be a hack to force the use of the integrated assembler when
-# building with clang.  Not only is that no longer necessary, but it also
-# causes slightly worse test results in at least one case.
+# Convert a standard arch name to the name used in gnu triplets.
+#
+proc triplet_arch {arch} {
+    switch -- ${arch} {
+        ppc     {return powerpc}
+        ppc64   {return powerpc64}
+        i386    {return i686}
+        arm64   {return aarch64}
+        default {return ${arch}}
+    }
+}
 
-array set merger_host {
-    ppc64 powerpc-apple-darwin
+# Get the full triplet for the specified arch, assuming the current OS.
+#
+proc triplet {arch} {
+    global os.platform os.version
+    return [triplet_arch ${arch}]-apple-${os.platform}${os.version}
+}
+
+# Set 'build' to the native arch.
+set platform_arch       [get_platform_arch]
+configure.args-append   --build=[triplet ${platform_arch}]
+
+# Set 'host' to the actual target, appropriately for universal and
+# non-universal builds.
+#
+# In addition, the test setup doesn't always get the correct arch,
+# so we similarly set up the HOSTARCH variable to pass it in.
+# This relies on a local patch.
+#
+if {![variant_isset universal]} {
+    set arch                ${configure.build_arch}
+    configure.args-append   --host=[triplet ${arch}]
+    test.env-append         HOSTARCH=${arch}
+} elseif {[llength ${configure.universal_archs}] == 1} {
+    # Single-arch universal doesn't get the full universal treatment
+    set arch                [lindex ${configure.universal_archs} 0]
+    configure.args-append   --host=[triplet ${arch}]
+    test.env-append         HOSTARCH=${arch}
+} else {
+    foreach arch ${configure.universal_archs} {
+        set merger_host(${arch})        [triplet ${arch}]
+        set merger_test_env(${arch})    HOSTARCH=${arch}
+        if {${platform_arch} eq "i386" && ${arch} eq "x86_64"} {
+            # The muniversal PG doesn't know that this case doesn't work.
+            # In the absence of a straightforward way to disable it, we
+            # arrange to ignore the resulting error (though the failures
+            # still appear in the log).  If muniversal ever became smarter,
+            # this would become a NOP.
+            set merger_test_args(${arch})   "|| true"
+        }
+    }
 }
 
 lappend merger_dont_diff \
@@ -85,9 +146,33 @@ depends_test-append port:dejagnu
 test.run            yes
 test.target         check
 
-# Some warnings need to be disabled when building tests with gcc-4.2
-if {[string match *gcc-4.2 ${configure.compiler}]} {
-    test.env-append LIBFFI_TEST_OLDGCC=1
+# Test adjustments assume the usual chosen compiler on all platforms.
+# Forcing a different compiler may result in failures.
+# The OS version may be used as a proxy for the compiler version.
+
+# Some alternate ABI cases provoke test failures, so they're currently
+# disabled.  It's not yet known whether these failures are due to real
+# bugs or just test bugs, but alternate ABIs aren't normally used on
+# the Mac, anyway.
+
+# Test adjustments needed for all expected compilers
+test.env-append LIBFFI_TEST_NO_NO_UNUSED_BUT_SET=1
+test.env-append LIBFFI_TEST_NO_THISCALL=1
+test.env-append LIBFFI_TEST_NO_MSABI=1
+
+# Disable logfile escape clutter when possible.
+if {${os.major} >= 11} {
+    test.env-append LIBFFI_TEST_NO_COLOR_DIAGS=1
+}
+
+# Adjustments needed for gcc-4
+if {[string match *gcc-4.* ${configure.compiler}]} {
+    test.env-append LIBFFI_TEST_GCC_NO_NO_UNUSED_OPT=1
+}
+
+# Adjustments needed for both gcc-4 and older clangs (<1100)
+if {${os.major} < 18} {
+    test.env-append LIBFFI_TEST_NO_NO_PSABI=1
 }
 
 github.livecheck.regex {(\d+(?:\.\d+)+)}

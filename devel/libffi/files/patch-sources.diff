@@ -1,5 +1,5 @@
 --- src/powerpc/darwin.S.orig	2024-06-01 10:42:02.000000000 -0700
-+++ src/powerpc/darwin.S	2025-04-17 11:40:54.000000000 -0700
++++ src/powerpc/darwin.S	2026-10-18 16:13:56.000000000 -0700
 @@ -31,8 +31,6 @@
  #define MODE_CHOICE(x, y) x
  #endif
@@ -10,7 +10,7 @@
  #define lgu		MODE_CHOICE(lwzu, ldu)
  #define lg		MODE_CHOICE(lwz,ld)
 --- src/powerpc/darwin_closure.S.orig	2024-06-01 10:42:02.000000000 -0700
-+++ src/powerpc/darwin_closure.S	2025-04-17 11:40:54.000000000 -0700
++++ src/powerpc/darwin_closure.S	2026-10-18 16:13:56.000000000 -0700
 @@ -34,7 +34,7 @@
  #define MODE_CHOICE(x, y) x
  #endif
@@ -20,31 +20,290 @@
  
  ; Define some pseudo-opcodes for size-independent load & store of GPRs ...
  #define lgu		MODE_CHOICE(lwzu, ldu)
+--- src/x86/ffi.c.orig	2025-02-08 06:37:58.000000000 -0800
++++ src/x86/ffi.c	2026-10-18 16:13:56.000000000 -0700
+@@ -118,6 +118,16 @@ ffi_prep_cif_machdep(ffi_cif *cif)
+       break;
+     case FFI_TYPE_STRUCT:
+       {
++        /* Handle single-float and single-double structs specially */
++        if (!cif->rtype->elements[1]) {
++          if (cif->rtype->elements[0]->type == FFI_TYPE_FLOAT) {
++            flags = X86_RET_FLOAT;
++            break;
++          } else if (cif->rtype->elements[0]->type == FFI_TYPE_DOUBLE) {
++            flags = X86_RET_DOUBLE;
++            break;
++          }
++        }
+ #if defined(X86_WIN32) || defined(X86_DARWIN)
+         size_t size = cif->rtype->size;
+         if (size == 1)
+@@ -386,8 +396,16 @@ ffi_call_int (ffi_cif *cif, void (*fn)(v
+ 	     inside, however, would get 16 byte alignment.  Since libffi does
+ 	     not support vectors, we need non concern ourselves with other
+ 	     cases.  */
++	  /*****
++	     Actually, the above is incorrect.  Argument alignment is never
++	     stricter than four bytes, regardless of type (though the entire
++	     stack frame is 16-byte aligned).
++
++	     Hence, we disable the following statement:
++
+ 	  if (t == FFI_TYPE_STRUCT && ty->alignment >= 16)
+ 	    align = 16;
++	   *****/
+ 
+ 	  if (dir < 0)
+ 	    {
+@@ -447,6 +465,13 @@ struct closure_frame
+   void *user_data;				/* 36 */
+ };
+ 
++/* Alignment is more complicated in the closure case, since the arguments
++   are received on the stack as usual, but provided to the callee via
++   pointers in the args[] array.  The received arguments never get stricter
++   than four-byte alignment, but the outgoing args need to be fully
++   aligned according to their type.  In some cases, this requires making
++   more strictly aligned copies. */
++
+ int FFI_HIDDEN FFI_DECLARE_FASTCALL
+ ffi_closure_inner (struct closure_frame *frame, char *stack)
+ {
+@@ -515,7 +540,7 @@ ffi_closure_inner (struct closure_frame 
+ 	  size_t za = FFI_ALIGN (z, FFI_SIZEOF_ARG);
+ 	  size_t align = FFI_SIZEOF_ARG;
+ 
+-	  /* See the comment in ffi_call_int.  */
++	  /* Note that this alignment only applies to the outgoing args */
+ 	  if (t == FFI_TYPE_STRUCT && ty->alignment >= 16)
+ 	    align = 16;
+ 
+@@ -537,8 +562,16 @@ ffi_closure_inner (struct closure_frame 
+ 	    }
+ 	  else
+ 	    {
+-	      argp = (char *)FFI_ALIGN (argp, align);
++	      /* Input args always have four-byte alignment. */
++	      argp = (char *)FFI_ALIGN (argp, 4);
+ 	      valp = argp;
++	      /* If the input arg isn't sufficiently aligned,
++	         make an aligned copy */
++	      if ((size_t) valp & (align -1))
++	        {
++	          valp = alloca(za);
++	          memcpy(valp, argp, za);
++	        }
+ 	      argp += za;
+ 	    }
+ 	}
+--- src/x86/sysv.S.orig	2024-06-01 10:42:02.000000000 -0700
++++ src/x86/sysv.S	2026-10-18 16:13:56.000000000 -0700
+@@ -127,8 +127,8 @@ L(UW2):
+ 
+ 	andl	$X86_RET_TYPE_MASK, %ecx
+ #ifdef __PIC__
+-	call	C(__x86.get_pc_thunk.bx)
+-L(pc1):
++	call	L(pc1)
++L(pc1):	popl	%ebx
+ 	leal	L(store_table)-L(pc1)(%ebx, %ecx, 8), %ebx
+ #else
+ 	leal	L(store_table)(,%ecx, 8), %ebx
+@@ -264,8 +264,9 @@ ENDF(ffi_call_i386)
+ #  undef FFI_CLOSURE_MASK_AND_JUMP
+ #  define FFI_CLOSURE_MASK_AND_JUMP(N, UW)				\
+ 	andl	$X86_RET_TYPE_MASK, %eax;				\
+-	call	C(__x86.get_pc_thunk.dx);				\
++	call	L(C1(pc,N));						\
+ L(C1(pc,N)):								\
++	popl	%edx;							\
+ 	leal	L(C1(load_table,N))-L(C1(pc,N))(%edx, %eax, 8), %edx;	\
+ 	movl	closure_CF(%esp), %eax;		/* optimiztic load */	\
+ 	_CET_NOTRACK jmp *%edx
+@@ -692,8 +693,8 @@ L(UW34):
+ 	movl	20(%ebx), %eax				/* load cif->flags */
+ 	andl	$X86_RET_TYPE_MASK, %eax
+ #ifdef __PIC__
+-	call	C(__x86.get_pc_thunk.bx)
+-L(pc4):
++	call	L(pc4)
++L(pc4):	popl	%ebx
+ 	leal	L(load_table4)-L(pc4)(%ebx, %eax, 8), %ecx
+ #else
+ 	leal	L(load_table4)(,%eax, 8), %ecx
+@@ -809,8 +810,8 @@ L(UW46):
+ 	movl	20(%ebx), %eax				/* load cif->flags */
+ 	andl	$X86_RET_TYPE_MASK, %eax
+ #ifdef __PIC__
+-	call	C(__x86.get_pc_thunk.bx)
+-L(pc5):
++	call	L(pc5)
++L(pc5):	popl	%ebx
+ 	leal	L(load_table5)-L(pc5)(%ebx, %eax, 8), %ecx
+ #else
+ 	leal	L(load_table5)(,%eax, 8), %ecx
+@@ -919,17 +920,12 @@ ENDF(C(ffi_closure_raw_THISCALL))
+ #endif
+ 
+ #if defined(__PIC__)
++# if !defined X86_DARWIN && !defined HAVE_HIDDEN_VISIBILITY_ATTRIBUTE
+ 	COMDAT(C(__x86.get_pc_thunk.bx))
+ C(__x86.get_pc_thunk.bx):
+ 	movl	(%esp), %ebx
+ 	ret
+ ENDF(C(__x86.get_pc_thunk.bx))
+-# if defined X86_DARWIN || defined HAVE_HIDDEN_VISIBILITY_ATTRIBUTE
+-	COMDAT(C(__x86.get_pc_thunk.dx))
+-C(__x86.get_pc_thunk.dx):
+-	movl	(%esp), %edx
+-	ret
+-ENDF(C(__x86.get_pc_thunk.dx))
+ #endif /* DARWIN || HIDDEN */
+ #endif /* __PIC__ */
+ 
+--- testsuite/config/default.exp.orig	2024-06-01 10:42:02.000000000 -0700
++++ testsuite/config/default.exp	2026-10-18 16:13:56.000000000 -0700
+@@ -1 +1,15 @@
+ load_lib "standard.exp"
++
++# Avoid multitop on Darwin, where it's at best useless, and attempts to
++# determine it may cause failures with the use of the -dumpspecs option.
++if { [istarget "*-*-darwin*"] } {
++    set_board_info multitop ""
++}
++
++# Provide a way to pass the host architecture to the compiler, which
++# doesn't happen automatically.
++#
++if [info exists env(HOSTARCH)] {
++  set_board_info cflags "-arch ${env(HOSTARCH)}"
++  set_board_info cxxflags "-arch ${env(HOSTARCH)}"
++}
 --- testsuite/lib/libffi.exp.orig	2024-06-01 10:42:02.000000000 -0700
-+++ testsuite/lib/libffi.exp	2025-04-17 11:40:54.000000000 -0700
-@@ -516,7 +516,10 @@ proc run-many-tests { testcases extra_fl
++++ testsuite/lib/libffi.exp	2026-10-18 16:13:56.000000000 -0700
+@@ -280,6 +280,10 @@ proc libffi-dg-prune { target_triplet te
+     regsub -all "(^|\n)\[^\n\]*warning: .* has a LOAD segment with RWX permissions" $text "" text
+     # Ignore Emscripten INFO messages
+     regsub -all "(^|\n)(cache|shared):INFO:\[^\n\]*" $text "" text
++    # We get this when building for i386 on macOS 10.13+
++    regsub -all -line "^ld: warning: The i386 architecture is deprecated for macOS.*$" $text "" text
++    # We get this when building for powerpc on macOS 10.4
++    regsub -all -line "^ld: warning: object file compiled with -mlong-branch which is no longer needed.*$" $text "" text
+     return $text
+ }
+ 
+@@ -367,6 +371,7 @@ proc libffi_target_compile { source dest
+     global libffi_include
+     global target_triplet
+     global compiler_vendor
++    global env
+ 
+     if { [target_info needs_status_wrapper]!="" && [info exists gluefile] } {
+ 	lappend options "libs=${gluefile}"
+@@ -388,8 +393,18 @@ proc libffi_target_compile { source dest
+     if { [istarget "*-*-darwin9*"] || [istarget "*-*-darwin1*"]
+ 	 || [istarget "*-*-darwin2*"] } {
+ 	# lappend options "additional_flags=-Wl,-allow_stack_execute"
+-        lappend options "additional_flags=-Wno-unused-command-line-argument"
+-        lappend options "additional_flags=-Wl,-search_paths_first"
++	if ![info exists env(LIBFFI_TEST_GCC_NO_NO_UNUSED_OPT)] {
++            lappend options "additional_flags=-Wno-unused-command-line-argument"
++        }
++	if ![info exists env(LIBFFI_TEST_NO_NO_UNUSED_BUT_SET)] {
++            lappend options "additional_flags=-Wno-unused-but-set-variable"
++        }
++        # Some GCCs throw a warning if '-Wl' options are used in
++        # non-link operations.
++        # The 'assembly' case occurs in 'libffi_feature_test'.
++        if ![string match $type assembly] {
++            lappend options "additional_flags=-Wl,-search_paths_first"
++        }
+     }
+ 
+     # If you're building the compiler with --prefix set to a place
+@@ -416,9 +431,8 @@ proc libffi_target_compile { source dest
+         # this may be required for g++, but just confused clang.
+         if { [string match "*.cc" $source] } {
+             lappend options "c++"
+-            if { [string match "*-*-darwin*" $target_triplet] } {
+-                lappend options "libs= -lc++"
+-            }
++            # Don't add -lc++ for Darwin - it may be the wrong library
++            # and the correct one is added automatically.
+         }
+ 
+         if { [string match "arc*-*-linux*" $target_triplet] } {
+@@ -432,6 +446,11 @@ proc libffi_target_compile { source dest
+         lappend options "additional_flags=-Wno-unused-command-line-argument"
+     }
+ 
++    # Allow deobfuscating compiler messages in logfiles
++    if { [info exists env(LIBFFI_TEST_NO_COLOR_DIAGS)] } {
++        lappend options "additional_flags=-fdiagnostics-color=never"
++    }
++
+     verbose "options: $options"
+     return [target_compile $source $dest $type $options]
+ }
+@@ -516,7 +535,10 @@ proc run-many-tests { testcases extra_fl
          }
        }
        "gnu" {
 -        set common "-W -Wall -Wno-psabi"
 +        set common "-W -Wall"
-+        if ![info exists env(LIBFFI_TEST_OLDGCC)] {
++        if ![info exists env(LIBFFI_TEST_NO_NO_PSABI)] {
 +            set common "$common -Wno-psabi"
 +        }
          if [info exists env(LIBFFI_TEST_OPTIMIZATION)] {
  	  set optimizations [ list $env(LIBFFI_TEST_OPTIMIZATION) ]
          } else {
+@@ -537,21 +559,23 @@ proc run-many-tests { testcases extra_fl
+     info exists env(LD_LIBRARY_PATH)
+ 
+     set targetabis { "" }
+-    if [string match $compiler_vendor "gnu"] {
++    # GCC's i386 'thiscall' is known absent in 4.4, present in 4.7
++    # GCC's x86_64 'ms_abi' is known absent in 4.3, present in 4.4
++    # clang's x86_64 'ms_abi' is known absent in 3.3, present in 3.4
++    if { [string match $compiler_vendor "gnu"]
++         || [string match $compiler_vendor "clang"] } {
+         if [libffi_feature_test "#ifdef __i386__"] {
+-            set targetabis {
+-                ""
+-                "-DABI_NUM=FFI_STDCALL -DABI_ATTR=__STDCALL__"
+-                "-DABI_NUM=FFI_THISCALL -DABI_ATTR=__THISCALL__"
+-                "-DABI_NUM=FFI_FASTCALL -DABI_ATTR=__FASTCALL__"
++            lappend targetabis "-DABI_NUM=FFI_STDCALL -DABI_ATTR=__STDCALL__"
++            if ![info exists env(LIBFFI_TEST_NO_THISCALL)] {
++                lappend targetabis \
++                        "-DABI_NUM=FFI_THISCALL -DABI_ATTR=__THISCALL__"
+             }
++            lappend targetabis"-DABI_NUM=FFI_FASTCALL -DABI_ATTR=__FASTCALL__"
+         } elseif { [istarget "x86_64-*-*"] \
+-		   && [libffi_feature_test "#if !defined __ILP32__  \
+-						&& !defined __i386__"] } {
+-            set targetabis {
+-                ""
+-                "-DABI_NUM=FFI_GNUW64 -DABI_ATTR=__MSABI__"
+-            }
++                   && [libffi_feature_test "#if !defined __ILP32__  \
++                                                && !defined __i386__"]
++                   && ![info exists env(LIBFFI_TEST_NO_MSABI)] } {
++            lappend targetabis "-DABI_NUM=FFI_GNUW64 -DABI_ATTR=__MSABI__"
+         }
+     }
+ 
 --- testsuite/libffi.bhaible/bhaible.exp.orig	2024-06-01 10:42:02.000000000 -0700
-+++ testsuite/libffi.bhaible/bhaible.exp	2025-04-17 11:40:54.000000000 -0700
-@@ -24,7 +24,10 @@ global compiler_vendor
++++ testsuite/libffi.bhaible/bhaible.exp	2026-10-18 16:13:56.000000000 -0700
+@@ -23,8 +23,9 @@ global compiler_vendor
+ # The conversion of this testsuite into a dejagnu compatible testsuite
  # was done in a pretty lazy fashion, and requires the use of compiler
  # flags to disable warnings for now.
++# The -Wno-unused-but-set-variable option is now handled by lib/libffi.exp
  if { [string match $compiler_vendor "gnu"] } {
 -    set warning_options "-Wno-unused-variable -Wno-unused-parameter -Wno-unused-but-set-variable -Wno-uninitialized";
 +    set warning_options "-Wno-unused-variable -Wno-unused-parameter -Wno-uninitialized";
-+    if ![info exists env(LIBFFI_TEST_OLDGCC)] {
-+        set common "$warning_options -Wno-unused-but-set-variable"
-+    }
  }
  if { [string match $compiler_vendor "microsoft"] } {
      # -wd4996  suggest use of vsprintf_s instead of vsprintf
