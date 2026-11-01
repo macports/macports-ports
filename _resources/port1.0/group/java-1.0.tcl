@@ -196,7 +196,11 @@ namespace eval java {
     proc java_get_default_fallback {} {
         global os.arch os.major java.version
         if {[option os.platform] eq "darwin"} {
-            if {${os.major} >= 18 && [vercmp ${java.version} < 18]} {
+            if {${os.major} >= 23 && [vercmp ${java.version} < 26]} {
+                return openjdk25
+            } else if {${os.major} >= 20 && [vercmp ${java.version} < 22]} {
+                return openjdk21
+            } else if {${os.major} >= 18 && [vercmp ${java.version} < 18]} {
                 return openjdk17
             } elseif {${os.major} >= 15 && [vercmp ${java.version} < 12]} {
                 return openjdk11
