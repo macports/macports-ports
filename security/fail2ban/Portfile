@@ -4,12 +4,12 @@ PortSystem              1.0
 PortGroup               github 1.0
 PortGroup               python 1.0
 
-github.setup            fail2ban fail2ban 0.9.4
-# Change github.tarball_from to 'releases' or 'archive' next update
-github.tarball_from     tarball
+github.setup            fail2ban fail2ban 1.1.1
+github.tarball_from     archive
+revision                0
 categories              security python
 license                 GPL-2+
-maintainers             nomaintainer
+maintainers             @ArtKoKo openmaintainer
 platforms               {darwin any}
 supported_archs         noarch
 
@@ -25,82 +25,99 @@ long_description        Fail2ban scans log files (e.g. /var/log/apache/error_log
 
 homepage                https://www.fail2ban.org/
 
-distname                ${version}
+checksums               rmd160  848abe67f3f9200c1b0b5a02da9fce074888bf02 \
+                        sha256  4be0ea0488e32de260058462a44a040f0542cd26a9fb6fa6d2514f9dd8ec1609 \
+                        size    627126
 
-checksums               rmd160  05ae35c2dc03f04e474985b394193b92029f8ca9 \
-                        sha256  9a4a6402f8e6bda15ef8b5a848ce8d91d80735356b52dfac0d7612cdd2fbcaf3
+python.versions         314
+# setup.py installs absolute data_files and the fail2ban-python link,
+# which a wheel cannot carry
+python.pep517           no
+python.link_binaries_suffix
 
-python.default_version  27
+depends_build-append    port:py${python.version}-setuptools
 
 set f2bconfdir          ${prefix}/etc/${name}
-set f2bbindir           ${prefix}/bin
 set f2brundir           ${prefix}/var/run/${name}
-set f2bsock             ${f2brundir}/${name}.sock
+set f2bdbdir            ${prefix}/var/db/${name}
 set f2bpid              ${f2brundir}/${name}.pid
 
-patchfiles              patch-setup.py.diff \
-                        patch-fail2ban-client-configreader.py.diff \
-                        patch-fail2ban-tests-misctestcase.py.diff \
-                        patch-fail2ban-tests-utils.py.diff \
-                        patch-config-fail2ban.conf.diff \
-                        patch-config-jail.conf.diff \
-                        patch-config-paths-common.conf.diff \
-                        patch-config-paths-osx.conf.diff \
-                        patch-config-action.d-osx-afctl.conf.diff \
-                        patch-bin-fail2ban-client.diff \
-                        patch-bin-fail2ban-server.diff \
-                        patch-fail2ban-server-filterpoll.py.diff
+patchfiles              patch-config-paths-osx.conf.diff
 
-post-patch   {
-    reinplace "s|@@PREFIX@@|${prefix}|g"    ${worksrcpath}/setup.py \
-                                            ${worksrcpath}/fail2ban/client/configreader.py \
-                                            ${worksrcpath}/fail2ban/tests/misctestcase.py \
-                                            ${worksrcpath}/fail2ban/tests/utils.py \
-                                            ${worksrcpath}/config/fail2ban.conf \
-                                            ${worksrcpath}/config/paths-common.conf \
-                                            ${worksrcpath}/bin/fail2ban-client \
-                                            ${worksrcpath}/bin/fail2ban-server
+post-patch {
+    # Move the hardcoded system paths under ${prefix}
+    fs-traverse f [list ${worksrcpath}/setup.py ${worksrcpath}/bin \
+                        ${worksrcpath}/config ${worksrcpath}/fail2ban \
+                        ${worksrcpath}/man] {
+        if {[string match */tests/files $f]} {
+            continue
+        }
+        if {[file isfile $f] && ![catch {exec grep -q -E {/etc/fail2ban|/var/(run|lib)/fail2ban} $f}]} {
+            reinplace -q "s|/etc/fail2ban|${f2bconfdir}|g; \
+                          s|/var/run/fail2ban|${f2brundir}|g; \
+                          s|/var/lib/fail2ban|${f2bdbdir}|g" $f
+        }
+    }
+    reinplace "s|^before = paths-debian.conf|before = paths-osx.conf|" \
+        ${worksrcpath}/config/jail.conf
+    reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/config/paths-osx.conf
 }
 
-startupitem.create      yes
-startupitem.start       "export LANG=en_GB.UTF-8; if \[ -r ${f2bsock} -a ! -r ${f2bpid} \]; then rm ${f2bsock}; fi; ${f2bbindir}/${name}-client start"
-startupitem.stop        "${f2bbindir}/${name}-client stop"
+build.args-append       --without-tests
+destroot.args-append    --without-tests
 
-destroot.keepdirs       ${destroot}${f2brundir}
+destroot.keepdirs       ${destroot}${f2brundir} \
+                        ${destroot}${f2bdbdir} \
+                        ${destroot}${f2bconfdir}/fail2ban.d \
+                        ${destroot}${f2bconfdir}/jail.d
 
 post-destroot {
-    # Adding dedicated OSX pf-icefloor action file
-    xinstall -m 644 ${filespath}/pf-icefloor.conf ${destroot}${f2bconfdir}/action.d/
-    # Adding a suffix to config files
-    set cfgfiles [concat [glob ${destroot}${f2bconfdir}/*.conf] [glob ${destroot}${f2bconfdir}/action.d/*.conf] [glob ${destroot}${f2bconfdir}/filter.d/*.conf]]
-    foreach cfgfile ${cfgfiles} {
-        move ${cfgfile} ${cfgfile}.${version}
-    }
+    # Dedicated pf action for the IceFloor firewall front-end
+    xinstall -m 0644 ${filespath}/pf-icefloor.conf ${destroot}${f2bconfdir}/action.d/
+
+    xinstall -m 0644 -W ${worksrcpath}/man fail2ban-client.1 fail2ban-python.1 \
+        fail2ban-regex.1 fail2ban-server.1 fail2ban.1 ${destroot}${prefix}/share/man/man1/
+    xinstall -m 0644 ${worksrcpath}/man/jail.conf.5 ${destroot}${prefix}/share/man/man5/
+
+    set docdir ${destroot}${prefix}/share/doc/${name}
+    xinstall -d ${docdir}
+    xinstall -m 0644 -W ${worksrcpath} ChangeLog COPYING DEVELOP FILTERS \
+        README.md doc/run-rootless.txt ${docdir}
 }
 
-post-activate {
-    # If not already present we put default config files
-    set cfgfiles [concat [glob ${f2bconfdir}/*.conf.${version}] [glob ${f2bconfdir}/action.d/*.conf.${version}] [glob ${f2bconfdir}/filter.d/*.conf.${version}]]
-    foreach cfgfile ${cfgfiles} {
-        regsub "\.${version}" ${cfgfile} {} origcfgfile
-        if {![file exists ${origcfgfile}]} {
-            file copy ${cfgfile} ${origcfgfile}
+pre-activate {
+    # Up to 0.9.4, post-activate copied the *.conf files outside of the
+    # registry; move such copies aside, or activation fails on them.
+    # Same suffix as 'port -f activate' uses for conflicting files.
+    set baksuffix .mp_[clock seconds]
+    set ref [registry_open ${subport} ${version} ${revision} ${portvariants} ${epoch}]
+    foreach f [registry_prop_retr $ref imagefiles] {
+        if {[string match ${f2bconfdir}/* $f] && [file isfile $f]
+                && [registry_file_registered $f] == "0"} {
+            ui_msg "--->  Moving unregistered $f to ${f}${baksuffix}"
+            file rename $f ${f}${baksuffix}
         }
     }
 }
 
+startupitem.create      yes
+startupitem.pidfile     clean ${f2bpid}
+startupitem.start       "${prefix}/bin/${name}-client -x start"
+startupitem.stop        "${prefix}/bin/${name}-client stop"
+
 notes "
-Next step is to configure fail2ban.
-Start to read:
-${f2bconfdir}/fail2ban.conf
-${f2bconfdir}/jail.conf
-and create your own fail2ban.local and jail.local
+Do not edit the *.conf files in ${f2bconfdir}: they are replaced\
+on each upgrade. Put your settings in *.local files instead (e.g.\
+${f2bconfdir}/jail.local), as explained in jail.conf. On an upgrade\
+from 0.9.4, the old copies of the *.conf files are renamed\
+*.conf.mp_<timestamp>.
 
-Start/stop fail2ban with: sudo port \[un\]load fail2ban
+The default ban action is pf. Bans are added to sub-anchors of the\
+f2b anchor, which must be referenced in /etc/pf.conf:
 
-More info at ${homepage}
+    anchor \"f2b/*\"
+
+Start/stop fail2ban with: sudo port \[un\]load ${name}
 "
 
-livecheck.type          regexm
-livecheck.url           ${homepage}wiki/index.php/Downloads
-livecheck.regex         <i>stable</i>.*?>${name}-(\[0-9.\]+)<
+github.livecheck.regex  {([0-9.]+)}
