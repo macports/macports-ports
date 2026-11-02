@@ -33,6 +33,25 @@ default merger_no_3_archs no
 default merger_arch_flag yes
 default merger_arch_compiler no
 
+# Check if a file is mach-o or an ar archive. Can be removed with
+# MacPorts 2.13 in favour of just calling fileIsBinary.
+proc muniversal_fileIsBinary {filename} {
+    if {[fileIsBinary $filename]} {
+        return 1
+    }
+    if {[file isfile $filename]} {
+        set ARMAG "!<arch>\n"
+        set SARMAG 8
+        set fd [open $filename rb]
+        set magic [read $fd $SARMAG]
+        close $fd
+        if {$magic eq $ARMAG} {
+            return 1
+        }
+    }
+    return 0
+}
+
 proc muniversal_arch_flag_supported {args} {
     global configure.compiler
     return [regexp {^gcc-4|llvm|apple|clang} ${configure.compiler}]
@@ -684,15 +703,19 @@ variant universal {
                             ui_debug "universal: merge: ${prefixDir}/${fl} is identical in ${base1} and ${base2}"
                         } else {
                             # Actually try to merge the files
-                            # First try lipo, then libtool
-                            if { ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
-                                # lipo worked
-                                ui_debug "universal: merge: lipo created ${prefixDir}/${fl}"
-                            } elseif { ! [catch {system "/usr/bin/libtool \"${dir1}/${fl}\" \"${dir2}/${fl}\" -o \"${dir}/${fl}\""}] } {
-                                # libtool worked
-                                ui_debug "universal: merge: libtool created ${prefixDir}/${fl}"
+                            if {[muniversal_fileIsBinary ${dir1}/${fl}] && [muniversal_fileIsBinary ${dir2}/${fl}]} {
+                                # First try lipo, then libtool
+                                if { ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
+                                    # lipo worked
+                                    ui_debug "universal: merge: lipo created ${prefixDir}/${fl}"
+                                } elseif { ! [catch {system "/usr/bin/libtool \"${dir1}/${fl}\" \"${dir2}/${fl}\" -o \"${dir}/${fl}\""}] } {
+                                    # libtool worked
+                                    ui_debug "universal: merge: libtool created ${prefixDir}/${fl}"
+                                } else {
+                                    return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
+                                }
                             } else {
-                                # lipo and libtool have failed, so assume they are text files to be merged
+                                # not binaries, so assume they are text files to be merged
                                 set dontdiff no
                                 foreach dont ${merger_dont_diff} {
                                     if {${dont} eq "${prefixDir}/${fl}"} {
