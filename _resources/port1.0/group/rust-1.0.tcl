@@ -83,6 +83,14 @@ default     rust.rt_static_libs     {[rust::get_static_rutime_libraries]}
 options     rust.add_compiler_runtime
 default     rust.add_compiler_runtime   {no}
 
+# the libc crate requests `-liconv` on Apple targets, which resolves to ${prefix}/lib/libiconv.dylib,
+#     so by default port:libiconv is added to depends_lib
+# set to `yes` to link the system libiconv instead and drop that dependency
+#     only works if no C code built by the port uses iconv (e.g. vendored libgit2 via libgit2-sys);
+#     such code is compiled against MacPorts iconv.h and needs its `libiconv_*` symbols
+options     rust.system_libiconv
+default     rust.system_libiconv        {no}
+
 # the distfiles of the main port will also be stored in this directory,
 # but this is the only way to allow reusing the same crates across multiple ports.
 default     dist_subdir             {[expr {[llength ${cargo.crates}] > 0 || [llength ${cargo.crates_github}] > 0 ? "cargo-crates" : ${name}}]}
@@ -206,6 +214,22 @@ proc rust::configure_ldflags_proc {option action args} {
     }
 }
 option_proc configure.ldflags rust::configure_ldflags_proc
+
+# directory searched by the linker before ${prefix}/lib; holds only a link to the system libiconv
+proc rust::system_libiconv_dir {} {
+    return [option workpath]/rust-system-libiconv
+}
+
+proc rust::system_libiconv_file {} {
+    foreach dir [list [option configure.sdkroot]/usr/lib /usr/lib] {
+        foreach lib {libiconv.tbd libiconv.dylib} {
+            if {[file exists ${dir}/${lib}]} {
+                return ${dir}/${lib}
+            }
+        }
+    }
+    return ""
+}
 
 # based on portextract::disttagclean from portextract.tcl
 proc rust::disttagclean {list} {
@@ -625,6 +649,26 @@ proc rust::rust_pg_callback {} {
             depends_build-append        port:cargo
             depends_skip_archcheck-delete   cargo
             depends_skip_archcheck-append   cargo
+        }
+
+        if { [option os.platform] eq "darwin" } {
+            if { [option rust.system_libiconv] } {
+                # rustc passes this ahead of build-script and LIBRARY_PATH search paths; C/C++ links are unaffected
+                rust.flags-delete       -Lnative=[rust::system_libiconv_dir]
+                rust.flags-append       -Lnative=[rust::system_libiconv_dir]
+                post-extract {
+                    set lib [rust::system_libiconv_file]
+                    if { ${lib} ne "" } {
+                        file mkdir [rust::system_libiconv_dir]
+                        ln -sf ${lib} [rust::system_libiconv_dir]/[file tail ${lib}]
+                    } else {
+                        ui_debug "rust: no system libiconv found; -liconv will resolve normally"
+                    }
+                }
+            } else {
+                depends_lib-delete      port:libiconv
+                depends_lib-append      port:libiconv
+            }
         }
     }
 
