@@ -1,0 +1,286 @@
+diff -ur ./clang/lib/DirectoryWatcher/mac/DirectoryWatcher-mac.cpp ./clang/lib/DirectoryWatcher/mac/DirectoryWatcher-mac.cpp
+--- ./clang/lib/DirectoryWatcher/mac/DirectoryWatcher-mac.cpp	2025-07-04 20:35:42.000000000 -0600
++++ ./clang/lib/DirectoryWatcher/mac/DirectoryWatcher-mac.cpp	2025-07-05 07:40:22.000000000 -0600
+@@ -98,6 +98,7 @@
+ };
+ } // namespace
+ 
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+ constexpr const FSEventStreamEventFlags StreamInvalidatingFlags =
+     kFSEventStreamEventFlagUserDropped | kFSEventStreamEventFlagKernelDropped |
+     kFSEventStreamEventFlagMustScanSubDirs;
+@@ -105,6 +106,7 @@
+ constexpr const FSEventStreamEventFlags ModifyingFileEvents =
+     kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRenamed |
+     kFSEventStreamEventFlagItemModified;
++#endif
+ 
+ static void eventStreamCallback(ConstFSEventStreamRef Stream,
+                                 void *ClientCallBackInfo, size_t NumEvents,
+@@ -118,14 +120,26 @@
+     StringRef Path = ((const char **)EventPaths)[i];
+     const FSEventStreamEventFlags Flags = EventFlags[i];
+ 
+-    if (Flags & StreamInvalidatingFlags) {
++    if (Flags
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070 
++        & StreamInvalidatingFlags
++#endif 
++        ) {
+       Events.emplace_back(DirectoryWatcher::Event{
+           DirectoryWatcher::Event::EventKind::WatcherGotInvalidated, ""});
+       break;
+-    } else if (!(Flags & kFSEventStreamEventFlagItemIsFile)) {
++    } else if (!(Flags
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
++          & kFSEventStreamEventFlagItemIsFile
++#endif 
++          )) {
+       // Subdirectories aren't supported - if some directory got removed it
+       // must've been the watched directory itself.
+-      if ((Flags & kFSEventStreamEventFlagItemRemoved) &&
++      if ((Flags
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
++            & kFSEventStreamEventFlagItemRemoved
++#endif 
++            ) &&
+           Path == ctx->WatchedPath) {
+         Events.emplace_back(DirectoryWatcher::Event{
+             DirectoryWatcher::Event::EventKind::WatchedDirRemoved, ""});
+@@ -135,11 +149,19 @@
+       }
+       // No support for subdirectories - just ignore everything.
+       continue;
+-    } else if (Flags & kFSEventStreamEventFlagItemRemoved) {
++    } else if (Flags
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
++        & kFSEventStreamEventFlagItemRemoved
++#endif
++        ) {
+       Events.emplace_back(DirectoryWatcher::Event::EventKind::Removed,
+                           llvm::sys::path::filename(Path));
+       continue;
+-    } else if (Flags & ModifyingFileEvents) {
++    } else if (Flags
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
++        & ModifyingFileEvents
++#endif
++        ) {
+       if (!getFileStatus(Path).has_value()) {
+         Events.emplace_back(DirectoryWatcher::Event::EventKind::Removed,
+                             llvm::sys::path::filename(Path));
+@@ -203,7 +225,10 @@
+   FSEventStreamRef Result = FSEventStreamCreate(
+       nullptr, eventStreamCallback, &Context, PathsToWatch,
+       kFSEventStreamEventIdSinceNow, /* latency in seconds */ 0.0,
+-      kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer);
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
++      kFSEventStreamCreateFlagFileEvents | 
++#endif 
++      kFSEventStreamCreateFlagNoDefer);
+   CFRelease(PathsToWatch);
+ 
+   return Result;
+@@ -222,7 +247,13 @@
+     std::function<void(llvm::ArrayRef<DirectoryWatcher::Event>, bool)> Receiver,
+     bool WaitForInitialSync) {
+   dispatch_queue_t Queue =
+-      dispatch_queue_create("DirectoryWatcher", DISPATCH_QUEUE_SERIAL);
++      dispatch_queue_create("DirectoryWatcher", 
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
++          DISPATCH_QUEUE_SERIAL
++#else
++          NULL
++#endif
++          );
+ 
+   if (Path.empty())
+     llvm::report_fatal_error(
+diff -ur ./compiler-rt/lib/sanitizer_common/sanitizer_mac.cpp ./compiler-rt/lib/sanitizer_common/sanitizer_mac.cpp
+--- ./compiler-rt/lib/sanitizer_common/sanitizer_mac.cpp	2025-01-14 02:41:02.000000000 -0700
++++ ./compiler-rt/lib/sanitizer_common/sanitizer_mac.cpp	2025-07-08 11:35:06.000000000 -0600
+@@ -71,9 +71,11 @@
+ #  include <mach/mach_time.h>
+ #  include <mach/vm_statistics.h>
+ #  include <malloc/malloc.h>
+-#  include <os/log.h>
+ #  include <pthread.h>
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
++#  include <os/log.h>
+ #  include <pthread/introspection.h>
++#endif
+ #  include <sched.h>
+ #  include <signal.h>
+ #  include <spawn.h>
+@@ -139,6 +141,11 @@
+ #define	POSIX_SPAWN_CLOEXEC_DEFAULT	0x4000
+ #endif
+ 
++// From <sys/spawn.h> but not in some SDKs
++#ifndef POSIX_SPAWN_CLOEXEC_DEFAULT
++#define	POSIX_SPAWN_CLOEXEC_DEFAULT	0x4000
++#endif
++
+ // XNU on Darwin provides a mmap flag that optimizes allocation/deallocation of
+ // giant memory regions (i.e. shadow memory regions).
+ #define kXnuFastMmapFd 0x4
+@@ -768,9 +775,13 @@
+ void WriteOneLineToSyslog(const char *s) {
+ #if !SANITIZER_GO
+   syslog_lock.CheckLocked();
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
+   if (GetMacosAlignedVersion() >= MacosVersion(10, 12)) {
+     SANITIZER_OS_LOG(OS_LOG_DEFAULT, "%{public}s", s);
+   } else {
++#else
++    {
++#endif
+ #pragma clang diagnostic push
+ // as_log is deprecated.
+ #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+@@ -836,19 +847,39 @@
+   // When logging with os_log_error this will make it into the crash log.
+   if (internal_strncmp(SanitizerToolName, "AddressSanitizer",
+                        sizeof("AddressSanitizer") - 1) == 0)
+-    SANITIZER_OS_LOG(OS_LOG_DEFAULT, "Address Sanitizer reported a failure.");
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
++    os_log_error(OS_LOG_DEFAULT, "Address Sanitizer reported a failure.");
++#else  
++    asl_log(nullptr, nullptr, ASL_LEVEL_ERR, "Address Sanitizer reported a failure.");
++#endif
+   else if (internal_strncmp(SanitizerToolName, "UndefinedBehaviorSanitizer",
+-                            sizeof("UndefinedBehaviorSanitizer") - 1) == 0)
+-    SANITIZER_OS_LOG(OS_LOG_DEFAULT,
+-                     "Undefined Behavior Sanitizer reported a failure.");
++        sizeof("UndefinedBehaviorSanitizer") - 1) == 0)
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
++    os_log_error(OS_LOG_DEFAULT,
++        "Undefined Behavior Sanitizer reported a failure.");
++#else  
++    asl_log(nullptr, nullptr, ASL_LEVEL_ERR, "Undefined Behavior Sanitizer reported a failure.");
++#endif
+   else if (internal_strncmp(SanitizerToolName, "ThreadSanitizer",
+-                            sizeof("ThreadSanitizer") - 1) == 0)
+-    SANITIZER_OS_LOG(OS_LOG_DEFAULT, "Thread Sanitizer reported a failure.");
++        sizeof("ThreadSanitizer") - 1) == 0)
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
++    os_log_error(OS_LOG_DEFAULT, "Thread Sanitizer reported a failure.");
++#else  
++    asl_log(nullptr, nullptr, ASL_LEVEL_ERR, "Thread Sanitizer reported a failure.");
++#endif
+   else
+-    SANITIZER_OS_LOG(OS_LOG_DEFAULT, "Sanitizer tool reported a failure.");
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
++    os_log_error(OS_LOG_DEFAULT, "Sanitizer tool reported a failure.");
++#else  
++    asl_log(nullptr, nullptr, ASL_LEVEL_ERR, "Sanitizer tool reported a failure.");
++#endif
+ 
+   if (common_flags()->log_to_syslog)
+-    SANITIZER_OS_LOG(OS_LOG_DEFAULT, "Consult syslog for more information.");
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
++    os_log_error(OS_LOG_DEFAULT, "Consult syslog for more information.");
++#else  
++    asl_log(nullptr, nullptr, ASL_LEVEL_ERR, "Consult syslog for more information.");
++#endif
+ 
+   // Log to syslog.
+   // The logging on OS X may call pthread_create so we need the threading
+@@ -1555,6 +1586,7 @@
+   return (u32)sysconf(_SC_NPROCESSORS_ONLN);
+ }
+ 
++#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
+ void InitializePlatformCommonFlags(CommonFlags *cf) {}
+ 
+ // Pthread introspection hook
+@@ -1611,6 +1643,7 @@
+   prev_pthread_introspection_hook =
+       pthread_introspection_hook_install(&sanitizer_pthread_introspection_hook);
+ }
++#endif
+ 
+ }  // namespace __sanitizer
+ 
+diff -ur ./compiler-rt/lib/sanitizer_common/sanitizer_platform.h ./compiler-rt/lib/sanitizer_common/sanitizer_platform.h
+--- ./compiler-rt/lib/sanitizer_common/sanitizer_platform.h	2025-01-14 02:41:02.000000000 -0700
++++ ./compiler-rt/lib/sanitizer_common/sanitizer_platform.h	2025-07-05 09:13:03.000000000 -0600
+@@ -63,6 +63,9 @@
+ //   - SANITIZER_IOSSIM: simulators (iOS and iOS-like)
+ //   - SANITIZER_DRIVERKIT
+ #if defined(__APPLE__)
++#if MAC_OS_X_VERSION_MIN_REQUIRED <= 101000
++#include <uuid/uuid.h>
++#endif
+ #  define SANITIZER_APPLE 1
+ #  include <TargetConditionals.h>
+ #  if TARGET_OS_OSX
+
+--- ./libcxx/include/__config	2026-10-04 13:26:10.000000000 -0600
++++ ./libcxx/include/__config	2026-10-04 13:26:54.000000000 -0600
+@@ -485,6 +485,27 @@
+ #    define _LIBCPP_HAS_ALIGNED_ALLOCATION 1
+ #  endif
+ 
++// It is not yet possible to use aligned_alloc() on all Apple platforms since
++// // 10.15 was the first version to ship an implementation of aligned_alloc().
++#  if defined(__APPLE__)
++#    if (defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) &&                                                     \
++         __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 101500) ||                                                    \
++        (defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__) &&                                                    \
++         __ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__ < 130000) ||                                                   \
++        (defined(__ENVIRONMENT_WATCH_OS_VERSION_MIN_REQUIRED__) &&                                                     \
++         __ENVIRONMENT_WATCH_OS_VERSION_MIN_REQUIRED__ < 60000) ||                                                     \
++        (defined(__ENVIRONMENT_TV_OS_VERSION_MIN_REQUIRED__) && __ENVIRONMENT_TV_OS_VERSION_MIN_REQUIRED__ < 130000)
++#      define _LIBCPP_HAS_C11_ALIGNED_ALLOC 0
++#    else
++#      define _LIBCPP_HAS_C11_ALIGNED_ALLOC 1
++#    endif
++#  elif defined(__ANDROID__) && __ANDROID_API__ < 28
++// Android only provides aligned_alloc when targeting API 28 or higher.
++#    define _LIBCPP_HAS_C11_ALIGNED_ALLOC 0
++#  else
++#    define _LIBCPP_HAS_C11_ALIGNED_ALLOC 1
++#  endif
++
+ #  if defined(__APPLE__) || defined(__FreeBSD__)
+ #    define _LIBCPP_WCTYPE_IS_MASK
+ #  endif
+--- ./compiler-rt/lib/sanitizer_common/sanitizer_mac.h 2026-10-04 15:41:06.000000000 -0600
++++ ./compiler-rt/lib/sanitizer_common/sanitizer_mac.h 2026-10-04 15:41:12.000000000 -0600
+@@ -59,7 +59,13 @@
+ };
+  
+ struct ReservedRange {
++//OS X 10.6 32bit requires uptr be explicitly cast as unsigned long
++//otherwise it will overflow to 0
++#if __LP64__ 
+   uptr beg, end;
++#else
++  unsigned long long beg, end;
++#endif
+ };
+
+ MacosVersion GetMacosAlignedVersion();
+--- ./libcxx/include/module.modulemap.in 2026-10-04 15:04:51.000000000 -0600
++++ ./libcxx/include/module.modulemap.in 2026-10-04 15:04:51.000000000 -0600
+@@ -1634,6 +1634,7 @@
+   module memory {
+     module addressof                          { header "__memory/addressof.h" }
+     module align                              { header "__memory/align.h" }
++    module aligned_alloc                      { header "aligned_alloc.h" }
+     module allocate_at_least                  { header "__memory/allocate_at_least.h" }
+     module allocation_guard                   { header "__memory/allocation_guard.h" }
+     module allocator {
+--- ./libcxx/src/include/aligned_alloc.h  2026-10-04 15:24:09.000000000 -0600
++++ ./libcxx/src/include/aligned_alloc.h  2026-10-04 15:24:09.000000000 -0600
+@@ -31,7 +31,7 @@
+   return ::_aligned_malloc(__size, __alignment);
+
+ // Android only provides aligned_alloc when targeting API 28 or higher.
+-#  elif !defined(__ANDROID__) || __ANDROID_API__ >= 28
++#  elif _LIBCPP_STD_VER >= 17 && _LIBCPP_HAS_C11_ALIGNED_ALLOC
+   // aligned_alloc() requires that __size is a multiple of __alignment,
+   // but for C++ [new.delete.general], only states "if the value of an
+   // alignment argument passed to any of these functions is not a valid
+
