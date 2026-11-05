@@ -19,6 +19,7 @@
 # - An inclusive major-version range can be specified with "-", for example
 #   "1.8-24". This selects the highest installed JVM from Java 8 through
 #   Java 24, inclusive.
+#   Either bound may use the legacy "1.x" notation, for example "1.5-1.8".
 #
 # The selected JDK's normalized major version is available to Portfiles as
 # [java::selected_version]. For example, Java 8 is returned as "8".
@@ -123,7 +124,7 @@ namespace eval java {
             # /usr/libexec/java_home does not consistently honour an upper
             # version bound. Select ranges from the discovered JVMs ourselves
             # on every macOS version.
-            set version_range [regexp {^1?\.?\d+-\d+$} ${java.version}]
+            set version_range [regexp {^(?:1\.)?\d+-(?:1\.)?\d+$} ${java.version}]
             if { ${os.platform} eq "darwin" && ${os.arch} eq "powerpc" && ${java.fallback} eq "openjdk8" } {
                 foreach loc { "/Library/Java/JavaVirtualMachines/openjdk8/Contents/Home" } {
                     if { [file isdirectory $loc] } {
@@ -219,8 +220,8 @@ namespace eval java {
     }
 
     proc get_jvm_bigsur { version_requested } {
-        # Normalize version numbers 1.x -> x
-        set version_requested [regsub {^1\.} $version_requested ""]
+        # Normalize version numbers 1.x -> x, including both range bounds.
+        regsub -all {(^|-)1\.} $version_requested {\1} version_requested
         # Sort the JVMs we found on the system descending
         set versions_found [sort_dict [find_jvm_versions]]
         ui_debug "java-portgroup: Detected JVMs: $versions_found"
