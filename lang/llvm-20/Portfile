@@ -14,7 +14,7 @@ cmake.set_cxx_standard                no
 legacysupport.use_static              yes
 
 categories              lang
-platforms               {darwin >= 11}
+platforms               {darwin >= 10}
 license                 NCSA
 maintainers             nomaintainer
 
@@ -23,9 +23,9 @@ set clang_exe_version   ${llvm_version}
 version                 ${llvm_version}.1.8
 
 name                    llvm-${llvm_version}
-revision                4
+revision                5
 subport                 mlir-${llvm_version}  { revision 0 }
-subport                 clang-${llvm_version} { revision 5 }
+subport                 clang-${llvm_version} { revision 6 }
 subport                 lldb-${llvm_version}  { revision 1 }
 subport                 flang-${llvm_version} { revision 1 }
 
@@ -49,11 +49,18 @@ conflicts_build-append  libunwind libunwind-headers
 compiler.blacklist      *gcc* {clang < 1001} macports-clang-3.*
 # work/build/include/c++/v1/optional:224:5: error: destructor cannot be marked constexpr
 #     _LIBCPP_CONSTEXPR_AFTER_CXX17 ~__optional_destruct_base()
-compiler.blacklist-append {clang < 1204} {macports-clang-[5-9].0} {macports-clang-1[0-3]}
+compiler.blacklist-append {macports-clang-[5-9].0} {macports-clang-1[0-3]}
 if {${os.major} >= 17 || ${os.platform} ne "darwin"} {
     compiler.fallback   clang macports-clang-17
 } else {
     compiler.fallback   clang macports-clang-16
+}
+#from 10.6(i386,x86_64) to 10.14 (x86_64), clang-11 works well
+#and so occams razor applies.
+if {${configure.build_arch} in [list i386, x86_64]} {
+    if {${os.platform} eq "darwin" && ${os.major} < 19} {
+        compiler.fallback   macports-clang-11
+    }
 }
 
 cmake.generator         Ninja
@@ -265,7 +272,7 @@ if { ${subport} eq "clang-${llvm_version}" } {
 
     depends_run-append  port:clang_select-${llvm_version} port:cctools
 
-    platforms           {darwin >= 15}
+    platforms           {darwin >= 10}
 
     configure.args-append   \
         -DLLVM_ENABLE_PROJECTS="clang\;clang-tools-extra\;lld" \
@@ -351,6 +358,35 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
     if {${os.platform} eq "darwin" && ${os.major} <= 11} {
         # xpc.h available 10.7 but doesn't support nullable features
         configure.args-append    -DCLANGD_BUILD_XPC=OFF
+    }
+
+    if {${os.platform} eq "darwin" && ${os.major} < 16} {
+        # 1. Remove version check that prohibits configure for 10.6
+        # 2. Appropriately modify DirectoryWatcher so that:
+        #     - neither os/log.h (10.12 or higher), or;
+        #     - pthread/introspection.h are included (10.12 and higher)
+        #     - FSEventStreamEventFlags are only called on 10.7 and higher
+        # 3. modify libunwind.cpp so that the mach_header is either 32 or 64 bit, and uses the
+        #    older getsectbyheadername, where appropriate.
+        # 4. prevent the use of reexported_symbols_list in libcxx/src/CMakeLists.abi unless
+        #    the minimum sdk is 10.7 or higher
+        patchfiles-append 0026-changes_for_el_capitan_and_lower.patch
+
+        if {${os.platform} eq "darwin" && ${os.major} < 11} {
+            patchfiles-append 0027-modifications-for-snow-leopard.patch
+            post-configure {
+                #we need a way to shoehorn in this string replacement, because the build system inserts no
+                #version number and compilation will fail.
+                reinplace "s|[quotemeta ${build.dir}/runtimes/runtimes-stamps/runtimes-configure]|${build.dir}/runtimes/runtimes-stamps/runtimes-configure \\&\\& \
+                sed -i '' 's:-current_version  /usr/lib/libSystem.B.dylib:-current_version 1.0.0 /usr/lib/libSystem.B.dylib:g' ${build.dir}/runtimes/runtimes-bins/build.ninja|g" ${build.dir}/build.ninja
+                #we remove "APPLE" from the check on cxa_thread_atexit to ensure we can
+                #rely on the implementation provided by clang for local threads on 10.6.
+                #we also remove the weak symbol check in cxa_thread_atexit.cc itself because
+                #jeremy's clang-11 build has it in libc++, which will make the check resolve
+                #to true, which we don't want
+                reinplace "s|(APPLE OR CYGWIN)|CYGWIN|g" ${workpath}/${distname}/libcxxabi/src/CMakeLists.txt
+            }
+        }
     }
 }
 
