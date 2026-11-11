@@ -207,6 +207,25 @@ namespace eval muniversal {}
 # internal procedures
 ####################################################################################################################################
 
+# Check if a file is mach-o or an ar archive. Can be removed with
+# MacPorts 2.13 in favour of just calling fileIsBinary.
+proc muniversal::fileIsBinary {filename} {
+    if {[::fileIsBinary $filename]} {
+        return 1
+    }
+    if {[file isfile $filename]} {
+        set ARMAG "!<arch>\n"
+        set SARMAG 8
+        set fd [open $filename rb]
+        set magic [read $fd $SARMAG]
+        close $fd
+        if {$magic eq $ARMAG} {
+            return 1
+        }
+    }
+    return 0
+}
+
 # the diff utility in macOS Ventura does not have the same functionality as previous versions
 # see https://trac.macports.org/ticket/66103
 # see https://trac.macports.org/ticket/66163
@@ -442,15 +461,19 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                     ui_debug "universal: merge: ${prefixDir}/${fl} is identical in ${base1} and ${base2}"
                 } else {
                     # actually try to merge the files
-                    # first try lipo, then libtool
-                    if { ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
-                        # lipo worked
-                        ui_debug "universal: merge: lipo created ${prefixDir}/${fl}"
-                    } elseif { ! [catch {system "/usr/bin/libtool \"${dir1}/${fl}\" \"${dir2}/${fl}\" -o \"${dir}/${fl}\""}] } {
-                        # libtool worked
-                        ui_debug "universal: merge: libtool created ${prefixDir}/${fl}"
+                    if {[fileIsBinary ${dir1}/${fl}] && [fileIsBinary ${dir2}/${fl}]} {
+                        # first try lipo, then libtool
+                        if { ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
+                            # lipo worked
+                            ui_debug "universal: merge: lipo created ${prefixDir}/${fl}"
+                        } elseif { ! [catch {system "/usr/bin/libtool \"${dir1}/${fl}\" \"${dir2}/${fl}\" -o \"${dir}/${fl}\""}] } {
+                            # libtool worked
+                            ui_debug "universal: merge: libtool created ${prefixDir}/${fl}"
+                        } else {
+                            return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
+                        }
                     } else {
-                        # lipo and libtool have failed, so assume they are text files to be merged
+                        # not binaries, so assume they are text files to be merged
                         if {"${prefixDir}/${fl}" in ${merger_dont_diff}} {
                             # user has specified that diff does not work
                             # attempt to give each file a unique name and create a new file which includes one of the original depending on the arch
