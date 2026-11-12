@@ -1,77 +1,105 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           boost 1.0
 PortGroup           cmake 1.1
+PortGroup           boost 1.0
+PortGroup           active_variants 1.1
+PortGroup           python_variants 1.0
 
+# Inkscape development branch (master, 1.5-dev), GTK 4 / gtkmm-4.0 front end.
+# Built from the tip of the git master branch at build time. The version
+# string below is cosmetic: bump it by hand when you want a new revision.
 name                inkscape-devel
+# Conflicts with the other Inkscape ports, whatever this port is named locally.
 conflicts           inkscape
 set my_name         inkscape
 
-set ver_num         1.4.3
-set ver_date        2025-12-25
-set ver_hash        0d15f75042
-set ver_gal_item    58914
-version             ${ver_num}
+version             1.5.0-20261112
 revision            0
-epoch               2
 
 categories          graphics gnome
 license             GPL-3+
-maintainers         {mascguy @mascguy} openmaintainer
+maintainers         nomaintainer
+platforms           darwin
 
-description         This is the current stable release version of Inkscape.
-long_description    Inkscape is an multi-platform, Open-Source Vector Graphics Editor \
-                    that uses SVG as its native file format. \
-                    {*}${description}
+description         Inkscape vector graphics editor, git master (GTK 4)
+long_description    Inkscape is a multi-platform, open-source vector graphics \
+                    editor that uses SVG as its native file format. This port \
+                    builds the git master branch (1.5-dev), which uses GTK 4 \
+                    and gtkmm-4.0 instead of GTK 3.
+
 homepage            https://inkscape.org/
 
-master_sites        https://inkscape.org/gallery/item/${ver_gal_item}
-worksrcdir          ${my_name}-${ver_num}_${ver_date}_${ver_hash}
-distname            ${my_name}-${ver_num}
-dist_subdir         ${my_name}
-use_xz              yes
+# Plain git checkout of HEAD. git.branch is deliberately left empty: MacPorts
+# then does a shallow clone of the remote's default branch tip instead of
+# downloading the full ~1.5-2 GB history. (Set it to a commit hash to pin a
+# revision, but that forces a full-history clone.)
+fetch.type          git
+git.url             https://gitlab.com/inkscape/inkscape.git
 
-checksums           rmd160  c467d4018561eb4fedef1c6284b9cd998ced5591 \
-                    sha256  e83a2c3db570b6c5a1ff0fccfe7098837b3f6bd74b133567937c8a91710ed1d1 \
-                    size    53907460
+# MacPorts does not initialise submodules itself, and the build needs them
+# (src/3rdparty/2geom, share/extensions, share/themes, ...). Try a shallow
+# fetch first and fall back to a full one if the pinned commit is not
+# reachable that way.
+post-fetch {
+    system -W ${worksrcpath} "git submodule update --init --recursive --depth 1 || git submodule update --init --recursive"
+}
 
 cmake.generator     Ninja
 
-set python_major    3
-set python_minor    14
-set python_version  ${python_major}${python_minor}
+# ---------------------------------------------------------------------------
+# Python
+# '#!/usr/bin/env python' (and a bare 'python3') does not resolve to the
+# MacPorts Python on macOS, so the interpreter is pinned explicitly, both
+# for the extensions Inkscape launches at run time and for the helper
+# scripts run by CMake at build time.
+# ---------------------------------------------------------------------------
+python.variants     314 315 315t
+set python.bin      ${prefix}/bin/python${python.branch}
 
-# Fix for poppler >= 26.01.0: gfree -> g_free, reset -> rewind
-patchfiles-append   poppler-26.01.0.patch
-patchfiles-append   poppler-26.02.0.patch
-
-# Fix for glibmm-2.4 < 2.64: Glib::canonicalize_filename not available
-patchfiles-append   glibmm-canonicalize.patch
-
+# These patterns come from the 1.3.2 port. The source layout of master may
+# differ, so every edit is guarded; a pattern that no longer matches is
+# silently a no-op (see the notes on how to check this).
 post-patch {
-    reinplace "s|\"python-interpreter\", *\{\"python3\"|\"python-interpreter\", \{\"python${python_major}.${python_minor}\"|g" \
-        ${worksrcpath}/src/extension/implementation/script.cpp
-    reinplace "s|COMMAND python3 |COMMAND ${prefix}/bin/python${python_major}.${python_minor} |g" \
-        ${worksrcpath}/share/filters/CMakeLists.txt \
-        ${worksrcpath}/share/markers/CMakeLists.txt \
-        ${worksrcpath}/share/paint/CMakeLists.txt \
-        ${worksrcpath}/share/palettes/CMakeLists.txt \
-        ${worksrcpath}/share/symbols/CMakeLists.txt \
-        ${worksrcpath}/share/templates/CMakeLists.txt
-    reinplace "s|\"\$\{CMAKE_INSTALL_LIBDIR\}/inkscape\"|\$\{CMAKE_INSTALL_LIBDIR\}|" \
-        ${worksrcpath}/src/CMakeLists.txt
+    # Interpreter used to run extensions (.py scripts under share/extensions)
+    set script_cpp ${worksrcpath}/src/extension/implementation/script.cpp
+    if {[file exists ${script_cpp}]} {
+        reinplace "s|\"python-interpreter\", *\{\"python3\"|\"python-interpreter\", \{\"python${python.branch}\"|g" \
+            ${script_cpp}
+    }
+    # Python helpers invoked by CMake while building share/*
+    foreach cml [glob -nocomplain ${worksrcpath}/share/*/CMakeLists.txt] {
+        reinplace "s|COMMAND python3 |COMMAND ${python.bin} |g" ${cml}
+    }
 }
 
-# Blacklist older Clang versions, for compilation errors:
-#   src/display/cairo-utils.cpp:
-#     No matching function for call to 'isnan'
-#   src/ui/dialog/objects.cpp:
-#     No member named 'extract'
-# See: https://trac.macports.org/ticket/65002
-compiler.blacklist-append \
-                    {clang < 1001}
+# ---------------------------------------------------------------------------
+# Poppler
+# Recent Poppler releases (26.x) no longer pull goo/gmem.h in indirectly, so
+# gfree()/gmalloc() are undeclared in the PDF import code (pdf-input.cpp).
+# They are thin wrappers around free()/malloc(), so call those directly.
+# ---------------------------------------------------------------------------
+post-patch {
+    foreach f [concat [glob -nocomplain ${worksrcpath}/src/extension/internal/pdfinput/*.cpp] \
+                      [glob -nocomplain ${worksrcpath}/src/extension/internal/pdfinput/*.h]] {
+        reinplace "s|gfree(|free(|g" ${f}
+        reinplace "s|gmalloc(|malloc(|g" ${f}
+    }
+}
 
+# Steer any find_package(Python3) in the build to the same interpreter.
+configure.args-append   -DPython3_EXECUTABLE=${python.bin}
+
+# ---------------------------------------------------------------------------
+# Compiler
+# ---------------------------------------------------------------------------
+# Inkscape master requires a C++20 compiler.
+compiler.cxx_standard   2020
+compiler.blacklist-append \
+                    {clang < 1300}
+
+# Need no-invalid-constexpr, due to lib2geom (now built from the in-tree
+# submodule). Remove if/when fixed upstream.
 if { [string match *clang* ${configure.compiler}] } {
     configure.cxxflags-append \
                     -Wno-invalid-constexpr \
@@ -79,16 +107,21 @@ if { [string match *clang* ${configure.compiler}] } {
                     -Wno-unknown-warning-option
 }
 
-# Inkscape 1.4+ uses boost::asio (needs >= 1.78 for C++20 compat)
-# and links against boost_filesystem
-boost.version       1.81
-boost.depends_type  lib
+# this port only uses boost headers during build
+# and does not link with any boost libraries
+# no need to rebuild due to boost library ABI changes
+boost.depends_type  build
+boost.version       1.91
+
 depends_build-append \
                     port:gettext \
+                    port:gtest \
                     path:bin/pkg-config:pkgconfig
 
+# gtkmm4 pulls in gtk4, glibmm, cairomm, pangomm, libsigc++-3.0 and graphene.
 depends_lib-append \
                     port:boehmgc \
+                    port:capypdf \
                     path:lib/pkgconfig/cairo.pc:cairo \
                     port:desktop-file-utils \
                     port:double-conversion \
@@ -97,18 +130,15 @@ depends_lib-append \
                     port:gettext-runtime \
                     path:lib/pkgconfig/glibmm-2.68.pc:glibmm \
                     port:gsl \
-                    port:gspell \
-                    port:gtkmm3 \
-                    port:gtksourceview4 \
+                    port:gtkmm4 \
+                    port:gtksourceview5 \
                     path:lib/pkgconfig/harfbuzz.pc:harfbuzz \
                     port:ImageMagick \
                     port:lcms2 \
-                    port:lib2geom \
                     port:libcdr-0.1 \
                     port:libepoxy \
                     path:include/turbojpeg.h:libjpeg-turbo \
                     port:libpng \
-                    port:libsigcxx2 \
                     port:libvisio-0.1 \
                     port:libwpg-0.3 \
                     port:libxml2 \
@@ -116,34 +146,31 @@ depends_lib-append \
                     path:lib/pkgconfig/pango.pc:pango \
                     path:lib/pkgconfig/poppler.pc:poppler \
                     port:potrace \
-                    port:python${python_version} \
                     port:zlib
 
 depends_run-append \
                     port:adwaita-icon-theme \
-                    port:py${python_version}-cssselect \
-                    port:py${python_version}-lxml \
-                    port:py${python_version}-numpy \
-                    port:py${python_version}-scour
+                    port:hicolor-icon-theme \
+                    port:py${python.variant}-cssselect \
+                    port:py${python.variant}-lxml \
+                    port:py${python.variant}-numpy \
+                    port:py${python.variant}-scour
 
-compiler.cxx_standard \
-                    2020
-
-# Inkscape 1.4.3 uses CMP0167 NEW, requiring Boost config mode
+# Options carried over from the 1.3.2 port. Some may no longer exist in
+# master; CMake only warns about unused -D variables.
 configure.args-append \
-                    -DCMAKE_PREFIX_PATH="[boost::install_area]" \
                     -DBUILD_TESTING=OFF \
                     -DENABLE_LCMS=ON \
                     -DENABLE_POPPLER=ON \
                     -DENABLE_POPPLER_CAIRO=OFF \
                     -DWITH_ASAN=OFF \
+                    -DWITH_DBUS=OFF \
                     -DWITH_GNU_READLINE=OFF \
                     -DWITH_GRAPHICS_MAGICK=OFF \
                     -DWITH_GSOURCEVIEW=ON \
-                    -DWITH_GSPELL=ON \
                     -DWITH_IMAGE_MAGICK=ON \
                     -DWITH_INTERNAL_CAIRO=OFF \
-                    -DWITH_INTERNAL_2GEOM=OFF \
+                    -DWITH_INTERNAL_2GEOM=ON \
                     -DWITH_JEMALLOC=OFF \
                     -DWITH_LIBCDR=ON \
                     -DWITH_LIBVISIO=ON \
@@ -154,19 +181,29 @@ configure.args-append \
                     -DWITH_PROFILING=OFF \
                     -DWITH_X11=OFF
 
-# The following dummy variants are used to identify this port's binary dependencies,
-# based on which variant of gtkmm is used for the build.
-variant x11 conflicts quartz {}
-variant quartz conflicts x11 {}
+# The GTK 4 stack must match: quartz (native macOS) is the default, since
+# gtkmm4 +x11 builds but is reported not to run (OpenGL issues).
+variant quartz conflicts x11 description {Native macOS (quartz) GTK 4 stack} {
+    require_active_variants gtk4 quartz
+    require_active_variants gtkmm4 quartz
+}
+variant x11 conflicts quartz description {X11 GTK 4 stack} {
+    require_active_variants gtk4 x11
+    require_active_variants gtkmm4 x11
+}
+default_variants    +quartz
 
-if {![variant_isset quartz]} {
-    default_variants +x11
+# Escape hatch if master does not yet build against your Poppler release:
+# builds without PDF import (PDF export and everything else are unaffected).
+variant no_pdfimport description {Build without PDF import (no Poppler dependency)} {
+    configure.args-replace \
+                    -DENABLE_POPPLER=ON \
+                    -DENABLE_POPPLER=OFF
+    depends_lib-delete \
+                    path:lib/pkgconfig/poppler.pc:poppler
 }
 
 variant tests description {Enable tests} {
-    depends_build-append \
-                    port:gtest
-
     configure.args-replace \
                     -DBUILD_TESTING=OFF \
                     -DBUILD_TESTING=ON
@@ -174,15 +211,30 @@ variant tests description {Enable tests} {
     test.run        yes
 }
 
+# CMake installs libinkscape_base into lib/inkscape, but the MacPorts cmake
+# group gives it the install name ${prefix}/lib/libinkscape_base.*.dylib, so
+# the executables look for it in ${prefix}/lib and fail to start (and
+# rev-upgrade reports them as broken). Install it where it is linked.
+# (The old 1.3.x port patched src/CMakeLists.txt for the same purpose; moving
+# the files after destroot does not depend on the source layout.)
+post-destroot {
+    set libsub ${destroot}${prefix}/lib/inkscape
+    foreach lib [glob -nocomplain ${libsub}/libinkscape_base*.dylib] {
+        move ${lib} ${destroot}${prefix}/lib/
+    }
+    if {[file isdirectory ${libsub}] && [llength [glob -nocomplain ${libsub}/*]] == 0} {
+        delete ${libsub}
+    }
+}
+
 post-activate {
-    system "${prefix}/bin/gtk-update-icon-cache -f -t ${prefix}/share/icons/hicolor"
-    system "${prefix}/bin/update-desktop-database ${prefix}/share/applications"
+    catch {system "${prefix}/bin/gtk4-update-icon-cache -f -t ${prefix}/share/icons/hicolor"}
+    catch {system "${prefix}/bin/update-desktop-database ${prefix}/share/applications"}
 }
 
-notes {
-    Install port 'inkscape-app', to create a macOS app launcher.
-}
+notes "
+This is the Inkscape master branch (1.5-dev): expect crashes and regressions.\
+\nIt conflicts with the inkscape and inkscape-devel (1.3.x, GTK 3) ports.
+"
 
-livecheck.type      regex
-livecheck.url       https://inkscape.org/release/
-livecheck.regex     ">Inkscape (\\d+(?:\\.\\d+)*)<"
+livecheck.type      none
