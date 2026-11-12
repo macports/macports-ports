@@ -214,12 +214,18 @@ proc muniversal::fileIsBinary {filename} {
         return 1
     }
     if {[file isfile $filename]} {
-        set ARMAG "!<arch>\n"
-        set SARMAG 8
+        set magic_len 8
         set fd [open $filename rb]
-        set magic [read $fd $SARMAG]
+        set magic [read $fd $magic_len]
         close $fd
-        if {$magic eq $ARMAG} {
+        # ar archive - ARMAG
+        if {$magic eq "!<arch>\n"} {
+            return 1
+        }
+        set magic [binary encode hex [string range $magic 0 3]]
+        # mach-o - MH_MAGIC, MH_CIGAM, MH_MAGIC_64, MH_CIGAM_64, FAT_MAGIC_64
+        set magic_list [list feedface cefaedfe feedfacf cffaedfe cafebabf]
+        if {$magic in $magic_list} {
             return 1
         }
     }
