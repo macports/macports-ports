@@ -1,0 +1,214 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           github 1.0
+
+github.setup        microsoft onnxruntime 1.30.0 v
+github.tarball_from archive
+categories          math devel science
+license             MIT
+maintainers         nomaintainer
+description         Cross-platform, high performance scoring engine for ML models
+long_description    ONNX Runtime is a performance-focused inference engine for \
+                    ONNX (Open Neural Network Exchange) models. It enables \
+                    hardware-accelerated machine learning inferencing across \
+                    a variety of platforms.
+
+homepage            https://github.com/microsoft/onnxruntime
+
+checksums           ${distname}${extract.suffix} \
+                        rmd160  e73c18b1517a844444399492586c798711719d44 \
+                        sha256  f6681ecbddf53898adf0cc9e8e9e84657485b84d2eca3c8aa353de6d7dd417ef \
+                        size    278619110 
+
+# -----------------------------------------------------------------------
+# Local, patched copy of protobuf
+#
+# onnxruntime pulls protobuf via CMake FetchContent (see cmake/deps.txt,
+# pinned to v33.6). On some Apple Clang / libc++ SDK combinations, protobuf's
+# own workaround for non-constexpr std::string default constructors
+# (src/google/protobuf/port.h, GlobalEmptyStringConstexpr::
+# HasConstexprDefaultConstructor) misdetects the platform as constinit-safe
+# and the build fails with:
+#    error: variable does not have a constant initializer
+#    note: pointer to subobject of heap-allocated object is not a constant
+#    expression
+# (src/google/protobuf/port.cc, fixed_address_empty_string)
+#
+# We fetch the exact same protobuf release ourselves, apply a one-line
+# patch disabling that misdetection on __APPLE__, and point FetchContent at
+# our patched copy via -DFETCHCONTENT_SOURCE_DIR_PROTOBUF (see below).
+# -----------------------------------------------------------------------
+distfiles-append    protobuf-33.6${extract.suffix}:protobuf
+master_sites-append https://github.com/protocolbuffers/protobuf/releases/download/v33.6:protobuf
+checksums-append    protobuf-33.6${extract.suffix} \
+                        rmd160  d8d6cc65a9f8907d8879176019878efd65231e28 \
+                        sha256  16498d7dc7967e9b100632138babd4b86b61592beeccdd556f67539d9c231355 \
+                        size    6888932
+
+# -----------------------------------------------------------------------
+# Build dependencies
+# -----------------------------------------------------------------------
+depends_build-append    port:python313
+
+# -----------------------------------------------------------------------
+# Hard-stop if stale protobuf3-cpp headers would break this build
+#
+# protobuf3-cpp's headers under ${prefix}/include collide with the newer
+# Protobuf that onnxruntime fetches via CMake FetchContent, causing
+# "redefinition of ..." errors. Fail early with a clear message instead.
+# -----------------------------------------------------------------------
+pre-fetch {
+    if {[file exists ${prefix}/include/google/protobuf/map_entry_lite.h]} {
+        set protobuf3cpp_entries {}
+        catch {set protobuf3cpp_entries [registry_active protobuf3-cpp]}
+        if {[llength ${protobuf3cpp_entries}] > 0} {
+            ui_error "protobuf3-cpp is active and provides stale google/protobuf headers under ${prefix}/include. These conflict with the newer Protobuf version onnxruntime builds from source via FetchContent and WILL break this build (\"redefinition of ...\", \"no matching declaration\"). Please deactivate it first:\n\n    sudo port deactivate protobuf3-cpp\n\nThen retry this install. You can reactivate protobuf3-cpp afterwards with:\n\n    sudo port activate protobuf3-cpp"
+            return -code error "protobuf3-cpp must be deactivated before building onnxruntime"
+        }
+    }
+}
+
+# -----------------------------------------------------------------------
+# Patch the local protobuf copy fetched above, then point CMake's
+# FetchContent at it instead of letting it download+build its own copy.
+# -----------------------------------------------------------------------
+post-extract {
+    # FETCHCONTENT_SOURCE_DIR_PROTOBUF bypasses onnxruntime's own
+    # PATCH_COMMAND (ONNXRUNTIME_PROTOBUF_PATCH_COMMAND), so replicate it here,
+    # in the same order as cmake/external/onnxruntime_external_deps.cmake.
+    # Note: protobuf_android_log.patch also changes utf8_validity from PRIVATE
+    # to PUBLIC in libprotobuf-lite, which coreml_proto needs to find
+    # utf8_validity.h - so this is required on macOS, not just Android.
+    foreach p {protobuf_android_log
+               protobuf_msvc_unreachable_code
+               protobuf_msvc_map_unreachable_code
+               protobuf_compiler_incomplete_type} {
+        system "cd ${workpath}/protobuf-33.6 && patch --binary --ignore-whitespace -p1 < ${worksrcpath}/cmake/patches/protobuf/${p}.patch"
+    }
+    system "cd ${workpath}/protobuf-33.6 && patch -p1 < ${filespath}/protobuf_apple_empty_string_constinit.patch"
+}
+
+# -----------------------------------------------------------------------
+# CoreML variant
+#
+# CoreML execution provider supported on macOS 10.15+.
+# Advanced features (e.g. MLOptimizationHints API) will be utilized
+# automatically when building for/on macOS 14.4+.
+# -----------------------------------------------------------------------
+variant coreml description {Build with CoreML execution provider (requires macOS 10.15+)} {}
+
+set ort_target [option macosx_deployment_target]
+if {${ort_target} eq ""} {
+    set ort_target "10.15"
+}
+
+# onnxruntime uses std::filesystem and CoreML EP, which both need macOS 10.15+.
+if {[vercmp ${ort_target} 10.15] < 0} {
+    set ort_target "10.15"
+}
+
+# Default to +coreml on any system that supports at least macOS 10.15.
+if {![variant_isset coreml] && ![variant_isset no_coreml] && [vercmp ${ort_target} 10.15] >= 0} {
+    default_variants +coreml
+}
+
+# If +coreml is set, ensure the deployment target is at least 10.15.
+if {[variant_isset coreml] && [vercmp ${ort_target} 10.15] < 0} {
+    set ort_target "10.15"
+}
+
+macosx_deployment_target ${ort_target}
+
+# -----------------------------------------------------------------------
+# Compiler flags
+#
+# -Wno-shorten-64-to-32: onnxruntime's CMake adds -Werror for this on
+#    arm64 with Apple clang.
+# -Wno-unguarded-availability(-new): model.mm calls macOS 14.4+/15+ APIs
+#    without explicit @available guards; needed for +coreml builds on older targets.
+# -Wno-deprecated-declarations: macOS SDKs deprecate std::codecvt_utf8,
+#    which -Werror would otherwise turn into an error.
+# -----------------------------------------------------------------------
+set ort_cxx_flags ""
+set ort_objcxx_flags ""
+
+if {${build_arch} eq "arm64"} {
+    set ort_cxx_flags    "${ort_cxx_flags} -Wno-shorten-64-to-32"
+    set ort_objcxx_flags "${ort_objcxx_flags} -Wno-shorten-64-to-32"
+}
+
+if {[variant_isset coreml]} {
+    set ort_cxx_flags    "${ort_cxx_flags} -Wno-unguarded-availability -Wno-unguarded-availability-new"
+    set ort_objcxx_flags "${ort_objcxx_flags} -Wno-unguarded-availability -Wno-unguarded-availability-new"
+    
+    # Enable MLOptimizationHints optimization flags when targeting macOS 14.4+
+    if {[vercmp ${ort_target} 14.4] >= 0} {
+        set ort_cxx_flags    "${ort_cxx_flags} -DHAVE_ML_OPTIMIZATION_HINTS=1"
+        set ort_objcxx_flags "${ort_objcxx_flags} -DHAVE_ML_OPTIMIZATION_HINTS=1"
+    }
+}
+
+if {${os.major} >= 25} {
+    set ort_cxx_flags    "${ort_cxx_flags} -Wno-deprecated-declarations"
+    set ort_objcxx_flags "${ort_objcxx_flags} -Wno-deprecated-declarations"
+}
+
+# -----------------------------------------------------------------------
+# Configure
+# -----------------------------------------------------------------------
+if {[variant_isset coreml]} {
+    configure.args-append -Donnxruntime_USE_COREML=ON
+} else {
+    configure.args-append -Donnxruntime_USE_COREML=OFF
+}
+
+cmake.source_dir    ${worksrcpath}/cmake
+configure.dir       ${workpath}/build
+build.dir           ${workpath}/build
+
+configure.args-append \
+    -DCMAKE_CXX_FLAGS="${ort_cxx_flags}" \
+    -DCMAKE_OBJCXX_FLAGS="${ort_objcxx_flags}" \
+    -DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER \
+    -DFETCHCONTENT_SOURCE_DIR_PROTOBUF=${workpath}/protobuf-33.6 \
+    -DPython_EXECUTABLE=${prefix}/bin/python3.13 \
+    -Donnxruntime_BUILD_SHARED_LIB=ON \
+    -Donnxruntime_BUILD_UNIT_TESTS=OFF \
+    -Donnxruntime_GENERATE_TEST_REPORTS=OFF \
+    -Donnxruntime_RUN_ONNX_TESTS=OFF \
+    -Donnxruntime_USE_FULL_PROTOBUF=OFF \
+    -Donnxruntime_USE_PREINSTALLED_ONNX=OFF \
+    -DCMAKE_CXX_STANDARD=20
+
+configure.env-delete    CPATH=${prefix}/include
+build.env-delete        CPATH=${prefix}/include
+
+# -----------------------------------------------------------------------
+# Fix install name
+#
+# onnxruntime's CMakeLists.txt hardcodes INSTALL_RPATH to "@rpath",
+# overriding CMAKE_INSTALL_NAME_DIR, so fix up install names manually.
+# -----------------------------------------------------------------------
+post-destroot {
+    set dylib ${destroot}${prefix}/lib/libonnxruntime.${version}.dylib
+    set final_name ${prefix}/lib/libonnxruntime.${version}.dylib
+
+    # Fix the dylib's own install name
+    system "install_name_tool -id ${final_name} ${dylib}"
+
+    # Fix the symlink target libonnxruntime.dylib if present
+    foreach link [glob -nocomplain ${destroot}${prefix}/lib/libonnxruntime*.dylib] {
+        if {${link} ne ${dylib}} {
+            catch {system "install_name_tool -id ${final_name} ${link}"}
+        }
+    }
+}
+
+# -----------------------------------------------------------------------
+# Test
+#
+# No unit test binary is built (onnxruntime_BUILD_UNIT_TESTS is OFF above).
+# -----------------------------------------------------------------------
+test.run            no
