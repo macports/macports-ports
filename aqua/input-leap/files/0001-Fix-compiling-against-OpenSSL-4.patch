@@ -1,0 +1,55 @@
+From 6c16eebace2c8215bdb23657aaff5b0c88f669ec Mon Sep 17 00:00:00 2001
+From: Clemens Lang <cal@macports.org>
+Date: Fri, 13 Nov 2026 11:07:05 +0100
+Subject: [PATCH] Fix compiling against OpenSSL 4
+
+OpenSSL 4 no longer provides direct access to the internals of an X509
+certificate, so modifying a subject name is now a chain of
+
+- X509_get_subject_name()
+- X509_NAME_dup()
+- modifying the name
+- X509_set_subject_name()
+
+rather than directly modifying the object returned by
+X509_get_subject_name() (which was honestly always pretty terrible API
+design anyway).
+
+While at it, add error handling for some fallible functions.
+
+Signed-off-by: Clemens Lang <cal@macports.org>
+---
+ src/lib/net/SecureUtils.cpp | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/src/lib/net/SecureUtils.cpp b/src/lib/net/SecureUtils.cpp
+index 6b2a3836..1e16c618 100644
+--- a/src/lib/net/SecureUtils.cpp
++++ b/src/lib/net/SecureUtils.cpp
+@@ -194,12 +194,20 @@ void generate_pem_self_signed_cert(const std::string& path)
+     X509_gmtime_adj(X509_get_notAfter(cert), expiration_days * 24 * 3600);
+     X509_set_pubkey(cert, private_key);
+ 
+-    auto* name = X509_get_subject_name(cert);
++    auto* name = X509_NAME_dup(X509_get_subject_name(cert));
++    if (!name) {
++        throw std::runtime_error("Could not copy X509_NAME");
++    }
++    auto name_free = finally([name]() { X509_NAME_free(name); });
+     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                                reinterpret_cast<const unsigned char *>("InputLeap"), -1, -1, 0);
+-    X509_set_issuer_name(cert, name);
++    if (!X509_set_subject_name(cert, name) || !X509_set_issuer_name(cert, name)) {
++        throw std::runtime_error("Failed to set certificate subject or issuer name");
++    }
+ 
+-    X509_sign(cert, private_key, EVP_sha256());
++    if (!X509_sign(cert, private_key, EVP_sha256())) {
++        throw std::runtime_error("Failed to sign self-signed certificate");
++    }
+ 
+     auto fp = fopen_utf8_path(path.c_str(), "w");
+     if (!fp) {
+-- 
+2.56.0
+
