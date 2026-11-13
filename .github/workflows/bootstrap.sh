@@ -113,12 +113,14 @@ case "$OS_MAJOR" in
 esac
 endgroup
 
+if [ -n "$MPBB" ] ; then
 begingroup "Installing Metal Toolchain"
 case "$OS_MAJOR" in
     25) sudo xcodebuild -downloadComponent MetalToolchain
         ;;
 esac
 endgroup
+fi
 
 begingroup "Installing getopt"
 # Install getopt required by mpbb
