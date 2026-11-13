@@ -76,7 +76,6 @@ endgroup
 if [ -n "$MPBB" ] ; then
 begingroup "Info"
 echo "macOS version: $(sw_vers -productVersion)"
-echo "IP address: $(/usr/bin/curl -fsS https://www-origin.macports.org/ip.php)"
 /usr/bin/curl -fsSIo /dev/null https://packages-private.macports.org/.org.macports.packages-private.healthcheck.txt && private_packages_available=yes || private_packages_available=no
 echo "Can reach private packages server: $private_packages_available"
 endgroup
@@ -114,17 +113,20 @@ case "$OS_MAJOR" in
 esac
 endgroup
 
+if [ -n "$MPBB" ] ; then
 begingroup "Installing Metal Toolchain"
 case "$OS_MAJOR" in
     25) sudo xcodebuild -downloadComponent MetalToolchain
         ;;
 esac
 endgroup
+fi
 
 begingroup "Installing getopt"
 # Install getopt required by mpbb
 if ! wait $curl_getopt_pid; then
     echo "Fetching getopt failed: $?"
+    exit 1
 fi
 echo "Extracting..."
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
@@ -147,6 +149,7 @@ echo "file://${PWD}/ports [default,nosync]" | sudo tee /opt/local/etc/macports/s
 # Install MacPorts
 if ! wait $curl_mpbase_pid; then
     echo "Fetching base failed: $?"
+    exit 1
 fi
 sudo installer -package "${MACPORTS_FILENAME}" -target /
 rm -f "${MACPORTS_FILENAME}"
