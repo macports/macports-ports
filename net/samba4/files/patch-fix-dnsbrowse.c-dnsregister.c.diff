@@ -1,0 +1,544 @@
+From 5aabf82dfaf325bf682db85d80476224e7005a41 Mon Sep 17 00:00:00 2001
+From: "Timur I. Bakeyev" <timur@FreeBSD.org>
+Date: Mon, 31 May 2021 00:46:16 +0200
+Subject: [PATCH 19/28] From 923bc7a1afeb0b920e60e14846987ae1d2d7dca4 Mon Sep
+ 17 00:00:00 2001 From: John Hixson <john@ixsystems.com> Date: Thu, 7 Dec 2017
+ 09:36:32 -0500 Subject: [PATCH] Freenas/master mdns fixes (#22)
+
+* mDNS fixes for Samba (work in progress).
+* Fix mDNS - Can advertise on individual interfaces
+* Fix mDNS browsing in smbclient
+
+Signed-off-by: Timur I. Bakeyev <timur@iXsystems.com>
+Signed-off-by: Timur I. Bakeyev <timur@FreeBSD.org>
+---
+ source3/client/dnsbrowse.c |  19 +-
+ source3/smbd/dnsregister.c | 354 ++++++++++++++++++++++++++++++-------
+ 2 files changed, 299 insertions(+), 74 deletions(-)
+
+diff --git a/source3/client/dnsbrowse.c b/source3/client/dnsbrowse.c
+index be6eb881cf1..83aef966d2a 100644
+--- source3/client/dnsbrowse.c
++++ source3/client/dnsbrowse.c
+@@ -39,6 +39,7 @@ struct mdns_smbsrv_result
+ struct mdns_browse_state
+ {
+ 	struct mdns_smbsrv_result *listhead; /* Browse result list head */
++	TALLOC_CTX * ctx;
+ 	int browseDone;
+ 
+ };
+@@ -64,7 +65,7 @@ static void do_smb_resolve(struct mdns_smbsrv_result *browsesrv)
+ 	struct timeval tv;
+ 	DNSServiceErrorType err;
+ 
+-	TALLOC_CTX * ctx = talloc_tos();
++	TALLOC_CTX * ctx = talloc_new(NULL);
+ 
+ 	err = DNSServiceResolve(&mdns_conn_sdref, 0 /* flags */,
+ 		browsesrv->ifIndex,
+@@ -91,7 +92,7 @@ static void do_smb_resolve(struct mdns_smbsrv_result *browsesrv)
+ 		}
+ 	}
+ 
+-	TALLOC_FREE(fdset);
++	TALLOC_FREE(ctx);
+ 	DNSServiceRefDeallocate(mdns_conn_sdref);
+ }
+ 
+@@ -124,18 +125,19 @@ do_smb_browse_reply(DNSServiceRef sdRef, DNSServiceFlags flags,
+ 		return;
+ 	}
+ 
+-	bresult = talloc_array(talloc_tos(), struct mdns_smbsrv_result, 1);
++	bresult = talloc_array(bstatep->ctx, struct mdns_smbsrv_result, 1);
+ 	if (bresult == NULL) {
+ 		return;
+ 	}
+ 
++	bresult->nextResult = NULL;
+ 	if (bstatep->listhead != NULL) {
+ 		bresult->nextResult = bstatep->listhead;
+ 	}
+ 
+-	bresult->serviceName = talloc_strdup(talloc_tos(), serviceName);
+-	bresult->regType = talloc_strdup(talloc_tos(), regtype);
+-	bresult->domain = talloc_strdup(talloc_tos(), replyDomain);
++	bresult->serviceName = talloc_strdup(bstatep->ctx, serviceName);
++	bresult->regType = talloc_strdup(bstatep->ctx, regtype);
++	bresult->domain = talloc_strdup(bstatep->ctx, replyDomain);
+ 	bresult->ifIndex = interfaceIndex;
+ 	bstatep->listhead = bresult;
+ }
+@@ -151,10 +153,13 @@ int do_smb_browse(void)
+ 	DNSServiceRef mdns_conn_sdref = NULL;
+ 	DNSServiceErrorType err;
+ 
+-	TALLOC_CTX * ctx = talloc_stackframe();
++	TALLOC_CTX * ctx = talloc_new(NULL);
+ 
+ 	ZERO_STRUCT(bstate);
+ 
++	bstate.ctx = ctx;
++	bstate.listhead = NULL;
++
+ 	err = DNSServiceBrowse(&mdns_conn_sdref, 0, 0, "_smb._tcp", "",
+ 			do_smb_browse_reply, &bstate);
+ 
+diff --git a/source3/smbd/dnsregister.c b/source3/smbd/dnsregister.c
+index df189001a09..389a4278f64 100644
+--- source3/smbd/dnsregister.c
++++ source3/smbd/dnsregister.c
+@@ -29,6 +29,29 @@
+  * browse for advertised SMB services.
+  */
+ 
++/*
++ * Time Machine Errata:
++ * sys=adVF=0x100 -- this is required when ._adisk._tcp is present on device. When it is
++ * set, the MacOS client will send a NetShareEnumAll IOCTL and shares will be visible.
++ * Otherwise, Finder will only see the Time Machine share. In the absence of ._adisk._tcp
++ * MacOS will _always_ send NetShareEnumAll IOCTL.
++ *
++ * waMa=0 -- MacOS server uses waMa=0, while embedded devices have it set to their Mac Address.
++ * Speculation in Samba-Technical indicates that this stands for "Wireless AirDisk Mac Address".
++ *
++ * adVU -- AirDisk Volume UUID. Mac OS servers generate a UUID. Time machine over SMB works without one
++ * set. Netatalk generates a UUID and stores it persistently in afp_voluuid.conf. This can be
++ * set by adding the share parameter "fruit:volume_uuid = "
++ *
++ * dk(n)=adVF=
++ *      0xa1, 0x81 - AFP support
++ *      0xa2, 0x82 - SMB support
++ *      0xa3, 0x83 - AFP and SMB support
++ *
++ * adVN -- AirDisk Volume Name. We set this to the share name.
++ *
++ */
++
+ #define DNS_REG_RETRY_INTERVAL (5*60)  /* in seconds */
+ 
+ #ifdef WITH_DNSSD_SUPPORT
+@@ -36,85 +59,177 @@
+ #include <dns_sd.h>
+ 
+ struct dns_reg_state {
+-	struct tevent_context *event_ctx;
+-	uint16_t port;
+-	DNSServiceRef srv_ref;
+-	struct tevent_timer *te;
+-	int fd;
+-	struct tevent_fd *fde;
++	int count;
++	struct reg_state {
++		DNSServiceRef srv_ref;
++		TALLOC_CTX *mem_ctx;
++		struct tevent_context *event_ctx;
++		struct tevent_timer *te;
++		struct tevent_fd *fde;
++		uint16_t port;
++		int if_index;
++		int fd;
++	} *drs;
+ };
+ 
+-static int dns_reg_state_destructor(struct dns_reg_state *dns_state)
++static void dns_register_smbd_retry(struct tevent_context *ctx,
++				    struct tevent_timer *te,
++				    struct timeval now,
++				    void *private_data);
++static void dns_register_smbd_fde_handler(struct tevent_context *ev,
++					  struct tevent_fd *fde,
++					  uint16_t flags,
++					  void *private_data);
++
++
++static int reg_state_destructor(struct reg_state *state)
+ {
+-	if (dns_state->srv_ref != NULL) {
++	if (state == NULL) {
++		return -1;
++	}
++
++	if (state->srv_ref != NULL) {
+ 		/* Close connection to the mDNS daemon */
+-		DNSServiceRefDeallocate(dns_state->srv_ref);
+-		dns_state->srv_ref = NULL;
++		DNSServiceRefDeallocate(state->srv_ref);
++		state->srv_ref = NULL;
+ 	}
+ 
+ 	/* Clear event handler */
+-	TALLOC_FREE(dns_state->te);
+-	TALLOC_FREE(dns_state->fde);
+-	dns_state->fd = -1;
++	TALLOC_FREE(state->te);
++	TALLOC_FREE(state->fde);
++	state->fd = -1;
+ 
+ 	return 0;
+ }
+ 
+-static void dns_register_smbd_retry(struct tevent_context *ctx,
+-				    struct tevent_timer *te,
+-				    struct timeval now,
+-				    void *private_data);
+-static void dns_register_smbd_fde_handler(struct tevent_context *ev,
+-					  struct tevent_fd *fde,
+-					  uint16_t flags,
+-					  void *private_data);
++int TXTRecordPrintf(TXTRecordRef * rec, const char * key, const char * fmt, ... )
++{
++	int ret = 0;
++	char *str;
++	va_list ap;
++	va_start( ap, fmt );
++
++	if( 0 > vasprintf(&str, fmt, ap ) ) {
++		va_end(ap);
++		return -1;
++	}
++	va_end(ap);
++
++	if( kDNSServiceErr_NoError != TXTRecordSetValue(rec, key, strlen(str), str) ) {
++		ret = -1;
++	}
++
++	free(str);
++	return ret;
++}
++
++int TXTRecordKeyPrintf(TXTRecordRef * rec, const char * key_fmt, int key_var, const char * fmt, ...)
++{
++	int ret = 0;
++	char *key = NULL, *str = NULL;
++	va_list ap;
++
++	if( 0 > asprintf(&key, key_fmt, key_var)) {
++		DEBUG(1, ("Failed in asprintf\n"));
++		return -1;
++	}
+ 
+-static bool dns_register_smbd_schedule(struct dns_reg_state *dns_state,
++	va_start( ap, fmt );
++	if( 0 > vasprintf(&str, fmt, ap )) {
++		va_end(ap);
++		DEBUG(1, ("Failed in vasprintf\n"));
++		ret = -1;
++		goto exit;
++	}
++	va_end(ap);
++
++	if( kDNSServiceErr_NoError != TXTRecordSetValue(rec, key, strlen(str), str) ) {
++		DEBUG(1, ("Failed in TXTRecordSetValuen"));
++		ret = -1;
++		goto exit;
++	}
++
++	exit:
++	if (str)
++		free(str);
++	if (key)
++		free(key);
++	return ret;
++}
++
++
++static bool dns_register_smbd_schedule(struct reg_state *state,
+ 				       struct timeval tval)
+ {
+-	dns_reg_state_destructor(dns_state);
++	reg_state_destructor(state);
+ 
+-	dns_state->te = tevent_add_timer(dns_state->event_ctx,
+-					 dns_state,
++	state->te = tevent_add_timer(state->event_ctx,
++					 state->mem_ctx,
+ 					 tval,
+ 					 dns_register_smbd_retry,
+-					 dns_state);
+-	if (!dns_state->te) {
++					 state);
++	if (!state->te) {
+ 		return false;
+ 	}
+ 
+ 	return true;
+ }
+ 
++static void dns_register_smbd_callback(DNSServiceRef service,
++				       DNSServiceFlags flags,
++				       DNSServiceErrorType errorCode,
++				       const char *name,
++				       const char *type,
++				       const char *domain,
++				       void *context)
++{
++	if (errorCode != kDNSServiceErr_NoError) {
++		DEBUG(6, ("error=%d\n", errorCode));
++	} else {
++		DEBUG(6, ("%-15s %s.%s%s\n", "REGISTER", name, type, domain));
++	}
++}
++
+ static void dns_register_smbd_retry(struct tevent_context *ctx,
+ 				    struct tevent_timer *te,
+ 				    struct timeval now,
+ 				    void *private_data)
+ {
+-	struct dns_reg_state *dns_state = talloc_get_type_abort(private_data,
+-					  struct dns_reg_state);
++	struct reg_state *state = (struct reg_state *)private_data;
+ 	DNSServiceErrorType err;
++	int snum;
++	size_t dk = 0;
++	bool sys_txt_created = false;
++	TXTRecordRef txt_adisk;
++	TXTRecordRef txt_devinfo;
++	char *servname;
++	char *v_uuid;
++	int num_services = lp_numservices();
++
++	reg_state_destructor(state);
+ 
+-	dns_reg_state_destructor(dns_state);
++	TXTRecordCreate(&txt_adisk, 0, NULL);
+ 
+-	DEBUG(6, ("registering _smb._tcp service on port %d\n",
+-		  dns_state->port));
++	DEBUG(6, ("registering _smb._tcp service on port %d index %d\n",
++		  state->port, state->if_index));
+ 
+ 	/* Register service with DNS. Connects with the mDNS
+ 	 * daemon running on the local system to perform DNS
+ 	 * service registration.
+ 	 */
+-	err = DNSServiceRegister(&dns_state->srv_ref, 0 /* flags */,
+-			kDNSServiceInterfaceIndexAny,
+-			NULL /* service name */,
+-			"_smb._tcp" /* service type */,
+-			NULL /* domain */,
+-			"" /* SRV target host name */,
+-			htons(dns_state->port),
+-			0 /* TXT record len */,
+-			NULL /* TXT record data */,
+-			NULL /* callback func */,
+-			NULL /* callback context */);
++	err = DNSServiceRegister(&state->srv_ref,
++			0		/* flags */,
++			state->if_index /* interface index */,
++			NULL		/* service name */,
++			"_smb._tcp"	/* service type */,
++			NULL		/* domain */,
++			""		/* SRV target host name */,
++			htons(state->port) /* port */,
++			0		/* TXT record len */,
++			NULL		/* TXT record data */,
++			dns_register_smbd_callback /* callback func */,
++			NULL		/* callback context */);
++
+ 
+ 	if (err != kDNSServiceErr_NoError) {
+ 		/* Failed to register service. Schedule a re-try attempt.
+@@ -123,24 +238,96 @@ static void dns_register_smbd_retry(struct tevent_context *ctx,
+ 		goto retry;
+ 	}
+ 
+-	dns_state->fd = DNSServiceRefSockFD(dns_state->srv_ref);
+-	if (dns_state->fd == -1) {
++	/*
++	 * Check for services that are configured as Time Machine targets
++	 *
++	 */
++	for (snum = 0; snum < num_services; snum++) {
++		if (lp_snum_ok(snum) && lp_parm_bool(snum, "fruit", "time machine", false))
++		{
++			if (!sys_txt_created) {
++				if( 0 > TXTRecordPrintf(&txt_adisk, "sys", "adVF=0x100") ) {
++					DEBUG(1, ("Failed to create Zeroconf TXTRecord for sys") );
++					goto retry;
++				}
++				else
++				{
++					sys_txt_created = true;
++				}
++			}
++
++			v_uuid = lp_parm_const_string(snum, "fruit", "volume_uuid", NULL);
++			servname = lp_const_servicename(snum);
++			DEBUG(1, ("Registering volume %s for TimeMachine\n", servname));
++			if (v_uuid) {
++				if( 0 > TXTRecordKeyPrintf(&txt_adisk, "dk%zu", dk++, "adVN=%s,adVF=0x82,adVU=%s",
++					servname, v_uuid) ) {
++					DEBUG(1, ("Could not set Zeroconf TXTRecord for dk%zu \n", dk));
++					goto retry;
++				}
++				DEBUG(1, ("Registering TimeMachine with the following TXT parameters: "
++					  "dk%zu,adVN=%s,adVF=0x82,adVU=%s\n", dk, servname, v_uuid) );
++			}
++			else {
++				if( 0 > TXTRecordKeyPrintf(&txt_adisk, "dk%zu", dk++, "adVN=%s,adVF=0x82",
++					servname) ) {
++					DEBUG(1, ("Could not set Zeroconf TXTRecord for dk%zu \n", dk));
++					goto retry;
++				}
++				DEBUG(1, ("Registering TimeMachine with the following TXT parameters: "
++					  "dk%zu,adVN=%s,adVF=0x82\n", dk, servname) );
++			}
++		}
++	}
++
++	if (dk) {
++		err = DNSServiceRegister(&state->srv_ref,
++				0		/* flags */,
++				state->if_index /* interface index */,
++				NULL		/* service name */,
++				"_adisk._tcp"	/* service type */,
++				NULL		/* domain */,
++				""		/* SRV target host name */,
++				/*
++				 * We would probably use port 0 zero, but we can't, from man DNSServiceRegister:
++				 *   "A value of 0 for a port is passed to register placeholder services.
++				 *    Place holder services are not found  when browsing, but other
++				 *    clients cannot register with the same name as the placeholder service."
++				 * We therefor use port 9 which is used by the adisk service type.
++				 */
++				htons(9)	/* port */,
++				TXTRecordGetLength(&txt_adisk)		/* TXT record len */,
++				TXTRecordGetBytesPtr(&txt_adisk)	/* TXT record data */,
++				dns_register_smbd_callback /* callback func */,
++				NULL		/* callback context */);
++
++
++		if (err != kDNSServiceErr_NoError) {
++			/* Failed to register service. Schedule a re-try attempt.
++			 */
++			DEBUG(1, ("unable to register with mDNS (err %d)\n", err));
++			goto retry;
++		}
++	}
++
++	state->fd = DNSServiceRefSockFD(state->srv_ref);
++	if (state->fd == -1) {
+ 		goto retry;
+ 	}
+ 
+-	dns_state->fde = tevent_add_fd(dns_state->event_ctx,
+-				       dns_state,
+-				       dns_state->fd,
+-				       TEVENT_FD_READ,
+-				       dns_register_smbd_fde_handler,
+-				       dns_state);
+-	if (!dns_state->fde) {
++	state->fde = tevent_add_fd(state->event_ctx,
++				   state->mem_ctx,
++				   state->fd,
++				   TEVENT_FD_READ,
++				   dns_register_smbd_fde_handler,
++				   state);
++	if (!state->fde) {
+ 		goto retry;
+ 	}
+ 
+ 	return;
+  retry:
+-	dns_register_smbd_schedule(dns_state,
++	dns_register_smbd_schedule(state,
+ 		timeval_current_ofs(DNS_REG_RETRY_INTERVAL, 0));
+ }
+ 
+@@ -150,44 +337,77 @@ static void dns_register_smbd_fde_handler(struct tevent_context *ev,
+ 					  uint16_t flags,
+ 					  void *private_data)
+ {
+-	struct dns_reg_state *dns_state = talloc_get_type_abort(private_data,
+-					  struct dns_reg_state);
++	struct reg_state *state = (struct reg_state *)private_data;
+ 	DNSServiceErrorType err;
+ 
+-	err = DNSServiceProcessResult(dns_state->srv_ref);
++	err = DNSServiceProcessResult(state->srv_ref);
+ 	if (err != kDNSServiceErr_NoError) {
+-		DEBUG(3, ("failed to process mDNS result (err %d), re-trying\n",
+-			    err));
++		DEBUG(3, ("failed to process mDNS result (err %d), re-trying\n", err));
+ 		goto retry;
+ 	}
+ 
+-	talloc_free(dns_state);
+ 	return;
+ 
+  retry:
+-	dns_register_smbd_schedule(dns_state,
+-		timeval_current_ofs(DNS_REG_RETRY_INTERVAL, 0));
++	dns_register_smbd_schedule(state, timeval_zero());
+ }
+ 
++static int dns_reg_state_destructor(struct dns_reg_state *state)
++{
++	if (state != NULL) {
++		talloc_free(state);
++	}
++	return 0;
++}
++
++
+ bool smbd_setup_mdns_registration(struct tevent_context *ev,
+ 				  TALLOC_CTX *mem_ctx,
+ 				  uint16_t port)
+ {
+ 	struct dns_reg_state *dns_state;
++	bool bind_all = true;
++	int i;
+ 
+ 	dns_state = talloc_zero(mem_ctx, struct dns_reg_state);
+-	if (dns_state == NULL) {
++	if (dns_state == NULL)
++		return false;
++
++	if (lp_interfaces() && lp_bind_interfaces_only())
++		bind_all = false;
++
++	dns_state->count = iface_count();
++	if (dns_state->count <= 0 || bind_all == true)
++		dns_state->count = 1;
++
++	dns_state->drs = talloc_array(mem_ctx, struct reg_state, dns_state->count);
++	if (dns_state->drs == NULL) {
++		talloc_free(dns_state);
+ 		return false;
+ 	}
+-	dns_state->event_ctx = ev;
+-	dns_state->port = port;
+-	dns_state->fd = -1;
+ 
+-	talloc_set_destructor(dns_state, dns_reg_state_destructor);
++	for (i = 0; i < dns_state->count; i++) {
++		struct interface *iface = get_interface(i);
++		struct reg_state *state = &dns_state->drs[i];
++
++		state->mem_ctx = mem_ctx;
++		state->srv_ref = NULL;
++		state->event_ctx = ev;
++		state->te = NULL;
++		state->fde = NULL;
++		state->port = port;
++		state->fd = -1;
+ 
+-	return dns_register_smbd_schedule(dns_state, timeval_zero());
++		state->if_index = bind_all ? kDNSServiceInterfaceIndexAny : iface->if_index;
++
++		dns_register_smbd_schedule(&dns_state->drs[i], timeval_zero());
++	}
++
++	talloc_set_destructor(dns_state, dns_reg_state_destructor);
++	return true;
+ }
+ 
++
+ #else /* WITH_DNSSD_SUPPORT */
+ 
+ bool smbd_setup_mdns_registration(struct tevent_context *ev,
+-- 
+2.37.1
+
