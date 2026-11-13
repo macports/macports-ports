@@ -124,6 +124,7 @@ begingroup "Installing getopt"
 # Install getopt required by mpbb
 if ! wait $curl_getopt_pid; then
     echo "Fetching getopt failed: $?"
+    exit 1
 fi
 echo "Extracting..."
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
@@ -146,6 +147,7 @@ echo "file://${PWD}/ports [default,nosync]" | sudo tee /opt/local/etc/macports/s
 # Install MacPorts
 if ! wait $curl_mpbase_pid; then
     echo "Fetching base failed: $?"
+    exit 1
 fi
 sudo installer -package "${MACPORTS_FILENAME}" -target /
 rm -f "${MACPORTS_FILENAME}"
