@@ -1,0 +1,191 @@
+From 57713adfcbc17cfbab2efa4a67a7d157a72d6b23 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Fri, 31 Jul 2026 16:23:31 +0000
+Subject: [PATCH] Use host-order pixel words on big-endian machines
+
+argb_t stored its channels as a fixed byte sequence (B,G,R,A), i.e.
+little-endian-packed ARGB8888. The ecosystem the pixmap ultimately
+feeds - pixman, cairo and every wl_shm consumer built on them -
+treats ARGB8888 as a host-order 32-bit word instead, so on
+big-endian machines (macOS PowerPC) every image came out with
+scrambled channels.
+
+Flip the channel order of argb_t on big-endian targets so the
+struct always represents a host-order ARGB word. All internal code
+accesses channels by name, so it is unaffected; the logical
+uint32_t conversions keep their 0xAARRGGBB meaning; the cairo path
+(SVG) is fixed for free since CAIRO_FORMAT_ARGB32 is native-order;
+and the libtiff path is fixed for free too, since
+TIFFReadRGBAImage fills host-order words and abgr_to_argb swaps
+channels by name.
+
+Decoders that ask their library for an explicit byte order are
+switched to the host-order equivalent on big-endian: libjpeg-turbo
+JCS_EXT_BGRA -> JCS_EXT_ARGB, libpng bgr+filler-after ->
+swap-alpha+filler-before (reader) and bgr -> swap-alpha (writer),
+libwebp MODE_BGRA -> MODE_ARGB, libavif AVIF_RGB_FORMAT_BGRA ->
+AVIF_RGB_FORMAT_ARGB.
+
+Assisted-By: Claude Fable 5
+---
+ src/color.hpp        | 38 ++++++++++++++++++++++++++++----------
+ src/formats/avif.cpp |  4 ++++
+ src/formats/jpeg.cpp |  4 ++++
+ src/formats/png.cpp  | 11 +++++++++++
+ src/formats/webp.cpp |  4 ++++
+ 5 files changed, 51 insertions(+), 10 deletions(-)
+
+diff --git a/src/color.hpp b/src/color.hpp
+index 25b5144..b24a5ad 100644
+--- src/color.hpp
++++ src/color.hpp
+@@ -8,27 +8,45 @@
+ #include <cstdint>
+ #include <limits>
+ 
+-/** ARGB color (BGRA in little endian). */
++// The ecosystem this pixmap feeds (pixman, cairo, and every wl_shm
++// consumer built on them) treats ARGB8888 as a *host-order* 32-bit
++// word, not a fixed byte sequence; on big-endian machines the
++// in-memory channel order therefore flips.
++#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++#define ARGB_HOST_BIG_ENDIAN 1
++#elif defined(__BIG_ENDIAN__)
++#define ARGB_HOST_BIG_ENDIAN 1
++#endif
++
++/** ARGB color (a host-order 32-bit ARGB word: BGRA bytes on
++ * little-endian machines, ARGB bytes on big-endian ones). */
+ struct argb_t {
+     using channel = uint8_t;
+ 
++#ifdef ARGB_HOST_BIG_ENDIAN
++    channel a = 0; // Alpha channel
++    channel r = 0; // Red channel
++    channel g = 0; // Green channel
++    channel b = 0; // Blue channel
++#else
+     channel b = 0; // Blue channel
+     channel g = 0; // Green channel
+     channel r = 0; // Red channel
+     channel a = 0; // Alpha channel
++#endif
+ 
+     argb_t() = default;
+ 
+     /**
+      * Constructor.
+-     * @param color color in little-endian
++     * @param color color as a logical 0xAARRGGBB value
+      */
+     constexpr argb_t(const uint32_t color)
+-        : b(color & max)
+-        , g((color >> 8) & max)
+-        , r((color >> 16) & max)
+-        , a((color >> 24) & max)
+     {
++        this->a = (color >> 24) & max;
++        this->r = (color >> 16) & max;
++        this->g = (color >> 8) & max;
++        this->b = color & max;
+     }
+ 
+     /**
+@@ -37,11 +55,11 @@ struct argb_t {
+      */
+     constexpr argb_t(const channel a, const channel r, const channel g,
+                      const channel b)
+-        : b(b)
+-        , g(g)
+-        , r(r)
+-        , a(a)
+     {
++        this->a = a;
++        this->r = r;
++        this->g = g;
++        this->b = b;
+     }
+ 
+     /**
+diff --git a/src/formats/avif.cpp b/src/formats/avif.cpp
+index 1a39d3d..552eb75 100644
+--- src/formats/avif.cpp
++++ src/formats/avif.cpp
+@@ -104,7 +104,11 @@ private:
+         avifRGBImageSetDefaults(&rgb, avif->image);
+ 
+         rgb.depth = 8;
++#ifdef ARGB_HOST_BIG_ENDIAN
++        rgb.format = AVIF_RGB_FORMAT_ARGB;
++#else
+         rgb.format = AVIF_RGB_FORMAT_BGRA;
++#endif
+ 
+         rc = avifRGBImageAllocatePixels(&rgb);
+         if (rc != AVIF_RESULT_OK) {
+diff --git a/src/formats/jpeg.cpp b/src/formats/jpeg.cpp
+index aea1a3e..493370f 100644
+--- src/formats/jpeg.cpp
++++ src/formats/jpeg.cpp
+@@ -49,7 +49,11 @@ public:
+             case JCS_UNKNOWN:
+                 break;
+             default:
++#ifdef ARGB_HOST_BIG_ENDIAN
++                jpg.out_color_space = JCS_EXT_ARGB;
++#else
+                 jpg.out_color_space = JCS_EXT_BGRA;
++#endif
+                 break;
+         }
+ #endif // LIBJPEG_TURBO_VERSION
+diff --git a/src/formats/png.cpp b/src/formats/png.cpp
+index 1d421c7..c38afb2 100644
+--- src/formats/png.cpp
++++ src/formats/png.cpp
+@@ -79,10 +79,17 @@ public:
+         if (bit_depth == 16) {
+             png_set_strip_16(png);
+         }
++#ifdef ARGB_HOST_BIG_ENDIAN
++        png_set_filler(png, 0xff, PNG_FILLER_BEFORE);
++        png_set_packing(png);
++        png_set_packswap(png);
++        png_set_swap_alpha(png);
++#else
+         png_set_filler(png, 0xff, PNG_FILLER_AFTER);
+         png_set_packing(png);
+         png_set_packswap(png);
+         png_set_bgr(png);
++#endif
+         png_set_expand(png);
+ 
+         png_read_update_info(png, png);
+@@ -161,7 +168,11 @@ public:
+         png_set_IHDR(png, png, pm.width(), pm.height(), 8,
+                      PNG_COLOR_TYPE_RGB_ALPHA, PNG_INTERLACE_NONE,
+                      PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
++#ifdef ARGB_HOST_BIG_ENDIAN
++        png_set_swap_alpha(png);
++#else
+         png_set_bgr(png);
++#endif
+ 
+ #ifdef PNG_TEXT_SUPPORTED
+         // save meta info as text
+diff --git a/src/formats/webp.cpp b/src/formats/webp.cpp
+index 3761ad0..c33d922 100644
+--- src/formats/webp.cpp
++++ src/formats/webp.cpp
+@@ -38,7 +38,11 @@ public:
+         // setup decoder
+         WebPAnimDecoderOptions webp_opts;
+         WebPAnimDecoderOptionsInit(&webp_opts);
++#ifdef ARGB_HOST_BIG_ENDIAN
++        webp_opts.color_mode = MODE_ARGB;
++#else
+         webp_opts.color_mode = MODE_BGRA;
++#endif
+         webp_opts.use_threads = true;
+ 
+         // open decoder
