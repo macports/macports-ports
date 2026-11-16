@@ -1,5 +1,7 @@
 https://github.com/Lampese/codex-switcher/pull/185
-Incremental OAuth policy after patch-182.diff; preserve v0.2.21 test homes and inactive login.
+Incremental OAuth policy after patch-182.diff, rebased onto v0.2.22.
+Preserve missing-ID-token compatibility, isolated test homes, inactive login,
+and the 20-second reset-credit request timeout.
 
 diff --git a/src-tauri/src/api/usage.rs b/src-tauri/src/api/usage.rs
 index e51c821..9377664 100644
@@ -480,7 +482,7 @@ index 52c5d77..bf00174 100644
      } else {
          anyhow::bail!("auth.json contains neither API key nor tokens");
 diff --git a/src-tauri/src/auth/token_refresh.rs b/src-tauri/src/auth/token_refresh.rs
-index 17cad59..94a161b 100644
+index e370f42..986c292 100644
 --- a/src-tauri/src/auth/token_refresh.rs
 +++ b/src-tauri/src/auth/token_refresh.rs
 @@ -2,12 +2,14 @@
@@ -590,7 +592,7 @@ index 17cad59..94a161b 100644
  async fn refresh_chatgpt_tokens_locked(account: &StoredAccount) -> Result<StoredAccount> {
      let (current, is_active) = load_account_reconciling_live_auth(&account.id)?;
  
-@@ -210,28 +243,57 @@ pub async fn create_chatgpt_account_from_refresh_token(
+@@ -210,30 +243,57 @@ pub async fn create_chatgpt_account_from_refresh_token(
  fn chatgpt_tokens_need_refresh(account: &StoredAccount) -> bool {
      match &account.auth_data {
          AuthData::ApiKey { .. } => false,
@@ -614,11 +616,9 @@ index 17cad59..94a161b 100644
 +        AuthData::ChatGPT { access_token, .. } => {
 +            parse_jwt_exp(access_token).is_none() || chatgpt_tokens_need_refresh(account)
 +        }
-     }
- }
- 
--fn chatgpt_tokens_need_refresh_at(id_token: &str, access_token: &str, now: i64) -> bool {
--    id_token_needs_refresh_at(id_token, now) || token_expired_or_near_expiry_at(access_token, now)
++    }
++}
++
 +fn should_refresh_proactively_at(
 +    access_token: &str,
 +    last_refresh_at: Option<i64>,
@@ -626,15 +626,18 @@ index 17cad59..94a161b 100644
 +) -> bool {
 +    if parse_jwt_exp(access_token).is_some() {
 +        return access_token_needs_refresh_at(access_token, now);
-+    }
+     }
 +
 +    last_refresh_at.is_some_and(|last_refresh| {
 +        last_refresh < now - ChronoDuration::days(TOKEN_REFRESH_INTERVAL_DAYS).num_seconds()
 +    })
-+}
-+
+ }
+ 
+-fn chatgpt_tokens_need_refresh_at(_id_token: &str, access_token: &str, now: i64) -> bool {
+-    // Codex refreshes based on access-token expiration. An older ID token
+-    // does not require rotating a still-usable single-use refresh token.
 +fn access_token_needs_refresh_at(access_token: &str, now: i64) -> bool {
-+    token_expired_or_near_expiry_at(access_token, now)
+     token_expired_or_near_expiry_at(access_token, now)
  }
  
  fn id_token_needs_refresh_at(token: &str, now: i64) -> bool {
@@ -656,7 +659,7 @@ index 17cad59..94a161b 100644
          None => false,
      }
  }
-@@ -344,11 +406,14 @@ async fn refresh_tokens_with_refresh_token(refresh_token: &str) -> Result<Refres
+@@ -343,11 +403,14 @@ async fn refresh_tokens_with_refresh_token(refresh_token: &str) -> Result<Refres
  #[cfg(test)]
  mod tests {
      use super::{
@@ -673,11 +676,11 @@ index 17cad59..94a161b 100644
  
      fn jwt_with_exp(exp: i64) -> String {
          let payload = URL_SAFE_NO_PAD.encode(format!(r#"{{"exp":{exp}}}"#));
-@@ -363,27 +428,111 @@ mod tests {
+@@ -362,42 +425,138 @@ mod tests {
      }
  
      #[test]
--    fn refresh_required_when_id_token_expired_but_access_token_valid() {
+-    fn expired_id_token_does_not_force_refresh_when_access_token_is_valid() {
 +    fn concurrent_unauthorized_retry_reuses_a_replaced_access_token() {
 +        assert!(rejected_access_token_is_still_current(
 +            "old-token",
@@ -709,7 +712,7 @@ index 17cad59..94a161b 100644
 -        let id_token = jwt_with_exp(now - 3_600);
 -        let access_token = jwt_with_exp(now + 3_600);
  
--        assert!(chatgpt_tokens_need_refresh_at(
+-        assert!(!chatgpt_tokens_need_refresh_at(
 -            &id_token,
 -            &access_token,
 -            now
@@ -750,9 +753,9 @@ index 17cad59..94a161b 100644
 +            "opaque-access-token",
 +            Some(now - (8 * 24 * 60 * 60 + 1)),
 +            now,
-+        ));
-+    }
-+
+         ));
+     }
+ 
 +    #[test]
 +    fn unparseable_access_token_without_refresh_age_does_not_refresh() {
 +        let now = 1_800_000_000;
@@ -761,9 +764,9 @@ index 17cad59..94a161b 100644
 +            "opaque-access-token",
 +            None,
 +            now,
-         ));
-     }
- 
++        ));
++    }
++
 +    #[test]
 +    fn refresh_not_required_when_only_id_token_is_expired() {
 +        let now = 1_800_000_000;
@@ -796,7 +799,24 @@ index 17cad59..94a161b 100644
              now
          ));
      }
-@@ -391,14 +540,9 @@ mod tests {
+ 
++    #[test]
++    fn expired_id_token_does_not_force_refresh_when_access_token_is_valid() {
++        let now = chrono::Utc::now().timestamp();
++        let account = StoredAccount::new_chatgpt(
++            "Valid access".into(),
++            None,
++            None,
++            None,
++            jwt_with_exp(now - 3_600),
++            jwt_with_exp(now + 3_600),
++            "refresh".into(),
++            None,
++        );
++
++        assert!(!chatgpt_tokens_need_refresh(&account));
++    }
++
      #[test]
      fn refresh_required_when_access_token_expired() {
          let now = 1_800_000_000;
@@ -812,7 +832,7 @@ index 17cad59..94a161b 100644
      }
  
      #[test]
-@@ -423,6 +567,18 @@ mod tests {
+@@ -421,6 +580,18 @@ mod tests {
          assert_eq!(resolved, current_id_token);
      }
  
@@ -831,7 +851,7 @@ index 17cad59..94a161b 100644
      #[test]
      fn active_account_uses_fresh_tokens_from_live_auth() {
          let now = chrono::Utc::now().timestamp();
-@@ -436,6 +592,7 @@ mod tests {
+@@ -434,6 +605,7 @@ mod tests {
              "stored-refresh".into(),
              Some("workspace-a".into()),
          );
@@ -840,7 +860,7 @@ index 17cad59..94a161b 100644
          let mut store = AccountsStore {
              accounts: vec![account.clone()],
 diff --git a/src-tauri/src/commands/account.rs b/src-tauri/src/commands/account.rs
-index fa3e3ac..14bec6e 100644
+index c48bda1..7d96a8e 100644
 --- a/src-tauri/src/commands/account.rs
 +++ b/src-tauri/src/commands/account.rs
 @@ -1,10 +1,11 @@
@@ -856,7 +876,7 @@ index fa3e3ac..14bec6e 100644
  };
  use crate::types::{
      parse_chatgpt_id_token_claims, AccountInfo, AccountsStore, AuthData, AuthDotJson,
-@@ -187,7 +188,9 @@ fn sync_matching_active_account_tokens(store: &mut AccountsStore, auth: &AuthDot
+@@ -181,7 +182,9 @@ fn sync_matching_active_account_tokens(store: &mut AccountsStore, auth: &AuthDot
  }
  
  pub async fn switch_account_by_id(account_id: &str) -> Result<(), String> {
@@ -868,7 +888,7 @@ index fa3e3ac..14bec6e 100644
  
      let target_index = store
 diff --git a/src-tauri/src/commands/account_stats.rs b/src-tauri/src/commands/account_stats.rs
-index 0bb1273..6777fff 100644
+index 129ea16..d0c5f6f 100644
 --- a/src-tauri/src/commands/account_stats.rs
 +++ b/src-tauri/src/commands/account_stats.rs
 @@ -1,13 +1,13 @@
@@ -890,7 +910,7 @@ index 0bb1273..6777fff 100644
  use crate::types::{AuthData, AuthMode, StoredAccount};
  
  const CHATGPT_PROFILE_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/profiles/me";
-@@ -206,10 +206,13 @@ pub async fn get_account_usage_stats(account_id: String) -> Result<AccountUsageS
+@@ -226,10 +226,13 @@ pub async fn get_account_usage_stats(account_id: String) -> Result<AccountUsageS
  
  async fn fetch_profile_usage(account: &StoredAccount) -> anyhow::Result<AccountUsageStats> {
      let fresh_account = ensure_chatgpt_tokens_fresh(account).await?;
@@ -906,19 +926,10 @@ index 0bb1273..6777fff 100644
          response = send_profile_usage_request(&refreshed_account).await?;
          return parse_profile_usage_with_reset_credits(&refreshed_account, response).await;
      }
-@@ -259,15 +262,15 @@ async fn parse_profile_usage_response(
+@@ -279,26 +282,41 @@ async fn parse_profile_usage_response(
  
  async fn fetch_reset_credits(account: &StoredAccount) -> anyhow::Result<AccountResetCredits> {
      let (access_token, chatgpt_account_id) = extract_chatgpt_auth(account)?;
--    let client = reqwest::Client::new();
--    let response = client
--        .get(CHATGPT_RESET_CREDITS_URL)
--        .headers(build_reset_credits_headers(
--            access_token,
--            chatgpt_account_id,
--        )?)
--        .send()
--        .await?;
 +    let rejected_access_token = access_token.to_string();
 +    let mut response = send_reset_credits_request(access_token, chatgpt_account_id).await?;
 +
@@ -928,31 +939,45 @@ index 0bb1273..6777fff 100644
 +        let (retry_token, retry_account_id) = extract_chatgpt_auth(&refreshed)?;
 +        response = send_reset_credits_request(retry_token, retry_account_id).await?;
 +    }
- 
-     let status = response.status();
-     if !status.is_success() {
-@@ -278,6 +281,21 @@ async fn fetch_reset_credits(account: &StoredAccount) -> anyhow::Result<AccountR
-     Ok(map_reset_credits(payload, Utc::now()))
- }
- 
++
++    let status = response.status();
++    if !status.is_success() {
++        anyhow::bail!("Reset credits request failed: {status}");
++    }
++
++    let payload: ResetCreditsResponse = response.json().await?;
++    Ok(map_reset_credits(payload, Utc::now()))
++}
++
 +async fn send_reset_credits_request(
 +    access_token: &str,
 +    chatgpt_account_id: Option<&str>,
 +) -> anyhow::Result<reqwest::Response> {
-+    let client = reqwest::Client::new();
+     // Bound the queued card requests: one stalled endpoint must not block others.
+     let client = reqwest::Client::builder()
+         .timeout(std::time::Duration::from_secs(20))
+         .build()?;
+-    let response = client
 +    Ok(client
-+        .get(CHATGPT_RESET_CREDITS_URL)
-+        .headers(build_reset_credits_headers(
-+            access_token,
-+            chatgpt_account_id,
-+        )?)
-+        .send()
+         .get(CHATGPT_RESET_CREDITS_URL)
+         .headers(build_reset_credits_headers(
+             access_token,
+             chatgpt_account_id,
+         )?)
+         .send()
+-        .await?;
+-
+-    let status = response.status();
+-    if !status.is_success() {
+-        anyhow::bail!("Reset credits request failed: {status}");
+-    }
+-
+-    let payload: ResetCreditsResponse = response.json().await?;
+-    Ok(map_reset_credits(payload, Utc::now()))
 +        .await?)
-+}
-+
+ }
+ 
  fn map_profile_usage(account_id: &str, payload: ProfileUsageResponse) -> AccountUsageStats {
-     let stats_error = payload
-         .metadata
 diff --git a/src-tauri/src/commands/oauth.rs b/src-tauri/src/commands/oauth.rs
 index 789dd11..3a2795b 100644
 --- a/src-tauri/src/commands/oauth.rs

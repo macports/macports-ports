@@ -1,0 +1,261 @@
+--- a/Sources/App/OwlAppDelegate.h	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/App/OwlAppDelegate.h	2026-10-15 02:04:24.000000000 +0800
+@@ -18,6 +18,10 @@
+ 
+ #import <Cocoa/Cocoa.h>
+ 
++#if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+ @interface OwlAppDelegate : NSObject <NSApplicationDelegate>
++#else
++@interface OwlAppDelegate : NSObject
++#endif
+ 
+ @end
+
+--- a/Sources/App/OwlKnownClientsManager.m	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/App/OwlKnownClientsManager.m	2026-10-15 02:13:10.000000000 +0800
+@@ -18,6 +18,11 @@
+ 
+ #import "OwlKnownClientsManager.h"
+ 
++static void OwlRemoveAllMenuItems(NSMenu *menu) {
++    while ([menu numberOfItems] > 0) {
++        [menu removeItemAtIndex: 0];
++    }
++}
+ 
+ @implementation OwlKnownClientsManager
+ 
+@@ -40,7 +45,7 @@
+     NSArray *customClients = [defaults arrayForKey: @"CustomClients"];
+     _clients = [[_defaultClients arrayByAddingObjectsFromArray: customClients] retain];
+ 
+-    [_clientsMenu removeAllItems];
++    OwlRemoveAllMenuItems(_clientsMenu);
+ 
+     NSUInteger size = [_clients count];
+     for (NSUInteger i = 0; i < size; i++) {
+@@ -62,7 +67,7 @@
+ }
+ 
+ - (void) dealloc {
+-    [_clientsMenu removeAllItems];
++    OwlRemoveAllMenuItems(_clientsMenu);
+     [_defaultClients release];
+     [_clients release];
+     [super dealloc];
+
+--- a/Sources/Compositor/OwlZwpIdleInhibitManagerV1.m	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/Compositor/OwlZwpIdleInhibitManagerV1.m	2026-10-15 02:16:00.000000000 +0800
+@@ -24,6 +24,9 @@
+ #import <IOKit/pwr_mgt/IOPMLib.h>
+ #elif defined(OWL_PLATFORM_APPLE)
+ #import <CoreServices/CoreServices.h>
++/* 10.5 does not expose this */
++extern OSErr UpdateSystemActivity(UInt8 activity);
++#define OWL_OVERALL_ACT 0   /* OverallAct in Power.h */
+ #endif
+ 
+ 
+@@ -62,7 +65,7 @@
+ 
+ #if defined(OWL_PLATFORM_APPLE) && !defined(OWL_HAS_IOPM)
+ + (void) keepSystemActiveTimer: (NSTimer *) timer {
+-    UpdateSystemActivity(OverallAct);
++    UpdateSystemActivity(OWL_OVERALL_ACT);
+ }
+ #endif
+ 
+@@ -99,7 +102,7 @@
+                                                       selector: @selector(keepSystemActiveTimer:)
+                                                       userInfo: nil
+                                                        repeats: YES] retain];
+-    UpdateSystemActivity(OverallAct);
++    UpdateSystemActivity(OWL_OVERALL_ACT);
+ #endif
+ }
+ 
+--- a/Sources/Shell/OwlWindowWrapper.h	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/Shell/OwlWindowWrapper.h	2026-10-15 02:33:54.000000000 +0800
+@@ -19,6 +19,14 @@
+ #import <Cocoa/Cocoa.h>
+ #import "OwlWindow.h"
+ 
++#if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
++#define OWL_WINDOW_DELEGATE_TYPE id<NSWindowDelegate>
++#define OWL_CONFORMS_TO_WINDOW_DELEGATE <NSWindowDelegate>
++#else
++#define OWL_WINDOW_DELEGATE_TYPE id
++#define OWL_CONFORMS_TO_WINDOW_DELEGATE
++#endif
++
+ @interface OwlWindowWrapper : NSObject {
+     NSString *_title;
+     OwlWindow *_window;
+@@ -26,7 +34,7 @@
+     NSSize _size;
+     NSSize _contentMinSize;
+     NSSize _contentMaxSize;
+-    id<NSWindowDelegate> _windowDelegate;
++    OWL_WINDOW_DELEGATE_TYPE _windowDelegate;
+ }
+ 
+ - (OwlWindow *) window;
+@@ -44,7 +52,6 @@
+ - (void) setContentMaxSize: (NSSize) size;
+ - (void) setTitle: (NSString *) title;
+ - (void) setView: (NSView *) view;
+-- (void) setWindowDelegate: (id<NSWindowDelegate>) delegate;
+-
++- (void) setWindowDelegate: (OWL_WINDOW_DELEGATE_TYPE) delegate;
+ 
+ @end
+
+--- a/Sources/Shell/OwlWindowWrapper.m	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/Shell/OwlWindowWrapper.m	2026-10-15 02:35:24.000000000 +0800
+@@ -139,7 +139,7 @@
+     [_window makeFirstResponder: view];
+ }
+ 
+-- (void) setWindowDelegate: (id<NSWindowDelegate>) delegate {
++- (void) setWindowDelegate: (OWL_WINDOW_DELEGATE_TYPE) delegate {
+     [delegate retain];
+     [_windowDelegate release];
+     _windowDelegate = delegate;
+
+--- a/Sources/Shell/OwlWindow.m	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/Shell/OwlWindow.m	2026-10-15 02:37:49.000000000 +0800
+@@ -38,6 +38,12 @@
+     return YES;
+ }
+ 
++#if defined(OWL_PLATFORM_APPLE) && MAC_OS_X_VERSION_MAX_ALLOWED < 1060
++@interface NSWindow (OwlStyleMask)
++- (void) setStyleMask: (NSUInteger) mask;
++@end
++#endif
++
+ @implementation OwlWindow
+ 
+ + (NSUInteger) styleMaskWhenDisplayingSSD: (BOOL) displaySSD {
+@@ -88,7 +94,13 @@
+ }
+ 
+ - (void) setDisplaySSD: (BOOL) displaySSD {
+-    [self setStyleMask: [OwlWindow styleMaskWhenDisplayingSSD: displaySSD]];
++    if ([self respondsToSelector: @selector(setStyleMask:)]) {
++        [self setStyleMask: [OwlWindow styleMaskWhenDisplayingSSD: displaySSD]];
++    } else {
++        // 10.5: style mask can't be changed after creation,
++        // so toggling server-side decorations is a no-op.
++        return;
++    }
+     if (_title != nil) {
+         [self setTitle: _title];
+     }
+@@ -114,7 +126,7 @@
+     }
+     NSPoint originalMouseLocation = [NSEvent mouseLocation];
+     NSPoint originalOrigin = [self frame].origin;
+-    NSEventMask mask = NSLeftMouseUpMask | NSMouseMovedMask | NSLeftMouseDraggedMask;
++    NSUInteger mask = NSLeftMouseUpMask | NSMouseMovedMask | NSLeftMouseDraggedMask;
+ 
+     while (YES) {
+         // A finite timeout so the loop can double-check the button
+@@ -161,7 +173,7 @@
+     }
+     NSPoint originalMouseLocation = [NSEvent mouseLocation];
+     NSRect originalFrame = [self frame];
+-    NSEventMask mask = NSLeftMouseUpMask | NSMouseMovedMask | NSLeftMouseDraggedMask;
++    NSUInteger mask = NSLeftMouseUpMask | NSMouseMovedMask | NSLeftMouseDraggedMask;
+ 
+     BOOL resizeTop = (edges & RESIZE_EDGE_TOP) != 0;
+     BOOL resizeBottom = (edges & RESIZE_EDGE_BOTTOM) != 0;
+
+--- a/Sources/Shell/OwlZxdgToplevelV6.h	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/Shell/OwlZxdgToplevelV6.h	2026-10-15 02:46:38.000000000 +0800
+@@ -23,7 +23,11 @@
+ 
+ @class OwlZxdgSurfaceV6;
+ 
++#if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+ @interface OwlZxdgToplevelV6 : NSObject<OwlSurfaceRole, NSWindowDelegate> {
++#else
++@interface OwlZxdgToplevelV6 : NSObject<OwlSurfaceRole> {
++#endif
+     struct wl_resource *_resource;
+     OwlSurface *_surface;
+     OwlZxdgSurfaceV6 *_xdgSurface;
+
+--- a/Sources/Shell/OwlXdgToplevel.h	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/Shell/OwlXdgToplevel.h	2026-10-15 02:44:30.000000000 +0800
+@@ -23,7 +23,11 @@
+ 
+ @class OwlXdgSurface;
+ 
++#if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+ @interface OwlXdgToplevel : NSObject<OwlSurfaceRole, NSWindowDelegate> {
++#else
++@interface OwlXdgToplevel : NSObject<OwlSurfaceRole> {
++#endif
+     struct wl_resource *_resource;
+     OwlSurface *_surface;
+     OwlXdgSurface *_xdgSurface;
+
+--- a/Sources/Shell/OwlXdgSurface.m	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/Shell/OwlXdgSurface.m	2026-10-15 02:46:08.000000000 +0800
+@@ -40,7 +40,11 @@
+  * application. reposition recomputes geometry from the new
+  * positioner and sends the full repositioned/configure/
+  * xdg_surface.configure sequence the protocol requires. */
++#if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+ @interface OwlXdgPopup : NSObject <OwlSurfaceRole, NSWindowDelegate> {
++#else
++@interface OwlXdgPopup : NSObject <OwlSurfaceRole> {
++#endif
+ @public
+     struct wl_resource *_resource;
+     OwlXdgSurface *_xdgSurface;
+
+--- a/Sources/Compositor/OwlZowlIOSurfaceV1.m	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/Compositor/OwlZowlIOSurfaceV1.m	2026-10-16 09:30:03.000000000 +0800
+@@ -152,4 +152,16 @@
+ 
+ @end
+ 
++#else /* OWL_HAS_IOSURFACE && OWL_HAS_GCD */
++
++#import <mach/mach.h>
++#import "owl-iosurface-unstable-v1-mig.h"
++
++kern_return_t owl_iosurface_v1_server_set_surface_port(
++    mach_port_t receiver_port,
++    mach_port_t iosurface_port
++) {
++    return KERN_NOT_SUPPORTED;
++}
++
+ #endif /* OWL_HAS_IOSURFACE && OWL_HAS_GCD */
+
+--- a/Sources/Mach/OwlZowlMachIpcPortV1.m	2026-08-29 12:04:17.000000000 +0800
++++ b/Sources/Mach/OwlZowlMachIpcPortV1.m	2026-10-16 09:28:27.000000000 +0800
+@@ -97,4 +97,19 @@
+ 
+ @end
+ 
++#else /* OWL_HAS_GCD */
++
++/* Pre-10.6: the MIG server stub is still generated and linked, but
++ * the protocol is never advertised, so this is never reached. */
++#import <mach/mach.h>
++#import "owl-mach-ipc-unstable-v1-mig.h"
++
++kern_return_t owl_mach_ipc_v1_server_retrieve_port(
++    mach_port_t server_port,
++    secret_t raw_secret,
++    mach_port_t *port
++) {
++    return KERN_NOT_SUPPORTED;
++}
++
+ #endif /* OWL_HAS_GCD */
