@@ -17,30 +17,46 @@ long_description \
 homepage            https://valgrind.org
 master_sites        https://sourceware.org/pub/valgrind/
 
-# older clangs identify as applellvm-4.2 and are rejected
-# https://trac.macports.org/ticket/53525
-compiler.blacklist-append \
-                    { clang < 426 }
-
-# priv/guest_s390_toIR.c:2056:39: error: invalid suffix "b00010000" on integer constant
-compiler.blacklist-append \
-                    llvm-gcc-4.2
-
-compilers.choose    cc cxx
-
-if {${os.platform} eq "darwin" && ${os.arch} eq "arm"} {
-    # error: this compiler does not support 'arm64e'
-    compiler.blacklist-append *gcc*
-    mpi.setup       -gcc
-} else {
-    mpi.setup       -gcc44 -gcc45 -gcc46
-}
-
 depends_build       bin:perl:perl5
 # Ignore trace reports about boost, Qt and OpenMP
 # as they are only used for tests
 
 configure.args      --without-mpicc
+compilers.choose    cc cxx
+
+if {$subport eq $name && ${os.platform} eq "darwin" && ${os.major} < 11} {
+    # on Snow Leopard and earlier we are frozen at the last version that
+    # supported that platform; that version works with its contemporary
+    # Xcode compilers (except early clang) but not many others, and doesn't
+    # support the current version of MPI
+
+    # clang: error: unknown argument: '-mno-dynamic-no-pic'
+    compiler.blacklist-append   macports-*clang* macports-*default
+
+    # checking for a supported version of gcc... no
+    compiler.blacklist-append   {*gcc-[0-35-9]*} {*gcc-4[0-9]*} *gcc-devel* \
+                                macports-gcc {clang < 211}
+
+    # cc1: error: unrecognized command line option "-arch"
+    compiler.blacklist-append   {macports-gcc-4.[0-6]}
+
+    # error: unsupported option '--gdwarf2'
+    compiler.blacklist-append   apple-gcc*
+
+    # successful
+    compiler.whitelist          gcc-4.2 llvm-gcc-4.2 gcc clang macports-gcc-4.9
+} else {
+    # current valgrind requires C11
+    compiler.c_standard     2011
+    compiler.cxx_standard   2011
+    use_autoreconf          yes
+
+    if {${os.platform} eq "darwin" && ${os.arch} eq "arm"} {
+        # error: this compiler does not support 'arm64e'
+        compiler.blacklist-append *gcc*
+    }
+    mpi.setup
+}
 
 if {${build_arch} eq "i386"} {
     configure.args-append --enable-only32bit
@@ -67,14 +83,39 @@ variant universal {
     }
 }
 
+if {${os.platform} eq "darwin" && ${os.major} >= 11 && ${os.major} < 15} {
+    # use MacPorts ld64 to avoid /usr/bin/ld errors with newer compilers
+    depends_build-append    port:ld64
+    post-patch {
+        reinplace "s|\"/usr/bin/ld\"|\"${prefix}/bin/ld\"|" \
+            ${worksrcpath}/coregrind/link_tool_exe_darwin.in
+    }
+}
+
 pre-patch {
-    if {[gcc_variant_isset]} {
-        # if compiling with gcc, fix clang-isms (applying patch with -l
-        # because valgrind-macos-devel has different trailing whitespace), and
-        # ensure that configure is regenerated after patching configure.ac
-        patchfiles-append   patch-gcc.diff
-        patch.args          -l
-        use_autoreconf      yes
+    # fix clang-isms if building with gcc
+    if {${os.platform} eq "darwin" && [string match *gcc* ${configure.cc}]} {
+        if {$subport eq $name && ${os.major} < 12} {
+            # old versions only need to handle __private_extern__
+            configure.cflags-append \
+                {-D__private_extern__='__attribute__((visibility("hidden")))'}
+        } else {
+            # apply patch with -l because valgrind-macos-devel has different
+            # trailing whitespace
+            patchfiles-append   patch-gcc.diff
+            patch.args          -l
+        }
+    }
+}
+
+post-patch {
+    # if compiling with MacPorts Clang 11 or later, use the MacPorts dsymutil
+    # from the same LLVM release to avoid /usr/bin/dsymutil abort
+    # (mpicc-*-clang90 uses clang-mp-9.0, so match 11 to 89 and devel)
+    if {[regexp {^(.*/)?(?:clang-mp-|mpicc-\w+-clang)(1[1-9]|[2-8]\d|devel)$} \
+            ${configure.cc} -> llvm_path llvm_vers]} {
+        reinplace "s|dsymutil |${llvm_path}dsymutil-mp-${llvm_vers} |" \
+            ${worksrcpath}/Makefile.all.am
     }
 }
 
@@ -89,17 +130,42 @@ if {$subport eq $name} {
     platforms       {darwin >= 9 < 23}
     supported_archs i386 x86_64
 
-    if {${os.platform} eq "darwin" && ${os.major} < 12} {
-        version     3.16.1
+    if {${os.platform} eq "darwin" && ${os.major} < 10} {
+        # last version that supported Mac OS X 10.5 (Intel only)
+        # (PowerPC and earlier Mac OS X releases were never supported)
+        version     3.6.1
         license     GPL-2+
-        checksums   rmd160  f06068b1f2aa9f6c2377816a0af809459da2c5a8 \
-                    sha256  c91f3a2f7b02db0f3bc99479861656154d241d2fdb265614ba918cc6720a33ca \
-                    size    16262776
+        checksums   rmd160  6f78ae50e2fb354547d90bf289abb1f56252043a \
+                    sha256  49bdcc4fbcf060049b5f0dcfd8a187a6e90e0b0e57309f633b64e44430726a0e \
+                    size    5974836
+
+    } elseif {${os.platform} eq "darwin" && ${os.major} < 11} {
+        # last version that supported Mac OS X 10.6
+        version     3.8.1
+        license     GPL-2+
+        checksums   rmd160  7b1e87ffa9baa614006ecd7722f848c10cadddda \
+                    sha256  473be00576bed311a662b277a2bfbe97d9cca4058e68619a0e420c9fc19958db \
+                    size    7962963
+
+    } elseif {${os.platform} eq "darwin" && ${os.major} < 12} {
+        # last version that supported Mac OS X 10.7
+        version     3.21.0
+        license     GPL-2+
+        checksums   rmd160  ed9a6ed812d303de6efa9466b04fc5d5e66486c3 \
+                    sha256  10ce1618bb3e33fad16eb79552b0a3e1211762448a0d7fce11c8a6243b9ac971 \
+                    size    17449484
+
     } else {
+        # current version
         version     3.28.0
         checksums   rmd160  1b47e0f11248f2cfb43a8d9169987c65c25c154c \
                     sha256  9f7a18d128f05d3a80fea53e6953f34aad7200a425ceaee46099a8a798a7dd9c \
                     size    17531409
+
+        # patch for OS X 10.8, cherry-picked from valgrind-devel fd2587eecf99
+        if {${os.platform} eq "darwin" && ${os.major} < 13} {
+            patchfiles-append   valgrind-osx108.patch
+        }
     }
 
     conflicts       valgrind-devel valgrind-macos-devel
@@ -107,6 +173,10 @@ if {$subport eq $name} {
 
     # Avoid conflict of faq.html and FAQ.html, #30541
     extract.post_args-append --exclude=${distname}/docs/html/FAQ.html
+
+    long_description-append \n\nThis port reflects the official release, \
+        which is compatible with Intel Macs running macOS 13 or earlier. \
+        Consider installing valgrind-macos-devel on newer macOS systems.
 
     pre-fetch {
         if {${os.platform} eq "darwin" && (${os.major} >= 23 || ${os.arch} eq "arm")} {
@@ -126,15 +196,18 @@ subport valgrind-devel {
     supported_archs i386 x86_64
 
     epoch           1
-    set date        2026-10-28
+    set date        2026-11-17
     version         3.28.0-r${date}
-    git.branch      492dde29d21760699ee6d0d7aa0a87e0de57d76e
+    git.branch      dc9a669332617902591da89ae887db9a567f2841
 
     conflicts       valgrind valgrind-macos-devel
     fetch.type      git
     git.url         https://sourceware.org/git/valgrind.git
-    use_autoreconf  yes
     livecheck.type  none
+
+    long_description-append \n\nThis port reflects the official upstream repository, \
+        which is compatible with Intel Macs running macOS 13 or earlier. \
+        Consider installing valgrind-macos-devel on newer macOS systems.
 
     pre-fetch {
         if {${os.platform} eq "darwin" && (${os.major} >= 23 || ${os.arch} eq "arm")} {
@@ -150,15 +223,15 @@ subport valgrind-macos-devel {
     # https://github.com/LouisBrunner/valgrind-macos/issues/123
     # https://github.com/LouisBrunner/valgrind-macos/issues/205
     if {${os.arch} eq "arm"} {
-        platforms   {darwin >= 9 != 24.* < 27}
+        platforms   {darwin >= 12 != 24.* < 27}
     } else {
-        platforms   {darwin >= 9 < 27}
+        platforms   {darwin >= 12 < 27}
     }
     supported_archs i386 x86_64 arm64
 
-    set date        2026-09-09
+    set date        2026-11-17
     version         3.28.0-r${date}
-    git.branch      7877928dcc8bfb873325e4f51949f930d77e493e
+    git.branch      3a119d86cda9bc6c06a9c5aa14e3fbd9eead5e5a
 
     description     A powerful memory debugger with latest macOS support (experimental)
 
@@ -168,11 +241,24 @@ subport valgrind-macos-devel {
         patchfiles-append   valgrind-xcode27.patch
     }
 
+    # patch for OS X 10.8, cherry-picked from valgrind-devel fd2587eecf99
+    if {${os.platform} eq "darwin" && ${os.major} < 13} {
+        patchfiles-append   valgrind-osx108.patch
+    }
+
+    # avoid certificate error with old git
+    if {${os.platform} eq "darwin" && ${os.major} < 16} {
+        depends_fetch-append    path:bin/git:git
+        git.cmd                 ${prefix}/bin/git
+    }
+
     conflicts       valgrind valgrind-devel
     fetch.type      git
     git.url         https://github.com/LouisBrunner/valgrind-macos.git
-    use_autoreconf  yes
     livecheck.type  none
+
+    long_description-append \n\nThis port reflects an experimental fork that \
+        adds support for Apple Silicon Macs and some newer macOS releases.
 }
 
 # detection of optional C23 support; intentional error if not C23
