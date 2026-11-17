@@ -1,0 +1,64 @@
+#!/bin/bash
+
+set -eu
+umask 077
+
+appExecutable='@APP_EXECUTABLE@'
+debugDir='@DEBUG_DIR@'
+buildDir='@BUILD_DIR@'
+shouldSaveCore=false
+
+if [[ ${1:-} == --help || ${1:-} == -h ]]; then
+    printf '%s\n' \
+        'Usage: ghost-downloader-debug [--core] [-- APP_ARGUMENTS...]' \
+        'Quit any existing Ghost instance first and keep this terminal open.' \
+        'Diagnostics: ~/Library/Logs/GhostDownloader/Debug/' \
+        '--core saves a full core dump on a crash; it may take minutes, use gigabytes, and contain credentials.'
+    exit 0
+fi
+
+if [[ ${1:-} == --core ]]; then
+    shouldSaveCore=true
+    shift
+fi
+if [[ ${1:-} == -- ]]; then
+    shift
+fi
+
+lldb=$(/usr/bin/xcrun --find lldb)
+logRoot="$HOME/Library/Logs/GhostDownloader/Debug"
+mkdir -p "$logRoot"
+logDir=$(mktemp -d "$logRoot/$(date +%Y%m%d-%H%M%S).XXXXXX")
+
+quotePath() {
+    local path=$1
+    path=${path//\\/\\\\}
+    path=${path//\"/\\\"}
+    printf '"%s"' "$path"
+}
+
+crashCommands=(
+    'process status'
+    'thread backtrace all'
+    'register read --all'
+    'image list -u -o -f'
+)
+if "$shouldSaveCore"; then
+    crashCommands+=("process save-core --style full $(quotePath "$logDir/process.core")")
+fi
+crashCommands+=('quit')
+printf '%s\n' "${crashCommands[@]}" > "$logDir/crash.lldb"
+
+printf 'Quit any existing Ghost instance first. Keep this terminal open.\nDiagnostics: %s\n' "$logDir"
+status=0
+"$lldb" --batch --no-lldbinit --no-use-colors \
+    -o 'settings set auto-confirm true' \
+    -o 'settings set target.disable-aslr false' \
+    -o 'settings set interpreter.stop-command-source-on-error false' \
+    -o "target symbols add --shlib $(quotePath "$appExecutable") $(quotePath "$debugDir/ghost-downloader.dSYM")" \
+    -o "settings set target.source-map $(quotePath "$buildDir") $(quotePath "$debugDir/sources")" \
+    -o run \
+    -K "$logDir/crash.lldb" \
+    -- "$appExecutable" "$@" > "$logDir/lldb.log" 2>&1 || status=$?
+printf 'LLDB exited with status %s. Transcript: %s/lldb.log\n' "$status" "$logDir"
+exit "$status"
