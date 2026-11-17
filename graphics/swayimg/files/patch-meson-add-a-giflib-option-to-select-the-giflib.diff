@@ -1,0 +1,89 @@
+From bc9484d78f47e532752595954ccb13c78040d725 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Fri, 31 Jul 2026 15:13:35 +0000
+Subject: [PATCH] meson: add a giflib option to select the giflib installation
+
+giflib ships no pkg-config file, so find_library() picks whatever
+gif library sits in the default search path. That breaks on systems
+with several giflib versions installed: MacPorts keeps giflib 4 at
+the prefix root (/opt/local/lib) and newer versions under
+/opt/local/libexec/giflib5 and /opt/local/libexec/giflib6, so the
+build silently picked giflib 4 while the decoder uses the giflib 5
+API.
+
+Add a 'giflib' string option naming the installation prefix to use
+(-Dgiflib=/opt/local/libexec/giflib5), wiring its include and lib
+directories into the dependency. Also verify that whichever giflib
+was found actually provides the version 5 API, by probing for
+DGifSavedExtensionToGCB: with -Dgif=enabled an unsuitable giflib is
+now a configuration error instead of a compile failure, and with
+the default auto it cleanly disables GIF support.
+
+Assisted-By: Claude Fable 5
+---
+ meson.build   | 21 +++++++++++++++++++++
+ meson.options | 10 ++++++++++
+ 2 files changed, 31 insertions(+)
+
+diff --git a/meson.build b/meson.build
+index 6510d39..ff0f7da 100644
+--- meson.build
++++ meson.build
+@@ -105,8 +105,14 @@ webp_demux = dependency('libwebpdemux', required: get_option('webp'))
+ # hack to build "pkgconfigless" gif in FreeBSD
+ cc = meson.get_compiler('c')
+ gif_opt = get_option('gif')
++gif_prefix = get_option('giflib')
++gif_args = []
+ if gif_opt.disabled()
+     gif = cc.find_library('gif', required: gif_opt)
++elif gif_prefix != ''
++    # Explicitly selected giflib installation.
++    gif_args = ['-I' + gif_prefix / 'include']
++    gif = cc.find_library('gif', dirs: gif_prefix / 'lib', required: gif_opt)
+ else
+     gif = cc.find_library('gif', required: false)
+     if not gif.found() and gif_opt.allowed()
+@@ -117,6 +123,21 @@ else
+         )
+     endif
+ endif
++# The decoder uses the giflib 5 API; reject older versions instead of
++# failing the build (DGifSavedExtensionToGCB appeared in giflib 5).
++if gif.found()
++    if not cc.has_header_symbol('gif_lib.h', 'DGifSavedExtensionToGCB',
++                                args: gif_args)
++        if gif_opt.enabled()
++            error('giflib >= 5 is required; ' +
++                  'use -Dgiflib=<prefix> to select a suitable installation')
++        endif
++        message('giflib found, but older than version 5; GIF support disabled')
++        gif = cc.find_library('gif', dirs: '/var/empty', required: false)
++    elif gif_args.length() > 0
++        gif = declare_dependency(compile_args: gif_args, dependencies: gif)
++    endif
++endif
+ 
+ # optional dependencies: other features
+ exiv = dependency('exiv2', required: get_option('exif'))
+diff --git a/meson.options b/meson.options
+index 36c60b4..a3dc409 100644
+--- meson.options
++++ meson.options
+@@ -11,6 +11,16 @@ option(
+     value: 'auto',
+     description: 'Enable GIF format support',
+ )
++option(
++    'giflib',
++    type: 'string',
++    value: '',
++    description: 'Prefix of the giflib installation to use. giflib ships ' +
++                 'no pkg-config file, so it cannot be discovered reliably ' +
++                 'when several versions are installed (e.g. MacPorts keeps ' +
++                 'giflib 4 at the prefix root and newer ones under ' +
++                 'libexec/giflib5). Example: /opt/local/libexec/giflib5',
++)
+ option(
+     'heif',
+     type: 'feature',
