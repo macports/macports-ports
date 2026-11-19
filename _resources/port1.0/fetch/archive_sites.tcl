@@ -79,8 +79,8 @@ if {${os.platform} eq "darwin" && ${os.major} <= 12} {
     set archive_delete_la_files(macports_archives) yes
 }
 variable archive_sigtype
-set archive_sigtype(macports_archives) rmd160
+set archive_sigtype(macports_archives) sig
 variable archive_pubkey
-set archive_pubkey(macports_archives) /opt/local/share/macports/macports-pubkey.pem
+set archive_pubkey(macports_archives) /opt/local/share/macports/keys/archives/macports-archives-2025.pub
 
 }

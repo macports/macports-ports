@@ -1,0 +1,494 @@
+From 40a5181b6abff751f756be980bfa165eb02677be Mon Sep 17 00:00:00 2001
+From: Jakub Jelen <jjelen@redhat.com>
+Date: Wed, 29 Apr 2026 16:19:16 +0200
+Subject: [PATCH] OpenSSL 4 compatibility
+
+Based on patch from Simo:
+
+https://src.fedoraproject.org/rpms/openpace/pull-request/2
+---
+ src/cv_cert.c    | 92 ++++++++++++++++++++++++++----------------------
+ src/cvc-create.c | 20 +++++------
+ src/cvc_lookup.c |  4 +--
+ src/eac_asn1.c   | 14 ++++----
+ src/eac_ca.c     |  2 +-
+ src/ta_lib.c     | 55 ++++++++++++++++-------------
+ 6 files changed, 100 insertions(+), 87 deletions(-)
+
+diff --git a/src/cv_cert.c b/src/cv_cert.c
+index 8fa65d8..0765b19 100644
+--- ./src/cv_cert.c
++++ ./src/cv_cert.c
+@@ -413,7 +413,8 @@ CVC_verify_signature(const CVC_CERT *cert, int protocol, EVP_PKEY *key)
+     body_buf = BUF_MEM_create_init(body, (size_t) body_len);
+ 
+     /* Get signature from certificate and convert it to a X9.62 representation */
+-    signature = BUF_MEM_create_init(cert->signature->data, cert->signature->length);
++    signature = BUF_MEM_create_init(ASN1_STRING_get0_data(cert->signature),
++        ASN1_STRING_length(cert->signature));
+ 
+     r = EAC_verify(protocol, key, signature, body_buf);
+ 
+@@ -468,12 +469,12 @@ enum cvc_terminal_role
+ CVC_get_role(const CVC_CHAT *chat)
+ {
+     if (!chat || !chat->relative_authorization
+-            || !chat->relative_authorization->data
+-            || chat->relative_authorization->length < 1)
++            || !ASN1_STRING_get0_data(chat->relative_authorization)
++            || ASN1_STRING_length(chat->relative_authorization) < 1)
+         return -1;
+ 
+     /* The left most bits encode the terminal type */
+-    return (chat->relative_authorization->data[0] >> 6) & 3;
++    return (ASN1_STRING_get0_data(chat->relative_authorization)[0] >> 6) & 3;
+ }
+ 
+ EVP_PKEY *
+@@ -549,9 +550,11 @@ CVC_pubkey2rsa(const CVC_PUBKEY *public_key, EVP_PKEY *out)
+         goto err;
+ 
+     check(RSA_set0_key(rsa,
+-                BN_bin2bn(public_key->cont1->data, public_key->cont1->length,
++                BN_bin2bn(ASN1_STRING_get0_data(public_key->cont1),
++                    ASN1_STRING_length(public_key->cont1),
+                     NULL),
+-                BN_bin2bn(public_key->cont2->data, public_key->cont2->length,
++                BN_bin2bn(ASN1_STRING_get0_data(public_key->cont2),
++                    ASN1_STRING_length(public_key->cont2),
+                     NULL), NULL),
+             "Internal error");
+ 
+@@ -617,8 +620,8 @@ CVC_pubkey2eckey(int all_parameters, const CVC_PUBKEY *public_key,
+         point = EC_POINT_new(group);
+         check(point
+                 && EC_POINT_oct2point(group, point,
+-                    public_key->cont6->data,
+-                    public_key->cont6->length,
++                    ASN1_STRING_get0_data(public_key->cont6),
++                    ASN1_STRING_length(public_key->cont6),
+                     bn_ctx)
+                 && EC_KEY_set_public_key(ec, point)
+                 && EC_KEY_check_key(ec),
+@@ -737,7 +740,8 @@ CVC_verify_request_signature(const CVC_CERT_REQUEST *request)
+     body_buf = BUF_MEM_create_init(body, (size_t) body_len);
+ 
+     /* Get signature from certificate and convert it to a X9.62 representation */
+-    inner_signature = BUF_MEM_create_init(request->inner_signature->data, request->inner_signature->length);
++    inner_signature = BUF_MEM_create_init(ASN1_STRING_get0_data(request->inner_signature),
++        ASN1_STRING_length(request->inner_signature));
+ 
+     r = EAC_verify(nid, key, inner_signature, body_buf);
+ 
+@@ -771,8 +775,8 @@ CVC_verify_authentication_request_signatures(EAC_CTX *ctx,
+ 
+     /* find the original certificate for verification of the outer signature */
+     trust_anchor = ctx->ta_ctx->lookup_cvca_cert(
+-            authentication->certificate_authority_reference->data,
+-            authentication->certificate_authority_reference->length);
++            ASN1_STRING_get0_data(authentication->certificate_authority_reference),
++            ASN1_STRING_length(authentication->certificate_authority_reference));
+     if (!trust_anchor)
+             goto err;
+ 
+@@ -788,16 +792,16 @@ CVC_verify_authentication_request_signatures(EAC_CTX *ctx,
+     if (request_len <= 0)
+         goto err;
+     data = BUF_MEM_create(
+-            authentication->certificate_authority_reference->length
++            ASN1_STRING_length(authentication->certificate_authority_reference)
+             + (size_t) request_len);
+     memcpy(data->data, request, request_len);
+     memcpy(data->data + request_len,
+-            authentication->certificate_authority_reference->data,
+-            authentication->certificate_authority_reference->length);
++            ASN1_STRING_get0_data(authentication->certificate_authority_reference),
++            ASN1_STRING_length(authentication->certificate_authority_reference));
+ 
+     outer_signature = BUF_MEM_create_init(
+-            authentication->outer_signature->data,
+-            authentication->outer_signature->length);
++            ASN1_STRING_get0_data(authentication->outer_signature),
++            ASN1_STRING_length(authentication->outer_signature));
+ 
+     r = EAC_verify(ctx->ta_ctx->protocol, ctx->ta_ctx->pub_key,
+             outer_signature, data);
+@@ -904,7 +908,7 @@ cvc_chat_print_authorizations(BIO *bio, const CVC_CHAT *chat, int indent)
+ 	const char **strings;
+ 
+ 	if (!bio || !chat || !chat->relative_authorization
+-	            || !chat->relative_authorization->data)
++	            || !ASN1_STRING_get0_data(chat->relative_authorization))
+ 	        goto err;
+ 
+ 	/* Figure out what kind of CHAT we have */
+@@ -926,7 +930,7 @@ cvc_chat_print_authorizations(BIO *bio, const CVC_CHAT *chat, int indent)
+     }
+ 
+     /* Sanity check: Does the received CHAT have the correct length? */
+-    if(chat->relative_authorization->length != rel_auth_num_bytes)
++    if(ASN1_STRING_length(chat->relative_authorization) != rel_auth_num_bytes)
+         goto err;
+ 
+     /* Dump the relative authorization bit string in human readable form.
+@@ -934,7 +938,7 @@ cvc_chat_print_authorizations(BIO *bio, const CVC_CHAT *chat, int indent)
+     for (i = 0; i < rel_auth_len; i++) {
+         if (i % 8 == 0 && i != 0)
+             j++;
+-        if (CHECK_BIT(chat->relative_authorization->data[rel_auth_num_bytes - j],
++        if (CHECK_BIT(ASN1_STRING_get0_data(chat->relative_authorization)[rel_auth_num_bytes - j],
+                 i % 8)) {
+             if (!BIO_indent(bio, indent, 80)
+                     || !BIO_printf(bio, "%s\n", strings[i]))
+@@ -955,7 +959,7 @@ cvc_chat_print(BIO *bio, const CVC_CHAT *chat, int indent)
+     int ok = 0, nid = 0, role;
+ 
+     if (!bio || !chat || !chat->relative_authorization
+-            || !chat->relative_authorization->data)
++            || !ASN1_STRING_get0_data(chat->relative_authorization))
+         goto err;
+ 
+     /* Figure out what kind of CHAT we have */
+@@ -1015,7 +1019,7 @@ CVC_get_profile_identifier(const CVC_CERT *cert)
+     long l;
+ 
+     if (!cert || !cert->body || !cert->body->certificate_profile_identifier ||
+-                !cert->body->certificate_profile_identifier->data)
++                !ASN1_STRING_get0_data(cert->body->certificate_profile_identifier))
+         return -1;
+     l = ASN1_INTEGER_get(cert->body->certificate_profile_identifier);
+     return (l == 0) ? 0 : -1; /* The only specified version number is 0 right now */
+@@ -1027,14 +1031,15 @@ cvc_get_reference_string(ASN1_OCTET_STRING *ref)
+     char *ret = NULL;
+ 
+     check(ref, "Invalid input");
+-    check(is_chr(ref->data, ref->length), "Invalid certificate reference");
++    check(is_chr(ASN1_STRING_get0_data(ref), ASN1_STRING_length(ref)),
++        "Invalid certificate reference");
+ 
+-    ret = malloc(ref->length + 1);
++    ret = malloc(ASN1_STRING_length(ref) + 1);
+     check(ret, "Not enough memory");
+ 
+-    memcpy(ret, ref->data, ref->length);
++    memcpy(ret, ASN1_STRING_get0_data(ref), ASN1_STRING_length(ref));
+     /* Null-terminate string */
+-    ret[ref->length] = '\0';
++    ret[ASN1_STRING_length(ref)] = '\0';
+ 
+ err:
+     return ret;
+@@ -1044,26 +1049,28 @@ char *
+ cvc_get_date_string(ASN1_OCTET_STRING *date)
+ {
+     char *ret;
++    const unsigned char *d;
+ 
+-    if (!date || !date->data || date->length != 6
+-            || !is_bcd(date->data, date->length))
++    if (!date || !ASN1_STRING_get0_data(date) || ASN1_STRING_length(date) != 6
++            || !is_bcd(ASN1_STRING_get0_data(date), ASN1_STRING_length(date)))
+         return NULL;
+ 
+     ret = malloc(11);
+     if (!ret)
+         return NULL;
+ 
++    d = ASN1_STRING_get0_data(date);
+     /* Convert to ASCII date */
+     ret[0] = '2';
+     ret[1] = '0';
+-    ret[2] = date->data[0] + 0x30;
+-    ret[3] = date->data[1] + 0x30;
++    ret[2] = d[0] + 0x30;
++    ret[3] = d[1] + 0x30;
+     ret[4] = '-';
+-    ret[5] = date->data[2] + 0x30;
+-    ret[6] = date->data[3] + 0x30;
++    ret[5] = d[2] + 0x30;
++    ret[6] = d[3] + 0x30;
+     ret[7] = '-';
+-    ret[8] = date->data[4] + 0x30;
+-    ret[9] = date->data[5] + 0x30;
++    ret[8] = d[4] + 0x30;
++    ret[9] = d[5] + 0x30;
+     ret[10] = '\0';
+ 
+     return ret;
+@@ -1081,28 +1088,28 @@ certificate_description_print(BIO *bio,
+ 
+     if (!BIO_indent(bio, indent, 80)
+             || !BIO_printf(bio, "%s\t%s\n", cert_desc_field_strings[0],
+-                desc->issuerName->data))
++                ASN1_STRING_get0_data(desc->issuerName)))
+         return 0;
+     if (desc->issuerURL) {
+         if (!BIO_indent(bio, indent, 80)
+                 || !BIO_printf(bio, "%s\t%s\n", cert_desc_field_strings[1],
+-                    desc->issuerURL->data))
++                    ASN1_STRING_get0_data(desc->issuerURL)))
+             return 0;
+     }
+     if (!BIO_indent(bio, indent, 80)
+             || !BIO_printf(bio, "%s\t%s\n", cert_desc_field_strings[2],
+-                desc->subjectName->data))
++                ASN1_STRING_get0_data(desc->subjectName)))
+         return 0;
+     if (desc->subjectURL) {
+         if (!BIO_indent(bio, indent, 80)
+                 || !BIO_printf(bio, "%s\t%s\n", cert_desc_field_strings[3],
+-                    desc->subjectURL->data))
++                    ASN1_STRING_get0_data(desc->subjectURL)))
+             return 0;
+     }
+     if (desc->redirectURL) {
+         if (!BIO_indent(bio, indent, 80)
+                 || !BIO_printf(bio, "%s\t%s\n", cert_desc_field_strings[4],
+-                    desc->redirectURL->data))
++                    ASN1_STRING_get0_data(desc->redirectURL)))
+             return 0;
+     }
+     if (desc->commCertificates) {
+@@ -1114,7 +1121,7 @@ certificate_description_print(BIO *bio,
+             for (i = 0; i < count; i++) {
+                 s = sk_value((_STACK*) desc->commCertificates->values, i);
+                 if (!BIO_puts(bio, "\n")
+-                        || !BIO_dump_indent(bio, (char *) s->data, s->length, indent+2))
++                        || !BIO_dump_indent(bio, (const char *) ASN1_STRING_get0_data(s), ASN1_STRING_length(s), indent+2))
+                     return 0;
+             }
+         }
+@@ -1124,7 +1131,8 @@ certificate_description_print(BIO *bio,
+     if (nid == NID_id_plainFormat) {
+             if (!BIO_indent(bio, indent, 80)
+                     || !BIO_printf(bio, "%s\n%.*s\n", cert_desc_field_strings[5],
+-                        desc->termsOfUsage->length, desc->termsOfUsage->data))
++                        ASN1_STRING_length(desc->termsOfUsage),
++                        ASN1_STRING_get0_data(desc->termsOfUsage)))
+                 return 0;
+             ret = 1;
+     } else if (nid == NID_id_htmlFormat) {
+@@ -1219,13 +1227,13 @@ CVC_check_description(const CVC_CERT *cv, const unsigned char *cert_desc_in,
+             goto err;
+ 
+         /* Check whether or not the hash in the certificate has the correct size */
+-        if (hash_check->length != desc_hash->length) {
++        if (ASN1_STRING_length(hash_check) != desc_hash->length) {
+             ret = 0;
+             goto err;
+         }
+ 
+         /* Compare it with the hash in the certificate */
+-        if (!memcmp(desc_hash->data, hash_check->data, desc_hash->length))
++        if (!memcmp(desc_hash->data, ASN1_STRING_get0_data(hash_check), desc_hash->length))
+             ret = 1;
+     } else
+         ret = 0;
+diff --git a/src/cvc-create.c b/src/cvc-create.c
+index 4f96e67..9e4a119 100644
+--- ./src/cvc-create.c
++++ ./src/cvc-create.c
+@@ -709,16 +709,16 @@ int main(int argc, char *argv[])
+             sign_as_cert = read_cvc_cert(cmdline.sign_as_arg);
+             if (!sign_as_cert)
+                 goto err;
+-            car = sign_as_cert->body->certificate_holder_reference->data;
+-            car_len = sign_as_cert->body->certificate_holder_reference->length;
++            car = ASN1_STRING_get0_data(sign_as_cert->body->certificate_holder_reference);
++            car_len = ASN1_STRING_length(sign_as_cert->body->certificate_holder_reference);
+         } else {
+             /* self signed certificate */
+             if (cmdline.manual_mode_counter) {
+                 car = (unsigned char *) cmdline.chr_arg;
+                 car_len = strlen(cmdline.chr_arg);
+             } else {
+-                car = request->body->certificate_holder_reference->data;
+-                car_len = request->body->certificate_holder_reference->length;
++                car = ASN1_STRING_get0_data(request->body->certificate_holder_reference);
++                car_len = ASN1_STRING_length(request->body->certificate_holder_reference);
+             }
+         }
+         if (!cert->body->certificate_authority_reference)
+@@ -744,15 +744,15 @@ int main(int argc, char *argv[])
+         strncpy(basename, cmdline.chr_arg, (sizeof basename) - 1);
+         basename[sizeof basename - 1] = '\0';
+     } else {
++        int name_len;
+         cert->body->certificate_holder_reference = (ASN1_UTF8STRING *) ASN1_STRING_dup((ASN1_STRING *) request->body->certificate_holder_reference);
+         if (!cert->body->certificate_holder_reference)
+             goto err;
+-        memcpy(basename, (char *) request->body->certificate_holder_reference->data,
+-                sizeof basename < request->body->certificate_holder_reference->length ?
+-                sizeof basename : request->body->certificate_holder_reference->length);
+-        basename[
+-            sizeof basename - 1 < request->body->certificate_holder_reference->length ?
+-            sizeof basename - 1 : request->body->certificate_holder_reference->length] = '\0';
++        name_len = ASN1_STRING_length(request->body->certificate_holder_reference);
++        memcpy(basename, (const char *) ASN1_STRING_get0_data(request->body->certificate_holder_reference),
++                sizeof basename < name_len ?
++                sizeof basename : name_len);
++        basename[sizeof basename - 1 < name_len ? sizeof basename - 1 : name_len] = '\0';
+     }
+ 
+ 
+diff --git a/src/cvc_lookup.c b/src/cvc_lookup.c
+index 331926c..af4a822 100644
+--- ./src/cvc_lookup.c
++++ ./src/cvc_lookup.c
+@@ -89,8 +89,8 @@ static int CVC_find_chr_in_file(const unsigned char *chr, size_t chr_len,
+         }
+         cvc = *cv_certificate;
+         if (cvc && cvc->body && cvc->body->certificate_holder_reference
+-                && cvc->body->certificate_holder_reference->length == chr_len
+-                && 0 == memcmp(cvc->body->certificate_holder_reference->data,
++                && ASN1_STRING_length(cvc->body->certificate_holder_reference) == chr_len
++                && 0 == memcmp(ASN1_STRING_get0_data(cvc->body->certificate_holder_reference),
+                     chr, chr_len)) {
+             ok = 1;
+             break;
+diff --git a/src/eac_asn1.c b/src/eac_asn1.c
+index 310a24c..24c4ed1 100644
+--- ./src/eac_asn1.c
++++ ./src/eac_asn1.c
+@@ -456,7 +456,7 @@ EAC_CTX_init_ef_cardaccess(const unsigned char * in, size_t in_len,
+ {
+     ASN1_INTEGER *i = NULL;
+     ASN1_OBJECT *oid = NULL;
+-    unsigned char *pubkey;
++    const unsigned char *pubkey;
+     size_t pubkey_len;
+     CA_CTX *ca_ctx = NULL;
+     CA_DP_INFO *tmp_ca_dp_info = NULL;
+@@ -637,15 +637,15 @@ EAC_CTX_init_ef_cardaccess(const unsigned char * in, size_t in_len,
+                  * UNSIGNED INTEGER, which is an ASN.1 INTEGER that is
+                  * always positive. Parsing the unsigned integer should be
+                  * done in EVP_PKEY_set_key. */
+-                const unsigned char *p = ca_public_key_info->chipAuthenticationPublicKeyInfo->subjectPublicKey->data;
++                const unsigned char *p = ASN1_STRING_get0_data(ca_public_key_info->chipAuthenticationPublicKeyInfo->subjectPublicKey);
+                 check(d2i_ASN1_UINTEGER(&i, &p,
+-                            ca_public_key_info->chipAuthenticationPublicKeyInfo->subjectPublicKey->length),
++                            ASN1_STRING_length(ca_public_key_info->chipAuthenticationPublicKeyInfo->subjectPublicKey)),
+                         "Could not decode CA PK");
+-                pubkey = i->data;
+-                pubkey_len = i->length;
++                pubkey = ASN1_STRING_get0_data(i);
++                pubkey_len = ASN1_STRING_length(i);
+             } else {
+-                pubkey = ca_public_key_info->chipAuthenticationPublicKeyInfo->subjectPublicKey->data;
+-                pubkey_len = ca_public_key_info->chipAuthenticationPublicKeyInfo->subjectPublicKey->length;
++                pubkey = ASN1_STRING_get0_data(ca_public_key_info->chipAuthenticationPublicKeyInfo->subjectPublicKey);
++                pubkey_len = ASN1_STRING_length(ca_public_key_info->chipAuthenticationPublicKeyInfo->subjectPublicKey);
+             }
+ 
+             if (!EVP_PKEY_set_keys(ca_ctx->ka_ctx->key, NULL, 0, pubkey, pubkey_len, ctx->bn_ctx))
+diff --git a/src/eac_ca.c b/src/eac_ca.c
+index 35d0d10..69c4653 100644
+--- ./src/eac_ca.c
++++ ./src/eac_ca.c
+@@ -184,7 +184,7 @@ EAC_CTX_init_ef_cardsecurity(const unsigned char *ef_cardsecurity,
+         goto err;
+     os = signed_data->d.other->value.octet_string;
+ 
+-    if (!EAC_CTX_init_ef_cardaccess(os->data, os->length, ctx)
++    if (!EAC_CTX_init_ef_cardaccess(ASN1_STRING_get0_data(os), ASN1_STRING_length(os), ctx)
+             || !ctx || !ctx->ca_ctx || !ctx->ca_ctx->ka_ctx)
+         goto err;
+ 
+diff --git a/src/ta_lib.c b/src/ta_lib.c
+index c23f895..bfd3795 100644
+--- ./src/ta_lib.c
++++ ./src/ta_lib.c
+@@ -97,15 +97,17 @@ cvc_check_time(const CVC_CERT *cert)
+ {
+     time_t loc;
+     struct tm exp_tm, eff_tm, *utc_tm;
++    const unsigned char *eff_d;
++    const unsigned char *exp_d;
+ 
+     if (!cert || !cert->body
+             || !cert->body->certificate_effective_date
+-            || cert->body->certificate_effective_date->length != 6
+-            || !is_bcd(cert->body->certificate_effective_date->data,
+-                cert->body->certificate_effective_date->length)
+-            || cert->body->certificate_expiration_date->length != 6
+-            || !is_bcd(cert->body->certificate_expiration_date->data,
+-                cert->body->certificate_expiration_date->length))
++            || ASN1_STRING_length(cert->body->certificate_effective_date) != 6
++            || !is_bcd(ASN1_STRING_get0_data(cert->body->certificate_effective_date),
++                ASN1_STRING_length(cert->body->certificate_effective_date))
++            || ASN1_STRING_length(cert->body->certificate_expiration_date) != 6
++            || !is_bcd(ASN1_STRING_get0_data(cert->body->certificate_expiration_date),
++                ASN1_STRING_length(cert->body->certificate_expiration_date)))
+         return -1;
+ 
+     /* FIXME gmtime is not thread safe */
+@@ -120,13 +122,16 @@ cvc_check_time(const CVC_CERT *cert)
+     eff_tm.tm_hour = 0;         /* hours */
+     eff_tm.tm_wday = -1;        /* day of the week */
+     eff_tm.tm_yday = -1;        /* day in the year */
++
++    eff_d = ASN1_STRING_get0_data(cert->body->certificate_effective_date);
++    exp_d = ASN1_STRING_get0_data(cert->body->certificate_expiration_date);
+     eff_tm.tm_year = 100        /* The number of years since 1900 */
+-        + ((unsigned char) cert->body->certificate_effective_date->data[0])*10
+-        + (unsigned char) cert->body->certificate_effective_date->data[1];
+-    eff_tm.tm_mon = ((unsigned char) cert->body->certificate_effective_date->data[2])*10
+-        + (unsigned char) cert->body->certificate_effective_date->data[3] - 1;
+-    eff_tm.tm_mday = ((unsigned char) cert->body->certificate_effective_date->data[4])*10
+-        + (unsigned char) cert->body->certificate_effective_date->data[5];
++        + ((unsigned char) eff_d[0])*10
++        + (unsigned char) eff_d[1];
++    eff_tm.tm_mon = ((unsigned char) eff_d[2])*10
++        + (unsigned char) eff_d[3] - 1;
++    eff_tm.tm_mday = ((unsigned char) eff_d[4])*10
++        + (unsigned char) eff_d[5];
+ 
+     memcpy(&exp_tm, utc_tm, sizeof(struct tm));
+     exp_tm.tm_sec = 59;         /* seconds */
+@@ -135,12 +140,12 @@ cvc_check_time(const CVC_CERT *cert)
+     exp_tm.tm_wday = -1;        /* day of the week */
+     exp_tm.tm_yday = -1;        /* day in the year */
+     exp_tm.tm_year = 100        /* The number of years since 1900 */
+-        + ((unsigned char) cert->body->certificate_expiration_date->data[0])*10
+-        + (unsigned char) cert->body->certificate_expiration_date->data[1];
+-    exp_tm.tm_mon = ((unsigned char) cert->body->certificate_expiration_date->data[2])*10
+-        + (unsigned char) cert->body->certificate_expiration_date->data[3] - 1;
+-    exp_tm.tm_mday = ((unsigned char) cert->body->certificate_expiration_date->data[4])*10
+-        + (unsigned char) cert->body->certificate_expiration_date->data[5];
++        + ((unsigned char) exp_d[0])*10
++        + (unsigned char) exp_d[1];
++    exp_tm.tm_mon = ((unsigned char) exp_d[2])*10
++        + (unsigned char) exp_d[3] - 1;
++    exp_tm.tm_mday = ((unsigned char) exp_d[4])*10
++        + (unsigned char) exp_d[5];
+ 
+     if (exp_tm.tm_mon < 0 || exp_tm.tm_mon > 12
+             || exp_tm.tm_mday > 31
+@@ -219,8 +224,8 @@ TA_CTX_import_certificate(TA_CTX *ctx, const CVC_CERT *next_cert,
+         trust_anchor = ctx->trust_anchor;
+     } else if (ctx->lookup_cvca_cert) {
+         trust_anchor = ctx->lookup_cvca_cert(
+-                next_cert->body->certificate_authority_reference->data,
+-                next_cert->body->certificate_authority_reference->length);
++                ASN1_STRING_get0_data(next_cert->body->certificate_authority_reference),
++                ASN1_STRING_length(next_cert->body->certificate_authority_reference));
+         check(trust_anchor, "Could not look up trust anchor");
+ 
+         /* lookup the whole certificate chain until we hit an CVCA
+@@ -240,11 +245,11 @@ TA_CTX_import_certificate(TA_CTX *ctx, const CVC_CERT *next_cert,
+      * the CHR of the next certificate in the chain */
+     check((next_cert->body->certificate_authority_reference
+                 && trust_anchor->body->certificate_holder_reference
+-                && next_cert->body->certificate_authority_reference->length ==
+-                trust_anchor->body->certificate_holder_reference->length
+-                && memcmp(trust_anchor->body->certificate_holder_reference->data,
+-                    next_cert->body->certificate_authority_reference->data,
+-                    trust_anchor->body->certificate_holder_reference->length) == 0),
++                && ASN1_STRING_length(next_cert->body->certificate_authority_reference) ==
++                ASN1_STRING_length(trust_anchor->body->certificate_holder_reference)
++                && memcmp(ASN1_STRING_get0_data(trust_anchor->body->certificate_holder_reference),
++                    ASN1_STRING_get0_data(next_cert->body->certificate_authority_reference),
++                    ASN1_STRING_length(trust_anchor->body->certificate_holder_reference)) == 0),
+             "Current CHR does not match next CAR");
+ 
+     i = CVC_verify_signature(next_cert,

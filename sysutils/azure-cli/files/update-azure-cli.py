@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.13
+#!/usr/bin/env python3.14
 """Generate portfile distfiles/checksums sections for a new azure-cli release.
 
 Usage:
@@ -36,12 +36,13 @@ PYPI_TO_PORT_OVERRIDES = {
     "pyjwt": "jwt",
     "pyopenssl": "openssl",
     "pysocks": "socks",
+    "pymsalruntime": "msalruntime",
     "typing_extensions": "typing_extensions",
 }
 
 # Python version used by the port. This should be invoked with the
 # matching Python interpreter. Make sure this matches the portfile.
-EXPECTED_PYTHON_VERSION = "3.13"
+EXPECTED_PYTHON_VERSION = "3.14"
 
 INDENT = " " * 20
 CS_INDENT = INDENT + "    "
@@ -163,6 +164,14 @@ def main():
             }
         )
     entries.sort(key=lambda e: e["tag"])
+
+    for entry in entries:
+        if entry["tag"] in ("azure_cli", "azure_cli_core"):
+            entry["file"] = re.sub(
+                rf"^{re.escape(entry['tag'])}-[^-]+-",
+                f"{entry['tag']}-${{version}}-",
+                entry["file"],
+            )
 
     print(format_aligned(
         "master_sites", [f"{e['url']}:{e['tag']}" for e in entries]))

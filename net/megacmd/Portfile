@@ -1,0 +1,186 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           active_variants 1.1
+PortGroup           github 1.0
+PortGroup           cmake 1.1
+PortGroup           openssl 1.0
+
+github.setup        meganz MEGAcmd 2.7.0 "" _macOS
+github.tarball_from archive
+name                [string tolower ${github.project}]
+revision            0
+categories          net
+maintainers         {i0ntempest @i0ntempest} openmaintainer
+license             BSD GPL-3+
+
+description         Command-line interactive and scriptable interface to MEGA
+long_description    ${github.project} provides an interactive shell and scriptable commands \
+                    for MEGA cloud storage, including transfers, synchronization, \
+                    backups, and WebDAV and FTP serving.
+
+set sdk_commit      d1c0cb76cb98598d93b9fb0bb89612daeb0fb39c
+set sdk_distname    sdk-${sdk_commit}
+distname            ${github.project}-${version}_macOS
+master_sites        https://codeload.github.com/meganz/${github.project}/tar.gz/${version}_macOS?dummy=:cmd \
+                    https://codeload.github.com/meganz/sdk/tar.gz/${sdk_commit}?dummy=:sdk
+distfiles           ${distname}${extract.suffix}:cmd \
+                    ${sdk_distname}${extract.suffix}:sdk
+
+checksums           ${distname}${extract.suffix} \
+                    rmd160  44b273a19af8a62e1d1fb9ee82a663a14cd0113e \
+                    sha256  3a148396c293cf34ecb152b393684a8bbd56e2782e08abe4e6e30fb7d6d922a4 \
+                    size    2173888 \
+                    ${sdk_distname}${extract.suffix} \
+                    rmd160  fe31ac4b8501468f7eccff7dd20e2dc16f72671c \
+                    sha256  24a09a2868af26de2d6643967636242b88856c289caa7e314bd0ce73a8d0e458 \
+                    size    5645236
+
+depends_build-append \
+                    port:pkgconfig
+depends_lib-append  port:curl \
+                    port:icu \
+                    port:libcryptopp \
+                    port:libsodium \
+                    port:libuv \
+                    port:pcre \
+                    port:readline \
+                    port:sqlite3 \
+                    port:zlib
+
+compiler.cxx_standard \
+                    2017
+cmake.generator     Ninja
+
+post-extract {
+    # GitHub archives contain an empty directory in place of the submodule.
+    file delete ${worksrcpath}/sdk
+    ln -s ../${sdk_distname} ${worksrcpath}/sdk
+}
+
+patchfiles          patch-cmake-macports.diff \
+                    patch-freeimage-objc.diff
+
+post-patch {
+    # Resolve SDK package finders correctly in the out-of-source build.
+    reinplace {s|list(APPEND CMAKE_MODULE_PATH sdk/cmake/modules/packages)|list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/sdk/cmake/modules/packages)|} \
+        ${worksrcpath}/CMakeLists.txt
+    # The system-dependency path uses Debian's Crypto++ pkg-config name.
+    reinplace {s|IMPORTED_TARGET libcrypto++)|IMPORTED_TARGET libcryptopp)|} \
+        ${worksrcpath}/sdk/cmake/modules/sdklib_libraries.cmake
+    # These libraries' headers are included by the SDK's public graphics headers.
+    reinplace {s|SDKlib PRIVATE FreeImage::FreeImage|SDKlib PUBLIC FreeImage::FreeImage|; s|SDKlib PRIVATE PkgConfig::pdfium|SDKlib PUBLIC PkgConfig::pdfium|} \
+        ${worksrcpath}/sdk/cmake/modules/sdklib_libraries.cmake
+    # pcrecpp is required by the C++ regular-expression calls.
+    reinplace {s|IMPORTED_TARGET libpcre)|IMPORTED_TARGET libpcrecpp)|} \
+        ${worksrcpath}/build/cmake/modules/megacmd_libraries.cmake
+
+    # There is no build-time updater switch. The runtime --auto=off setting
+    # does not prevent registration of the independent emergency LaunchAgent.
+    # These guards cover update commands, login/listener checks and registration.
+    reinplace {s@#if defined(_WIN32) || defined(__APPLE__)@#if defined(_WIN32)@g} \
+        ${worksrcpath}/src/megacmd.cpp \
+        ${worksrcpath}/src/megacmdexecuter.cpp \
+        ${worksrcpath}/src/megacmdcommonutils.h \
+        ${worksrcpath}/src/megacmdshell/megacmdshell.cpp
+
+    # The clients must start our server rather than the upstream app bundle.
+    reinplace "s|/Applications/MEGAcmd.app/Contents/MacOS/mega-cmd|${prefix}/bin/mega-cmd-server|" \
+        ${worksrcpath}/src/megacmdshell/megacmdshellcommunications.cpp
+    reinplace {s|const char executable2\[\] = "./mega-cmd";|const char executable2[] = "./mega-cmd-server";|} \
+        ${worksrcpath}/src/megacmdshell/megacmdshellcommunications.cpp
+    reinplace "s|/Applications/MEGAcmd.app/Contents/MacOS/megacmd_completion.sh|${prefix}/share/bash-completion/completions/mega-cmd|g; s|/Applications/MEGAcmd.app/Contents/MacOS|${prefix}/bin|g" \
+        ${worksrcpath}/src/megacmd.cpp
+}
+
+configure.args-append \
+                    -DVCPKG_ROOT:PATH= \
+                    -DSDK_COMMIT_HASH:STRING=${sdk_commit} \
+                    -DFULL_REQS=OFF \
+                    -DENABLE_MEGACMD_TESTS=OFF \
+                    -DENABLE_SDKLIB_TESTS=OFF \
+                    -DENABLE_SDKLIB_EXAMPLES=OFF \
+                    -DENABLE_ISOLATED_GFX=OFF \
+                    -DENABLE_MEDIA_FILE_METADATA=OFF \
+                    -DUSE_MEDIAINFO=OFF \
+                    -DUSE_FREEIMAGE=OFF \
+                    -DUSE_FFMPEG=OFF \
+                    -DUSE_PDFIUM=OFF \
+                    -DUSE_LIBUV=ON \
+                    -DUSE_OPENSSL=ON \
+                    -DWITH_FUSE=OFF
+
+# Do not build or install the upstream self-updater.
+build.target        mega-cmd mega-cmd-server mega-exec
+
+destroot {
+    xinstall -m 755 -W ${cmake.build_dir} mega-cmd mega-cmd-server mega-exec \
+        ${destroot}${prefix}/bin
+    foreach script [glob ${worksrcpath}/src/client/mega-*] {
+        xinstall -m 755 ${script} ${destroot}${prefix}/bin
+    }
+    # As in upstream's install rules, exclude src/client/python/mega-execports:
+    # it is an obsolete TCP client, while this build uses Unix-domain sockets.
+    xinstall -d ${destroot}${prefix}/share/bash-completion/completions
+    xinstall -m 644 ${worksrcpath}/src/client/megacmd_completion.sh \
+        ${destroot}${prefix}/share/bash-completion/completions/mega-cmd
+    foreach command [glob -tails -directory ${destroot}${prefix}/bin mega-*] {
+        if {${command} ne "mega-cmd"} {
+            ln -s mega-cmd ${destroot}${prefix}/share/bash-completion/completions/${command}
+        }
+    }
+    xinstall -d ${destroot}${prefix}/share/doc/${name}
+    xinstall -m 644 -W ${worksrcpath} LICENSE README.md UserGuide.md \
+        ${destroot}${prefix}/share/doc/${name}
+    xinstall -m 644 ${worksrcpath}/sdk/LICENSE \
+        ${destroot}${prefix}/share/doc/${name}/LICENSE.sdk
+}
+
+variant pdf description {Generate PDF and image thumbnails and previews} {
+    depends_lib-append \
+                    port:pdfium
+    configure.args-replace \
+                    -DUSE_PDFIUM=OFF -DUSE_PDFIUM=ON
+}
+
+variant media description {Generate image/video previews and extract media metadata} {
+    depends_lib-append \
+                    port:ffmpeg \
+                    port:mediainfolib \
+                    port:zenlib
+    configure.args-replace \
+                    -DUSE_FFMPEG=OFF -DUSE_FFMPEG=ON \
+                    -DENABLE_MEDIA_FILE_METADATA=OFF -DENABLE_MEDIA_FILE_METADATA=ON
+    configure.args-delete \
+                    -DUSE_MEDIAINFO=OFF
+}
+
+# Both PDF rendering and video decoding feed the FreeImage graphics backend.
+if {[variant_isset pdf] || [variant_isset media]} {
+    depends_lib-append \
+                    port:freeimage
+    configure.args-replace \
+                    -DUSE_FREEIMAGE=OFF -DUSE_FREEIMAGE=ON
+}
+
+variant fuse description {Mount MEGA folders using macFUSE (experimental)} {
+    depends_lib-append \
+                    port:macfuse
+    require_active_variants macfuse fs_link
+    configure.args-replace \
+                    -DWITH_FUSE=OFF -DWITH_FUSE=ON
+    configure.args-append \
+                    -DFUSE_INCLUDE_DIR=${prefix}/include/fuse3 \
+                    -DFUSE_LIBRARY=${prefix}/lib/libfuse3.dylib
+    post-patch {
+        # The pinned SDK has a Darwin backend; this help text predates it.
+        reinplace {s|They are not available in macOS. ||} \
+            ${worksrcpath}/src/megacmd_fuse.cpp \
+            {*}[glob ${worksrcpath}/contrib/docs/commands/fuse-*.md]
+    }
+    notes-append "
+        FUSE mount support in ${name} is experimental.
+    "
+}
+
+default_variants    +pdf +media

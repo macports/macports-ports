@@ -285,7 +285,7 @@ platform macosx {
     post-destroot {
         if {[tbool app.create]} {
             # Ensure app.identifier is valid.
-            if {[regexp -nocase {[^a-z0-9._-]} ${app.identifier}]} {
+            if {[regexp -nocase {[^a-z0-9.-]} ${app.identifier}]} {
                 return -code error "app.identifier ${app.identifier} contains illegal characters"
             }
             if {[llength [split ${app.identifier} "."]] < 3} {
@@ -452,8 +452,8 @@ proc app._icon_trace {optionName unusedIndex unusedOperation} {
     }
     set needs_dep [expr {[file extension [join ${option}]] eq ".svg"}]
     if {${needs_dep}} {
-        depends_build-delete port:librsvg
-        depends_build-append port:librsvg
+        depends_build-delete path:lib/pkgconfig/librsvg-2.0.pc:librsvg
+        depends_build-append path:lib/pkgconfig/librsvg-2.0.pc:librsvg
     }
 }
 

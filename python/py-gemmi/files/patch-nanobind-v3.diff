@@ -1,0 +1,111 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 54e1a4fd..fbb0a27d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -31,6 +31,8 @@ option(GENERATE_STUBS "Generate Python type stubs" ON)
+ option(EXTRA_WARNINGS "Set extra warning flags" OFF)
+ option(USE_WMAIN "(Windows only) take Unicode arguments in gemmi program" ON)
+ option(STANDALONE_PYTHON_MODULE "Avoid linking Python module to libgemmi_cpp DLL" ON)
++option(ENABLE_SPLIT_MODE "Use nanobind split mode (BACKEND_MODULE)" OFF)
++option(ENABLE_FREE_THREADED "Enable free-threaded Python support" OFF)
+ if (WIN32)
+   set(GEMMI_INSTALL_CMAKEDIR "cmake" CACHE STRING
+       "Install path for gemmi CMake files")
+@@ -472,10 +474,20 @@ if (USE_PYTHON)
+       COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+       OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE nb_cmake_dir)
+     list(APPEND CMAKE_PREFIX_PATH "${nb_cmake_dir}")
+-    find_package(nanobind 2.4.0 CONFIG REQUIRED)
++    find_package(nanobind CONFIG REQUIRED)
++    if (nanobind_VERSION VERSION_LESS "2.4.0" OR nanobind_VERSION VERSION_GREATER_EQUAL "4.0.0")
++      message(FATAL_ERROR "nanobind version must be >= 2.4.0 and < 4.0.0 (found ${nanobind_VERSION})")
++    endif()
+     message(STATUS "Found nanobind ${nanobind_VERSION}: ${NB_DIR}")
+   endif()
+-  nanobind_add_module(gemmi_py NOMINSIZE
++  set(gemmi_py_flags NOMINSIZE)
++  if (ENABLE_SPLIT_MODE)
++    list(APPEND gemmi_py_flags BACKEND_MODULE nanobind_backend)
++  endif()
++  if (ENABLE_FREE_THREADED)
++    list(APPEND gemmi_py_flags FREE_THREADED)
++  endif()
++  nanobind_add_module(gemmi_py ${gemmi_py_flags}
+           python/gemmi.cpp python/align.cpp
+           python/ccp4.cpp python/chemcomp.cpp python/cif.cpp
+           python/elem.cpp python/grid.cpp python/hkl.cpp
+diff --git a/python/hkl.cpp b/python/hkl.cpp
+index f991f90d..91d725e4 100644
+--- a/python/hkl.cpp
++++ b/python/hkl.cpp
+@@ -318,7 +318,7 @@ void add_hkl(nb::module_& m) {
+         self.add_if_valid({h(i, 0), h(i, 1), h(i, 2)}, 0, 0, v(i), s(i));
+       self.type = DataType::Unmerged;
+       self.switch_to_asu_indices();
+-    }, nb::arg("cell"), nb::arg("sg").none(false),
++    }, nb::arg("cell"), nb::arg("sg"),
+        nb::arg("miller_array"), nb::arg("value_array"), nb::arg("sigma_array"))
+     ;
+ 
+diff --git a/python/make_iterator.h b/python/make_iterator.h
+index bbb5c4fc..f800754a 100644
+--- a/python/make_iterator.h
++++ b/python/make_iterator.h
+@@ -4,7 +4,18 @@
+ // This wrapper simplifies the call to nb::make_iterator (by assuming
+ // the name "iterator") and changes the default rv_policy to what it was
+ // in pybind11 and nanobind<2.0.
+-template<nb::rv_policy Policy = nb::rv_policy::reference_internal, typename S, typename T>
++#if defined(NB_VERSION_MAJOR) && NB_VERSION_MAJOR >= 3
++template <typename S, typename T>
++auto usual_iterator(const S&, T& value) {
++  return nb::make_iterator<nb::rv_policy::reference_internal>(nb::type<S>(), "iterator", value);
++}
++template <auto Policy, typename S, typename T>
++auto usual_iterator(const S&, T& value) {
++  return nb::make_iterator<Policy>(nb::type<S>(), "iterator", value);
++}
++#else
++template <nb::rv_policy Policy = nb::rv_policy::reference_internal, typename S, typename T>
+ auto usual_iterator(const S&, T& value) {
+   return nb::make_iterator<Policy>(nb::type<S>(), "iterator", value);
+ }
++#endif
+diff --git a/python/mol.cpp b/python/mol.cpp
+index 56eb7dfe..7108965c 100644
+--- a/python/mol.cpp
++++ b/python/mol.cpp
+@@ -36,7 +36,11 @@ struct returns_references {
+     if (!nb::isinstance<nb::sequence>(ret))
+       throw std::runtime_error("return value should be a sequence");
+     for (nb::handle nurse : ret)
++#if defined(NB_VERSION_MAJOR) && NB_VERSION_MAJOR >= 3
++      nb::keep_alive_obj(nurse, args[0]);
++#else
+       nb::detail::keep_alive(nurse.ptr(), args[0]);
++#endif
+   }
+ };
+ 
+diff --git a/python/scaling.cpp b/python/scaling.cpp
+index 5bc3690c..050351b3 100644
+--- a/python/scaling.cpp
++++ b/python/scaling.cpp
+@@ -22,7 +22,7 @@ void add_scaling(nb::module_& m) {
+     .def_prop_rw("parameters", &Scaling::get_parameters,
+                   (void (Scaling::*)(const std::vector<double>&)) &Scaling::set_parameters)
+     .def("prepare_points", &Scaling::prepare_points,
+-         nb::arg("calc"), nb::arg("obs"), nb::arg("mask")=static_cast<FPhiData*>(nullptr))
++         nb::arg("calc"), nb::arg("obs"), nb::arg("mask")=nb::none())
+     .def("fit_isotropic_b_approximately", &Scaling::fit_isotropic_b_approximately)
+     .def("fit_b_star_approximately", &Scaling::fit_b_star_approximately)
+     .def("fit_parameters", &Scaling::fit_parameters)
+@@ -36,7 +36,7 @@ void add_scaling(nb::module_& m) {
+     })
+     .def("get_solvent_scale", &Scaling::get_solvent_scale, nb::arg("stol2"))
+     .def("scale_data", &Scaling::scale_data,
+-         nb::arg("asu_data"), nb::arg("mask_data")=static_cast<FPhiData*>(nullptr))
++         nb::arg("asu_data"), nb::arg("mask_data")=nb::none())
+     .def("scale_value", &Scaling::scale_value,
+          nb::arg("hkl"), nb::arg("f_value"), nb::arg("mask_value"))
+     ;

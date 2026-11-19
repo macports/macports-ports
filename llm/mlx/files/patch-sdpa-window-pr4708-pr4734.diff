@@ -1,0 +1,1313 @@
+diff --git mlx/backend/cuda/scaled_dot_product_attention.cpp mlx/backend/cuda/scaled_dot_product_attention.cpp
+index e6c8abf..123a487 100644
+--- mlx/backend/cuda/scaled_dot_product_attention.cpp
++++ mlx/backend/cuda/scaled_dot_product_attention.cpp
+@@ -557,11 +557,19 @@ std::tuple<bool, std::string> has_fused_kernel(
+     const array& v,
+     bool has_arr_mask,
+     bool do_causal,
++    int window_size,
+     bool output_logsumexp,
+     Stream s) {
+   if (s.device != Device::gpu) {
+     return {false, "the fused kernels require a GPU stream."};
+   }
++  if (window_size > 0) {
++    return {false, "window attention support for CUDA is NYI"};
++  }
++  if (output_logsumexp && window_size > 0) {
++    return {false, "window support for backward attention is NYI"};
++  }
++
+   if (!supports_sdpa_cudnn(q, k, v, has_arr_mask, do_causal, s) &&
+       !supports_sdpa_vector(q, k, v, has_arr_mask, output_logsumexp)) {
+     std::ostringstream msg;
+@@ -584,12 +592,13 @@ bool ScaledDotProductAttention::use_fallback(
+     bool has_arr_mask,
+     bool do_causal,
+     bool has_sinks,
++    int window_size,
+     bool is_training,
+     bool output_logsumexp,
+     bool force_fused,
+     Stream s) {
+-  auto [has_fused, reason] =
+-      has_fused_kernel(q, k, v, has_arr_mask, do_causal, output_logsumexp, s);
++  auto [has_fused, reason] = has_fused_kernel(
++      q, k, v, has_arr_mask, do_causal, window_size, output_logsumexp, s);
+   if (force_fused) {
+     if (!has_fused) {
+       std::ostringstream msg;
+diff --git mlx/backend/metal/kernels/sdpa_vector.h mlx/backend/metal/kernels/sdpa_vector.h
+index 1d31203..e5b978f 100644
+--- mlx/backend/metal/kernels/sdpa_vector.h
++++ mlx/backend/metal/kernels/sdpa_vector.h
+@@ -11,6 +11,16 @@ constant bool bool_mask [[function_constant(23)]];
+ constant bool float_mask [[function_constant(24)]];
+ constant bool has_sinks [[function_constant(25)]];
+ constant int blocks [[function_constant(26)]];
++constant int window_size [[function_constant(27)]];
++constant bool has_window = window_size > 0;
++
++// Visible keys [lo, hi) of the query at position pos
++METAL_FUNC int2 window_range(int pos, int N) {
++  int lo = max(0, pos - window_size + 1);
++  int hi = do_causal ? (pos + 1) : (pos + window_size);
++  hi = min(N, hi);
++  return int2(lo, hi);
++}
+ 
+ template <typename T, int D, int V = D>
+ [[kernel]] void sdpa_vector(
+@@ -81,6 +91,26 @@ template <typename T, int D, int V = D>
+ 
+   out += o_offset * V + simd_gid * v_per_thread;
+ 
++  // Restrict the keys to the window
++  int lo = 0;
++  int hi = N;
++  if (has_window) {
++    // Offset = kL - qL = N - tpg.y
++    auto range = window_range(N - int(tpg.y) + int(q_seq_idx), N);
++    lo = range.x;
++    hi = range.y;
++
++    // Move all arrays ahead by lo
++    keys += lo * k_seq_stride;
++    values += lo * v_seq_stride;
++    if (bool_mask) {
++      bmask += lo * mask_kv_seq_stride;
++    }
++    if (float_mask) {
++      fmask += lo * mask_kv_seq_stride;
++    }
++  }
++
+   // Read the query and 0 the output accumulator
+   for (int i = 0; i < qk_per_thread; i++) {
+     q[i] = static_cast<U>(scale) * queries[i];
+@@ -96,15 +126,18 @@ template <typename T, int D, int V = D>
+     sum_exp_score = 1;
+   }
+ 
+-  // For each key
+-  for (int i = simd_gid; i < N; i += BN) {
++  // For each key in valid range
++  for (int i = lo + simd_gid; i < hi; i += BN) {
+     bool use_key = true;
+     if (do_causal) {
+       use_key = i <= (N - int(tpg.y) + int(q_seq_idx));
+-    } else if (bool_mask) {
+-      use_key = bmask[0];
++    }
++
++    // Allow causal and array masking at the same time
++    if (bool_mask) {
++      use_key = use_key && bmask[0];
+     } else if (float_mask) {
+-      use_key = (fmask[0] >= Limits<T>::finite_min);
++      use_key = use_key && (fmask[0] >= Limits<T>::finite_min);
+     }
+     if (use_key) {
+       // Read the key
+@@ -267,6 +300,45 @@ template <typename T, int D, int V = D, int TK = 4>
+ 
+   // For each key
+   int i = block_idx;
++
++  // Prepare for windows
++  int lo = 0;
++  int hi = N;
++
++  if (has_window) {
++    // The earliest valid key falls in the valid window for
++    // q_seq_idx = 0 -> pos = N - q_seq_len
++    // This is uniform across block ids
++    const int min_valid_key = max(0, N - q_seq_len - window_size + 1);
++
++    // We find if we can uniformly skip over some iterations of
++    // the loop over keys for all blocks
++    const int itr_sz = blocks * TK;
++
++    if (min_valid_key > itr_sz) {
++      const int min_valid_off = (min_valid_key / itr_sz) * itr_sz;
++
++      // Move the loop index up
++      i += min_valid_off;
++
++      // Move the buffer offsets up
++      keys += min_valid_off * k_seq_stride;
++      values += min_valid_off * v_seq_stride;
++      if (bool_mask) {
++        bmask += min_valid_off * mask_kv_seq_stride;
++      }
++      if (float_mask) {
++        fmask += min_valid_off * mask_kv_seq_stride;
++      }
++    }
++
++    // We set lo and hi for the specific q_seq_idx
++    auto range = window_range(N - q_seq_len + int(q_seq_idx), N);
++    lo = range.x;
++    hi = range.y;
++  }
++
++  // For each key
+   for (; i + (TK - 1) * blocks < N; i += blocks * TK) {
+     // Prefetch: issue all TK K/V loads first so the HW can overlap them.
+     T k_reg[TK][qk_per_thread];
+@@ -287,13 +359,19 @@ template <typename T, int D, int V = D, int TK = 4>
+     for (int t = 0; t < TK; t++) {
+       int ii = i + t * blocks;
+       bool use_key = true;
+-      if (do_causal) {
++      if (has_window) {
++        use_key = (ii >= lo) && (ii < hi);
++      } else if (do_causal) {
+         use_key = ii <= (N - q_seq_len + int(q_seq_idx));
+-      } else if (bool_mask) {
+-        use_key = bmask[t * stride_mask_tok];
++      }
++
++      if (bool_mask) {
++        use_key = use_key && bmask[t * stride_mask_tok];
+       } else if (float_mask) {
+-        use_key = (fmask[t * stride_mask_tok] >= Limits<T>::finite_min);
++        use_key =
++            use_key && (fmask[t * stride_mask_tok] >= Limits<T>::finite_min);
+       }
++
+       if (use_key) {
+         U score = 0;
+         for (int j = 0; j < qk_per_thread; j++) {
+@@ -328,12 +406,16 @@ template <typename T, int D, int V = D, int TK = 4>
+   // Tail (fewer than TK remaining keys)
+   for (; i < N; i += blocks) {
+     bool use_key = true;
+-    if (do_causal) {
++    if (has_window) {
++      use_key = (i >= lo) && (i < hi);
++    } else if (do_causal) {
+       use_key = i <= (N - q_seq_len + int(q_seq_idx));
+-    } else if (bool_mask) {
+-      use_key = bmask[0];
++    }
++
++    if (bool_mask) {
++      use_key = use_key && bmask[0];
+     } else if (float_mask) {
+-      use_key = (fmask[0] >= Limits<T>::finite_min);
++      use_key = use_key && (fmask[0] >= Limits<T>::finite_min);
+     }
+     if (use_key) {
+       // Compute the i-th score
+diff --git mlx/backend/metal/kernels/steel/attn/kernels/steel_attention.h mlx/backend/metal/kernels/steel/attn/kernels/steel_attention.h
+index d8f5efd..f77be7f 100644
+--- mlx/backend/metal/kernels/steel/attn/kernels/steel_attention.h
++++ mlx/backend/metal/kernels/steel/attn/kernels/steel_attention.h
+@@ -5,7 +5,7 @@
+ using namespace mlx::steel;
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+-// GEMM kernels
++// Attention kernels
+ ///////////////////////////////////////////////////////////////////////////////
+ 
+ constant bool align_Q [[function_constant(200)]];
+@@ -15,6 +15,15 @@ constant bool has_mask [[function_constant(300)]];
+ constant bool do_causal [[function_constant(301)]];
+ constant bool has_sinks [[function_constant(302)]];
+ constant bool save_lse [[function_constant(303)]];
++constant int window_size [[function_constant(304)]];
++constant bool has_window = window_size > 0;
++
++// True if the key at position c is hidden from the query at position r
++METAL_FUNC bool window_masked(int r, int c) {
++  return (do_causal && r < c) ||
++      (has_window &&
++       ((r - c) >= window_size || (!do_causal && (c - r) >= window_size)));
++}
+ 
+ struct MaxOp {
+   template <typename T>
+@@ -116,6 +125,49 @@ template <
+         tidl.y * mask_params->M_strides[1]; // Head
+   }
+ 
++  int kb_lim = params->NK;
++  int kb_min_causal = params->NK;
++
++  // Blocks before this are ignored
++  int kb_start = 0;
++
++  // First block with no masked block edge
++  int kb_win_lo = 0;
++  // Last block with no masked block edge
++  int kb_win_hi = params->NK;
++
++  // Query positions covered by this block are [q_min, q_max)
++  const int q_max = (tid.x + 1) * BQ + params->qL_off;
++  const int q_min = max(0, int(tid.x) * BQ + params->qL_off);
++
++  if (do_causal) {
++    kb_lim = (q_max + BK - 1) / BK;
++    kb_lim = min(params->NK, kb_lim);
++
++    kb_min_causal = (q_min / BK);
++  } else if (has_window) {
++    int k_max = q_max + window_size - 1;
++    kb_lim = (k_max + BK - 1) / BK;
++    kb_lim = min(params->NK, kb_lim);
++  }
++
++  if (has_window) {
++    // The smallest k this block attends to is decided by the window
++    int k_min = max(0, q_min - window_size + 1);
++    kb_start = k_min / BK;
++
++    // Move the K and V pointers to the first key block
++    K += kb_start * BK * params->K_strides[2];
++    V += kb_start * BK * params->V_strides[2];
++
++    // All queries in the block [q_min, q_max) attend to
++    // keys [common_k_min, common_k_max)
++    auto common_k_min = max(0, q_max - window_size);
++    auto common_k_max = q_min + window_size;
++    kb_win_lo = (common_k_min + BK - 1) / BK;
++    kb_win_hi = common_k_max / BK;
++  }
++
+   // Prepare threadgroup memory
+   constexpr short padQ = 16 / sizeof(T);
+   constexpr short padK = 16 / sizeof(T);
+@@ -279,21 +331,8 @@ template <
+     }
+   }
+ 
+-  int kb_lim = params->NK;
+-  int kb_min_causal = params->NK;
+-
+-  if (do_causal) {
+-    int q_max = (tid.x + 1) * BQ + params->qL_off;
+-    kb_lim = (q_max + BK - 1) / BK;
+-    kb_lim = min(params->NK, kb_lim);
+-
+-    int q_min = tid.x * BQ + params->qL_off;
+-    q_min = max(0, q_min);
+-    kb_min_causal = (q_min / BK);
+-  }
+-
+   // Loop over KV seq length
+-  for (int kb = 0; kb < kb_lim; kb++) {
++  for (int kb = kb_start; kb < kb_lim; kb++) {
+     // Load K block and apply scale
+     threadgroup_barrier(mem_flags::mem_threadgroup);
+     if (!align_K && kb == (params->NK_aligned)) {
+@@ -382,8 +421,12 @@ template <
+       }
+     }
+ 
+-    // Mask out if causal
+-    if (do_causal && kb >= kb_min_causal) {
++    // Mask out if causal or at the window edge
++    const bool is_causal_masked = do_causal && (kb >= kb_min_causal);
++    const bool is_win_lo_masked = has_window && (kb < kb_win_lo);
++    const bool is_win_hi_masked = has_window && !do_causal && (kb >= kb_win_hi);
++
++    if (is_causal_masked || is_win_lo_masked || is_win_hi_masked) {
+       using stile_t = decltype(Stile);
+       using selem_t = typename stile_t::elem_type;
+       constexpr auto neg_inf = Limits<selem_t>::finite_min;
+@@ -397,8 +440,14 @@ template <
+           const int col_pos = kb * BK + sn + (j * stile_t::kFragCols);
+           STEEL_PRAGMA_UNROLL
+           for (short jj = 0; jj < stile_t::MMAFrag_t::kElemCols; jj++) {
+-            if (row_pos < (col_pos + jj)) {
+-              Stile.frag_at(i, j)[jj] = neg_inf;
++            if (has_window) {
++              if (window_masked(row_pos, (col_pos + jj))) {
++                Stile.frag_at(i, j)[jj] = neg_inf;
++              }
++            } else if (do_causal) {
++              if (row_pos < (col_pos + jj)) {
++                Stile.frag_at(i, j)[jj] = neg_inf;
++              }
+             }
+           }
+         }
+diff --git mlx/backend/metal/kernels/steel/attn/kernels/steel_attention_nax.h mlx/backend/metal/kernels/steel/attn/kernels/steel_attention_nax.h
+index 13cf24f..ec25db1 100644
+--- mlx/backend/metal/kernels/steel/attn/kernels/steel_attention_nax.h
++++ mlx/backend/metal/kernels/steel/attn/kernels/steel_attention_nax.h
+@@ -8,7 +8,7 @@
+ using namespace mlx::steel;
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+-// GEMM kernels
++// Attention kernels
+ ///////////////////////////////////////////////////////////////////////////////
+ 
+ constant bool align_Q [[function_constant(200)]];
+@@ -18,6 +18,8 @@ constant bool has_mask [[function_constant(300)]];
+ constant bool do_causal [[function_constant(301)]];
+ constant bool has_sinks [[function_constant(302)]];
+ constant bool save_lse [[function_constant(303)]];
++constant int window_size [[function_constant(304)]];
++constant bool has_window = window_size > 0;
+ 
+ template <typename T>
+ struct TransformScale {
+@@ -188,14 +190,44 @@ template <
+   int kb_lim = params->NK;
+   int kb_min_causal = params->NK;
+ 
++  // Blocks before this are ignored
++  int kb_start = 0;
++
++  // First block with no masked block edge
++  int kb_win_lo = 0;
++  // Last block with no masked block edge
++  int kb_win_hi = params->NK;
++
++  // Query positions covered by this block are [q_min, q_max)
++  const int q_max = (tid.x + 1) * BQ + params->qL_off;
++  const int q_min = max(0, int(tid.x) * BQ + params->qL_off);
++
+   if (do_causal) {
+-    int q_max = (tid.x + 1) * BQ + params->qL_off;
+     kb_lim = (q_max + BK - 1) / BK;
+     kb_lim = min(params->NK, kb_lim);
+ 
+-    int q_min = tid.x * BQ + params->qL_off;
+-    q_min = max(0, q_min);
+     kb_min_causal = (q_min / BK);
++  } else if (has_window) {
++    int k_max = q_max + window_size - 1;
++    kb_lim = (k_max + BK - 1) / BK;
++    kb_lim = min(params->NK, kb_lim);
++  }
++
++  if (has_window) {
++    // The smallest k this block attends to is decided by the window
++    int k_min = max(0, q_min - window_size + 1);
++    kb_start = k_min / BK;
++
++    // Move the K and V pointers to the first key block
++    K += kb_start * BK * params->K_strides[2];
++    V += kb_start * BK * params->V_strides[2];
++
++    // All queries in the block [q_min, q_max) attend to
++    // keys [common_k_min, common_k_max)
++    auto common_k_min = max(0, q_max - window_size);
++    auto common_k_max = q_min + window_size;
++    kb_win_lo = (common_k_min + BK - 1) / BK;
++    kb_win_hi = common_k_max / BK;
+   }
+ 
+   const bool is_last_bq = int(tid.x) == (params->NQ_aligned);
+@@ -206,7 +238,7 @@ template <
+   const short lim_rows_k = params->kL_rem;
+ 
+   // Loop over KV seq length
+-  for (int kb = 0; kb < kb_lim; kb++) {
++  for (int kb = kb_start; kb < kb_lim; kb++) {
+     const int is_last_k = (kb == (params->NK_aligned));
+ 
+     // Do S = Q @ K.T
+@@ -291,8 +323,12 @@ template <
+       }
+     }
+ 
+-    // Mask out if causal
+-    if (do_causal && kb >= kb_min_causal) {
++    // Mask out if causal or at the window edge
++    const bool is_causal_masked = do_causal && (kb >= kb_min_causal);
++    const bool is_win_lo_masked = has_window && (kb < kb_win_lo);
++    const bool is_win_hi_masked = has_window && !do_causal && (kb >= kb_win_hi);
++
++    if (is_causal_masked || is_win_lo_masked || is_win_hi_masked) {
+       constexpr auto neg_inf = Limits<AccumType>::finite_min;
+ 
+       const int base_row = tid.x * BQ + params->qL_off + tm;
+@@ -312,7 +348,20 @@ template <
+                   base_row + iq * kU + ii * stile_t::kFragRowsJump + sm;
+               const auto c = base_col + ik * kU + jj + sn;
+               const auto loc = ii * stile_t::kFragThrCols + jj;
+-              fg[loc] = (r < c) ? neg_inf : fg[loc];
++
++              if (has_window) {
++                if (is_causal_masked) {
++                  fg[loc] = (r < c) ? neg_inf : fg[loc];
++                }
++                if (is_win_lo_masked) {
++                  fg[loc] = ((r - c) >= window_size) ? neg_inf : fg[loc];
++                }
++                if (is_win_hi_masked) {
++                  fg[loc] = ((c - r) >= window_size) ? neg_inf : fg[loc];
++                }
++              } else if (do_causal) {
++                fg[loc] = (r < c) ? neg_inf : fg[loc];
++              }
+             }
+           }
+         }
+@@ -633,14 +682,44 @@ template <
+   int kb_lim = params->NK;
+   int kb_min_causal = params->NK;
+ 
++  // Blocks before this are ignored
++  int kb_start = 0;
++
++  // First block with no masked block edge
++  int kb_win_lo = 0;
++  // Last block with no masked block edge
++  int kb_win_hi = params->NK;
++
++  // Query positions covered by this block are [q_min, q_max)
++  const int q_max = (tid.x + 1) * BQ + params->qL_off;
++  const int q_min = max(0, int(tid.x) * BQ + params->qL_off);
++
+   if (do_causal) {
+-    int q_max = (tid.x + 1) * BQ + params->qL_off;
+     kb_lim = (q_max + BK - 1) / BK;
+     kb_lim = min(params->NK, kb_lim);
+ 
+-    int q_min = tid.x * BQ + params->qL_off;
+-    q_min = max(0, q_min);
+     kb_min_causal = (q_min / BK);
++  } else if (has_window) {
++    int k_max = q_max + window_size - 1;
++    kb_lim = (k_max + BK - 1) / BK;
++    kb_lim = min(params->NK, kb_lim);
++  }
++
++  if (has_window) {
++    // The smallest k this block attends to is decided by the window
++    int k_min = max(0, q_min - window_size + 1);
++    kb_start = k_min / BK;
++
++    // Move the K and V pointers to the first key block
++    K += kb_start * BK * params->K_strides[2];
++    V += kb_start * BK * params->V_strides[2];
++
++    // All queries in the block [q_min, q_max) attend to
++    // keys [common_k_min, common_k_max)
++    auto common_k_min = max(0, q_max - window_size);
++    auto common_k_max = q_min + window_size;
++    kb_win_lo = (common_k_min + BK - 1) / BK;
++    kb_win_hi = common_k_max / BK;
+   }
+ 
+   const bool is_last_q = int(tid.x) == (params->NQ_aligned);
+@@ -673,7 +752,7 @@ template <
+   const short sn = simd_coord.x;
+ 
+   // Loop over KV seq length
+-  for (int kb = 0; kb < kb_lim; kb++) {
++  for (int kb = kb_start; kb < kb_lim; kb++) {
+     const int is_last_k = (kb == (params->NK_aligned));
+ 
+     stile_t Stile;
+@@ -761,8 +840,12 @@ template <
+       }
+     }
+ 
+-    // Mask out if causal
+-    if (do_causal && kb >= kb_min_causal) {
++    // Mask out if causal or at the window edge
++    const bool is_causal_masked = do_causal && (kb >= kb_min_causal);
++    const bool is_win_lo_masked = has_window && (kb < kb_win_lo);
++    const bool is_win_hi_masked = has_window && !do_causal && (kb >= kb_win_hi);
++
++    if (is_causal_masked || is_win_lo_masked || is_win_hi_masked) {
+       constexpr auto neg_inf = Limits<AccumType>::finite_min;
+ 
+       const int base_row = tid.x * BQ + params->qL_off + tm;
+@@ -779,7 +862,20 @@ template <
+             const auto r = base_row + ii * stile_t::kFragRowsJump + sm;
+             const auto c = base_col + ik * kU + jj + sn;
+             const auto loc = ii * stile_t::kFragThrCols + jj;
+-            fg[loc] = (r < c) ? neg_inf : fg[loc];
++
++            if (has_window) {
++              if (is_causal_masked) {
++                fg[loc] = (r < c) ? neg_inf : fg[loc];
++              }
++              if (is_win_lo_masked) {
++                fg[loc] = ((r - c) >= window_size) ? neg_inf : fg[loc];
++              }
++              if (is_win_hi_masked) {
++                fg[loc] = ((c - r) >= window_size) ? neg_inf : fg[loc];
++              }
++            } else if (do_causal) {
++              fg[loc] = (r < c) ? neg_inf : fg[loc];
++            }
+           }
+         }
+       }
+diff --git mlx/backend/metal/scaled_dot_product_attention.cpp mlx/backend/metal/scaled_dot_product_attention.cpp
+index 5b157c6..4386452 100644
+--- mlx/backend/metal/scaled_dot_product_attention.cpp
++++ mlx/backend/metal/scaled_dot_product_attention.cpp
+@@ -24,12 +24,14 @@ bool use_blocked_d512(
+     bool has_arr_mask,
+     bool do_causal,
+     bool has_sinks,
++    int window_size,
+     bool output_logsumexp,
+     Stream s) {
+   return s.device == Device::gpu && !metal::is_nax_available() &&
+-      (q.dtype() == float16 || q.dtype() == bfloat16) && q.shape(-1) == 512 &&
+-      v.shape(-1) == 512 && q.shape(2) >= 1024 && q.shape(2) <= k.shape(2) &&
+-      do_causal && !has_arr_mask && !has_sinks && !output_logsumexp;
++      window_size <= 0 && (q.dtype() == float16 || q.dtype() == bfloat16) &&
++      q.shape(-1) == 512 && v.shape(-1) == 512 && q.shape(2) >= 1024 &&
++      q.shape(2) <= k.shape(2) && do_causal && !has_arr_mask && !has_sinks &&
++      !output_logsumexp;
+ }
+ 
+ void sdpa_blocked_softmax(const Stream& s, metal::Device& d, array& scores) {
+@@ -210,6 +212,7 @@ void sdpa_full_self_attention_nax(
+     const float scale,
+     array& o,
+     bool do_causal_,
++    int window_size_,
+     const std::optional<array>& mask,
+     const std::optional<array>& sinks,
+     array* lse) {
+@@ -267,6 +270,7 @@ void sdpa_full_self_attention_nax(
+   const bool do_causal = do_causal_;
+   const bool has_sinks = sinks.has_value();
+   const bool save_lse = (lse != nullptr);
++  const int window_size = window_size_;
+ 
+   metal::MTLFCList func_consts = {
+       {&align_Q, MTL::DataType::DataTypeBool, 200},
+@@ -274,7 +278,8 @@ void sdpa_full_self_attention_nax(
+       {&has_mask, MTL::DataType::DataTypeBool, 300},
+       {&do_causal, MTL::DataType::DataTypeBool, 301},
+       {&has_sinks, MTL::DataType::DataTypeBool, 302},
+-      {&save_lse, MTL::DataType::DataTypeBool, 303}};
++      {&save_lse, MTL::DataType::DataTypeBool, 303},
++      {&window_size, MTL::DataType::DataTypeInt, 304}};
+ 
+   std::string base_name;
+   concatenate(
+@@ -311,7 +316,9 @@ void sdpa_full_self_attention_nax(
+       "_has_sinks_",
+       (has_sinks ? 't' : 'n'),
+       "_save_lse_",
+-      (save_lse ? 't' : 'n'));
++      (save_lse ? 't' : 'n'),
++      "_window_",
++      (window_size > 0 ? std::to_string(window_size) : "n"));
+ 
+   auto& compute_encoder = metal::get_command_encoder(s);
+ 
+@@ -402,6 +409,7 @@ void sdpa_full_self_attention_metal(
+     const float scale,
+     array& o,
+     bool do_causal_,
++    int window_size_,
+     const std::optional<array>& mask,
+     const std::optional<array>& sinks,
+     array* lse /* = nullptr */) {
+@@ -421,6 +429,7 @@ void sdpa_full_self_attention_metal(
+         /* const float scale = */ scale,
+         /* array& o = */ o,
+         /* bool do_causal_ = */ do_causal_,
++        /* int window_size_ = */ window_size_,
+         /* const std::optional<array>& mask = */ mask,
+         /* const std::optional<array>& sinks = */ sinks,
+         /* array* lse = */ lse);
+@@ -479,6 +488,7 @@ void sdpa_full_self_attention_metal(
+         /* const float scale = */ scale,
+         /* array& o = */ op,
+         /* bool do_causal_ = */ do_causal_,
++        /* int window_size_ = */ window_size_,
+         /* const std::optional<array>& mask = */ mask,
+         /* const std::optional<array>& sinks = */ sinks,
+         /* array* lse = */ nullptr);
+@@ -521,6 +531,7 @@ void sdpa_full_self_attention_metal(
+   const bool do_causal = do_causal_;
+   const bool has_sinks = sinks.has_value();
+   const bool save_lse = (lse != nullptr);
++  const int window_size = window_size_;
+ 
+   metal::MTLFCList func_consts = {
+       {&align_Q, MTL::DataType::DataTypeBool, 200},
+@@ -528,7 +539,8 @@ void sdpa_full_self_attention_metal(
+       {&has_mask, MTL::DataType::DataTypeBool, 300},
+       {&do_causal, MTL::DataType::DataTypeBool, 301},
+       {&has_sinks, MTL::DataType::DataTypeBool, 302},
+-      {&save_lse, MTL::DataType::DataTypeBool, 303}};
++      {&save_lse, MTL::DataType::DataTypeBool, 303},
++      {&window_size, MTL::DataType::DataTypeInt, 304}};
+ 
+   std::string base_name;
+   concatenate(
+@@ -565,7 +577,9 @@ void sdpa_full_self_attention_metal(
+       "_has_sinks_",
+       (has_sinks ? 't' : 'n'),
+       "_save_lse_",
+-      (save_lse ? 't' : 'n'));
++      (save_lse ? 't' : 'n'),
++      "_window_",
++      ((window_size > 0) ? std::to_string(window_size) : "n"));
+ 
+   auto& compute_encoder = metal::get_command_encoder(s);
+ 
+@@ -646,7 +660,16 @@ void sdpa_full_self_attention_metal(
+   compute_encoder.dispatch_threadgroups(grid_dims, group_dims);
+ }
+ 
+-void sdpa_vector(
++// Upper bound on the number of keys one query reads
++int visible_keys(int N, int qL, int window_size, bool do_causal) {
++  if (window_size <= 0) {
++    return N;
++  }
++  int span = do_causal ? window_size : 2 * window_size;
++  return std::min(N, span + qL - 1);
++}
++
++bool sdpa_vector(
+     const Stream& s,
+     metal::Device& d,
+     const array& q,
+@@ -655,6 +678,7 @@ void sdpa_vector(
+     array& out,
+     float scale,
+     bool do_causal,
++    int window_size,
+     const std::optional<array>& mask,
+     const std::optional<array>& sinks) {
+   // Set the kernel name
+@@ -690,16 +714,21 @@ void sdpa_vector(
+       {&bool_mask, MTL::DataType::DataTypeBool, 23},
+       {&float_mask, MTL::DataType::DataTypeBool, 24},
+       {&has_sinks, MTL::DataType::DataTypeBool, 25},
++      {&window_size, MTL::DataType::DataTypeInt, 27},
+   };
+   std::string hash_name = kname;
+   hash_name += has_mask ? (bool_mask ? "_boolmask" : "_floatmask") : "_nomask";
+   hash_name += query_transposed ? "_qt" : "_qnt";
+   hash_name += do_causal ? "_c" : "_nc";
+   hash_name += has_sinks ? "_sinks" : "_nosinks";
++  hash_name += window_size > 0 ? "_w" + std::to_string(window_size) : "_nw";
+ 
+   // Get the kernel
+   auto& compute_encoder = metal::get_command_encoder(s);
+   auto kernel = d.get_kernel(kname, hash_name, func_consts);
++  if (kernel->maxTotalThreadsPerThreadgroup() < group_dims.width) {
++    return false;
++  }
+   check_kernel_threadgroup_size(kernel, group_dims, hash_name);
+   compute_encoder.set_compute_pipeline_state(kernel);
+ 
+@@ -734,6 +763,7 @@ void sdpa_vector(
+ 
+   // Launch
+   compute_encoder.dispatch_threadgroups(grid_dims, group_dims);
++  return true;
+ }
+ 
+ void sdpa_vector_2pass(
+@@ -745,6 +775,7 @@ void sdpa_vector_2pass(
+     array& out,
+     float scale,
+     bool do_causal,
++    int window_size,
+     const std::optional<array>& mask,
+     const std::optional<array>& sinks) {
+   // Set the kernel name
+@@ -755,7 +786,7 @@ void sdpa_vector_2pass(
+   bool gqa_dims =
+       (gqa_factor == 8 && (q.shape(-1) == 64 || q.shape(-1) == 128)) ||
+       ((gqa_factor == 12 || gqa_factor == 16) && q.shape(-1) == 128);
+-  if (!mask && !sinks && q.shape(2) == 1 &&
++  if (!mask && !sinks && window_size <= 0 && q.shape(2) == 1 &&
+       q.shape(1) == gqa_factor * k.shape(1) && q.shape(-1) == v.shape(-1) &&
+       gqa_dims && k.shape(2) >= 8192) {
+     kname += "_gqa_";
+@@ -773,15 +804,17 @@ void sdpa_vector_2pass(
+ 
+   char devc = d.get_architecture().back();
+   int N = k.shape(2);
++  // Choose the blocks from the keys inside the window
++  int n_keys = visible_keys(N, q.shape(2), window_size, do_causal);
+   int blocks;
+   if (devc == 's') {
+     blocks = 64;
+-    if (N > 1024 && n_simds > 4) {
+-      if (N <= 8192) {
++    if (n_keys > 1024 && n_simds > 4) {
++      if (n_keys <= 8192) {
+         blocks = 128;
+-      } else if (N <= 32768) {
++      } else if (n_keys <= 32768) {
+         blocks = 256;
+-      } else if (N <= 65536) {
++      } else if (n_keys <= 65536) {
+         blocks = 512;
+       } else {
+         blocks = 1024;
+@@ -789,12 +822,12 @@ void sdpa_vector_2pass(
+     }
+   } else if (devc == 'd') {
+     blocks = 128;
+-    if (n_simds <= 2 && N > 8192) {
++    if (n_simds <= 2 && n_keys > 8192) {
+       blocks = 256;
+     } else if (n_simds >= 6) {
+-      if (N >= 16384 && N < 65536) {
++      if (n_keys >= 16384 && n_keys < 65536) {
+         blocks = 512;
+-      } else if (N >= 65536) {
++      } else if (n_keys >= 65536) {
+         blocks = 1024;
+       }
+     }
+@@ -849,6 +882,7 @@ void sdpa_vector_2pass(
+       {&float_mask, MTL::DataType::DataTypeBool, 24},
+       {&has_sinks, MTL::DataType::DataTypeBool, 25},
+       {&blocks, MTL::DataType::DataTypeInt, 26},
++      {&window_size, MTL::DataType::DataTypeInt, 27},
+   };
+   std::string hash_name = kname;
+   hash_name += has_mask ? (bool_mask ? "_boolmask" : "_floatmask") : "_nomask";
+@@ -856,6 +890,7 @@ void sdpa_vector_2pass(
+   hash_name += do_causal ? "_c" : "_nc";
+   hash_name += has_sinks ? "_sinks_" : "_nosinks_";
+   hash_name += std::to_string(blocks);
++  hash_name += window_size > 0 ? "_w" + std::to_string(window_size) : "_nw";
+ 
+   // Get the kernel
+   auto kernel = d.get_kernel(kname, hash_name, func_consts);
+@@ -938,12 +973,23 @@ std::tuple<bool, std::string> has_fused_kernel(
+     bool has_mask,
+     bool has_arr_mask,
+     bool do_causal,
++    int window_size,
+     bool output_logsumexp,
+     Stream s) {
+   if (s.device != Device::gpu) {
+     return {false, "the fused kernels require a GPU (Metal) stream."};
+   }
+ 
++  if (window_size > 0 && q.shape(2) > 8 && q.shape(2) > k.shape(2)) {
++    return {
++        false,
++        "the full attention kernel with a window requires the query sequence "
++        "to be no longer than the key sequence."};
++  }
++  if (output_logsumexp && window_size > 0) {
++    return {false, "window support for backward attention is NYI"};
++  }
++
+   if (output_logsumexp && has_arr_mask) {
+     return {
+         false,
+@@ -1395,12 +1441,21 @@ bool ScaledDotProductAttention::use_fallback(
+     bool has_arr_mask,
+     bool do_causal,
+     bool has_sinks,
++    int window_size,
+     bool is_training,
+     bool output_logsumexp,
+     bool force_fused,
+     Stream s) {
+   auto [has_fused, reason] = has_fused_kernel(
+-      q, k, v, has_mask, has_arr_mask, do_causal, output_logsumexp, s);
++      q,
++      k,
++      v,
++      has_mask,
++      has_arr_mask,
++      do_causal,
++      window_size,
++      output_logsumexp,
++      s);
+   if (force_fused) {
+     if (!has_fused) {
+       std::ostringstream msg;
+@@ -1412,7 +1467,15 @@ bool ScaledDotProductAttention::use_fallback(
+     return false;
+   }
+   if (use_blocked_d512(
+-          q, k, v, has_arr_mask, do_causal, has_sinks, output_logsumexp, s)) {
++          q,
++          k,
++          v,
++          has_arr_mask,
++          do_causal,
++          has_sinks,
++          window_size,
++          output_logsumexp,
++          s)) {
+     return false;
+   }
+   if (!has_fused) {
+@@ -1572,13 +1635,15 @@ void ScaledDotProductAttention::eval_gpu(
+     // We route to the 2 pass fused attention if
+     // - The device is large and the sequence length long
+     // - The sequence length is even longer and we have gqa
+-    bool do_causal = do_causal_ && q.shape(2) > 1;
++    bool csl = do_causal_ && q.shape(2) > 1;
++    int ws = window_size_;
++    int n_keys = visible_keys(k.shape(2), q.shape(2), ws, csl);
+     char devc = d.get_architecture().back();
+-    if (((devc == 'd' || devc == 's') && k.shape(2) >= 1024) ||
+-        (k.shape(1) < q.shape(1) && k.shape(2) >= 4096)) {
+-      sdpa_vector_2pass(s, d, q, k, v, o, scale_, do_causal, mask, sinks);
+-    } else {
+-      sdpa_vector(s, d, q, k, v, o, scale_, do_causal, mask, sinks);
++    if (((devc == 'd' || devc == 's') && n_keys >= 1024) ||
++        (k.shape(1) < q.shape(1) && n_keys >= 4096)) {
++      sdpa_vector_2pass(s, d, q, k, v, o, scale_, csl, ws, mask, sinks);
++    } else if (!sdpa_vector(s, d, q, k, v, o, scale_, csl, ws, mask, sinks)) {
++      sdpa_vector_2pass(s, d, q, k, v, o, scale_, csl, ws, mask, sinks);
+     }
+   }
+ 
+@@ -1623,12 +1688,13 @@ void ScaledDotProductAttention::eval_gpu(
+             has_arr_mask,
+             do_causal_,
+             sinks.has_value(),
++            window_size_,
+             lse != nullptr,
+             s)) {
+       sdpa_full_self_attention_blocked(s, d, q, k, v, scale_, o);
+     } else {
+       sdpa_full_self_attention_metal(
+-          s, d, q, k, v, scale_, o, do_causal_, mask, sinks, lse);
++          s, d, q, k, v, scale_, o, do_causal_, window_size_, mask, sinks, lse);
+     }
+   }
+ 
+diff --git mlx/backend/no_gpu/primitives.cpp mlx/backend/no_gpu/primitives.cpp
+index e3ee598..4cf0434 100644
+--- mlx/backend/no_gpu/primitives.cpp
++++ mlx/backend/no_gpu/primitives.cpp
+@@ -31,6 +31,7 @@ bool fast::ScaledDotProductAttention::use_fallback(
+     bool has_arr_mask,
+     bool do_causal,
+     bool has_sinks,
++    int window_size,
+     bool is_training,
+     bool output_logsumexp,
+     bool force_fused,
+diff --git mlx/fast.cpp mlx/fast.cpp
+index 2afb834..442c1c4 100644
+--- mlx/fast.cpp
++++ mlx/fast.cpp
+@@ -716,6 +716,7 @@ array scaled_dot_product_attention(
+     const array& keys,
+     const array& values,
+     const float scale,
++    int window_size /* = -1 */,
+     const std::string& mask_mode /* = "" */,
+     std::optional<array> mask_arr /* = {} */,
+     const std::optional<array>& sinks /* = {} */,
+@@ -729,6 +730,14 @@ array scaled_dot_product_attention(
+       throw std::invalid_argument(msg.str());
+     }
+   }
++  if (window_size == 0 || window_size < -1) {
++    std::ostringstream msg;
++    msg << "[scaled_dot_product_attention] Invalid window_size " << window_size
++        << ". window_size must be positive or -1 for no window.";
++    throw std::invalid_argument(msg.str());
++  }
++  bool has_window = window_size > 0;
++
+   // Check valid mask
+   if (mask_mode != "" && mask_mode != "causal" && mask_mode != "array") {
+     std::ostringstream msg;
+@@ -820,6 +829,7 @@ array scaled_dot_product_attention(
+                    n_q_heads,
+                    n_kv_heads,
+                    do_causal,
++                   window_size,
+                    has_sinks,
+                    has_arr_mask,
+                    s](const std::vector<array>& inputs) {
+@@ -833,10 +843,10 @@ array scaled_dot_product_attention(
+       v = expand_dims(v, 2, s);
+     }
+     auto scores = matmul(q, swapaxes(k, -1, -2, s), s);
+-    if (has_arr_mask || do_causal) {
++    if (has_arr_mask || do_causal || window_size > 0) {
+       // Mask must be broadcast-compatible with [B, n_q_heads, L_q, L_kv]
+       auto make_or_fetch_mask = [&]() {
+-        if (do_causal) {
++        if (do_causal || window_size > 0) {
+           int kL = k.shape(-2);
+           int qL = q.shape(-2);
+           int offset = kL - qL;
+@@ -844,12 +854,37 @@ array scaled_dot_product_attention(
+           auto k_idx = arange(0, kL, s);
+           q_idx = expand_dims(q_idx, 1, s);
+           k_idx = expand_dims(k_idx, 0, s);
++
++          if (window_size > 0) {
++            auto dist = abs(subtract(q_idx, k_idx, s), s);
++            auto window_mask = less(dist, array(window_size, dist.dtype()), s);
++
++            if (do_causal) {
++              auto causal_mask = greater_equal(q_idx, k_idx, s);
++              window_mask = logical_and(window_mask, causal_mask, s);
++            }
++
++            return window_mask;
++          }
++
+           return greater_equal(q_idx, k_idx, s);
+         }
+         return inputs[3];
+       };
+       auto mask = make_or_fetch_mask();
+ 
++      // If we have an array mask on top of a built mask
++      if ((do_causal || window_size > 0) && has_arr_mask) {
++        auto arr_mask = inputs[3];
++
++        if (arr_mask.dtype() == bool_) {
++          mask = logical_and(mask, arr_mask, s);
++        } else {
++          auto minarr = array(finfo(scores.dtype()).min, scores.dtype());
++          mask = where(mask, arr_mask, minarr, s);
++        }
++      }
++
+       if (n_repeats > 1 && mask.ndim() >= 3) {
+         if (mask.shape(-3) == 1) {
+           mask = expand_dims(mask, -3, s);
+@@ -935,6 +970,7 @@ array scaled_dot_product_attention(
+           has_arr_mask,
+           do_causal,
+           has_sinks,
++          window_size,
+           is_training,
+           output_logsumexp,
+           force_fused,
+@@ -956,6 +992,7 @@ array scaled_dot_product_attention(
+         scale,
+         do_causal,
+         has_sinks,
++        window_size,
+         output_logsumexp,
+         force_fused);
+     if (output_logsumexp) {
+@@ -1026,6 +1063,7 @@ bool ScaledDotProductAttention::is_equivalent(const Primitive& other) const {
+       static_cast<const ScaledDotProductAttention&>(other);
+   return scale_ == a_other.scale_ && do_causal_ == a_other.do_causal_ &&
+       has_sinks_ == a_other.has_sinks_ &&
++      window_size_ == a_other.window_size_ &&
+       output_logsumexp_ == a_other.output_logsumexp_ &&
+       force_fused_ == a_other.force_fused_;
+ }
+diff --git mlx/fast.h mlx/fast.h
+index 14a46de..98c80ac 100644
+--- mlx/fast.h
++++ mlx/fast.h
+@@ -54,6 +54,7 @@ MLX_API array scaled_dot_product_attention(
+     const array& keys,
+     const array& values,
+     const float scale,
++    int window_size = -1,
+     const std::string& mask_mode = "",
+     std::optional<array> mask_arr = {},
+     const std::optional<array>& sinks = {},
+diff --git mlx/fast_primitives.h mlx/fast_primitives.h
+index 8117a7a..56daea5 100644
+--- mlx/fast_primitives.h
++++ mlx/fast_primitives.h
+@@ -273,12 +273,14 @@ class ScaledDotProductAttention : public Custom {
+       float scale,
+       bool do_causal,
+       bool has_sinks,
++      int window_size,
+       bool output_logsumexp,
+       bool force_fused)
+       : Custom(stream, std::move(fallback)),
+         scale_(scale),
+         do_causal_(do_causal),
+         has_sinks_(has_sinks),
++        window_size_(window_size),
+         output_logsumexp_(output_logsumexp),
+         force_fused_(force_fused) {}
+ 
+@@ -290,6 +292,7 @@ class ScaledDotProductAttention : public Custom {
+       bool has_arr_mask,
+       bool do_causal,
+       bool has_sinks,
++      int window_size,
+       bool is_training,
+       bool output_logsumexp,
+       bool force_fused,
+@@ -320,6 +323,7 @@ class ScaledDotProductAttention : public Custom {
+         scale_,
+         do_causal_,
+         has_sinks_,
++        window_size_,
+         output_logsumexp_,
+         force_fused_);
+   }
+@@ -328,6 +332,7 @@ class ScaledDotProductAttention : public Custom {
+   float scale_;
+   bool do_causal_;
+   bool has_sinks_;
++  int window_size_;
+   bool output_logsumexp_;
+   bool force_fused_;
+ };
+diff --git python/src/fast.cpp python/src/fast.cpp
+index f9c472a..513eca9 100644
+--- python/src/fast.cpp
++++ python/src/fast.cpp
+@@ -262,6 +262,7 @@ void init_fast(nb::module_& parent_module) {
+          const mx::array& keys,
+          const mx::array& values,
+          const float scale,
++         int window_size,
+          const std::variant<std::monostate, std::string, mx::array>& mask,
+          const std::optional<mx::array>& sinks,
+          bool force_fused,
+@@ -285,6 +286,7 @@ void init_fast(nb::module_& parent_module) {
+                 keys,
+                 values,
+                 scale,
++                window_size,
+                 mask_str,
+                 std::nullopt,
+                 sinks,
+@@ -297,6 +299,7 @@ void init_fast(nb::module_& parent_module) {
+                 keys,
+                 values,
+                 scale,
++                window_size,
+                 "",
+                 mask_arr,
+                 sinks,
+@@ -306,7 +309,16 @@ void init_fast(nb::module_& parent_module) {
+ 
+         } else {
+           return mx::fast::scaled_dot_product_attention(
+-              queries, keys, values, scale, "", {}, sinks, force_fused, s);
++              queries,
++              keys,
++              values,
++              scale,
++              window_size,
++              "",
++              {},
++              sinks,
++              force_fused,
++              s);
+         }
+       },
+       "q"_a,
+@@ -314,12 +326,13 @@ void init_fast(nb::module_& parent_module) {
+       "v"_a,
+       nb::kw_only(),
+       "scale"_a,
++      "window_size"_a = -1,
+       "mask"_a = nb::none(),
+       "sinks"_a = nb::none(),
+       "force_fused"_a = false,
+       "stream"_a = nb::none(),
+       nb::sig(
+-          "def scaled_dot_product_attention(q: array, k: array, v: array, *, scale: float,  mask: None | str | array = None, sinks: array | None = None, force_fused: bool = False, stream: StreamOrDevice = None) -> array"),
++          "def scaled_dot_product_attention(q: array, k: array, v: array, *, scale: float, window_size: int = -1, mask: None | str | array = None, sinks: array | None = None, force_fused: bool = False, stream: StreamOrDevice = None) -> array"),
+       R"pbdoc(
+         A fast implementation of multi-head attention: ``O = softmax(Q @ K.T, dim=-1) @ V``.
+ 
+@@ -350,6 +363,9 @@ void init_fast(nb::module_& parent_module) {
+             k (array): Keys with shape ``[B, N_kv, T_kv, D]``.
+             v (array): Values with shape ``[B, N_kv, T_kv, D]``.
+             scale (float): Scale for queries (typically ``1.0 / sqrt(q.shape(-1)``).
++            window_size (int, optional): The size of the sliding window. A
++               query attends only to keys less than ``window_size`` positions
++               away. Use ``-1`` for no window. Must not be ``0``. Default: ``-1``.
+             mask (str or array, optional): The mask to apply to the
+                query-key scores. The mask can be an array or a string indicating
+                the mask type. The only supported string type is ``"causal"``. If
+diff --git python/tests/test_fast_sdpa.py python/tests/test_fast_sdpa.py
+index b2d7e91..bab477e 100644
+--- python/tests/test_fast_sdpa.py
++++ python/tests/test_fast_sdpa.py
+@@ -7,6 +7,24 @@ import mlx.core as mx
+ import mlx_tests
+ 
+ 
++def make_causal_mask(qL, kL):
++    offset = kL - qL
++    q_indices = mx.arange(qL) + offset
++    k_indices = mx.arange(kL)
++    mask = q_indices[:, None] >= k_indices[None]
++
++    return mask
++
++
++def make_window_mask(qL, kL, window_size):
++    offset = kL - qL
++    q_indices = mx.arange(qL) + offset
++    k_indices = mx.arange(kL)
++    mask = mx.abs(q_indices[:, None] - k_indices[None]) < window_size
++
++    return mask
++
++
+ def mlx_ref_attn(q, k, v, scale=1.0, mask=None, sinks=None):
+     q_dtype = q.dtype
+     q = q * mx.array(scale, q_dtype)
+@@ -1392,6 +1410,148 @@ class TestFastSDPA(mlx_tests.MLXTestCase):
+                         tolerance = {"rtol": 1e-2, "atol": 1e-2}
+                     self.assertTrue(mx.allclose(ref, out, **tolerance))
+ 
++    def test_sdpa_window_size(self):
++        D = 64
++        scale = D**-0.5
++
++        qH = 4
++        kH = 2
++
++        for qL, kL, window, causal, sinks, mask_type in product(
++            (1, 7, 16),
++            (16, 33),
++            (1, 3, 16, 100),
++            (False, True),
++            (False, True),
++            (None, "bool", "additive"),
++        ):
++            if qL > kL or (causal and mask_type is not None):
++                continue
++            with self.subTest(
++                qL=qL,
++                kL=kL,
++                window=window,
++                causal=causal,
++                sinks=sinks,
++                mask_type=mask_type,
++            ):
++                q = mx.random.normal((2, qH, qL, D))
++                k = mx.random.normal((2, kH, kL, D))
++                v = mx.random.normal((2, kH, kL, D))
++                s = mx.random.normal((qH,)) if sinks else None
++
++                arr_mask = None
++                if mask_type == "bool":
++                    arr_mask = mx.random.uniform(shape=(2, qH, qL, kL)) < 0.7
++                    arr_mask[..., 0] = True
++                elif mask_type == "additive":
++                    arr_mask = mx.random.uniform(shape=(2, qH, qL, kL))
++
++                # Reference: the window as a boolean array mask.
++                ref_mask = make_window_mask(qL, kL, window)
++                if causal:
++                    ref_mask = ref_mask & make_causal_mask(qL, kL)
++
++                if mask_type == "bool":
++                    ref_mask = ref_mask & arr_mask
++                elif mask_type == "additive":
++                    ref_mask = mx.where(ref_mask, arr_mask, -mx.inf)
++                ref = mlx_ref_attn(q, k, v, scale=scale, mask=ref_mask, sinks=s)
++
++                kwargs = {"scale": scale, "sinks": s, "window_size": window}
++                if causal:
++                    kwargs["mask"] = "causal"
++                elif arr_mask is not None:
++                    kwargs["mask"] = arr_mask
++                out = mx.fast.scaled_dot_product_attention(q, k, v, **kwargs)
++
++                # Fused kernels return 0 for rows with no visible key (and no
++                # sink), the reference returns a uniform average. Skip them.
++                if mask_type == "bool" and not sinks:
++                    valid = ref_mask.any(axis=-1, keepdims=True)
++                    ref = mx.where(valid, ref, 0)
++                    out = mx.where(valid, out, 0)
++                self.assertTrue(mx.allclose(ref, out, atol=1e-5, rtol=1e-5))
++
++    @unittest.skipIf(not mx.is_available(mx.gpu), "GPU kernel path only")
++    def test_sdpa_window_large(self):
++        D = 128
++        scale = D**-0.5
++
++        qH = 8
++        kH = 4
++
++        for qL, kL, window, causal, sinks, mask_type in product(
++            (3, 2050),
++            (2050, 4096),
++            (1024, 2048),
++            (False, True),
++            (False, True),
++            (None, "bool"),
++        ):
++            if qL > kL or (causal and mask_type is not None):
++                continue
++            with self.subTest(
++                qL=qL,
++                kL=kL,
++                window=window,
++                causal=causal,
++                sinks=sinks,
++                mask_type=mask_type,
++            ):
++                q = mx.random.normal((2, qH, qL, D))
++                k = mx.random.normal((2, kH, kL, D))
++                v = mx.random.normal((2, kH, kL, D))
++                s = mx.random.normal((qH,)) if sinks else None
++
++                arr_mask = None
++                if mask_type == "bool":
++                    arr_mask = mx.random.uniform(shape=(2, qH, qL, kL)) < 0.7
++                    arr_mask[..., 0] = True
++                elif mask_type == "additive":
++                    arr_mask = mx.random.uniform(shape=(2, qH, qL, kL))
++
++                # Reference: the window as a boolean array mask.
++                ref_mask = make_window_mask(qL, kL, window)
++                if causal:
++                    ref_mask = ref_mask & make_causal_mask(qL, kL)
++
++                if mask_type == "bool":
++                    ref_mask = ref_mask & arr_mask
++                elif mask_type == "additive":
++                    ref_mask = mx.where(ref_mask, arr_mask, -mx.inf)
++                ref = mlx_ref_attn(q, k, v, scale=scale, mask=ref_mask, sinks=s)
++
++                kwargs = {"scale": scale, "sinks": s, "window_size": window}
++                if causal:
++                    kwargs["mask"] = "causal"
++                elif arr_mask is not None:
++                    kwargs["mask"] = arr_mask
++                out = mx.fast.scaled_dot_product_attention(q, k, v, **kwargs)
++
++                # Fused kernels return 0 for rows with no visible key (and no
++                # sink), the reference returns a uniform average. Skip them.
++                if mask_type == "bool" and not sinks:
++                    valid = ref_mask.any(axis=-1, keepdims=True)
++                    ref = mx.where(valid, ref, 0)
++                    out = mx.where(valid, out, 0)
++                self.assertTrue(mx.allclose(ref, out, atol=1e-5, rtol=1e-5))
++
++    def test_sdpa_window_size_errors(self):
++        q = mx.random.normal((1, 2, 4, 32))
++        for window in (0, -2):
++            with self.assertRaises(ValueError):
++                mx.fast.scaled_dot_product_attention(
++                    q, q, q, scale=1.0, window_size=window
++                )
++        out = mx.fast.scaled_dot_product_attention(q, q, q, scale=1.0, window_size=-1)
++        ref = mx.fast.scaled_dot_product_attention(q, q, q, scale=1.0)
++        self.assertTrue(mx.array_equal(out, ref))
++        with self.assertRaises(ValueError):
++            mx.fast.scaled_dot_product_attention(
++                q, q, q, scale=1.0, window_size=2, force_fused=True
++            )
++
+ 
+ if __name__ == "__main__":
+     mlx_tests.MLXTestRunner(failfast=True)

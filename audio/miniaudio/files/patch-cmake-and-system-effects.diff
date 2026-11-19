@@ -1,0 +1,126 @@
+Use system effect headers and fix shared-library linkage and pkg-config metadata.
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -512,7 +512,11 @@
+     install(FILES miniaudio.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/miniaudio)
+ endif()
+ 
+-target_include_directories(miniaudio PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR})
++target_include_directories(miniaudio PUBLIC
++    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
++    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/miniaudio>
++)
++target_link_libraries(miniaudio PRIVATE ${COMMON_LINK_LIBRARIES})
+ target_compile_options    (miniaudio PRIVATE ${COMPILE_OPTIONS})
+ target_compile_definitions(miniaudio PRIVATE ${COMPILE_DEFINES})
+ 
+@@ -542,7 +546,7 @@
+ 
+     target_compile_options    (miniaudio_libvorbis PRIVATE ${COMPILE_OPTIONS})
+     target_compile_definitions(miniaudio_libvorbis PRIVATE ${COMPILE_DEFINES})
+-    target_link_libraries     (miniaudio_libvorbis PRIVATE libvorbis_interface)
++    target_link_libraries     (miniaudio_libvorbis PRIVATE miniaudio libvorbis_interface)
+     target_include_directories(miniaudio_libvorbis PUBLIC  extras/decoders/libvorbis/)
+ endif()
+ 
+@@ -573,7 +577,7 @@
+ 
+     target_compile_options    (miniaudio_libopus PRIVATE ${COMPILE_OPTIONS})
+     target_compile_definitions(miniaudio_libopus PRIVATE ${COMPILE_DEFINES})
+-    target_link_libraries     (miniaudio_libopus PRIVATE libopus_interface)
++    target_link_libraries     (miniaudio_libopus PRIVATE miniaudio libopus_interface)
+     target_include_directories(miniaudio_libopus PUBLIC  extras/decoders/libopus/)
+ endif()
+ 
+@@ -594,6 +598,7 @@
+         endif()
+ 
+         target_include_directories(miniaudio_${name}_node PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/extras/nodes/ma_${name}_node)
++        target_link_libraries     (miniaudio_${name}_node PRIVATE miniaudio)
+         target_compile_options    (miniaudio_${name}_node PRIVATE ${COMPILE_OPTIONS})
+         target_compile_definitions(miniaudio_${name}_node PRIVATE ${COMPILE_DEFINES})
+ 
+@@ -859,8 +864,14 @@
+     string(JOIN ", " PC_REQUIRES_STR ${PC_REQUIRES_PRIVATE_LIST})
+     string(APPEND MINIAUDIO_PC_REQUIRES_PRIVATE "${PC_REQUIRES_STR}")
+ endif()
+-list(TRANSFORM COMMON_LINK_LIBRARIES PREPEND "-l")
+-string(JOIN " " MINIAUDIO_PC_LIBS_PRIVATE ${COMMON_LINK_LIBRARIES})
++# Do not prepend -l to full paths returned by find_library(), or embed SDK paths.
++set(PC_COMMON_LINK_LIBRARIES)
++foreach(LIB IN LISTS COMMON_LINK_LIBRARIES)
++    get_filename_component(LIB_NAME "${LIB}" NAME_WE)
++    string(REGEX REPLACE "^lib" "" LIB_NAME "${LIB_NAME}")
++    list(APPEND PC_COMMON_LINK_LIBRARIES "-l${LIB_NAME}")
++endforeach()
++string(JOIN " " MINIAUDIO_PC_LIBS_PRIVATE ${PC_COMMON_LINK_LIBRARIES})
+ list(TRANSFORM COMPILE_DEFINES PREPEND "-D")
+ string(JOIN " " MINIAUDIO_PC_CFLAGS ${COMPILE_DEFINES})
+ 
+@@ -870,6 +881,25 @@
+     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/miniaudio.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+ 
+     message(STATUS "Library list: ${LIBS_TO_INSTALL}")
++    foreach(LIB IN LISTS LIBS_TO_INSTALL)
++        set_target_properties(${LIB} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
++    endforeach()
++    include(CMakePackageConfigHelpers)
++    configure_package_config_file(miniaudioConfig.cmake.in
++        "${CMAKE_CURRENT_BINARY_DIR}/miniaudioConfig.cmake"
++        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/miniaudio")
++    write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/miniaudioConfigVersion.cmake"
++        VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
++    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/miniaudioConfig.cmake"
++        "${CMAKE_CURRENT_BINARY_DIR}/miniaudioConfigVersion.cmake"
++        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/miniaudio")
++    install(TARGETS miniaudio EXPORT miniaudioTargets
++        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
++        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
++        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
++    install(EXPORT miniaudioTargets NAMESPACE miniaudio::
++        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/miniaudio")
++    list(REMOVE_ITEM LIBS_TO_INSTALL miniaudio)
+     install(TARGETS ${LIBS_TO_INSTALL}
+         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+--- a/miniaudioConfig.cmake.in
++++ b/miniaudioConfig.cmake.in
+@@ -0,0 +1,5 @@
++@PACKAGE_INIT@
++include("${CMAKE_CURRENT_LIST_DIR}/miniaudioTargets.cmake")
++get_target_property(MINIAUDIO_INCLUDE_DIRS miniaudio::miniaudio INTERFACE_INCLUDE_DIRECTORIES)
++set(MINIAUDIO_LIBRARIES miniaudio::miniaudio)
++check_required_components(miniaudio)
+--- a/miniaudio.pc.in
++++ b/miniaudio.pc.in
+@@ -10,6 +10,6 @@
+ Version: @PROJECT_VERSION@
+ 
+ Requires.private: @MINIAUDIO_PC_REQUIRES_PRIVATE@
+-Cflags: -I${includedir} @MINIAUDIO_PC_CFLAGS@
++Cflags: -I${includedir}/miniaudio @MINIAUDIO_PC_CFLAGS@
+ Libs: -L${libdir} -lminiaudio
+ Libs.private: @MINIAUDIO_PC_LIBS_PRIVATE@
+--- a/extras/nodes/ma_reverb_node/ma_reverb_node.h
++++ b/extras/nodes/ma_reverb_node/ma_reverb_node.h
+@@ -3,7 +3,7 @@
+ #define miniaudio_reverb_node_h
+ 
+ #include "../../../miniaudio.h"
+-#include "verblib.h"
++#include <verblib.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+--- a/extras/nodes/ma_vocoder_node/ma_vocoder_node.h
++++ b/extras/nodes/ma_vocoder_node/ma_vocoder_node.h
+@@ -3,7 +3,7 @@
+ #define miniaudio_vocoder_node_h
+ 
+ #include "../../../miniaudio.h"
+-#include "voclib.h"
++#include <voclib.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {

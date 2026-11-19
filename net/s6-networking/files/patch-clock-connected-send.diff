@@ -1,0 +1,131 @@
+s6-taiclock, s6-sntpclock: send on the connected socket, without an address
+
+Symptom (every macOS release): both clock clients fail every round trip
+with "Socket is already connected" (EISCONN) and exit 1 with "unable to
+contact ... server", against any server. They are unusable on Darwin.
+s6-taiclockd, which never connects its socket, is unaffected.
+
+Cause: each client connect()s its UDP socket to the server
+(socket_deadlineconnstamp46_g), then sends every query with
+socket_sendnb46_g, which is sendto() naming that same server again. The
+peer is held twice: by the socket, and by every send.
+
+POSIX leaves this case to the implementation. For a connectionless socket
+with a pre-specified peer, sendto() with a destination either sends to it,
+overriding the peer, or fails with EISCONN; EISCONN is listed as "may fail"
+(IEEE Std 1003.1-2024, sendto(), DESCRIPTION and ERRORS):
+https://pubs.opengroup.org/onlinepubs/9799919799/functions/sendto.html
+
+- Linux overrides: udp_sendmsg() in net/ipv4/udp.c (v7.3) uses the given
+  address, and EISCONN does not occur in that file. The duplicate is
+  harmless there, which is why the code works on Linux.
+- XNU fails: udp_output() in bsd/netinet/udp_usrreq.c returns EISCONN for
+  any destination once inp_faddr is set, even the connected peer itself:
+      if (addr) {
+          if (inp->inp_faddr.s_addr != INADDR_ANY) {
+              error = EISCONN;
+  udp6_output() in bsd/netinet6/udp6_output.c does the same for IPv6. The
+  check is present unchanged in xnu-1504.15.3 (10.6), xnu-2422.1.72
+  (10.9), xnu-4570.1.46 (10.13) and xnu-12377.121.6, so it concerns every
+  Darwin release, not one version.
+
+The connect() must stay: a connected UDP socket accepts datagrams only
+from its peer, and these programs discard the source address recvfrom()
+reports. The connection is what keeps a third party from answering.
+
+Fix: send with skalibs' timed_write() (skalibs/unix-timed.h), which writes
+on the connected socket with no address; the socket alone holds the peer.
+A UDP write is atomic (the whole datagram, or -1), so the semantics match
+socket_sendnb46_g: EAGAIN retried until the deadline, then ETIMEDOUT, any
+other error returned with errno set. The exchange functions lose their
+now-unused port parameter. Receiving is unchanged: recvfrom() on a
+connected socket is valid on Darwin. On Linux the behaviour is identical,
+since the connected peer was the destination anyway.
+
+The defect is at s6-networking master (b5929b9), unchanged since the
+initial commit (e0fc822, 2014). It is not submitted upstream: Skarnet does
+not accept LLM-generated contributions:
+https://github.com/skarnet/s6-networking/blob/main/CONTRIBUTING
+
+MacPorts downstream patch; not submitted to or accepted by Skarnet.
+External tests, negative controls, and results:
+https://github.com/bjornpagen/macports-ports/tree/a9d0bf9ac5e77e79c576ff13092aa40e4f6cb73f
+
+--- src/clock/s6-taiclock.c.orig
++++ src/clock/s6-taiclock.c
+@@ -15,6 +15,7 @@
+ #include <skalibs/iopause.h>
+ #include <skalibs/allreadwrite.h>
+ #include <skalibs/socket.h>
++#include <skalibs/unix-timed.h>
+ #include <skalibs/ip46.h>
+ #include <skalibs/random.h>
+ 
+@@ -25,7 +26,7 @@
+ 
+ #define N 28
+ 
+-int tain_exchange (int s, ip46 const *ip, uint16_t port, tain *serversays, tain const *deadline)
++int tain_exchange (int s, ip46 const *ip, tain *serversays, tain const *deadline)
+ {
+   char query[N] = "ctai" ;
+   char answer[N] ;
+@@ -34,9 +35,7 @@
+   uint16_t dummyport ;
+   tain_pack(query+4, &STAMP) ;
+   random_buf(query+20, N-20) ; /* cookie */
+-  r = socket_sendnb46_g(s, query, N, ip, port, deadline) ;
+-  if (r < 0) return 0 ;
+-  if (r < N) return (errno = EPIPE, 0) ;
++  if (timed_write_g(s, query, N, deadline) < N) return 0 ;
+   r = socket_recvnb46_g(s, answer, N, &dummyip, &dummyport, ip46_is6(ip), deadline) ;
+   if (r < 0) return 0 ;
+   if (r < N) return (errno = EPROTO, 0) ;
+@@ -116,7 +115,7 @@
+     tain_add_g(&deadline, &timeouttto) ;
+     if (tain_less(&globaldeadline, &deadline)) deadline = globaldeadline ;
+     tain_copynow(&before) ;
+-    if (!tain_exchange(sock, &ipremote, portremote, &serversays, &deadline))
++    if (!tain_exchange(sock, &ipremote, &serversays, &deadline))
+     {
+       e = errno ;
+       if (verbosity >= 2)
+--- src/clock/s6-sntpclock.c.orig
++++ src/clock/s6-sntpclock.c
+@@ -16,6 +16,7 @@
+ #include <skalibs/iopause.h>
+ #include <skalibs/allreadwrite.h>
+ #include <skalibs/socket.h>
++#include <skalibs/unix-timed.h>
+ #include <skalibs/ip46.h>
+ 
+ #define USAGE "s6-sntpclock [ -f ] [ -v verbosity ] [ -r roundtrips ] [ -t triptimeout ] [ -h throttle ] [ -T totaltimeout ] [ -e errmax ] [ -p port ] ipaddress"
+@@ -23,7 +24,7 @@
+ 
+ static unsigned int verbosity = 1 ;
+ 
+-int ntp_exchange (int s, ip46 const *ip, uint16_t port, tain *stamps, tain const *deadline)
++int ntp_exchange (int s, ip46 const *ip, tain *stamps, tain const *deadline)
+ {
+   char query[48] = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0" ;
+   char answer[48] = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0" ;
+@@ -43,9 +44,7 @@
+     fmtntp[uint64_xfmt(fmtntp, ntpstamp)] = 0 ;
+     strerr_warni2x("NTP stamp[0] sent: ", fmtntp) ;
+   }
+-  r = socket_sendnb46_g(s, query, 48, ip, port, deadline) ;
+-  if (r < 0) return 0 ;
+-  if (r < 48) return (errno = EPIPE, 0) ;
++  if (timed_write_g(s, query, 48, deadline) < 48) return 0 ;
+   r = socket_recvnb46_g(s, answer, 48, &dummyip, &dummyport, ip46_is6(ip), deadline) ;
+   if (r < 0) return 0 ;
+   if (r < 48) return (errno = EPROTO, 0) ;
+@@ -149,7 +148,7 @@
+       fmtr[uint_fmt(fmtr, roundtrips)] = 0 ;
+       strerr_warni4x("NTP round-trip ", fmt, "/", fmtr) ;
+     }
+-    if (!ntp_exchange(sock, &ipremote, portremote, stamps, &deadline))
++    if (!ntp_exchange(sock, &ipremote, stamps, &deadline))
+     {
+       e = errno ;
+       if (verbosity >= 2)

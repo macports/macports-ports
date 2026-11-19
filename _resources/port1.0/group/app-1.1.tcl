@@ -365,7 +365,7 @@ proc app::post_destroot {} {
 
     if {[tbool app_create]} {
         # Ensure app.identifier is valid.
-        if {[regexp -nocase {[^a-z0-9._-]} ${app_identifier}]} {
+        if {[regexp -nocase {[^a-z0-9.-]} ${app_identifier}]} {
             return -code error "app.identifier ${app_identifier} contains illegal characters"
         }
         if {[llength [split ${app_identifier} "."]] < 3} {
@@ -547,8 +547,8 @@ proc app::check_app_icon {} {
     }
     set needs_dep [expr {[file extension [join ${app_icon}]] eq ".svg"}]
     if {${needs_dep}} {
-        depends_build-delete port:librsvg
-        depends_build-append port:librsvg
+        depends_build-delete path:lib/pkgconfig/librsvg-2.0.pc:librsvg
+        depends_build-append path:lib/pkgconfig/librsvg-2.0.pc:librsvg
     }
 }
 

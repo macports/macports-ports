@@ -6,9 +6,12 @@ PortGroup           github          1.0
 PortGroup           legacysupport   1.0
 PortGroup           openssl         1.0
 
-github.setup        cwida duckdb 1.5.4 v
+github.setup        duckdb duckdb 2.0.0 v
 github.tarball_from archive
 revision            0
+
+# Keep in sync with GIT_TAG in .github/config/extensions/ducklake.cmake
+set ducklake_commit 417a9117f590e8141742ac0579d02f6a90162e37
 
 homepage            https://www.duckdb.org
 
@@ -20,37 +23,63 @@ long_description    \
     fast while embedded in another process. It is designed to be easy to \
     install and easy to use. DuckDB has no external dependencies. DuckDB has \
     bindings for C/C++, Python and R. DuckDB is developed by the Database \
-    Architectures group of the CWI.
+    Architectures group of the CWI. The DuckLake lakehouse format extension \
+    is built in.
 
 categories          databases
 license             MIT
 maintainers         {gmail.com:herby.gillot @herbygillot} \
                     openmaintainer
 
-checksums           rmd160  a8a87d9c9d3e10431da39e98e158508d205446e7 \
-                    sha256  99c36e4bf415f295e19ed67401adb72e075e63e6a0dc3a14312c986e29781fd0 \
-                    size    101078007
+master_sites-append https://github.com/duckdb/ducklake/archive/${ducklake_commit}${extract.suffix}?dummy=:ducklake
+distfiles-append    ducklake-${ducklake_commit}${extract.suffix}:ducklake
+
+checksums           ${distname}${extract.suffix} \
+                    rmd160  1a354a9ed5d435bf1f35bcc9336ad2ce682039ae \
+                    sha256  7e89053255046bfb26afbd7f524a2fb84df7dbef496aa911ea35e4a1182fdc00 \
+                    size    106477075 \
+                    ducklake-${ducklake_commit}${extract.suffix} \
+                    rmd160  0044daa0d9ae6b5e0c698493b8d472567de27c43 \
+                    sha256  264fa356b06f62d1601358a6a931ee522b41813e05566ae46010e2cbe9a832d7 \
+                    size    1099005
 
 patchfiles-append   no-ccache.patch \
-                    no-clangd-cache.patch
+                    no-clangd-cache.patch \
+                    macports-smoke-test.patch
 
 set python_version  314
 set python_branch   \
     [string index ${python_version} 0].[string range ${python_version} 1 end]
 
 configure.args-append \
-                    -DBUILD_EXTENSIONS='autocomplete\;icu\;parquet\;json' \
-                    -DENABLE_EXTENSION_AUTOLOADING=1 \
-                    -DENABLE_EXTENSION_AUTOINSTALL=1 \
+                    -DBUILD_EXTENSIONS='autocomplete\;icu\;parquet\;json\;ducklake' \
+                    -DLINK_CORE_EXTENSIONS=ON \
                     -DOVERRIDE_GIT_DESCRIBE=v${version} \
                     -DPython3_EXECUTABLE=${prefix}/bin/python${python_branch}
 
-compiler.cxx_standard 2011
+# DuckDB 2.0 requires C++17
+compiler.cxx_standard 2017
+
+configure.env-append \
+                    DUCKDB_DUCKLAKE_DIRECTORY=${workpath}/ducklake-${ducklake_commit}
+
+post-patch {
+    set ducklake_cmake ${worksrcpath}/.github/config/extensions/ducklake.cmake
+    set fd [open ${ducklake_cmake} r]
+    set pinned [regexp -inline {GIT_TAG\s+([0-9a-f]+)} [read ${fd}]]
+    close ${fd}
+    if {[lindex ${pinned} 1] ne ${ducklake_commit}} {
+        return -code error "ducklake_commit ${ducklake_commit} does not match the GIT_TAG in ${ducklake_cmake}: [lindex ${pinned} 1]"
+    }
+    reinplace "s|GIT_TAG ${ducklake_commit}|& EXTENSION_VERSION [string range ${ducklake_commit} 0 6]|" ${ducklake_cmake}
+}
 
 depends_build-append \
                     port:pkgconfig \
                     port:python${python_version} \
                     port:zstd
+
+depends_lib-append  port:croaring
 
 if {[string match *gcc* ${configure.compiler}]} {
     # Without the following setting, the build fails miserably at linking with every possible symbol undefined.
@@ -59,4 +88,14 @@ if {[string match *gcc* ${configure.compiler}]} {
                     -DEXTENSION_STATIC_BUILD=TRUE
     configure.ldflags-append \
                     -latomic
+}
+
+test.run            yes
+test {
+    set scratch ${workpath}/test
+    file delete -force ${scratch}
+    file mkdir ${scratch}
+    system -W ${scratch} "${cmake.build_dir}/duckdb \
+        -cmd \"SET VARIABLE expected_version = 'v${version}'\" \
+        -f ${worksrcpath}/test/macports-smoke.sql"
 }

@@ -1,0 +1,96 @@
+--- target/arm/hvf/hvf.c.orig
++++ target/arm/hvf/hvf.c
+@@ -489,6 +489,17 @@
+  * Nothing is lost by doing so, as the __builtin_available() checks guarding
+  * these paths can only ever succeed on macOS 15.0 and later anyway.
+  */
++/*
++ * IPA configuration requires both SDK declarations and macOS 13 at runtime.
++ * Earlier systems only support the default, fixed 36-bit IPA space.
++ */
++#define HVF_PRE_13_IPA_BIT_SIZE 36
++#if defined(MAC_OS_VERSION_13_0)
++#define HVF_HAVE_MACOS_13_SDK 1
++#else
++#define HVF_HAVE_MACOS_13_SDK 0
++#endif
++
+ #if defined(MAC_OS_VERSION_15_0)
+ #define HVF_HAVE_MACOS_15_SDK 1
+ #else
+@@ -1280,18 +1291,28 @@
+ 
+ uint32_t hvf_arch_get_default_ipa_bit_size(void)
+ {
+-    uint32_t default_ipa_size;
+-    hv_return_t ret = hv_vm_config_get_default_ipa_size(&default_ipa_size);
+-    assert_hvf_ok(ret);
+-
+-    return default_ipa_size;
++#if HVF_HAVE_MACOS_13_SDK
++    if (__builtin_available(macOS 13.0, *)) {
++        uint32_t default_ipa_size;
++        hv_return_t ret = hv_vm_config_get_default_ipa_size(&default_ipa_size);
++        assert_hvf_ok(ret);
++
++        return default_ipa_size;
++    }
++#endif
++    return HVF_PRE_13_IPA_BIT_SIZE;
+ }
+ 
+ uint32_t hvf_arch_get_max_ipa_bit_size(void)
+ {
+-    uint32_t max_ipa_size;
+-    hv_return_t ret = hv_vm_config_get_max_ipa_size(&max_ipa_size);
+-    assert_hvf_ok(ret);
++    uint32_t max_ipa_size = HVF_PRE_13_IPA_BIT_SIZE;
++
++#if HVF_HAVE_MACOS_13_SDK
++    if (__builtin_available(macOS 13.0, *)) {
++        hv_return_t ret = hv_vm_config_get_max_ipa_size(&max_ipa_size);
++        assert_hvf_ok(ret);
++    }
++#endif
+ 
+     /*
+      * We clamp any IPA size we want to back the VM with to a valid PARange
+@@ -1352,11 +1373,22 @@
+ hv_return_t hvf_arch_vm_create(MachineState *ms, uint32_t pa_range)
+ {
+     hv_return_t ret;
+-    hv_vm_config_t config = hv_vm_config_create();
+-
+-    ret = hv_vm_config_set_ipa_size(config, pa_range);
+-    if (ret != HV_SUCCESS) {
+-        goto cleanup;
++    hv_vm_config_t config = NULL;
++
++#if HVF_HAVE_MACOS_13_SDK
++    if (__builtin_available(macOS 13.0, *)) {
++        config = hv_vm_config_create();
++        ret = hv_vm_config_set_ipa_size(config, pa_range);
++        if (ret != HV_SUCCESS) {
++            goto cleanup;
++        }
++    } else
++#endif
++    {
++        if (pa_range != HVF_PRE_13_IPA_BIT_SIZE) {
++            ret = HV_UNSUPPORTED;
++            goto cleanup;
++        }
+     }
+     chosen_ipa_bit_size = pa_range;
+ 
+@@ -1413,7 +1445,9 @@
+     }
+ 
+ cleanup:
+-    os_release(config);
++    if (config) {
++        os_release(config);
++    }
+ 
+     return ret;
+ }

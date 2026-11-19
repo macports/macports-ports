@@ -1,0 +1,93 @@
+Rust 1.99 removed the free function `core::mem::type_info::of` (TypeId::of
+without the 'static bound). Homebrew's bun 1.4.3 build, which does compile
+std from the rust library sources, fails on the same calls. Restore that
+helper with the intrinsic the old function used, so lifetime-carrying field
+types still reflect.
+--- src/collections/lib.rs.orig
++++ src/collections/lib.rs
+@@ -2,13 +2,14 @@
+ 
+ #![feature(
+     type_info,
++    core_intrinsics,
+     adt_const_params,
+     unsized_const_params,
+     const_cmp,
+     const_trait_impl,
+     allocator_api
+ )]
+-#![allow(incomplete_features)]
++#![allow(incomplete_features, internal_features)]
+ #![warn(unused_must_use)]
+ 
+ pub mod hive_array;
+--- src/collections/multi_array_list.rs.orig
++++ src/collections/multi_array_list.rs
+@@ -47,7 +47,6 @@
+ 
+ use core::alloc::Layout;
+ use core::marker::PhantomData;
+-use core::mem::type_info;
+ use core::mem::{ManuallyDrop, MaybeUninit};
+ use core::ptr::{self, NonNull};
+ use std::alloc::{Allocator, Global};
+@@ -253,9 +252,14 @@
+ 
+ // The reflection methods on `TypeId` are compile-time-only functions: they can
+ // be called from a `const` item or an inline `const { }` block, not from a
+-// `const fn` body. `type_info::of::<F>()` is `TypeId::of` without the `'static`
+-// bound — reflected field ids are not `'static`-restricted, and column callers
+-// routinely use lifetime-carrying field types (`&'a [u8]`, `Ref<'a>`).
++// `const fn` body. Rust 1.99 removed `type_info::of` (`TypeId::of` without the
++// `'static` bound). `type_info_of` is that function: reflected field ids are not
++// `'static`-restricted, and column callers routinely use lifetime-carrying field
++// types (`&'a [u8]`, `Ref<'a>`).
++const fn type_info_of<T: ?Sized>() -> core::any::TypeId {
++    const { core::intrinsics::type_id::<T>() }
++}
++
+ 
+ /// Column-layout sort key for a field of `size` bytes within a struct of
+ /// alignment `struct_align`.
+@@ -318,7 +322,7 @@
+     /// fields cannot sum past `size_of::<T>()`). A single-variant enum with an
+     /// explicit `#[repr(int)]` still passes; its tag would never be written.
+     const COUNT: usize = {
+-        let id = type_info::of::<T>();
++        let id = type_info_of::<T>();
+         assert!(
+             id.variants() == 1,
+             "MultiArrayList<T>: T must be a struct with named fields",
+@@ -352,7 +356,7 @@
+ 
+     /// `[FieldMeta; COUNT]` in declaration order.
+     const META: [FieldMeta; MAX_FIELDS] = {
+-        let id = type_info::of::<T>();
++        let id = type_info_of::<T>();
+         let n = Self::COUNT;
+         assert!(
+             n <= MAX_FIELDS,
+@@ -443,7 +447,7 @@
+     #[cfg(test)]
+     const fn index_of<const NAME: &'static str>() -> usize {
+         const {
+-            let id = type_info::of::<T>();
++            let id = type_info_of::<T>();
+             let mut i = 0;
+             while i < Self::COUNT {
+                 if const_str_eq(id.field(0, i).name(), NAME) {
+@@ -466,12 +470,12 @@
+     /// rejected.
+     const fn check<const NAME: &'static str, F>() -> usize {
+         const {
+-            let id = type_info::of::<T>();
++            let id = type_info_of::<T>();
+             let mut i = 0;
+             while i < Self::COUNT {
+                 let f = id.field(0, i);
+                 if const_str_eq(f.name(), NAME) {
+-                    if !(f.type_id() == type_info::of::<F>()) {
++                    if !(f.type_id() == type_info_of::<F>()) {
+                         assert!(
+                             Self::META[i].size == core::mem::size_of::<F>(),
+                             "MultiArrayList: column type does not match field type",
