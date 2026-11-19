@@ -452,10 +452,7 @@ proc app._icon_trace {optionName unusedIndex unusedOperation} {
     }
     set needs_dep [expr {[file extension [join ${option}]] eq ".svg"}]
     if {${needs_dep}} {
-        # Make sure we handle both variations of librsvg dep
-        depends_build-delete port:librsvg
         depends_build-delete path:lib/pkgconfig/librsvg-2.0.pc:librsvg
-
         depends_build-append path:lib/pkgconfig/librsvg-2.0.pc:librsvg
     }
 }
