@@ -1,0 +1,62 @@
+Fix font family metrics when Pango >= 1.44 is used.
+
+gdip_get_fontfamily_details_from_harfbuzz read extents from the hb_font
+that Pango scales to the requested point size, but stored them as font
+design units. Line spacing, cell ascent, cell descent, and Font.Height
+were therefore inflated by (8 * 96 / 72 * PANGO_SCALE) / units_per_EM,
+about 5.33 for typical fonts.
+
+Backport of upstream commit 39e85126dd, which is included in 6.1:
+https://github.com/mono/libgdiplus/commit/39e85126dd
+
+--- src/font.c.orig
++++ src/font.c
+@@ -805,17 +805,43 @@
+ }
+ 
+ #ifdef PANGO_DEPRECATED_FREETYPE_DEPENDENCY
++#include <hb-ot.h>
++
++/* Backport of upstream commit 39e85126dd (libgdiplus 6.1).  The hb_font_t
++ * supplied by Pango is scaled to the requested point size in Pango units,
++ * so its extents are not in font design units.  Read the extents from a
++ * subfont scaled to units_per_EM so that they are consistent with
++ * family->height. */
+ static void
+ gdip_get_fontfamily_details_from_harfbuzz (GpFontFamily *family, hb_font_t *font)
+ {
++	hb_font_t *subfont;
+ 	hb_font_extents_t font_extents;
+-	hb_font_get_extents_for_direction (font, HB_DIRECTION_LTR, &font_extents);
++	hb_face_t *face;
++	hb_position_t position;
+ 
+-	family->celldescent = -font_extents.descender;
+-	family->cellascent = font_extents.ascender;
+-	family->linespacing = family->cellascent + family->celldescent + font_extents.line_gap;
++	face = hb_font_get_face (font);
++	family->height = hb_face_get_upem (face);
+ 
+-	family->height = hb_face_get_upem (hb_font_get_face (font));
++	subfont = hb_font_create (face);
++
++	hb_font_set_scale (subfont, family->height, family->height);
++	hb_font_get_h_extents (subfont, &font_extents);
++
++	family->linespacing = font_extents.line_gap + font_extents.ascender - font_extents.descender;
++
++	if (hb_ot_metrics_get_position (subfont, HB_OT_METRICS_TAG_HORIZONTAL_CLIPPING_ASCENT, &position)) {
++		family->cellascent = position;
++	} else {
++		family->cellascent = font_extents.ascender;
++	}
++	if (hb_ot_metrics_get_position (subfont, HB_OT_METRICS_TAG_HORIZONTAL_CLIPPING_DESCENT, &position)) {
++		family->celldescent = position;
++	} else {
++		family->celldescent = -font_extents.descender;
++	}
++
++	hb_font_destroy (subfont);
+ }
+ #endif
+ 
