@@ -1,0 +1,103 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+
+# The CLI lives in Proton's Drive SDK monorepo, tagged cli/v<version>.
+github.setup        ProtonDriveApps sdk 0.9.0 cli/v
+github.tarball_from archive
+name                proton-drive-cli
+revision            0
+
+categories          net
+maintainers         {strandkip.nl:jabley @ableyjoe} openmaintainer
+license             MIT
+supported_archs     arm64 x86_64
+# Built with bun, which MacPorts supports on macOS 13 and later.
+platforms           {darwin >= 22}
+
+description         command-line interface to Proton Drive
+long_description    The official Proton Drive CLI uploads, downloads, lists \
+                    and manages files in Proton Drive, and handles sharing \
+                    and invitations, with the same end-to-end encryption as \
+                    the Proton Drive apps. This port builds it from source \
+                    and adds a manual page generated from its command \
+                    definitions.
+
+homepage            https://proton.me/support/drive-cli
+
+checksums           rmd160  5a48b8dec275649e334ee70ad94472d61c6fc265 \
+                    sha256  90f901e9962d031d7ec91dc7acf37c49ac1cb4cb6f87745bd8b5889d2225bf83 \
+                    size    1173773
+
+depends_build       path:bin/bun:bun
+
+# Upstream pins an exact bun version in engines.bun and refuses to build
+# with any other; later releases work.
+patchfiles          patch-bun-engines.diff
+
+use_configure       no
+
+post-patch {
+    # Generates proton-drive.1 from the CLI's command registry, so the
+    # manual matches `proton-drive --help` for each release.
+    copy ${filespath}/generate-man.ts ${worksrcpath}/cli/scripts/
+}
+
+# bun install fetches the npm packages pinned by cli/bun.lock during the
+# build, as the bun 1.0 PortGroup does.
+build {
+    set cli ${worksrcpath}/cli
+
+    system -W ${cli} "env BUN_INSTALL_CACHE_DIR=[shellescape ${workpath}/.bun-cache] \
+        ${prefix}/bin/bun install --frozen-lockfile --production"
+
+    # The CLI compiles the SDK packages from their source directories
+    # (see cli/tsconfig.json paths), which have no node_modules of their own.
+    ln -s ../../cli/node_modules ${worksrcpath}/client/js/node_modules
+    ln -s ../../../cli/node_modules ${worksrcpath}/incubating/account/js/node_modules
+
+    # Version strings normally come from git tags, which the tarball lacks.
+    set fd [open ${worksrcpath}/client/js/CHANGELOG.md r]
+    set changelog [read ${fd}]
+    close ${fd}
+    if {![regexp {## js/v([0-9.]+)} ${changelog} -> js_version]} {
+        return -code error "cannot find the SDK version in client/js/CHANGELOG.md"
+    }
+
+    # Proton asks distributions repackaging the unmodified CLI to identify
+    # themselves as cli-drive-<distribution> (cli/README.md). Without
+    # SENTRY_DSN, crash reporting and build telemetry are disabled.
+    system -W ${cli} "env CLI_VERSION=${version} JS_VERSION=${js_version} \
+        CLI_APP_VERSION_NAME=cli-drive-macports \
+        ${prefix}/bin/bun ./scripts/build-cli.mjs"
+
+    # Date the manual page by the tagged commit. Files in GitHub's release
+    # tarball carry its timestamp; the tagged CHANGELOG.md does not yet list
+    # the release being tagged, so it cannot supply the date.
+    set source_date [file mtime ${worksrcpath}/cli/CHANGELOG.md]
+    system -W ${cli} "env SOURCE_DATE_EPOCH=${source_date} \
+        ${prefix}/bin/bun ./scripts/generate-man.ts \
+        [shellescape ${worksrcpath}/proton-drive.1]"
+}
+
+destroot {
+    xinstall -m 0755 ${worksrcpath}/cli/release/proton-drive ${destroot}${prefix}/bin/
+    xinstall -m 0644 ${worksrcpath}/proton-drive.1 ${destroot}${prefix}/share/man/man1/
+
+    set docdir ${destroot}${prefix}/share/doc/${name}
+    xinstall -d ${docdir}
+    xinstall -m 0644 -W ${worksrcpath}/cli README.md CHANGELOG.md ${docdir}
+    xinstall -m 0644 ${worksrcpath}/LICENSE.md ${docdir}
+}
+
+test.run            yes
+test.cmd            ${worksrcpath}/cli/release/proton-drive
+test.target         {}
+test.args           version
+
+# The GitHub tags page mixes cli/, js/ and cs/ tags; Proton's download
+# index lists only CLI releases.
+livecheck.type      regex
+livecheck.url       https://proton.me/download/drive/cli/index.html
+livecheck.regex     {Proton Drive CLI ([0-9.]+)}
