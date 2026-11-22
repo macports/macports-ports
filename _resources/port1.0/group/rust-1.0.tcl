@@ -162,7 +162,11 @@ proc cargo.rust_platform {{arch ""}} {
         if {${arch} eq ""} {
             set arch [option configure.build_arch]
             if {${arch} eq ""} {
-                error "No build arch configured"
+                set arch [option build_arch]
+                if {${arch} eq ""} {
+                    ui_debug "cargo.rust_platform: No build arch configured"
+                    return {}
+                }
             }
         }
     }
