@@ -5,7 +5,7 @@ PortGroup           python 1.0
 
 name                google-cloud-sdk
 version             594.0.0
-revision            0
+revision            2
 categories          devel python
 license             Apache-2
 maintainers         {breun @breun} openmaintainer
@@ -75,7 +75,7 @@ variant config_connector description {Add config connector} { dict set variant_t
 variant docker_credential_gcr description {Add Google Container Registry's Docker credential helper} { dict set variant_to_component docker_credential_gcr docker-credential-gcr }
 variant enterprise_certificate_proxy description {Add Enterprise certificate proxy} { dict set variant_to_component enterprise_certificate_proxy enterprise-certificate-proxy }
 variant gke_gcloud_auth_plugin description {Add GKE Google Cloud auth plugin} { dict set variant_to_component gke_gcloud_auth_plugin gke-gcloud-auth-plugin }
-variant istioctl description {Add istioctl} { dict set variant_to_component istioctl istioctl }
+variant istioctl description {Add istioctl} { dict set variant_to_component istioctl istioctl; conflicts-append istioctl }
 variant kpt description {Add kpt} { dict set variant_to_component kpt kpt }
 variant kubectl description {Add kubectl} { dict set variant_to_component kubectl kubectl }
 variant kubectl_oidc description {Add kubectl-oidc} { dict set variant_to_component kubectl_oidc kubectl-oidc }
@@ -83,7 +83,7 @@ variant kustomize description {Add Kustomize} { dict set variant_to_component ku
 variant local_extract description {Add On-Demand Scanning API extraction helper} { dict set variant_to_component local_extract local-extract }
 variant log_streaming description {Add Log Streaming} { dict set variant_to_component log_streaming log-streaming }
 variant managed_flink_client description {Add managed Flink client} { dict set variant_to_component managed_flink_client managed-flink-client }
-variant minikube description {Add Minikube} { dict set variant_to_component minikube minikube }
+variant minikube description {Add Minikube} { dict set variant_to_component minikube minikube; conflicts-append minikube }
 variant nomos description {Add Nomos CLI} { dict set variant_to_component nomos nomos }
 variant package_go_module description {Add Artifact Registry Go Module Package Helper} { dict set variant_to_component package_go_module package-go-module }
 variant pkg description {Add pkg} { dict set variant_to_component pkg pkg }
@@ -91,9 +91,18 @@ variant preview description {Add gcloud CLI Preview Commands} { dict set variant
 variant pubsub_emulator description {Add Cloud Pub/Sub Emulator} { dict set variant_to_component pubsub_emulator pubsub-emulator }
 variant spanner_cli description {Add Spanner CLI} { dict set variant_to_component spanner_cli spanner-cli }
 variant spanner_migration_tool description {Add Spanner migration tool} { dict set variant_to_component spanner_migration_tool spanner-migration-tool }
-variant skaffold description {Add Skaffold} { dict set variant_to_component skaffold skaffold }
+variant skaffold description {Add Skaffold} { dict set variant_to_component skaffold skaffold; conflicts-append skaffold }
 variant terraform_tools description {Add Terraform Tools} { dict set variant_to_component terraform_tools terraform-tools }
 variant universal_maker description {Add universal-maker} { dict set variant_to_component universal_maker universal-maker }
+
+# Variant binaries that generate their own shell completions via `<binary> completion bash|zsh|fish`.
+# Only binaries whose generated scripts register completions for their own installed name are listed.
+set variant_completions [dict create \
+    cloud_sql_proxy cloud-sql-proxy \
+    istioctl        istioctl \
+    kubectl         kubectl \
+    minikube        minikube \
+    skaffold        skaffold]
 
 use_configure       no
 build {
@@ -152,10 +161,37 @@ destroot {
         ${worksrcpath}/lib \
         ${worksrcpath}/platform \
         ${libexecdir}
-    foreach f { anthoscli bq docker-credential-gcloud gcloud gsutil } {
+    foreach f { bq docker-credential-gcloud gcloud gsutil } {
         ln -s ../libexec/${name}/bin/${f} ${destroot}${prefix}/bin/${f}
     }
     ln -s ../libexec/${name}/bin/git-credential-gcloud.sh ${destroot}${prefix}/bin/git-credential-gcloud
+
+    # Symlink binaries installed by additional components selected via variants.
+    # Each component records its files in .install/<component>.manifest; binaries usually
+    # come from a platform-specific sub-component (e.g. <component>-darwin-arm.manifest).
+    foreach component_variant [dict keys ${variant_to_component}] {
+        if {![variant_isset ${component_variant}]} {
+            continue
+        }
+        set component [dict get ${variant_to_component} ${component_variant}]
+        foreach suffix [list "" -nix -darwin -darwin-${arch_classifier}] {
+            set manifest ${worksrcpath}/.install/${component}${suffix}.manifest
+            if {![file exists ${manifest}]} {
+                continue
+            }
+            set fd [open ${manifest} r]
+            set entries [split [read -nonewline ${fd}] "\n"]
+            close ${fd}
+            foreach entry ${entries} {
+                if {[regexp {^bin/([^/]+)$} ${entry} -> f]} {
+                    set link ${destroot}${prefix}/bin/${f}
+                    if {[catch {file lstat ${link} link_stat}]} {
+                        ln -s ../libexec/${name}/bin/${f} ${link}
+                    }
+                }
+            }
+        }
+    }
 
     # bash completion
     set bash_completions_path ${prefix}/etc/bash_completion.d
@@ -165,12 +201,38 @@ destroot {
     # zsh completion
     set gcloud_libexec ${destroot}${prefix}/libexec/google-cloud-sdk
     xinstall -m 644 ${worksrcpath}/completion.zsh.inc ${gcloud_libexec}
+
+    # Shell completions for variant binaries that can generate them
+    set zsh_completions_path ${prefix}/share/zsh/site-functions
+    set fish_completions_path ${prefix}/share/fish/vendor_completions.d
+    foreach component_variant [dict keys ${variant_completions}] {
+        if {![variant_isset ${component_variant}]} {
+            continue
+        }
+        set f [dict get ${variant_completions} ${component_variant}]
+        xinstall -d ${destroot}${zsh_completions_path} ${destroot}${fish_completions_path}
+        system -W ${worksrcpath} "./bin/${f} completion bash < /dev/null > ${destroot}${bash_completions_path}/${f}"
+        system -W ${worksrcpath} "./bin/${f} completion zsh < /dev/null > ${destroot}${zsh_completions_path}/_${f}"
+        system -W ${worksrcpath} "./bin/${f} completion fish < /dev/null > ${destroot}${fish_completions_path}/${f}.fish"
+    }
 }
 
 notes "
     google-cloud-sdk zsh completions aren't loaded automatically.
     You must source them manually in your ~/.zshrc:
         source '${prefix}/libexec/google-cloud-sdk/completion.zsh.inc'"
+
+foreach component_variant [dict keys ${variant_completions}] {
+    if {[variant_isset ${component_variant}]} {
+        notes-append "
+    Completions for binaries added by variants are also installed for zsh in
+    ${prefix}/share/zsh/site-functions and for fish in
+    ${prefix}/share/fish/vendor_completions.d. MacPorts zsh loads them
+    automatically; with macOS /bin/zsh, add this to your ~/.zshrc before compinit:
+        fpath=(${prefix}/share/zsh/site-functions \$fpath)"
+        break
+    }
+}
 
 livecheck.url       https://cloud.google.com/sdk/docs/release-notes
 livecheck.regex     {([\d\.]+) \(\d{4}-\d{2}-\d{2}\)}
