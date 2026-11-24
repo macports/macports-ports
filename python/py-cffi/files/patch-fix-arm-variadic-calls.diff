@@ -1,0 +1,90 @@
+#==================================================================================================
+# From 8424ac4397d2b4d3f7908ecd582d4927ef84dfbe Mon Sep 17 00:00:00 2001
+# Date: Thu, 23 Jul 2026 12:12:35 +0200
+# Subject: [PATCH] Fix variadic calls on Apple platforms with a non-OS libffi
+#
+# Closes #264
+#
+# The CFFI_CHECK_FFI_* feature checks only enabled ffi_prep_cif_var(),
+# ffi_closure_alloc() and ffi_prep_closure_loc() on Apple platforms when
+# FFI_AVAILABLE_APPLE was defined.  That macro comes from the libffi
+# header shipped with the macOS SDK, so any build against a different
+# libffi - the static libffi that iOS/tvOS/watchOS wheels are built
+# against, or a Homebrew libffi on macOS - silently fell into the fallback
+# branch that disables all three functions.
+#
+# Without ffi_prep_cif_var(), variadic functions are called through a cif
+# prepared by ffi_prep_cif(), i.e. with the fixed-arguments calling
+# convention.  On arm64 Apple platforms variadic arguments are passed on
+# the stack, unlike named arguments, so the callee read garbage: integers
+# came back as random values and pointer arguments typically crashed
+# (e.g. any printf-family callee dereferencing a garbage %s).
+#
+# There is no runtime-availability question in this configuration: the
+# libffi the module was linked against always provides all three
+# functions, so the new branch enables them unconditionally.
+#
+# The two "for an unknown reason" iOS markers in test_c.py were this bug:
+# test_call_function_9 (garbage int return) and test_FILE (fscanf()
+# reading nothing on 3.14, crashing on 3.13).  Remove the markers so both
+# act as regression tests.  Verified on an arm64 iPhone simulator with
+# CPython 3.13: the full test_c.py passes (208 passed, 21 skipped), and
+# both tests fail again when the fix is reverted.
+#
+# Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+#==================================================================================================
+--- src/c/_cffi_backend.c
++++ src/c/_cffi_backend.c
+@@ -117,6 +117,25 @@
+ # define CFFI_CHECK_FFI_PREP_CIF_VAR __builtin_available(macos 10.15, ios 13, watchos 6, tvos 13, *)
+ # define CFFI_CHECK_FFI_PREP_CIF_VAR_MAYBE 1
+ 
++#elif defined(__APPLE__)
++
++/* On Apple platforms, but built against a libffi whose headers do not
++ * define FFI_AVAILABLE_APPLE: not the OS-provided libffi, but e.g. the
++ * static libffi that iOS/tvOS/watchOS wheels are built against, or a
++ * Homebrew libffi on macOS.  There is no runtime-availability question
++ * there: whatever the linker resolved is present, so all three functions
++ * can be used unconditionally.  ffi_prep_cif_var() in particular must be
++ * used: on arm64 Apple platforms variadic arguments are passed on the
++ * stack, unlike regular arguments, so calling a variadic function through
++ * a cif prepared with ffi_prep_cif() silently passes garbage.
++ */
++# define CFFI_CHECK_FFI_CLOSURE_ALLOC 1
++# define CFFI_CHECK_FFI_CLOSURE_ALLOC_MAYBE 1
++# define CFFI_CHECK_FFI_PREP_CLOSURE_LOC 1
++# define CFFI_CHECK_FFI_PREP_CLOSURE_LOC_MAYBE 1
++# define CFFI_CHECK_FFI_PREP_CIF_VAR 1
++# define CFFI_CHECK_FFI_PREP_CIF_VAR_MAYBE 1
++
+ #elif defined(__EMSCRIPTEN__)
+ 
+ # define CFFI_CHECK_FFI_CLOSURE_ALLOC 1
+--- src/c/test_c.py
++++ src/c/test_c.py
+@@ -1233,11 +1233,6 @@ def test_cannot_pass_struct_with_array_of_length_0():
+     BFunc2 = new_function_type((BInt,), BStruct, False)
+     pytest.raises(NotImplementedError, cast(BFunc2, 123), 123)
+ 
+-@pytest.mark.xfail(
+-    is_ios,
+-    reason="For an unknown reason f(1, cast(BInt, 42)) returns 36792864",
+-    raises=AssertionError,
+-)
+ def test_call_function_9():
+     BInt = new_primitive_type("int")
+     BFunc9 = new_function_type((BInt,), BInt, True)    # vararg
+@@ -3022,11 +3017,6 @@ def test_string_assignment_to_byte_array():
+     except ImportError:
+         pass   # win32
+ 
+-@pytest.mark.skipif(
+-    is_ios,
+-    reason="For an unknown reason fscanf() doesn't read anything on 3.14"
+-           " and crashes on 3.13 (that's why it's not an xfail)",
+-)
+ def test_FILE():
+     if sys.platform == "win32":
+         pytest.skip("testing FILE not implemented")
+
