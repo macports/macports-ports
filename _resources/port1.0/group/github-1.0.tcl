@@ -73,6 +73,52 @@ default github.livecheck.branch HEAD
 options github.livecheck.regex
 default github.livecheck.regex {(\[^"]+)}
 
+# Controls how tag-based livecheck (see github.setup below) finds the latest
+# version. 'tags' (the default) scrapes the repository's /tags page, which
+# lists every tag regardless of whether it has an associated GitHub Release;
+# projects that tag pre-releases (e.g. release candidates) without publishing
+# a Release for them will cause false positives. 'releases/latest' instead
+# queries the GitHub REST API for the latest published, non-prerelease,
+# non-draft Release, avoiding that problem.
+options github.livecheck
+default github.livecheck tags
+option_proc github.livecheck github.handle_livecheck
+proc github.handle_livecheck {option action args} {
+    if {${action} eq "set"} {
+        switch ${args} {
+            tags -
+            releases/latest {}
+            default {
+                return -code error "invalid value \"${args}\" for github.livecheck"
+            }
+        }
+    }
+}
+
+proc github.get_livecheck_url {} {
+    global github.livecheck github.homepage github.author github.project
+    switch -- ${github.livecheck} {
+        releases/latest {
+            return https://api.github.com/repos/${github.author}/${github.project}/releases/latest
+        }
+        default {
+            return ${github.homepage}/tags
+        }
+    }
+}
+
+proc github.get_livecheck_regex {} {
+    global github.livecheck github.tag_prefix github.tag_suffix github.livecheck.regex
+    switch -- ${github.livecheck} {
+        releases/latest {
+            return [list \"tag_name\":\\s*\"[quotemeta [join ${github.tag_prefix}]][join ${github.livecheck.regex}][quotemeta [join ${github.tag_suffix}]]\"]
+        }
+        default {
+            return [list archive/refs/tags/[quotemeta [join ${github.tag_prefix}]][join ${github.livecheck.regex}][quotemeta [join ${github.tag_suffix}]]\\.tar\\.gz]
+        }
+    }
+}
+
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_suffix ""}} {
     global github.author github.project github.version github.tag_prefix github.tag_suffix \
            github.homepage github.master_sites github.livecheck.branch PortInfo
@@ -110,8 +156,8 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
         default github.tarball_from archive
     } else {
         livecheck.type          regex
-        default livecheck.url   {${github.homepage}/tags}
-        default livecheck.regex {[list archive/refs/tags/[quotemeta [join ${github.tag_prefix}]][join ${github.livecheck.regex}][quotemeta [join ${github.tag_suffix}]]\\.tar\\.gz]}
+        default livecheck.url   {[github.get_livecheck_url]}
+        default livecheck.regex {[github.get_livecheck_regex]}
     }
     default livecheck.branch    {${github.livecheck.branch}}
     livecheck.version           ${github.version}
