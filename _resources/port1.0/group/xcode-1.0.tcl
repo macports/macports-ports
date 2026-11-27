@@ -26,6 +26,7 @@
 #   xcode.configuration      xcode buildstyle/configuration. Default is Deployment.
 #   xcode.target             if present, overrides build.target and destroot.target
 #   xcode.scheme             if present, supersedes target
+#   xcode.use_project_sdk    let each target choose its SDK. Default is no.
 #   xcode.build.settings     additional settings passed to $xcodebuildcmd (in
 #                            the X=Y form)
 #   xcode.destroot.type      install type (application or framework). Default is
@@ -74,6 +75,8 @@ options xcode.scheme
 default xcode.scheme ""
 options xcode.configuration
 default xcode.configuration Deployment
+options xcode.use_project_sdk
+default xcode.use_project_sdk no
 options xcode.build.settings
 default xcode.build.settings ""
 options xcode.destroot.type
@@ -218,7 +221,7 @@ proc xcode::get_build_args {args} {
     global tcl_platform
     global configure.universal_archs configure.build_arch configure.cxx_stdlib macosx_deployment_target
     global os.major os.arch
-    global developer_dir configure.sdkroot
+    global developer_dir configure.sdkroot xcode.use_project_sdk
 
     set xcode_project_dir [file normalize [option build.dir]/[file dirname [option xcode.project]]]
     set xcode_build_args ""
@@ -234,8 +237,9 @@ proc xcode::get_build_args {args} {
         append xcode_build_args " ARCHS=${configure.build_arch}"
     }
 
-    # SDKROOT
-    append xcode_build_args " SDKROOT=\"${configure.sdkroot}\""
+    if {![tbool xcode.use_project_sdk]} {
+        append xcode_build_args " SDKROOT=\"${configure.sdkroot}\""
+    }
 
     # GCC_VERSION
     switch -- [option configure.compiler] {
