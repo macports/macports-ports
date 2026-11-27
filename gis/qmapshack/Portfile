@@ -1,0 +1,195 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           cmake 1.1
+PortGroup           qt6 1.0
+
+github.setup        Maproom qmapshack 1.22.0 V_
+github.tarball_from archive
+revision            0
+
+categories          gis aqua
+maintainers         nomaintainer
+
+# Bundled: Blend2D and AsmJit (zlib, statically linked) and the Garmin FIT
+# SDK in 3rdparty/GarminFitSdk (Garmin FIT Protocol License). Debian ships the
+# FIT SDK in main; see its debian/copyright for qmapshack.
+license             GPL-3+ zlib
+
+description         GPS mapping and track editing with Garmin IMG map support
+long_description    QMapShack is a desktop application to plan tours and view \
+                    and edit GPS tracks, routes and waypoints. It displays \
+                    Garmin vector maps (.img, with TYP styling) and Garmin \
+                    BirdsEye (.jnx) maps, GDAL raster maps such as GeoTIFF, \
+                    and online TMS/WMTS maps, together with digital elevation \
+                    models. Routing works offline with Routino and offline or \
+                    online with BRouter, and Garmin devices are supported for \
+                    reading and writing data. QMapShack is the successor to \
+                    QLandkarte GT. The port also installs QMapTool, a tool to \
+                    prepare and convert raster maps for QMapShack.
+homepage            https://github.com/Maproom/qmapshack
+
+# Blend2D and AsmJit are pulled by FetchContent at configure time. MacPorts
+# builds offline, so both are fetched as distfiles and handed to FetchContent
+# through FETCHCONTENT_SOURCE_DIR_*. Keep these commits in sync with
+# ASMJIT_GIT_TAG / BLEND2D_GIT_TAG in the top-level CMakeLists.txt on every update.
+set asmjit_commit   0bd5787b54b575ed94bf32ac452153b34385c514
+set blend2d_commit  def0d1238c3e5d0983bb848e5676049d829e435b
+
+master_sites-append https://github.com/asmjit/asmjit/archive/${asmjit_commit}/:asmjit \
+                    https://github.com/blend2d/blend2d/archive/${blend2d_commit}/:blend2d
+distfiles-append    asmjit-${asmjit_commit}.tar.gz:asmjit \
+                    blend2d-${blend2d_commit}.tar.gz:blend2d
+
+checksums           ${distname}${extract.suffix} \
+                    rmd160  06d8b4eea825b5c533f9ab2804d7a9f34a0021b9 \
+                    sha256  8dc181d60b07b8f054f56b684940aa52794f066c75bf4208575d90e1b22f5899 \
+                    size    107115876 \
+                    asmjit-${asmjit_commit}.tar.gz \
+                    rmd160  8ed2073549dfdf0da4505419fdbb68dc583b5b6d \
+                    sha256  8d642612b05d0fd932beee8bdb8c9559c675cb4d2db2946b9636a1fef32b3fb9 \
+                    size    1366294 \
+                    blend2d-${blend2d_commit}.tar.gz \
+                    rmd160  0bdb7a755b20398d852cbc15d2a37ea2f4188a83 \
+                    sha256  fac3fc318d5236b6cfeec9124995f3e5866166cad37febb520517ebdc97cd100 \
+                    size    1525821
+
+# Only the main tarball is extracted by the default phase, so the github
+# PortGroup can still rename it to ${worksrcpath}. The other two are unpacked below.
+extract.only        ${distname}${extract.suffix}
+
+post-extract {
+    foreach f [list asmjit-${asmjit_commit}.tar.gz blend2d-${blend2d_commit}.tar.gz] {
+        system -W ${workpath} "${extract.cmd} -dc ${distpath}/${f} | tar -xf -"
+    }
+}
+
+# Blend2D's JIT is per-architecture and FetchContent sources are shared.
+universal_variant   no
+
+compiler.cxx_standard 2020
+
+qt6.depends_lib     qt5compat \
+                    qtdeclarative \
+                    qtsvg \
+                    qttools \
+                    qttranslations \
+                    qtwebengine
+
+depends_build-append \
+                    path:bin/pkg-config:pkgconfig
+
+depends_lib-append  port:gdal \
+                    port:proj9 \
+                    path:include/turbojpeg.h:libjpeg-turbo \
+                    port:routino \
+                    port:libmtp \
+                    port:libusb
+
+# Only QT_DEV_PATH (added to CMAKE_PREFIX_PATH) and ROUTINO_DEV_PATH (hint for
+# FindROUTINO) are used. PROJ_DEV_PATH and GDAL_DEV_PATH are only checked for
+# presence on APPLE, so they just need a value.
+cmake.prefix_path-append \
+                    ${prefix}/lib/proj9
+
+# CMakeLists.txt requires git via find_package(Git REQUIRED) even though
+# FetchContent never runs it here (sources are local, fetching is disabled),
+# so the Command Line Tools' git is sufficient.
+configure.args-append \
+                    -DQT_DEV_PATH=${qt6.dir} \
+                    -DROUTINO_DEV_PATH=${prefix} \
+                    -DPROJ_DEV_PATH=${prefix}/lib/proj9 \
+                    -DGDAL_DEV_PATH=${prefix} \
+                    -DUSE_QT6DBus=OFF \
+                    -DBUILD_TESTING=OFF \
+                    -DUPDATE_TRANSLATIONS=OFF \
+                    -DGIT_EXECUTABLE=/usr/bin/git \
+                    -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+                    -DFETCHCONTENT_SOURCE_DIR_ASMJIT=${workpath}/asmjit-${asmjit_commit} \
+                    -DFETCHCONTENT_SOURCE_DIR_BLEND2D=${workpath}/blend2d-${blend2d_commit} \
+                    -DBLEND2D_NO_INSTALL=ON
+
+# --- Bundling -----------------------------------------------------------------
+# Upstream builds the .app only with MacOSX/bundle-*.sh, which is not usable
+# here (Homebrew, sudo, macdeployqt, fixed codesign identity). CMake installs
+# plain binaries into ${prefix}/bin; the bundles are assembled below.
+#
+# CAppSetupMac resolves everything relative to the bundle and unconditionally
+# exports GDAL_DATA, GDAL_DRIVER_PATH and PROJ_DATA pointing into
+# Contents/Resources. Symlinks from there to the MacPorts locations satisfy
+# that without patching the source.
+
+proc qms_make_bundle {app bin} {
+    global destroot prefix applications_dir worksrcpath build.dir qt6.dir version
+
+    set contents ${destroot}${applications_dir}/${app}.app/Contents
+    set res      ${contents}/Resources
+    set src_osx  ${worksrcpath}/MacOSX/resources
+
+    xinstall -d ${contents}/MacOS ${res}/translations ${res}/help ${contents}/Tools
+
+    # executable: CAppSetupMac::getApplicationDir() goes Contents/MacOS -> Contents
+    move ${destroot}${prefix}/bin/${bin} ${contents}/MacOS/${app}
+
+    # Info.plist and icon
+    copy ${src_osx}/Info.plist ${contents}/Info.plist
+    reinplace -q "s|QMapShack|${app}|g"             ${contents}/Info.plist
+    reinplace "s|APP_VERSION|${version}|g"          ${contents}/Info.plist
+    reinplace "s|BUNDLE_VERSION|${version}|g"       ${contents}/Info.plist
+    # LSEnvironment does not expand $PATH; the Tools symlinks below cover the
+    # external tools anyway, this only adds ${prefix}/bin as a fallback.
+    reinplace "s|\$PATH:PACKAGES_PATH/bin|${prefix}/bin:/usr/bin:/bin:/usr/sbin:/sbin|g" \
+                                                    ${contents}/Info.plist
+    copy ${src_osx}/${app}.icns ${res}/
+
+    foreach lang {ca cs de en es fr hr it nl ru} {
+        xinstall -d ${res}/${lang}.lproj
+        copy ${src_osx}/locversion.plist ${res}/${lang}.lproj/
+        system "/usr/libexec/PlistBuddy -c 'Set :LprojLocale ${lang}' ${res}/${lang}.lproj/locversion.plist"
+    }
+
+    # GDAL / PROJ data and plugins
+    ln -s ${prefix}/share/gdal                  ${res}/gdal
+    ln -s ${prefix}/lib/gdalplugins             ${res}/gdalplugins
+    ln -s ${prefix}/lib/proj9/share/proj        ${res}/proj
+
+    # translations: own catalogs from the build tree, Qt's from qttranslations
+    foreach qm [glob -nocomplain ${build.dir}/src/${bin}/*.qm] {
+        xinstall -m 0644 ${qm} ${res}/translations/
+    }
+    foreach qm [glob -nocomplain ${qt6.dir}/translations/qtbase_*.qm] {
+        ln -s ${qm} ${res}/translations/[file tail ${qm}]
+    }
+
+    # external tools, found through the Tools dir CAppSetupMac adds to PATH
+    foreach tool {gdalinfo gdalbuildvrt gdaladdo gdal_translate gdalwarp planetsplitter} {
+        ln -s ${prefix}/bin/${tool}             ${contents}/Tools/${tool}
+    }
+    ln -s ${prefix}/lib/proj9/bin/proj          ${contents}/Tools/proj
+}
+
+post-destroot {
+    qms_make_bundle QMapShack qmapshack
+    qms_make_bundle QMapTool  qmaptool
+
+    set qms_res ${destroot}${applications_dir}/QMapShack.app/Contents/Resources
+    set qmt_res ${destroot}${applications_dir}/QMapTool.app/Contents/Resources
+
+    # QMapShack-only resources
+    ln -s ${prefix}/share/routino               ${qms_res}/routino
+    copy ${worksrcpath}/doc/html                ${qms_res}/help/qms
+    ln -s ${prefix}/bin/qms_surfacedb \
+        ${destroot}${applications_dir}/QMapShack.app/Contents/Tools/qms_surfacedb
+
+    # QMapTool help (CAppSetupMac::helpFile() opens Resources/help/QMTHelp.qhc)
+    xinstall -m 0644 ${worksrcpath}/src/qmaptool/doc/QMTHelp.qhc \
+                     ${worksrcpath}/src/qmaptool/doc/QMTHelp.qch ${qmt_res}/help/
+
+    # qms_surfacedb, qmt_map2jnx and qmt_rgb2pct stay in ${prefix}/bin.
+    # Man pages are only installed by CMake on non-Apple UNIX.
+    xinstall -d ${destroot}${prefix}/share/man/man1
+    foreach m {qmapshack.1 qms_surfacedb.1 qmaptool.1 qmt_map2jnx.1 qmt_rgb2pct.1} {
+        xinstall -m 0644 ${worksrcpath}/${m} ${destroot}${prefix}/share/man/man1/
+    }
+}
