@@ -32,7 +32,7 @@ proc set_defaults args {
 # https://learn.microsoft.com/en-us/sql/connect/odbc/linux-mac/system-requirements
 if { ${os.major} >= 23 } {
     version             18.7.1.1
-    revision            0
+    revision            1
     epoch               1
     set_defaults
     supported_archs     x86_64 arm64
@@ -53,7 +53,7 @@ if { ${os.major} >= 23 } {
     }
 } elseif { ${os.major} >= 22 } {
     version             18.5.1.1
-    revision            0
+    revision            1
     epoch               0
     set_defaults
     supported_archs     x86_64 arm64
@@ -74,7 +74,7 @@ if { ${os.major} >= 23 } {
     }
 } elseif { ${os.major} >= 20 } {
     version             18.4.1.1
-    revision            0
+    revision            1
     epoch               0
     set_defaults
     supported_archs     x86_64 arm64
@@ -95,7 +95,7 @@ if { ${os.major} >= 23 } {
     }
 } elseif { ${os.major} >= 19 } {
     version             18.1.1.1
-    revision            0
+    revision            1
     epoch               0
     set_defaults
     supported_archs     x86_64 arm64
@@ -179,8 +179,42 @@ switch ${configure.build_arch} {
     }
 }
 
+# Driver 18 does not link OpenSSL: it dlopens libssl and libcrypto by absolute
+# path from a directory hard-coded in the library, outside ${prefix}, so it
+# never finds the openssl3 libraries and every connection fails with
+# "OpenSSL library could not be loaded". Point the string at a directory that
+# holds links to the openssl3 libraries; the new path is padded with slashes
+# to the length of the original.
+set ssl_dir_old     ${old_prefix}/opt/openssl/lib/
+set ssl_dir         ${prefix}/lib/msodbcsql${major}/
+
+proc msodbcsql_patch_ssl_dir {lib old new} {
+    set len [string length ${old}]
+    if {[string length ${new}] > ${len}} {
+        ui_warn "${new} is longer than ${old}: the driver will look for OpenSSL in ${old}"
+        return 0
+    }
+    set fd [open ${lib} r]
+    fconfigure ${fd} -translation binary
+    set data [read ${fd}]
+    close ${fd}
+    if {[string first ${old} ${data}] < 0} {
+        return -code error "${old} not found in ${lib}"
+    }
+    set new ${new}[string repeat / [expr {${len} - [string length ${new}]}]]
+    file attributes ${lib} -permissions u+w
+    set fd [open ${lib} w]
+    fconfigure ${fd} -translation binary
+    puts -nonewline ${fd} [string map [list ${old} ${new}] ${data}]
+    close ${fd}
+    return 1
+}
+
 patch {
     reinplace "s|${old_prefix}|${prefix}|g"    ${workpathdir}/odbcinst.ini
+    if {${major} >= 18} {
+        msodbcsql_patch_ssl_dir ${workpathdir}/lib/libmsodbcsql.${major}.dylib ${ssl_dir_old} ${ssl_dir}
+    }
 }
 
 build {
@@ -188,10 +222,18 @@ build {
     system "install_name_tool -change ${old_prefix}/opt/openssl/lib/libcrypto.1.0.0.dylib ${prefix}/lib/openssl-3/libcrypto.3.dylib ${workpathdir}/lib/libmsodbcsql.${major}.dylib"
     system "install_name_tool -change ${old_prefix}/opt/openssl/lib/libssl.1.0.0.dylib ${prefix}/lib/openssl-3/libssl.3.dylib ${workpathdir}/lib/libmsodbcsql.${major}.dylib"
     system "install_name_tool -id ${prefix}/lib/libmsodbcsql.${major}.dylib ${workpathdir}/lib/libmsodbcsql.${major}.dylib"
+    # The edits above invalidate Microsoft's signature.
+    system "codesign --force --sign - ${workpathdir}/lib/libmsodbcsql.${major}.dylib"
 }
 
 destroot {
     xinstall -m 444 ${workpathdir}/lib/libmsodbcsql.${major}.dylib ${destroot}${prefix}/lib/libmsodbcsql.${major}.dylib
+    if {${major} >= 18} {
+        xinstall -d ${destroot}${ssl_dir}
+        foreach lib {libssl.3.dylib libcrypto.3.dylib} {
+            ln -s ${prefix}/libexec/openssl3/lib/${lib} ${destroot}${ssl_dir}${lib}
+        }
+    }
     xinstall -d ${destroot}${prefix}/share/msodbcsql${major}/resources/en_US
     xinstall -m 444 ${workpathdir}/share/msodbcsql${major}/resources/en_US/msodbcsqlr${major}.rll ${destroot}${prefix}/share/msodbcsql${major}/resources/en_US/msodbcsqlr${major}.rll
     xinstall -m 644 ${workpathdir}/odbcinst.ini ${destroot}${prefix}/share/msodbcsql${major}/resources/odbcinst.ini
