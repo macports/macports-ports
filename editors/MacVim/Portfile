@@ -7,10 +7,10 @@ PortGroup           github 1.0
 # is because they both share the same set of configuration files and ensures
 # that the user's configuration files will always work with both.
 set vim_version     9.2
-set release         183
+set release         184
 github.setup        macvim-dev macvim ${release} release-
 github.tarball_from archive
-revision            1
+revision            0
 name                MacVim
 version             ${vim_version}.release${release}
 categories          editors
@@ -24,11 +24,14 @@ long_description \
 
 homepage            https://macvim.org
 
-checksums           rmd160  2e9bce394ca5672cf3faed48fae8fc88d8cd2f3f \
-                    sha256  72de6be82087cd4db8d7b5b27ee079fe80d504f12b53065d68d29366fc7025f1 \
-                    size    29267188
+checksums           rmd160  9224cd3558096ddd46fec0cd0b73694907060292 \
+                    sha256  af1467e2d4c360bb8934815ac31259918f25f32b4787aaf9955443f14dc58bbd \
+                    size    29705100
 
-depends_lib-append  port:gettext \
+depends_build-append \
+                    port:gettext
+
+depends_lib-append  port:gettext-runtime \
                     port:libiconv \
                     port:ncurses
 
@@ -39,11 +42,6 @@ supported_archs     arm64 x86_64
 patchfiles          patch-remove-updater.diff \
                     patch-remove-Homebrew-python.diff \
                     patch-src_testdir_Make_all.mak.diff
-
-# Backport fixes for stray 'p' characters in some terminals
-patchfiles-append   patch-9.2.0387.diff \
-                    patch-9.2.0389.diff \
-                    patch-9.2.0456.diff
 
 pre-fetch {
     if {${os.platform} eq "darwin" && ${os.major} < 12} {
@@ -60,13 +58,6 @@ post-extract {
     file mkdir ${workpath}/caches
 }
 
-post-patch {
-    # Disable Sparkle auto update
-    system -W ${worksrcpath}/src/MacVim/ "/usr/libexec/PlistBuddy -c \"Delete :SUFeedURL\" Info.plist"
-    system -W ${worksrcpath}/src/MacVim/ "/usr/libexec/PlistBuddy -c \"Delete :SUPublicEDKey\" Info.plist"
-    system -W ${worksrcpath}/src/MacVim/ "/usr/libexec/PlistBuddy -c \"Add :SUEnableAutomaticChecks bool false\" Info.plist"
-}
-
 use_xcode yes
 
 autoconf.cmd make autoconf
@@ -81,18 +72,28 @@ configure.args      --enable-gui=macvim \
                     --disable-gpm \
                     --disable-canberra \
                     --disable-libsodium \
+                    --disable-pixman \
                     --with-tlib=ncurses \
                     --enable-multibyte \
                     --enable-fail-if-missing \
                     --with-compiledby="MacPorts"
 
-# Old pre-compiled headers could influence build, #26723
-build.args          XCODEFLAGS="CACHE_ROOT=${workpath}/caches"
-
-if {[vercmp ${xcodeversion} 12.0] >= 0} {
-    build.args    XCODEFLAGS="-scheme MacVim -configuration Release -derivedDataPath ${workpath}/.home/DerivedData CACHE_ROOT=${workpath}/caches -UseNewBuildSystem=NO MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target} ARCHS=${configure.build_arch}"
-} elseif {[vercmp ${xcodeversion} 10.0] >= 0} {
-    build.args    XCODEFLAGS="CACHE_ROOT=${workpath}/caches -UseNewBuildSystem=NO MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
+# Append our flags to the XCODEFLAGS that configure writes to config.mk.
+# Passing XCODEFLAGS on the make command line would replace them, dropping
+# DISABLE_SPARKLE/REMOVE_SPARKLE (from --disable-sparkle) and
+# VIM_SHORT_VERSION_STRING. See #74663 and #69311.
+post-configure {
+    # Old pre-compiled headers could influence build, #26723
+    set xcodeflags "CACHE_ROOT=${workpath}/caches"
+    if {[vercmp ${xcodeversion} 12.0] >= 0} {
+        # -scheme picks up the test plan's coverage instrumentation, #69289
+        set xcodeflags "-scheme MacVim -configuration Release -derivedDataPath ${workpath}/.home/DerivedData ${xcodeflags} -UseNewBuildSystem=NO MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target} ARCHS=${configure.build_arch} CLANG_COVERAGE_MAPPING=NO ENABLE_CODE_COVERAGE=NO"
+    } elseif {[vercmp ${xcodeversion} 10.0] >= 0} {
+        append xcodeflags " -UseNewBuildSystem=NO MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
+    }
+    set fd [open ${worksrcpath}/src/auto/config.mk a]
+    puts ${fd} "XCODEFLAGS += ${xcodeflags}"
+    close ${fd}
 }
 
 destroot {
@@ -113,14 +114,16 @@ destroot {
 }
 
 test.run            yes
+# test_libvterm uses glibtool; test_plugin_tar uses xz
+depends_test-append port:libtool \
+                    port:xz
 # test_gui.vim requires a live connection to the macOS WindowServer (mouse
 # events, GUI dialogs, menus, scrollbars, font rendering) and cannot run
 # without a display; it is excluded via patch-src_testdir_Make_all.mak.diff
 # rather than TEST_SKIP_PAT. test_gui_init.vim is excluded alongside it
 # for consistency, as it also runs MacVim with GUI init files.
 # Same test skips as the vim port at this patch level (see editors/vim/Portfile for details):
-# - Test_zip_*: zip plugin exits vim abnormally at 9.2.0321, corrupting the
-#   Makefile suffix rule; fixed at HEAD (remove on next version bump)
+# - Test_zip_*: test_plugin_zip.vim breaks the testdir Makefile rule
 # - Test_modeline_default: expects vim to disable 'modeline' for root; port
 #   tests run as root but 9.2.0321 does not enforce this yet
 # - Test_opt_set_keycode, Test_set_completion: build environment termcap
@@ -140,7 +143,11 @@ test.run            yes
 #   without a display
 # - Test_xxlast_highlight_RGB_color: causes vim to exit abnormally without a
 #   display
-test.env            "TEST_SKIP_PAT=\\vTest_zip_|Test_modeline_default|Test_opt_set_keycode|Test_set_completion|Test_popup_opacity_wide_char_overlap|Test_stdin_no_newline|Test_terminal_sync_shell_dir|Test_clipmethod_is_none_when_gui|Test_mouse_shape_|Test_progname|Test_zz1_terminal_in_gui|Test_xxlast_highlight_RGB_color"
+# - Clipboard tests (Test_TextYankPost, Test_clipboard_*, Test_setreg_basic,
+#   Test_visual_put_*, etc.; matched exactly by name): no pasteboard in the
+#   headless/SSH build environment, so * and + registers stay empty
+# - Test_popup_select: its screen dump depends on the * register
+test.env            "TEST_SKIP_PAT=\\vTest_zip_|Test_modeline_default|Test_opt_set_keycode|Test_set_completion|Test_popup_opacity_wide_char_overlap|Test_stdin_no_newline|Test_terminal_sync_shell_dir|Test_clipmethod_is_none_when_gui|Test_mouse_shape_|Test_progname|Test_zz1_terminal_in_gui|Test_xxlast_highlight_RGB_color|Test_%(TextPutX|TextYankPost|assignment_vim9script|clipboard_%(nul|regs|provider_no_unamedplus|provider_sys_clipboard)|get_reg%(info|ister)|hlsearch_clipboard|modeless_%(characterwise_selection|line_selection|selection_full_width_rows|word_selection)|term_modeless_selection|paste_clipboard|popup_select|quotestar|register_completion|register_y_append_reset|set_register|setreg_basic|term_mouse_middle_click%(|_in_cmdline_to_paste|_insert_mode)|v_register|ve_blockpaste|visual_%(ended_in_unloaded_buffer|paste_clipboard|pos_buffer_heap_overflow|put_blockedit_zy_and_zp|put_in_block%(|_using_zp|_using_zy_and_zp)|reselect_with_count))\[(\]"
 
 if {![variant_isset big] && ![variant_isset huge]} {
     default_variants +huge
@@ -152,6 +159,13 @@ foreach level ${levels} {
     variant ${level} description "Build ${level} feature set" conflicts {*}[lsearch -inline -all -not -exact $levels $level] "
         configure.args-replace --with-features=normal --with-features=$level
     "
+}
+
+# +image (terminal sixel/kitty images) needs pixman and the huge feature set
+if {[variant_isset huge]} {
+    configure.args-replace  --disable-pixman --enable-pixman
+    depends_build-append    path:bin/pkg-config:pkgconfig
+    depends_lib-append      path:lib/pkgconfig/pixman-1.pc:libpixman
 }
 
 variant xim description {Build with support for X Input Method} {
