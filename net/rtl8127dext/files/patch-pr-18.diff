@@ -1,0 +1,154 @@
+From f6231645e3b002d39f61a385e86365bf5f647448 Mon Sep 17 00:00:00 2001
+From: i0ntempest <i0ntempest@i0ntempest.com>
+Date: Thu, 26 Nov 2026 19:30:36 +1100
+Subject: [PATCH 1/3] Dext: honor TCP MSS when deciding whether to segment
+
+Segment TSO packets that exceed the requested TCP MSS even when they fit the local interface MTU. Keep packets that already fit both limits on the checksum-only path so single jumbo segments stay whole.
+---
+ RTL8127Dext/RTL8127Dext/RTL8127Driver.cpp | 34 +++++++++++++++--------
+ 1 file changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/RTL8127Dext/RTL8127Dext/RTL8127Driver.cpp b/RTL8127Dext/RTL8127Dext/RTL8127Driver.cpp
+index cae4c25..b16bd7d 100644
+--- a/RTL8127Dext/RTL8127Dext/RTL8127Driver.cpp
++++ b/RTL8127Dext/RTL8127Dext/RTL8127Driver.cpp
+@@ -244,7 +244,6 @@ struct RTL8127Driver_IVars {
+     uint32_t mediaArray[8];
+     uint32_t mediaCount;
+     uint32_t currentMedia;
+-    uint32_t mtu;
+ 
+     /* Offloads the stack asked for (setHardwareAssists), TSO in particular. */
+     bool tsoEnabled;
+@@ -277,8 +276,7 @@ bool RTL8127Driver::init()
+      * 22 bytes -- the chip then rejects every frame. Seen on hardware as
+      * "rx pkts 0" with the runt/oversize tally climbing.
+      */
+-    ivars->mtu = 1500;
+-    ivars->hw->mtu = ivars->mtu;
++    ivars->hw->mtu = 1500;
+     ivars->tsoEnabled = true;
+     return true;
+ }
+@@ -365,6 +363,20 @@ static void freeDmaBuffer(IOBufferMemoryDescriptor **md, IODMACommand **cmd)
+ 
+ static inline uint16_t bswap16(uint16_t v) { return __builtin_bswap16(v); }
+ 
++static bool tsoPayloadExceedsMSS(const uint8_t *frame, uint32_t len, uint32_t mss, bool ipv4)
++{
++    if (!mss || len <= kMacHdrLen + mss)
++        return false;
++
++    /* Use the same IP header layouts as prepareTSO4/6(). */
++    uint32_t tcpOff = kMacHdrLen + (ipv4 ? (frame[kMacHdrLen] & 0x0f) * 4 : kIPv6HdrLen);
++    if (len < tcpOff + sizeof(struct tcphdr))
++        return false;
++
++    uint32_t tcpHdrLen = (frame[tcpOff + 12] >> 4) * 4;  /* TCP data offset */
++    return tcpHdrLen >= sizeof(struct tcphdr) && len > tcpOff + tcpHdrLen + mss;
++}
++
+ /*
+  * The RTL8125/8127 giant-send engine wants the TCP checksum field preloaded
+  * with the pseudo-header checksum (addresses + protocol, no length), exactly
+@@ -619,25 +631,24 @@ static uint32_t txDequeueAction(OSObject *target,
+             }
+         }
+         /*
+-         * TSO: same descriptor recipe as the kext outputStart(). A TSO
+-         * packet that fits in one MTU-sized frame is sent as a plain
+-         * checksum-offloaded frame. The chip's MSS field is 11 bits, so on
+-         * jumbo MTUs the segment size is clamped -- smaller frames on the
+-         * wire, still correct.
++         * A packet can go out as one frame if it fits both the local MTU
++         * and the requested TCP segment size. Check the requested MSS before
++         * clamping it to the hardware limit, so a single jumbo segment stays whole.
+          */
+         uint16_t mss = 0;
+         IOUserNetworkPacketTSOFlags tso = 0;
+         pkt->getTSOInfo(&mss, &tso);
+ 
+-        if (iv->tsoEnabled && (tso & (kIOUserNetworkPacketTSOIPV4 | kIOUserNetworkPacketTSOIPV6)) &&
+-            (len - kMacHdrLen) > iv->mtu) {
++        bool tso4 = (tso & kIOUserNetworkPacketTSOIPV4) != 0;
++        if (iv->tsoEnabled && (tso4 || (tso & kIOUserNetworkPacketTSOIPV6)) &&
++            (len - kMacHdrLen > hw->mtu || tsoPayloadExceedsMSS(frame, len, mss, tso4))) {
+             uint32_t tcpOff;
+             uint32_t segsz = mss;
+ 
+             if (segsz == 0 || segsz > MSS_MAX)
+                 segsz = MSS_MAX;
+ 
+-            if (tso & kIOUserNetworkPacketTSOIPV4) {
++            if (tso4) {
+                 tcpOff = prepareTSO4(frame);
+                 cmd = (GiantSendv4 | (tcpOff << GTTCPHO_SHIFT));
+             } else {
+@@ -1925,7 +1936,6 @@ IOReturn RTL8127Driver::setMaxTransferUnit(uint32_t mtu)
+     if (mtu < ETH_ZLEN || mtu > kMaxMtu)
+         return kIOReturnUnsupported;
+ 
+-    ivars->mtu = mtu;
+     hw->mtu = mtu;
+ 
+     /* Same bookkeeping as the kext setMaxPacketSize(). */
+
+From a7875fba4a0cb8d913f97c6cd9d60fa678034bd1 Mon Sep 17 00:00:00 2001
+From: i0ntempest <i0ntempest@i0ntempest.com>
+Date: Thu, 26 Nov 2026 19:43:28 +1100
+Subject: [PATCH 2/3] Dext: match RTL8162KB and RTL8162KD
+
+Backport PCI ID 10ec:8162 from Mieze/RTL812xLucy 48551c7. The dext already has chip detection for this ID, and the host app can now display the device.
+---
+ RTL8127Dext/RTL8127App/RTL8127App.swift | 1 +
+ RTL8127Dext/RTL8127Dext/Info.plist      | 2 +-
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/RTL8127Dext/RTL8127App/RTL8127App.swift b/RTL8127Dext/RTL8127App/RTL8127App.swift
+index 54a6a96..c818db7 100644
+--- a/RTL8127Dext/RTL8127App/RTL8127App.swift
++++ b/RTL8127Dext/RTL8127App/RTL8127App.swift
+@@ -89,6 +89,7 @@ enum Hardware {
+         0x8126: "RTL8126 (5GbE)",
+         0x5000: "RTL8126 (5GbE)",
+         0x8125: "RTL8125 (2.5GbE)",
++        0x8162: "RTL8162 (2.5GbE)",
+         0x3000: "RTL8125 (2.5GbE)",
+     ]
+ 
+diff --git a/RTL8127Dext/RTL8127Dext/Info.plist b/RTL8127Dext/RTL8127Dext/Info.plist
+index b07d384..e2d4972 100644
+--- a/RTL8127Dext/RTL8127Dext/Info.plist
++++ b/RTL8127Dext/RTL8127Dext/Info.plist
+@@ -46,7 +46,7 @@
+ 			<key>IOUserServerName</key>
+ 			<string>net.wizzz.RTL8127Dext</string>
+ 			<key>IOPCIPrimaryMatch</key>
+-			<string>0x812510ec 0x81251186 0x300010ec 0x812610ec 0x500010ec 0x812710ec 0x0e1010ec</string>
++			<string>0x812510ec 0x81251186 0x300010ec 0x812610ec 0x500010ec 0x812710ec 0x0e1010ec 0x816210ec</string>
+ 			<key>IOPCITunnelCompatible</key>
+ 			<true/>
+ 			<key>IOProbeScore</key>
+
+From 1a7d88b930b0dd4e8fe872d427b025cfec72c15c Mon Sep 17 00:00:00 2001
+From: i0ntempest <i0ntempest@i0ntempest.com>
+Date: Sat, 28 Nov 2026 00:12:11 +1100
+Subject: [PATCH 3/3] App: label RTL8162 as Gigabit Ethernet
+
+---
+ RTL8127Dext/RTL8127App/RTL8127App.swift | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/RTL8127Dext/RTL8127App/RTL8127App.swift b/RTL8127Dext/RTL8127App/RTL8127App.swift
+index c818db7..5347c78 100644
+--- a/RTL8127Dext/RTL8127App/RTL8127App.swift
++++ b/RTL8127Dext/RTL8127App/RTL8127App.swift
+@@ -89,7 +89,7 @@ enum Hardware {
+         0x8126: "RTL8126 (5GbE)",
+         0x5000: "RTL8126 (5GbE)",
+         0x8125: "RTL8125 (2.5GbE)",
+-        0x8162: "RTL8162 (2.5GbE)",
++        0x8162: "RTL8162 (1GbE)",
+         0x3000: "RTL8125 (2.5GbE)",
+     ]
+ 
